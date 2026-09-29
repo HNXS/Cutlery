@@ -1,0 +1,16 @@
+build*/
+dist/
+Qt/
+runtime/
+codecs/
+config/
+cache/
+user-data/
+*.user
+*.cutlery
+*.autosave
+*.partial.*
+__pycache__/
+.deps/
+core
+core.*

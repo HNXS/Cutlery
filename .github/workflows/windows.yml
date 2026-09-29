@@ -1,0 +1,74 @@
+name: Windows portable build
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install Qt 6.8.3
+        run: |
+          python -m pip install aqtinstall==3.3.0
+          if ($LASTEXITCODE -ne 0) { throw 'aqtinstall installation failed' }
+          python -m aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 --outputdir "$env:RUNNER_TEMP/Qt" --modules qtmultimedia
+          if ($LASTEXITCODE -ne 0) { throw 'Qt installation failed' }
+          $qt = "$env:RUNNER_TEMP/Qt/6.8.3/msvc2022_64"
+          "QT_ROOT_DIR=$qt" | Out-File $env:GITHUB_ENV -Append
+          "$qt/bin" | Out-File $env:GITHUB_PATH -Append
+      - name: Fetch and verify LGPL codec runtime
+        run: |
+          $bin = ./tools/Get-FFmpeg.ps1
+          "FFMPEG_BIN=$bin" | Out-File $env:GITHUB_ENV -Append
+          $bin | Out-File $env:GITHUB_PATH -Append
+      - name: Configure and compile
+        run: |
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR"
+          if ($LASTEXITCODE -ne 0) { throw 'Configuration failed' }
+          cmake --build build --config Release --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+      - name: Test model and actual media rendering
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+        run: |
+          ctest --test-dir build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+          $p = Start-Process build/bin/Release/Cutlery.exe -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw 'QML startup failed' }
+      - name: Package portable application
+        run: |
+          ./tools/Package-Windows.ps1 -QtRoot $env:QT_ROOT_DIR -FFmpegBin $env:FFMPEG_BIN
+      - name: Smoke-test deployed executable
+        env:
+          QT_QUICK_BACKEND: software
+        run: |
+          $env:QT_PLUGIN_PATH = ''
+          $env:QML2_IMPORT_PATH = ''
+          $env:QML_IMPORT_PATH = ''
+          $env:PATH = "$env:SystemRoot/System32;$env:SystemRoot"
+          $exe = Resolve-Path dist/Cutlery-0.1.0-win64-portable/Cutlery.exe
+          $p = Start-Process $exe -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw 'Deployed application failed' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Cutlery-0.1.0-win64-portable
+          path: dist/Cutlery-0.1.0-win64-portable/
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: Windows-test-logs
+          path: build/Testing/Temporary/

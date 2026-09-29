@@ -45,4 +45,3 @@ ctest --test-dir build -C Release --output-on-failure
 ```
 
 Qt 6.8.3 (Core, Gui, Quick, QuickControls2, Multimedia, Test), MSVC 2022, CMake ≥3.24, FFmpeg and ffprobe are required. See the build guide for environment setup and packaging. The project has no application-wide open-source licence selected yet; dependency licences remain separate.
-
