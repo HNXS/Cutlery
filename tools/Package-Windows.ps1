@@ -14,6 +14,8 @@ if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
 New-Item -ItemType Directory -Force "$OutputDir/codecs","$OutputDir/licenses","$OutputDir/licenses/FFmpeg-upstream","$OutputDir/docs" | Out-Null
 Copy-Item "$FFmpegBin/*" "$OutputDir/codecs" -Recurse -Force
 $ffRoot = Split-Path $FFmpegBin
+$ffManifest = Join-Path (Split-Path (Split-Path $ffRoot)) 'manifest.json'
+Copy-Item $ffManifest "$OutputDir/codecs/manifest.json"
 Get-ChildItem $ffRoot | Where-Object { $_.Name -ne 'bin' } | Copy-Item -Destination "$OutputDir/licenses/FFmpeg-upstream" -Recurse -Force
 Copy-Item "$root/docs/THIRD_PARTY.md","$root/docs/PORTABLE.md" "$OutputDir/docs"
 Copy-Item "$root/README.md" $OutputDir
