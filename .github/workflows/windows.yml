@@ -2,6 +2,7 @@ name: Windows portable build
 on:
   push:
     branches: [main]
+    paths-ignore: [docs/VALIDATION.md]
   pull_request:
   workflow_dispatch:
 permissions:

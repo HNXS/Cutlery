@@ -138,6 +138,22 @@ class EngineTest : public QObject {
         QCOMPARE(readUtf8File(dir.filePath("out.srt")), readUtf8File(input));
         e.save(QUrl::fromLocalFile(dir.filePath("captions.cutlery")));
     }
+    void remoteReferencesRejected() {
+        QTemporaryDir dir;
+        const auto path = dir.filePath("remote.m3u8");
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nhttps://example.invalid/"
+                "segment.ts\n#EXT-X-ENDLIST\n");
+        f.close();
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.importMedia({QUrl::fromLocalFile(path)});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["importing"].toBool(), 10000);
+        QVERIFY(editor.project().assets.isEmpty());
+        QVERIFY2(editor.state()["error"].toString().contains("whitelist"),
+                 qPrintable(editor.state()["error"].toString()));
+    }
     void asynchronousJobs() {
         QTemporaryDir dir;
         const auto file = dir.filePath("image with spaces.png");

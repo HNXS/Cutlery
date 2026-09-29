@@ -19,7 +19,7 @@ The design blueprint targets a native C++/Qt shell, shared render graph, D3D11 v
 - Preview resolution differs from export resolution; typography is rasterized at each target size. Composition semantics are shared, but pixel identity across resolutions is not promised.
 - Source audio and video are linked. Trims are inspector edits; no roll/slip tools. Speed changes preserve source range, rounded down to full output frames.
 - Crash recovery has one snapshot; no rolling journal or power-loss test qualification. A hard process kill may leave partial export/cache files. User originals are never edited.
-- ffprobe runs in a child process but has no hostile-media sandbox. Network media paths are refused; only local files are imported. Inputs are not forensic evidence or security-isolated assets.
+- ffprobe runs in a child process but has no hostile-media sandbox. Network media paths are refused; FFmpeg and ffprobe input protocols are limited to file/pipe, including references inside local playlists. Media probing has a 30-second timeout. Inputs are not forensic evidence or security-isolated assets.
 - H.264 Media Foundation is an optional explicit profile. Failure is surfaced; no hidden codec change or claim of certified compatibility.
 - Qt Multimedia uses its deployed backend for cache playback. The future WASAPI engine will replace this path for interactive timeline audio.
 

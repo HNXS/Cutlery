@@ -76,6 +76,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             if (!QFileInfo(file).isFile())
                 throw std::runtime_error(("Missing media: " + file).toStdString());
         }
+        r.inputs << "-protocol_whitelist" << "file,pipe";
         if (image)
             r.inputs << "-loop" << "1" << "-framerate" << fps;
         else

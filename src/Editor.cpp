@@ -400,8 +400,12 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId) {
         if (e == QProcess::FailedToStart)
             complete(false);
     });
-    process->start(executable("ffprobe"),
-                   {"-v", "error", "-show_format", "-show_streams", "-of", "json", path});
+    QTimer::singleShot(30000, process, [process] {
+        if (process->state() != QProcess::NotRunning)
+            process->kill();
+    });
+    process->start(executable("ffprobe"), {"-v", "error", "-protocol_whitelist", "file,pipe",
+                                           "-show_format", "-show_streams", "-of", "json", path});
 }
 void Editor::addAsset(const QString &id, int track) {
     const auto newClipId = newId();
