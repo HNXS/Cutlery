@@ -88,6 +88,12 @@ class Editor final : public QObject {
     Q_INVOKABLE QVariantMap waveform(const QString &assetId) const {
         return m_analysis->waveform(assetId);
     }
+    Q_INVOKABLE QVariantList transitionTypes() const {
+        QVariantList result;
+        for (const auto &[id, label] : cutlery::transitionTypes())
+            result << QVariantMap{{"id", id}, {"label", label}};
+        return result;
+    }
     Q_INVOKABLE QVariantMap thumbnails(const QString &assetId) const {
         return m_thumbnails->strip(assetId);
     }

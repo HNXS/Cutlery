@@ -119,7 +119,11 @@ QVariantList Editor::clips() const {
                               {"reverse", c.reverse},
                               {"muted", c.muted || !m_project.audioEnabled(c.track)},
                               {"hidden", c.hidden || m_project.trackSettings[c.track].hidden},
-                              {"locked", m_project.trackSettings[c.track].locked}};
+                              {"locked", m_project.trackSettings[c.track].locked},
+                              {"transition", c.transition},
+                              {"transitionFrames", c.transitionFrames},
+                              {"transitionLength", m_project.transitionLength(c)},
+                              {"canTransition", m_project.previousAdjacent(c) != nullptr}};
     }
     return result;
 }
@@ -248,7 +252,11 @@ QVariantMap Editor::state() const {
                         {"speed", c.speed.seconds()},
                         {"text", c.text},
                         {"fontSize", c.fontSize},
-                        {"textColor", c.textColor}};
+                        {"textColor", c.textColor},
+                        {"transition", c.transition},
+                        {"transitionFrames", c.transitionFrames},
+                        {"transitionLength", m_project.transitionLength(c)},
+                        {"canTransition", m_project.previousAdjacent(c) != nullptr}};
 #define PROP(k) selected[#k] = c.k
             PROP(scale);
             PROP(x);
@@ -716,6 +724,13 @@ void Editor::setClip(const QString &key, const QVariant &v) {
             c->fontSize = v.toInt();
         else if (key == "textColor")
             c->textColor = v.toString();
+        else if (key == "transition") {
+            c->transition = v.toString();
+            // New transitions start at half a second, like a typical dissolve.
+            if (!c->transition.isEmpty() && c->transitionFrames < 2)
+                c->transitionFrames = std::max<qint64>(2, qRound64(0.5 * p.fpsN / p.fpsD));
+        } else if (key == "transitionFrames")
+            c->transitionFrames = v.toLongLong();
 #define FIELD(k, type) else if (key == #k) c->k = v.type()
         FIELD(scale, toDouble);
         FIELD(x, toDouble);
@@ -751,6 +766,8 @@ void Editor::duplicate() {
             p.requireEditable(c->track);
             auto copy = *c;
             copy.id = id;
+            copy.transition.clear();
+            copy.transitionFrames = 0;
             copy.start += copy.duration;
             p.clips.push_back(copy);
             p.move(copy.id, copy.track, copy.start);

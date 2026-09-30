@@ -25,6 +25,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - Detach video audio onto its own track; cached mono waveform overviews that follow trims, speed and reverse.
 - Filmstrip thumbnails on video and image clips that follow trims, speed and reverse, plus poster frames in the media library. They are extracted in the background from keyframes and cached per file.
 - 30 configurable keyboard commands with conflict checks and portable preferences. Open **Help → Keyboard shortcuts** or press **Ctrl+/**; see the [shortcut reference](docs/SHORTCUTS.md).
+- 14 transitions between touching clips on a track: dissolve, dips to black/white, wipes, slides, zoom, circle, radial and pixelize. Click **+** on a cut or use the inspector; duration 0.1–3 s. Audio crossfades automatically. Clips keep their timing; each extends into the other using spare source media, or holds its edge frame.
 - Static transforms, equal-edge crop, horizontal flip, opacity, brightness/contrast/saturation, clip fades.
 - Constant speed **0.25–4×**, reverse, volume/mute, stereo mixing with an output limiter.
 - Rasterized Unicode titles, manual captions, SRT import/export and subtitle burn-in.
@@ -35,11 +36,11 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 
 ## Boundaries of this alpha
 
-This is a CPU reference implementation. It does **not** yet implement the planned D3D11/WASAPI real-time engine, proxies, multilevel waveform pyramids, keyframes, transition library, masks, tracking, HDR colour management, hardware qualification, offline AI, transcription, an installer, or project-media collection. Heavy multi-layer timelines can drop frames during playback on the CPU renderer. Reversed clips decode their whole visible range before playing, so long reversed clips start slowly. The UI is not yet an accessibility-qualified release.
+This is a CPU reference implementation. It does **not** yet implement the planned D3D11/WASAPI real-time engine, proxies, multilevel waveform pyramids, keyframes, easing curves, masks, tracking, HDR colour management, hardware qualification, offline AI, transcription, an installer, or project-media collection. Heavy multi-layer timelines can drop frames during playback on the CPU renderer. Reversed clips decode their whole visible range before playing, so long reversed clips start slowly. The UI is not yet an accessibility-qualified release.
 
 Only finite local media files are supported. Source audio/video remain together until you use **Detach audio**; detached clips can then be edited independently. Relinking or resynchronizing detached pairs is not implemented. Timing is rounded to sequence frames; SRT timing is quantized on import. Colour operations are simple SDR adjustments, not a colour-managed grading pipeline. Output filenames must be new; exports never overwrite an existing file. Temporary render folders live under `cache`; remove it while Cutlery is closed if space is needed.
 
-Versions 0.3 and 0.4 read 0.1/0.2 projects and save schema 3, which older versions cannot open. Use **Save As** to preserve an older project copy.
+The current development build saves schema 4, which adds transitions; 0.4 and older cannot open it. It reads all earlier schemas. Use **Save As** to preserve an older project copy.
 
 See [what remains](docs/ROADMAP.md), [drag/drop and magnetic tracks](docs/TIMELINE.md), [BUILDING](docs/BUILDING.md), [PORTABLE](docs/PORTABLE.md), [architecture](docs/ARCHITECTURE.md), [feature status](docs/FEATURE_STATUS.md), [the original blueprint](docs/BLUEPRINT.md), and [third-party notices](docs/THIRD_PARTY.md).
 

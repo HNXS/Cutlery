@@ -10,6 +10,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 #include <limits>
+#include <tuple>
 using namespace cutlery;
 class EngineTest : public QObject {
     Q_OBJECT
@@ -438,6 +439,139 @@ class EngineTest : public QObject {
         reused.setAssets({missing});
         QTRY_VERIFY_WITH_TIMEOUT(!reused.busy(), 5000);
         QCOMPARE(reused.strip("missing")["status"].toString(), QString("unavailable"));
+    }
+    void transitions() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        auto source = [&](const QString &name, const QString &colour, int hz) {
+            const auto path = dir.filePath(name);
+            run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                         QString("color=%1:s=160x90:r=30:d=2").arg(colour), "-f", "lavfi", "-i",
+                         QString("sine=frequency=%1:sample_rate=48000:duration=2").arg(hz), "-c:v",
+                         "ffv1", "-threads", "1", "-c:a", "pcm_s16le", "-shortest", path});
+            return path;
+        };
+        Project p;
+        p.width = 160;
+        p.height = 90;
+        for (auto [id, colour, hz] : {std::tuple{"red", "red", 440}, {"blue", "blue", 660}}) {
+            Asset a;
+            a.id = id;
+            a.path = source(QString(id) + ".mkv", colour, hz);
+            a.kind = "video";
+            a.duration = 2;
+            a.hasAudio = true;
+            p.assets.push_back(a);
+        }
+        Clip a;
+        a.id = "a";
+        a.assetId = "red";
+        a.duration = 30;
+        Clip b = a;
+        b.id = "b";
+        b.assetId = "blue";
+        b.start = 30;
+        p.clips = {a, b};
+        // Model rules: only a clip starting at a cut can transition; length is clamped.
+        QCOMPARE(p.transitionLength(p.clips[1]), qint64(0));
+        p.clips[1].transition = "fade";
+        p.clips[1].transitionFrames = 10;
+        QCOMPARE(p.previousAdjacent(p.clips[1])->id, QString("a"));
+        QCOMPARE(p.transitionLength(p.clips[1]), qint64(10));
+        p.clips[1].transitionFrames = 500;
+        QCOMPARE(p.transitionLength(p.clips[1]), qint64(30));
+        p.clips[1].transitionFrames = 10;
+        QVERIFY(p.previousAdjacent(p.clips[0]) == nullptr);
+        auto broken = p;
+        broken.clips[1].start = 31;
+        QCOMPARE(broken.transitionLength(broken.clips[1]), qint64(0));
+        auto invalid = p;
+        invalid.clips[1].transition = "not-a-transition";
+        QVERIFY_EXCEPTION_THROWN(invalid.validate(), std::runtime_error);
+        const auto roundtrip = Project::fromJson(p.json(dir.path()), dir.path());
+        QCOMPARE(roundtrip.clips[1].transition, QString("fade"));
+        QCOMPARE(roundtrip.clips[1].transitionFrames, qint64(10));
+        QCOMPARE(p.json()["schemaVersion"].toInt(), 4);
+        auto split = p;
+        QVERIFY(split.split("b", 45));
+        QCOMPARE(split.clips[1].transition, QString("fade"));
+        QVERIFY(split.clips.last().transition.isEmpty());
+
+        const auto graph = dir.filePath("graph.txt");
+        auto writeGraph = [&](const RenderPlan &plan) {
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+        };
+        auto still = [&](const Project &project, qint64 frame, bool window) {
+            RenderOptions options;
+            options.audio = false;
+            if (window) {
+                options.from = frame;
+                options.to = frame + 1;
+            }
+            const auto plan = compileRender(project, dir.filePath("work"), 160, 90, options);
+            writeGraph(plan);
+            QImage image;
+            image.loadFromData(
+                run(ffmpeg, renderArguments(plan, graph, {}, "",
+                                            window ? 0 : frameTime(frame, 30, 1).seconds())),
+                "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        // Dissolve over frames 25..34, centred on the cut at 30; the length is unchanged.
+        QCOMPARE(p.duration(), qint64(60));
+        auto colour = [&](qint64 frame, bool window, int x = 80) {
+            return still(p, frame, window).pixelColor(x, 45);
+        };
+        QVERIFY(colour(20, false).red() > 200 && colour(20, false).blue() < 40);
+        const auto middle = colour(30, false);
+        QVERIFY2(middle.red() > 80 && middle.red() < 180 && middle.blue() > 80 &&
+                     middle.blue() < 180,
+                 qPrintable(middle.name()));
+        QVERIFY(colour(26, false).red() > colour(33, false).red());
+        QVERIFY(colour(40, false).blue() > 200 && colour(40, false).red() < 40);
+        // Windows starting inside the transition show the same blend as the full timeline.
+        for (qint64 frame : {25, 27, 30, 34, 35}) {
+            const auto full = colour(frame, false), window = colour(frame, true);
+            QVERIFY2(std::abs(full.red() - window.red()) < 6 &&
+                         std::abs(full.blue() - window.blue()) < 6,
+                     qPrintable(QString("frame %1: %2 vs %3")
+                                    .arg(frame)
+                                    .arg(full.name(), window.name())));
+        }
+        // A wipe reveals the incoming clip from one side.
+        auto wipe = p;
+        wipe.clips[1].transition = "wipeleft";
+        const auto half = still(wipe, 30, false);
+        const auto left = half.pixelColor(10, 45), right = half.pixelColor(150, 45);
+        QVERIFY2((left.red() > 200) != (right.red() > 200),
+                 qPrintable(left.name() + " " + right.name()));
+        // Audio: equal-power crossfade keeps level steady, and the mix length is exact.
+        RenderOptions sound;
+        sound.video = false;
+        const auto plan = compileRender(p, dir.filePath("work"), 160, 90, sound);
+        writeGraph(plan);
+        const auto pcm = run(ffmpeg, streamArguments(plan, graph, false));
+        QCOMPARE(pcm.size(), qsizetype(2 * 48000) * 4);
+        auto rms = [&](double from, double to) {
+            double sum = 0;
+            qint64 count = 0;
+            for (qint64 i = qint64(from * 48000); i < qint64(to * 48000); ++i) {
+                const auto *sample = reinterpret_cast<const qint16 *>(pcm.constData()) + i * 2;
+                sum += double(sample[0]) * sample[0];
+                ++count;
+            }
+            return std::sqrt(sum / count);
+        };
+        const double steady = rms(0.2, 0.7);
+        for (double t : {0.84, 0.92, 1.0, 1.08}) {
+            const double level = rms(t, t + 0.03);
+            QVERIFY2(level > steady * 0.8 && level < steady * 1.25,
+                     qPrintable(QString("%1 s: %2 vs %3").arg(t).arg(level).arg(steady)));
+        }
     }
     void waveformPeaksAndCache() {
         PeakAccumulator peaks(2);

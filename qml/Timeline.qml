@@ -695,6 +695,60 @@ FocusScope {
                                 }
                             }
                         }
+                        // Cuts between touching clips: "+" adds a dissolve; an existing transition
+                        // shows its span across the cut. Clicking selects the incoming clip.
+                        Repeater {
+                            model: editor.clips
+                            Item {
+                                id: cut
+                                required property var modelData
+                                readonly property real cutX: modelData.start / root.state.fps * root.pixelsPerSecond
+                                readonly property real rowY: 4 + (root.state.tracks - 1 - modelData.track) * root.rowHeight
+                                readonly property bool active: modelData.transitionLength > 0
+                                visible: modelData.canTransition && !modelData.audio && root.draggingClip === null
+                                Rectangle {
+                                    visible: cut.active
+                                    x: cut.cutX - Math.floor(cut.modelData.transitionLength / 2) / root.state.fps * root.pixelsPerSecond
+                                    y: cut.rowY
+                                    width: Math.max(2, cut.modelData.transitionLength / root.state.fps * root.pixelsPerSecond)
+                                    height: root.rowHeight - 8
+                                    color: "#64d8bc"
+                                    opacity: .22
+                                    radius: 4
+                                }
+                                Rectangle {
+                                    objectName: "transitionMarker-" + cut.modelData.id
+                                    x: cut.cutX - width / 2
+                                    y: cut.rowY + (root.rowHeight - 8) / 2 - height / 2
+                                    width: 20
+                                    height: 20
+                                    radius: 5
+                                    color: cut.active ? "#64d8bc" : markerMouse.containsMouse ? "#34434d" : "#202831"
+                                    border.color: cut.active ? "#e7edf2" : "#6481a0"
+                                    Label {
+                                        anchors.centerIn: parent
+                                        text: cut.active ? "⧓" : "+"
+                                        color: cut.active ? "#0b1016" : "#e7edf2"
+                                        font.pixelSize: cut.active ? 11 : 14
+                                        font.bold: true
+                                    }
+                                    MouseArea {
+                                        id: markerMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            root.forceActiveFocus();
+                                            editor.select(cut.modelData.id);
+                                            if (!cut.modelData.transition && !cut.modelData.locked)
+                                                editor.setClip("transition", "fade");
+                                        }
+                                    }
+                                    ToolTip.visible: markerMouse.containsMouse
+                                    ToolTip.text: cut.active ? "Transition · edit it in the inspector" : "Add a dissolve at this cut"
+                                }
+                            }
+                        }
                         Rectangle {
                             x: (root.playbackFrame >= 0 ? root.playbackFrame : root.state.playhead) / root.state.fps * root.pixelsPerSecond
                             width: 2

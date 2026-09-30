@@ -1,5 +1,6 @@
 #include "Project.h"
 #include <QColor>
+#include <algorithm>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -30,6 +31,33 @@ const Asset *Project::asset(const QString &id) const {
         if (a.id == id)
             return &a;
     return nullptr;
+}
+const QVector<QPair<QString, QString>> &transitionTypes() {
+    static const QVector<QPair<QString, QString>> types{
+        {"fade", "Dissolve"},          {"fadeblack", "Dip to black"},
+        {"fadewhite", "Dip to white"}, {"wipeleft", "Wipe left"},
+        {"wiperight", "Wipe right"},   {"slideleft", "Slide left"},
+        {"slideright", "Slide right"}, {"slideup", "Slide up"},
+        {"slidedown", "Slide down"},   {"smoothleft", "Smooth left"},
+        {"zoomin", "Zoom in"},         {"circleopen", "Circle open"},
+        {"radial", "Radial"},          {"pixelize", "Pixelize"}};
+    return types;
+}
+const Clip *Project::previousAdjacent(const Clip &c) const {
+    const Clip *found = nullptr;
+    for (const auto &x : clips)
+        if (x.id != c.id && x.track == c.track && x.start + x.duration == c.start)
+            found = &x;
+    return found;
+}
+qint64 Project::transitionLength(const Clip &c) const {
+    if (c.transition.isEmpty() || c.transitionFrames < 2)
+        return 0;
+    const auto *prev = previousAdjacent(c);
+    if (!prev)
+        return 0;
+    // Each clip gives at most its whole length, so a transition never spans three clips.
+    return std::min({c.transitionFrames, prev->duration, c.duration});
 }
 Clip *Project::clip(const QString &id) {
     for (auto &c : clips)
@@ -111,15 +139,17 @@ QJsonObject Project::json(const QString &base) const {
         PUT(fadeIn);
         PUT(fadeOut);
 #undef PUT
+        o["transition"] = c.transition;
+        o["transitionFrames"] = QString::number(c.transitionFrames);
         cc.append(o);
     }
-    return {{"format", "cutlery"}, {"schemaVersion", 3}, {"name", name},       {"width", width},
+    return {{"format", "cutlery"}, {"schemaVersion", 4}, {"name", name},       {"width", width},
             {"height", height},    {"fpsN", fpsN},       {"fpsD", fpsD},       {"tracks", tracks},
             {"assets", aa},        {"clips", cc},        {"trackSettings", tt}};
 }
 Project Project::fromJson(const QJsonObject &o, const QString &base) {
     require(o["format"] == "cutlery" &&
-                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 3),
+                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 4),
             "Unsupported project format/version. Original left unchanged.");
     require(o["assets"].isArray() && o["clips"].isArray(), "Missing project collections");
     Project p;
@@ -204,6 +234,9 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         GET(fadeIn, 0);
         GET(fadeOut, 0);
 #undef GET
+        c.transition = j["transition"].toString();
+        if (j.contains("transitionFrames"))
+            c.transitionFrames = integer(j["transitionFrames"]);
         p.clips.push_back(c);
     }
     p.validate();
@@ -259,6 +292,11 @@ void Project::validate() const {
                     bounded(c.brightness, -0.5, 0.5) && bounded(c.contrast, 0.1, 3) &&
                     bounded(c.saturation, 0, 3) && bounded(c.crop, 0, 0.45),
                 "Invalid effect value");
+        require(c.transitionFrames >= 0 && c.transitionFrames <= 100000000 &&
+                    (c.transition.isEmpty() ||
+                     std::any_of(transitionTypes().begin(), transitionTypes().end(),
+                                 [&](const auto &t) { return t.first == c.transition; })),
+                "Invalid transition");
         require(bounded(c.fadeIn, 0, 3600) && bounded(c.fadeOut, 0, 3600) && c.fontSize >= 8 &&
                     c.fontSize <= 500 && c.text.size() <= 10000 && QColor(c.textColor).isValid(),
                 "Invalid text/fade value");
@@ -298,6 +336,8 @@ bool Project::split(const QString &id, qint64 frame) {
     c->duration = left;
     c->fadeOut = 0;
     b.fadeIn = 0;
+    b.transition.clear();
+    b.transitionFrames = 0;
     clips.push_back(b);
     return true;
 }

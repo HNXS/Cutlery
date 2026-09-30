@@ -222,6 +222,55 @@ class UiTest : public QObject {
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
         QVERIFY(editor.save(QUrl::fromLocalFile(dir.filePath("drag.cutlery"))));
     }
+    void transitionMarkers() {
+        QTemporaryDir dir;
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.configure(160, 90, 30, 1);
+        editor.addTitle();
+        const auto first = editor.project().clips.first().id;
+        editor.seek(89);
+        editor.addTitle();
+        const auto second = editor.project().clips.last().id;
+        editor.moveClip(second, 90, editor.project().clips.last().track);
+        QCOMPARE(editor.project().clips.last().start, qint64(90));
+        QVERIFY(editor.project().previousAdjacent(editor.project().clips.last()));
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        QTest::qWait(100);
+        QVERIFY(!findItem(window->contentItem(), "transitionMarker-" + first)->isVisible());
+        auto *marker = findItem(window->contentItem(), "transitionMarker-" + second);
+        QVERIFY(marker && marker->isVisible());
+        const auto point =
+            marker->mapToScene(QPointF(marker->width() / 2, marker->height() / 2)).toPoint();
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, point);
+        QTRY_COMPARE(editor.project().clips.last().transition, QString("fade"));
+        QCOMPARE(editor.state()["selectedId"].toString(), second);
+        QCOMPARE(editor.project().clips.last().transitionFrames, qint64(15));
+        QCOMPARE(editor.project().transitionLength(editor.project().clips.last()), qint64(15));
+        auto *type = findItem(window->contentItem(), "transitionType");
+        QVERIFY(type && type->isVisible());
+        QTRY_COMPARE(type->property("currentText").toString(), QString("Dissolve"));
+        editor.setClip("transition", "wipeleft");
+        QTRY_COMPARE(type->property("currentText").toString(), QString("Wipe left"));
+        editor.undo();
+        editor.undo();
+        QVERIFY(editor.project().clips.last().transition.isEmpty());
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void editingAndPlayback() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;
