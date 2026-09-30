@@ -1,5 +1,11 @@
 # Validation record
 
+## Windows portable build — 2026-09-30, version 0.3.0
+
+[GitHub Actions run 36768658353](https://github.com/HNXS/Cutlery/actions/runs/36768658353) completed successfully for commit `d80150d78c218ca3e3457ad6dd48915c876dac00` on Windows Server 2022 with MSVC 2022 and Qt 6.8.3. Compilation including the native icon resource, both engine/interface test suites, QML startup, packaging and packaged-executable startup without SDK paths passed.
+
+[Download Cutlery-0.3.0-win64-portable](https://github.com/HNXS/Cutlery/actions/runs/36768658353/artifacts/11122917795) (131,803,167 bytes). The CI artifact expires on 2026-10-30. Archive SHA-256: `823a0e62430bf0ae7615e8b4c9c1a067d59eba9c6d76ab113060d95e676d95c0`.
+
 ## Local development run — 2026-09-30, version 0.3.0
 
 Built with GCC 13.3, Qt 6.8.3 and CMake 4.4.3 on Ubuntu 24.04.
