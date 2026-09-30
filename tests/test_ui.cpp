@@ -264,12 +264,17 @@ class UiTest : public QObject {
         timeline->forceActiveFocus();
         editor.seek(0);
         QTest::keyClick(window, Qt::Key_Space);
-        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["playbackUrl"].toString().isEmpty(), 30000);
-        auto *player = window->findChild<QObject *>("previewPlayer");
-        QVERIFY(player);
-        QTRY_VERIFY_WITH_TIMEOUT(player->property("position").toLongLong() > 0, 10000);
+        QVERIFY(editor.playing());
+        QTRY_VERIFY_WITH_TIMEOUT(editor.playbackFrame() > 0, 10000);
         QTest::keyClick(window, Qt::Key_K);
-        QVERIFY(player->property("playbackState").toInt() != 1);
+        QVERIFY(!editor.playing());
+        const auto paused = editor.state()["playhead"].toLongLong();
+        QVERIFY(paused > 0);
+        QTest::keyClick(window, Qt::Key_Space);
+        QVERIFY(editor.playing());
+        QTest::keyClick(window, Qt::Key_Space);
+        QVERIFY(!editor.playing());
+        QVERIFY(editor.state()["playhead"].toLongLong() >= paused);
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
         QVERIFY(editor.save(QUrl::fromLocalFile(dir.filePath("ui.cutlery"))));
     }

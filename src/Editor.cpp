@@ -53,6 +53,23 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     m_previewTimer.setSingleShot(true);
     m_previewTimer.setInterval(180);
     connect(&m_previewTimer, &QTimer::timeout, this, &Editor::requestPreview);
+    m_playback = new Playback(this);
+    connect(m_playback, &Playback::frameChanged, this, &Editor::playbackChanged);
+    connect(m_playback, &Playback::finished, this, [this] {
+        m_playhead = std::max(qint64(0), m_project.duration() - 1);
+        m_status = "Ready";
+        stopPlayback();
+        emit changed();
+    });
+    connect(m_playback, &Playback::failed, this, [this](const QString &message) {
+        m_status = "Ready";
+        stopPlayback();
+        fail(message);
+    });
+    // Edits during playback restart it from the current frame once the edit burst settles.
+    m_resumeTimer.setSingleShot(true);
+    m_resumeTimer.setInterval(150);
+    connect(&m_resumeTimer, &QTimer::timeout, this, &Editor::play);
     m_saveTimer.setSingleShot(true);
     m_saveTimer.setInterval(800);
     connect(&m_saveTimer, &QTimer::timeout, this, &Editor::autosave);
@@ -266,7 +283,7 @@ QVariantMap Editor::state() const {
             {"analyzing", m_analysis->busy()},
             {"progress", m_progress},
             {"previewUrl", m_previewUrl},
-            {"playbackUrl", m_playbackUrl},
+            {"playing", m_playback->active() || m_resumeTimer.isActive()},
             {"canUndo", !m_undo.empty()},
             {"canRedo", !m_redo.empty()},
             {"hasRecovery", m_hasRecovery},
@@ -284,7 +301,11 @@ void Editor::clearError() {
 void Editor::edited() {
     ++m_revision;
     m_dirty = true;
-    m_playbackUrl.clear();
+    if (m_playback->active()) {
+        m_playhead = m_playback->frame();
+        stopPlayback();
+        m_resumeTimer.start();
+    }
     m_playhead = std::clamp(m_playhead, qint64(0), std::max(qint64(0), m_project.duration() - 1));
     if (!m_project.clip(m_selected))
         m_selected.clear();
@@ -329,7 +350,8 @@ void Editor::newProject() {
     m_playhead = 0;
     m_dirty = false;
     m_previewUrl.clear();
-    m_playbackUrl.clear();
+    m_resumeTimer.stop();
+    stopPlayback();
     ++m_revision;
     m_status = "New project";
     m_analysis->setAssets(m_project.assets);
@@ -354,7 +376,8 @@ bool Editor::openProject(const QUrl &url) {
         m_playhead = 0;
         m_dirty = false;
         ++m_revision;
-        m_playbackUrl.clear();
+        m_resumeTimer.stop();
+        stopPlayback();
         m_previewUrl.clear();
         m_status = "Opened " + QFileInfo(path).fileName();
         m_previewTimer.start();
@@ -410,6 +433,8 @@ void Editor::select(const QString &id) {
     emit changed();
 }
 void Editor::seek(qint64 frame) {
+    m_resumeTimer.stop();
+    stopPlayback();
     m_playhead = std::clamp(frame, qint64(0), std::max(qint64(0), m_project.duration() - 1));
     m_previewTimer.start();
     emit changed();
@@ -742,7 +767,7 @@ void Editor::requestPreview() {
         m_preview->deleteLater();
         m_preview = nullptr;
     }
-    if (m_project.clips.empty() || m_busy) {
+    if (m_project.clips.empty() || m_busy || m_playback->active() || m_resumeTimer.isActive()) {
         if (m_project.clips.empty()) {
             m_previewUrl.clear();
             emit changed();
@@ -753,14 +778,14 @@ void Editor::requestPreview() {
         auto work = std::make_shared<QTemporaryDir>(m_data + "/cache/still-XXXXXX");
         if (!work->isValid())
             throw std::runtime_error("Cannot create preview folder");
-        int w = 640, h = qRound(640. * m_project.height / m_project.width / 2) * 2;
-        if (h > 640) {
-            h = 640;
-            w = qRound(640. * m_project.width / m_project.height / 2) * 2;
-        }
-        w = std::max(64, w);
-        h = std::max(64, h);
-        const auto plan = compileRender(m_project, work->path(), w, h, false);
+        const auto size = previewSize(640);
+        RenderOptions options;
+        options.audio = false;
+        options.from = m_playhead;
+        options.to = m_playhead + 1;
+        // Only the playhead frame is compiled, so the cost does not grow with its position.
+        const auto plan = compileRender(m_project, work->path(), size.width(), size.height(),
+                                        options);
         const auto graph = work->filePath("graph.txt");
         writeGraph(graph, plan.graph);
         auto *process = new QProcess(this);
@@ -776,6 +801,7 @@ void Editor::requestPreview() {
             QImage img;
             if (success && img.loadFromData(data, "PNG")) {
                 m_frames->frame = img;
+                m_playback->showImage(img);
                 m_previewUrl = "image://frames/" + QString::number(++m_previewSerial);
                 emit changed();
             } else
@@ -791,25 +817,104 @@ void Editor::requestPreview() {
         });
         process->start(
             executable("ffmpeg"),
-            renderArguments(plan, graph, {}, "",
-                            frameTime(m_playhead, m_project.fpsN, m_project.fpsD).seconds()));
+            renderArguments(plan, graph, {}, "", 0));
     } catch (const std::exception &e) {
         fail(e.what());
     }
 }
-void Editor::renderPlayback() {
+QSize Editor::previewSize(int longSide) const {
+    int w = longSide, h = qRound(double(longSide) * m_project.height / m_project.width / 2) * 2;
+    if (h > longSide) {
+        h = longSide;
+        w = qRound(double(longSide) * m_project.width / m_project.height / 2) * 2;
+    }
+    return {std::max(64, w), std::max(64, h)};
+}
+void Editor::setVideoSink(QObject *sink) {
+    m_playback->setVideoSink(qobject_cast<QVideoSink *>(sink));
+    m_playback->showImage(m_frames->frame);
+}
+void Editor::play() {
+    m_resumeTimer.stop();
+    if (m_project.clips.empty() || m_busy || m_playback->active())
+        return;
+    if (m_preview) {
+        m_preview->disconnect(this);
+        m_preview->kill();
+        m_preview->deleteLater();
+        m_preview = nullptr;
+    }
+    try {
+        if (m_playhead >= m_project.duration() - 1)
+            m_playhead = 0;
+        auto work = std::make_shared<QTemporaryDir>(m_data + "/cache/play-XXXXXX");
+        if (!work->isValid())
+            throw std::runtime_error("Cannot create playback folder");
+        const auto size = previewSize(960);
+        Playback::Request request;
+        request.ffmpeg = executable("ffmpeg");
+        request.fpsN = m_project.fpsN;
+        request.fpsD = m_project.fpsD;
+        request.from = m_playhead;
+        request.work = work;
+        RenderOptions options;
+        options.from = m_playhead;
+        options.realtime = true;
+        options.audio = false;
+        request.video =
+            compileRender(m_project, work->path(), size.width(), size.height(), options);
+        options.audio = true;
+        options.video = false;
+        request.audio =
+            compileRender(m_project, work->path(), size.width(), size.height(), options);
+        request.videoGraph = work->filePath("video.txt");
+        request.audioGraph = work->filePath("audio.txt");
+        writeGraph(request.videoGraph, request.video.graph);
+        writeGraph(request.audioGraph, request.audio.graph);
+        m_analysis->setPaused(true);
+        m_playback->start(request);
+        m_status = "Playing";
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+    emit playbackChanged();
+    emit changed();
+}
+void Editor::pause() {
+    const bool resuming = m_resumeTimer.isActive();
+    m_resumeTimer.stop();
+    if (!m_playback->active() && !resuming)
+        return;
+    if (m_playback->active())
+        m_playhead = m_playback->frame();
+    stopPlayback();
+    m_status = "Ready";
+    requestPreview();
+    emit changed();
+}
+void Editor::togglePlayback() {
+    if (m_playback->active() || m_resumeTimer.isActive())
+        pause();
+    else
+        play();
+}
+void Editor::stopPlayback() {
+    if (!m_playback->active())
+        return;
+    m_playback->stop();
     if (!m_busy)
-        startRender(m_data + "/cache/playback-" + newId() + ".mp4", "mpeg4", true);
+        m_analysis->setPaused(false);
+    emit playbackChanged();
 }
 void Editor::exportVideo(const QUrl &url, const QString &profile) {
     try {
         if (!m_busy)
-            startRender(localPath(url), profile, false);
+            startRender(localPath(url), profile);
     } catch (const std::exception &e) {
         fail(e.what());
     }
 }
-void Editor::startRender(const QString &output, const QString &profile, bool playback) {
+void Editor::startRender(const QString &output, const QString &profile) {
     if (QFileInfo::exists(output)) {
         fail("That output file already exists. Choose a new filename.");
         return;
@@ -822,20 +927,13 @@ void Editor::startRender(const QString &output, const QString &profile, bool pla
         auto work = std::make_shared<QTemporaryDir>(m_data + "/cache/render-XXXXXX");
         if (!work->isValid())
             throw std::runtime_error("Cannot create render folder");
-        int w = m_project.width, h = m_project.height;
-        if (playback) {
-            w = 960;
-            h = std::max(64, qRound(960. * m_project.height / m_project.width / 2) * 2);
-            if (h > 960) {
-                h = 960;
-                w = std::max(64, qRound(960. * m_project.width / m_project.height / 2) * 2);
-            }
-        }
-        const auto plan = compileRender(m_project, work->path(), w, h);
+        const auto plan = compileRender(m_project, work->path(), m_project.width, m_project.height);
         const auto graph = work->filePath("graph.txt");
         writeGraph(graph, plan.graph);
         const QString temp = QFileInfo(output).absolutePath() + "/.cutlery-" + newId() + "." +
                              (profile == "webm" ? "webm" : "mp4");
+        m_resumeTimer.stop();
+        stopPlayback();
         auto *process = new QProcess(this);
         m_job = process;
         m_jobTemp = temp;
@@ -843,14 +941,13 @@ void Editor::startRender(const QString &output, const QString &profile, bool pla
         m_analysis->setPaused(true);
         m_cancelled = false;
         m_progress = 0;
-        m_status = playback ? "Rendering playback cache…" : "Exporting…";
+        m_status = "Exporting…";
         if (m_preview) {
             m_preview->disconnect(this);
             m_preview->kill();
             m_preview->deleteLater();
             m_preview = nullptr;
         }
-        const auto revision = m_revision;
         auto log = std::make_shared<QByteArray>();
         auto pending = std::make_shared<QByteArray>();
         connect(process, &QProcess::readyReadStandardError, this, [process, log] {
@@ -871,7 +968,7 @@ void Editor::startRender(const QString &output, const QString &profile, bool pla
                     }
                     emit changed();
                 });
-        auto complete = [this, process, work, output, temp, playback, revision, log](bool success) {
+        auto complete = [this, process, work, output, temp, log](bool success) {
             *log += process->readAllStandardError();
             m_job = nullptr;
             m_jobTemp.clear();
@@ -888,14 +985,9 @@ void Editor::startRender(const QString &output, const QString &profile, bool pla
                 QFile::remove(temp);
                 fail("Cannot publish output. Check the folder permissions and choose a new "
                      "filename.");
-            } else if (playback && revision != m_revision) {
-                QFile::remove(output);
-                m_status = "Timeline changed. Render playback again.";
             } else {
                 m_progress = 1;
-                m_status = playback ? "Playback ready — press Play" : "Export saved: " + output;
-                if (playback)
-                    m_playbackUrl = QUrl::fromLocalFile(output).toString();
+                m_status = "Export saved: " + output;
             }
             m_analysis->setPaused(false);
             m_previewTimer.start();

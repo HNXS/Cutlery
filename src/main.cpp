@@ -21,7 +21,7 @@ int main(int argc, char **argv) {
     app.setOrganizationName("HNXS");
     app.setApplicationName("Cutlery");
     app.setWindowIcon(QIcon(":/assets/cutlery.png"));
-    app.setApplicationVersion("0.3.0");
+    app.setApplicationVersion("0.4.0");
     QQuickStyle::setStyle("Basic");
     auto *frames = new cutlery::FrameProvider;
     cutlery::Editor editor(frames);

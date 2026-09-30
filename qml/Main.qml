@@ -33,11 +33,9 @@ ApplicationWindow {
     property string exportProfile: "mpeg4"
     property string pendingAction: ""
     property bool allowClose: false
-    property bool showPlayback: false
-    property bool playWhenReady: false
     property var libraryGesture: null
     property bool textEditing: activeFocusItem && typeof activeFocusItem.cursorPosition === "number"
-    property bool shortcutsBlocked: openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || srtOpen.visible || srtSave.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || playbackError.visible || timelinePanel.dialogOpen
+    property bool shortcutsBlocked: openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || srtOpen.visible || srtSave.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
         enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
@@ -48,8 +46,6 @@ ApplicationWindow {
         }
     }
     function goTo(frame) {
-        player.pause();
-        showPlayback = false;
         editor.seek(frame);
         timelinePanel.reveal(s.playhead);
     }
@@ -65,8 +61,8 @@ ApplicationWindow {
         return true;
     }
     function command(id) {
-        if (showPlayback && ["split", "trimStart", "trimEnd", "previousCut", "nextCut"].indexOf(id) >= 0)
-            goTo(Math.floor(player.position * s.fps / 1000));
+        if (editor.playing && ["split", "trimStart", "trimEnd", "previousCut", "nextCut"].indexOf(id) >= 0)
+            goTo(editor.playbackFrame);
         const c = s.selected, editable = s.selectedId.length > 0 && !c.locked;
         if (id === "new")
             guarded("new");
@@ -101,15 +97,13 @@ ApplicationWindow {
         else if (id === "title")
             editor.addTitle();
         else if (id === "play" && s.duration > 0 && !s.busy)
-            play();
+            editor.togglePlayback();
         else if (id === "pause")
-            goTo(showPlayback ? Math.floor(player.position * s.fps / 1000) : s.playhead);
-        else if (id === "render" && s.duration > 0 && !s.busy)
-            editor.renderPlayback();
+            editor.pause();
         else if (id === "previousFrame")
-            goTo((showPlayback ? Math.floor(player.position * s.fps / 1000) : s.playhead) - 1);
+            goTo(editor.playbackFrame - 1);
         else if (id === "nextFrame")
-            goTo((showPlayback ? Math.floor(player.position * s.fps / 1000) : s.playhead) + 1);
+            goTo(editor.playbackFrame + 1);
         else if (id === "previousCut")
             goTo(editor.adjacentCut(false));
         else if (id === "nextCut")
@@ -144,9 +138,7 @@ ApplicationWindow {
             runAction(action);
     }
     function runAction(action) {
-        player.stop();
-        showPlayback = false;
-        playWhenReady = false;
+        editor.pause();
         if (action === "new")
             editor.newProject();
         else if (action === "open")
@@ -164,40 +156,11 @@ ApplicationWindow {
         else
             saveDialog.open();
     }
-    function play() {
-        if (!s.playbackUrl.length) {
-            playWhenReady = true;
-            editor.renderPlayback();
-            return;
-        }
-        showPlayback = true;
-        if (player.playbackState === MediaPlayer.PlayingState) {
-            player.pause();
-            editor.seek(Math.floor(player.position * s.fps / 1000));
-        } else {
-            player.position = Math.round(s.playhead / s.fps * 1000);
-            player.play();
-        }
-    }
     onClosing: function (close) {
         if (!allowClose && (s.dirty || s.busy)) {
             close.accepted = false;
             pendingAction = "close";
             discardDialog.open();
-        }
-    }
-    Connections {
-        target: editor
-        function onChanged() {
-            if (!win.s.playbackUrl.length) {
-                player.stop();
-                win.showPlayback = false;
-            }
-            if (win.playWhenReady && win.s.playbackUrl.length) {
-                win.playWhenReady = false;
-                Qt.callLater(win.play);
-            } else if (win.playWhenReady && !win.s.busy)
-                win.playWhenReady = false;
         }
     }
     component Action: Button {
@@ -642,7 +605,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                         }
                         Label {
-                            text: win.showPlayback ? "CACHED PLAYBACK" : "RENDERED FRAME"
+                            text: editor.playing ? "LIVE PLAYBACK" : "PREVIEW FRAME"
                             color: win.muted
                             font.pixelSize: 9
                             font.letterSpacing: 1
@@ -657,18 +620,15 @@ ApplicationWindow {
                             height: width * win.s.height / win.s.width
                             color: "#07090c"
                             border.color: "#2e3741"
-                            Image {
-                                anchors.fill: parent
-                                source: win.s.previewUrl
-                                cache: false
-                                fillMode: Image.PreserveAspectFit
-                                visible: !win.showPlayback && source.toString().length > 0
-                            }
+                            // Preview stills and live playback share this surface, so pausing
+                            // keeps the last played frame until the exact still replaces it.
                             VideoOutput {
                                 id: videoOutput
+                                objectName: "viewer"
                                 anchors.fill: parent
                                 fillMode: VideoOutput.PreserveAspectFit
-                                visible: win.showPlayback
+                                visible: win.s.duration > 0
+                                Component.onCompleted: editor.setVideoSink(videoSink)
                             }
                             ColumnLayout {
                                 anchors.centerIn: parent
@@ -701,32 +661,25 @@ ApplicationWindow {
                             onClicked: win.command("previousFrame")
                         }
                         Action {
-                            text: player.playbackState === MediaPlayer.PlayingState ? "Pause" : win.s.playbackUrl.length ? "Play" : "Render & play"
+                            text: editor.playing ? "Pause" : "Play"
                             enabled: win.s.duration > 0 && !win.s.busy
-                            onClicked: win.play()
+                            onClicked: editor.togglePlayback()
                         }
                         Action {
                             text: "+1"
                             onClicked: win.command("nextFrame")
                         }
                         Label {
-                            text: win.clock(win.showPlayback ? Math.floor(player.position * win.s.fps / 1000) : win.s.playhead) + " / " + win.clock(win.s.duration)
+                            text: win.clock(editor.playbackFrame) + " / " + win.clock(win.s.duration)
                             font.family: "Consolas"
                             color: win.mint
                         }
                     }
-                    RowLayout {
+                    Label {
                         Layout.alignment: Qt.AlignHCenter
-                        Action {
-                            text: "Render playback"
-                            enabled: win.s.duration > 0 && !win.s.busy
-                            onClicked: editor.renderPlayback()
-                        }
-                        Label {
-                            text: "Space renders if needed, then plays"
-                            color: win.muted
-                            font.pixelSize: 10
-                        }
+                        text: "Space plays live from the playhead"
+                        color: win.muted
+                        font.pixelSize: 10
                     }
                 }
             }
@@ -1056,7 +1009,7 @@ ApplicationWindow {
             Layout.preferredHeight: 360
             dropsEnabled: !win.shortcutsBlocked
             state: win.s
-            playbackFrame: win.showPlayback ? player.position / 1000 * win.s.fps : -1
+            playbackFrame: editor.playing ? editor.playbackFrame : -1
             onSeekRequested: function (frame) {
                 win.goTo(frame);
             }
@@ -1088,23 +1041,12 @@ ApplicationWindow {
                     implicitHeight: 25
                 }
                 Label {
-                    text: "0.3.0 ALPHA"
+                    text: "0.4.0 ALPHA"
                     font.pixelSize: 9
                     font.letterSpacing: 1
                     color: win.mint
                 }
             }
-        }
-    }
-    MediaPlayer {
-        id: player
-        objectName: "previewPlayer"
-        source: win.s.playbackUrl
-        audioOutput: AudioOutput {}
-        videoOutput: videoOutput
-        onErrorOccurred: function (error, errorString) {
-            playbackError.text = errorString;
-            playbackError.open();
         }
     }
     FileDialog {
@@ -1307,19 +1249,15 @@ ApplicationWindow {
     Dialog {
         id: about
         anchors.centerIn: parent
-        title: "Cutlery · 0.3.0 alpha"
+        title: "Cutlery · 0.4.0 alpha"
         modal: true
         width: 490
         standardButtons: Dialog.Ok
         Label {
             width: parent.width
-            text: "A local desktop editor built around a shared FFmpeg render graph.\n\nImport media, arrange up to 64 tracks, drag clip edges to trim, add titles/captions, adjust picture and sound, render playback, and export. Higher tracks appear above lower tracks.\n\nPlayback is cached; Play or Space renders automatically when needed. Track buttons lock edits, mute or solo audio, and hide picture. See Help → Keyboard shortcuts to customize keys. This alpha does not yet include a real-time D3D11 engine, automatic captions, keyframes, masks, tracking, or the full design roadmap.\n\nProject files reference your original media. Keep those files alongside the project. Recovery data: " + win.s.dataPath
+            text: "A local desktop editor built around a shared FFmpeg render graph.\n\nImport media, arrange up to 64 tracks, drag clip edges to trim, add titles/captions, adjust picture and sound, play, and export. Higher tracks appear above lower tracks.\n\nPlay or Space starts live playback from the playhead; edits made while playing apply immediately. Track buttons lock edits, mute or solo audio, and hide picture. See Help → Keyboard shortcuts to customize keys. This alpha does not yet include a real-time D3D11 engine, automatic captions, keyframes, masks, tracking, or the full design roadmap.\n\nProject files reference your original media. Keep those files alongside the project. Recovery data: " + win.s.dataPath
             wrapMode: Text.Wrap
             lineHeight: 1.3
         }
-    }
-    MessageDialog {
-        id: playbackError
-        title: "Playback error"
     }
 }

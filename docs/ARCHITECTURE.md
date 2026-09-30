@@ -6,9 +6,9 @@ The design blueprint targets a native C++/Qt shell, shared render graph, D3D11 v
 
 `Project` stores media references and ordered clips. Timeline coordinates are integer frames at an exact rational frame rate. Source offsets and speed are rational values. Every editor mutation copies the project, validates the result, and commits it as one undo step. JSON schema 3 adds persistent track IDs and per-track snapping/magnetic modes to schema 2. Schema 1/2 migrate with snapping enabled and Magnet disabled, preserving existing clip positions. All schemas store timestamps as decimal strings to avoid floating-point integer loss. Unsupported schema versions are rejected without modifying the original file. QSaveFile performs atomic saves; one debounced recovery file is separate from the user's saved project.
 
-`compileRender()` is shared by preview stills, cached playback and export. It emits FFmpeg filter nodes and a separate argument list. Media paths are passed as process arguments, never a command shell or filter string. Titles become local transparent PNGs drawn with Qt's font shaping. No user title text is executed as a filter expression. Higher tracks composite last; same-track conflicts retain insertion order. Audio is resampled to 48 kHz stereo, adjusted, delayed, mixed and limited. Timeline length determines the output frame count.
+`compileRender()` is shared by preview stills, live playback and export. It emits FFmpeg filter nodes and a separate argument list. Media paths are passed as process arguments, never a command shell or filter string. Titles become local transparent PNGs drawn with Qt's font shaping. No user title text is executed as a filter expression. Higher tracks composite last; same-track conflicts retain insertion order. Audio is resampled to 48 kHz stereo, adjusted, delayed, mixed and limited. Timeline length determines the output frame count.
 
-`Editor` owns asynchronous ffprobe/FFmpeg jobs. An export compiles an immutable snapshot, writes a unique partial file in the destination folder, then renames it only on success. Existing destinations are refused. A failed/cancelled render removes its partial file. Preview jobs are debounced and replaced when seeking; revision/frame checks reject stale results. Cached playback is invalidated on every edit. Qt Multimedia handles playback of that cache, not timeline rendering.
+`Editor` owns asynchronous ffprobe/FFmpeg jobs. An export compiles an immutable snapshot, writes a unique partial file in the destination folder, then renames it only on success. Existing destinations are refused. A failed/cancelled render removes its partial file. Preview jobs are debounced and replaced when seeking; revision/frame checks reject stale results. Playback is live (ADR 002); edits during playback restart it from the current frame.
 
 `Project::move` inserts/reorders magnetic tracks at clip boundaries; `packTrack` keeps their order contiguous from frame zero. Trims retain source mapping while repacking the affected track. Free tracks retain arbitrary gaps and overlaps. Lock checks happen before edits; each operation including displaced neighbors is one undo transaction.
 
@@ -16,9 +16,19 @@ File drops queue asynchronous probes with stable destination track IDs. Each suc
 
 `MediaAnalysis` streams 8 kHz mono PCM into a bounded peak accumulator (at most 6,001 bins per asset). Disk cache keys cover canonical path, size, modification time, duration and algorithm version. It processes one asset at a time with a 120-second timeout; assets over 24 hours have no waveform. Cache failures do not block editing. This is an overview, not a sample-accurate peak pyramid.
 
-`KeyboardShortcuts` owns a validated registry and atomic per-user/portable preferences. QML disables timeline shortcuts during text entry and modal dialogs. Play requests automatically render a missing cache before starting playback.
+`KeyboardShortcuts` owns a validated registry and atomic per-user/portable preferences. QML disables timeline shortcuts during text entry and modal dialogs. 
 
 `Main.qml` and `Timeline.qml` expose the implemented editing controls. Native file dialogs handle paths. Portable mode is selected only by an application-adjacent `portable.json`; its data folder must be writable. QLockFile prevents two instances from sharing the same recovery/cache folder.
+
+## ADR 002 — windowed compilation and live playback (0.4)
+
+0.3 had two costs that grew with the timeline. A still preview compiled the whole timeline and seeked the *output*, so FFmpeg decoded and composited everything from frame 0 to the playhead. Play first rendered the entire timeline to a cache file. On a 3-minute 1080p H.264 clip this meant roughly 12 s for a preview frame at 1:30, and roughly 40 s before playback could begin.
+
+`RenderOptions` gives `compileRender()` a frame range. Only clips overlapping it are opened. Each input seeks directly to the first source time it needs, reversed clips included. Filters keep clip-local timestamps, so fades stay anchored to the clip, and the output starts at the window. A preview is a one-frame window: about 0.1 s regardless of position in the same test. Tests compare windowed frames against whole-timeline frames.
+
+`Playback` runs two FFmpeg processes on a window from the playhead to the end. One writes raw yuv420p frames at viewer resolution to a pipe; the other writes 48 kHz PCM. `realtime`/`arealtime` filters pace both to wall-clock speed, which bounds memory without a disk cache. Audio goes to a `QAudioSink`, and its processed-sample count is the master clock. Video frames are pushed into the QML `VideoOutput`'s `QVideoSink` when the clock reaches them. If the CPU falls behind, late frames are skipped and sound continues. Without an audio device, the wall clock drives the picture. The first frame appeared after about 0.16 s in the same test. Preview stills are pushed into the same video sink, so pausing does not flash.
+
+Two defects in the shared graph were found while proving window equivalence, and they affected export too. `setpts` truncates, so a clip placed at 1/3 s could start one frame early; placement is now rounded. Overlay enable windows now compare against half-frame boundaries instead of decimal-rounded frame edges. Clip sampling is biased by 1/8 frame, so exact half-frame ties (for example, 2× speed or 60 fps into 30 fps) resolve the same way wherever decoding starts.
 
 ## Known compromises
 
@@ -29,7 +39,8 @@ File drops queue asynchronous probes with stable destination track IDs. Each suc
 - Crash recovery has one snapshot; no rolling journal or power-loss test qualification. A hard process kill may leave partial export/cache files. User originals are never edited.
 - ffprobe runs in a child process but has no hostile-media sandbox. Network media paths are refused; FFmpeg and ffprobe input protocols are limited to file/pipe, including references inside local playlists. Media probing has a 30-second timeout. Inputs are not forensic evidence or security-isolated assets.
 - H.264 Media Foundation is an optional explicit profile. Failure is surfaced; no hidden codec change or claim of certified compatibility.
-- Qt Multimedia uses its deployed backend for cache playback. The future WASAPI engine will replace this path for interactive timeline audio.
+- Live playback composites on the CPU in FFmpeg. Heavy multi-layer timelines drop frames rather than stall; the D3D11 engine remains the path to real-time heavy compositing. A reversed clip must decode its visible range before its first frame, so long reversed clips start slowly.
+- Reversed clips can select an adjacent source frame in a preview window compared with export, because FFmpeg reassigns reversed timestamps from the decoded range. Forward clips match export.
 
 ## Next implementation gates
 
