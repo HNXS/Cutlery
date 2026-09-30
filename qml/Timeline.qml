@@ -136,7 +136,7 @@ FocusScope {
             }
             Label {
                 visible: root.state.analyzing
-                text: "Reading waveforms…"
+                text: "Reading thumbnails and waveforms…"
                 color: "#8c9aa8"
                 font.pixelSize: 10
             }
@@ -444,8 +444,20 @@ FocusScope {
                                         last: 100000000
                                     })
                                 property var wave: ({})
+                                property var thumbs: ({})
                                 readonly property real shownStart: operation ? dragStart : modelData.start
                                 readonly property real shownEnd: operation ? dragEnd : modelData.start + modelData.duration
+                                function refreshThumbs() {
+                                    thumbs = modelData.title || modelData.audio ? ({}) : editor.thumbnails(modelData.assetId);
+                                }
+                                // Strip tile for a filmstrip slot: the source frame at the slot's centre,
+                                // following trims (including live trim drags), speed and reverse.
+                                function tileFor(slot) {
+                                    const local = (shownStart - modelData.start) / root.state.fps + (slot + .5) * filmstrip.tileWidth / root.pixelsPerSecond;
+                                    const clipSeconds = modelData.duration / root.state.fps;
+                                    const source = modelData.sourceIn + (modelData.reverse ? clipSeconds - local : local) * modelData.speed;
+                                    return Math.max(0, Math.min(thumbs.count - 1, Math.floor(source / thumbs.interval)));
+                                }
                                 function refreshWave() {
                                     wave = modelData.hasAudio ? editor.waveform(modelData.assetId) : ({});
                                     waveform.requestPaint();
@@ -506,7 +518,10 @@ FocusScope {
                                 opacity: modelData.locked ? .65 : 1
                                 border.width: root.state.selectedId === modelData.id ? 2 : 1
                                 border.color: operation === 1 && (dragTrack < 0 || dragTrack >= root.state.tracks || (editor.trackList[dragTrack] || {}).locked) ? "#ec947e" : root.state.selectedId === modelData.id ? "#64d8bc" : "#6481a0"
-                                Component.onCompleted: refreshWave()
+                                Component.onCompleted: {
+                                    refreshWave();
+                                    refreshThumbs();
+                                }
                                 Component.onDestruction: {
                                     if (root.draggingClip === clipRect)
                                         root.clearDrag();
@@ -515,6 +530,42 @@ FocusScope {
                                     target: editor
                                     function onAnalysisChanged() {
                                         clipRect.refreshWave();
+                                    }
+                                    function onThumbnailsChanged() {
+                                        clipRect.refreshThumbs();
+                                    }
+                                }
+                                Item {
+                                    id: filmstrip
+                                    objectName: "filmstrip-" + clipRect.modelData.id
+                                    anchors.fill: parent
+                                    anchors.margins: 1
+                                    clip: true
+                                    visible: clipRect.thumbs.status === "ready"
+                                    readonly property real tileWidth: visible ? clipRect.thumbs.tileWidth * height / clipRect.thumbs.tileHeight : 0
+                                    // Only tiles inside the visible part of the timeline are created.
+                                    readonly property real visibleFrom: Math.max(0, timeline.contentX - clipRect.x)
+                                    readonly property real visibleTo: Math.min(width, timeline.contentX + timeline.width - clipRect.x)
+                                    readonly property int firstTile: tileWidth > 0 ? Math.floor(visibleFrom / tileWidth) : 0
+                                    Repeater {
+                                        model: filmstrip.tileWidth > 0 ? Math.max(0, Math.ceil(filmstrip.visibleTo / filmstrip.tileWidth) - filmstrip.firstTile) : 0
+                                        Image {
+                                            required property int index
+                                            readonly property int slot: filmstrip.firstTile + index
+                                            x: slot * filmstrip.tileWidth
+                                            width: filmstrip.tileWidth
+                                            height: filmstrip.height
+                                            source: clipRect.thumbs.url
+                                            sourceClipRect: Qt.rect(clipRect.tileFor(slot) * clipRect.thumbs.tileWidth, 0, clipRect.thumbs.tileWidth, clipRect.thumbs.tileHeight)
+                                            fillMode: Image.PreserveAspectCrop
+                                            asynchronous: true
+                                        }
+                                    }
+                                    // Keeps the clip name and waveform legible over bright footage.
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        color: "#0b1016"
+                                        opacity: clipRect.modelData.hidden ? .7 : .3
                                     }
                                 }
                                 Label {

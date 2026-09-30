@@ -197,6 +197,28 @@ class UiTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["importing"].toBool(), 15000);
         QCOMPARE(editor.project().assets.size(), 5);
         QCOMPARE(editor.project().clips.size(), 5);
+        // Video and image clips show filmstrip tiles once background extraction finishes.
+        int filmstrips = 0;
+        for (const auto &clip : editor.project().clips) {
+            const auto *asset = editor.project().asset(clip.assetId);
+            auto *strip = findItem(window->contentItem(), "filmstrip-" + clip.id);
+            QVERIFY(asset && strip);
+            if (asset->kind == "audio") {
+                QVERIFY(!strip->isVisible());
+                continue;
+            }
+            ++filmstrips;
+            QTRY_VERIFY_WITH_TIMEOUT(strip->isVisible(), 30000);
+            QTRY_VERIFY_WITH_TIMEOUT(
+                [&] {
+                    for (auto *tile : strip->childItems())
+                        if (tile->inherits("QQuickImage") && tile->property("status").toInt() == 1)
+                            return true;
+                    return false;
+                }(),
+                10000);
+        }
+        QVERIFY(filmstrips >= 2);
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
         QVERIFY(editor.save(QUrl::fromLocalFile(dir.filePath("drag.cutlery"))));
     }

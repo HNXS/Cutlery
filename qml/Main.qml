@@ -472,12 +472,35 @@ ApplicationWindow {
                                 anchors.margins: 10
                                 spacing: 10
                                 Rectangle {
-                                    width: 38
-                                    height: 42
+                                    id: poster
+                                    property var strip: ({})
+                                    function refresh() {
+                                        strip = mediaTile.modelData.kind === "audio" ? ({}) : editor.thumbnails(mediaTile.modelData.id);
+                                    }
+                                    Component.onCompleted: refresh()
+                                    Connections {
+                                        target: editor
+                                        function onThumbnailsChanged() {
+                                            poster.refresh();
+                                        }
+                                    }
+                                    Layout.preferredWidth: poster.strip.status === "ready" ? 75 : 38
+                                    Layout.preferredHeight: 42
                                     radius: 5
+                                    clip: true
                                     color: modelData.kind === "audio" ? "#344c4e" : "#354255"
+                                    // Poster frame: the tile from the middle of the media.
+                                    Image {
+                                        anchors.fill: parent
+                                        visible: poster.strip.status === "ready"
+                                        source: visible ? poster.strip.url : ""
+                                        sourceClipRect: visible ? Qt.rect(Math.floor(poster.strip.count / 2) * poster.strip.tileWidth, 0, poster.strip.tileWidth, poster.strip.tileHeight) : Qt.rect(0, 0, 0, 0)
+                                        fillMode: Image.PreserveAspectCrop
+                                        asynchronous: true
+                                    }
                                     Label {
                                         anchors.centerIn: parent
+                                        visible: poster.strip.status !== "ready"
                                         text: modelData.kind === "audio" ? "♫" : modelData.kind === "image" ? "▧" : "▶"
                                         color: win.mint
                                         font.pixelSize: 20

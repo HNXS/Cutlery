@@ -23,6 +23,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - Media probing/import and relinking; project presets; atomic JSON saves; single recovery snapshot; 60-step undo/redo.
 - Split, draggable edge trims, inspector trims, move, duplicate, delete, track-local ripple delete; snapping to clip edges, the playhead and timeline start.
 - Detach video audio onto its own track; cached mono waveform overviews that follow trims, speed and reverse.
+- Filmstrip thumbnails on video and image clips that follow trims, speed and reverse, plus poster frames in the media library. They are extracted in the background from keyframes and cached per file.
 - 30 configurable keyboard commands with conflict checks and portable preferences. Open **Help → Keyboard shortcuts** or press **Ctrl+/**; see the [shortcut reference](docs/SHORTCUTS.md).
 - Static transforms, equal-edge crop, horizontal flip, opacity, brightness/contrast/saturation, clip fades.
 - Constant speed **0.25–4×**, reverse, volume/mute, stereo mixing with an output limiter.
@@ -34,7 +35,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 
 ## Boundaries of this alpha
 
-This is a CPU reference implementation. It does **not** yet implement the planned D3D11/WASAPI real-time engine, proxies, video thumbnails, multilevel waveform pyramids, keyframes, transition library, masks, tracking, HDR colour management, hardware qualification, offline AI, transcription, an installer, or project-media collection. Heavy multi-layer timelines can drop frames during playback on the CPU renderer. Reversed clips decode their whole visible range before playing, so long reversed clips start slowly. The UI is not yet an accessibility-qualified release.
+This is a CPU reference implementation. It does **not** yet implement the planned D3D11/WASAPI real-time engine, proxies, multilevel waveform pyramids, keyframes, transition library, masks, tracking, HDR colour management, hardware qualification, offline AI, transcription, an installer, or project-media collection. Heavy multi-layer timelines can drop frames during playback on the CPU renderer. Reversed clips decode their whole visible range before playing, so long reversed clips start slowly. The UI is not yet an accessibility-qualified release.
 
 Only finite local media files are supported. Source audio/video remain together until you use **Detach audio**; detached clips can then be edited independently. Relinking or resynchronizing detached pairs is not implemented. Timing is rounded to sequence frames; SRT timing is quantized on import. Colour operations are simple SDR adjustments, not a colour-managed grading pipeline. Output filenames must be new; exports never overwrite an existing file. Temporary render folders live under `cache`; remove it while Cutlery is closed if space is needed.
 

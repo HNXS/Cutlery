@@ -1,6 +1,7 @@
 #pragma once
 #include "MediaAnalysis.h"
 #include "Playback.h"
+#include "Thumbnails.h"
 #include "Project.h"
 #include <QObject>
 #include <QProcess>
@@ -87,6 +88,9 @@ class Editor final : public QObject {
     Q_INVOKABLE QVariantMap waveform(const QString &assetId) const {
         return m_analysis->waveform(assetId);
     }
+    Q_INVOKABLE QVariantMap thumbnails(const QString &assetId) const {
+        return m_thumbnails->strip(assetId);
+    }
     static QString executable(const QString &name);
     const Project &project() const {
         return m_project;
@@ -96,6 +100,7 @@ class Editor final : public QObject {
     void projectChanged();
     void analysisChanged();
     void playbackChanged();
+    void thumbnailsChanged();
 
   private:
     Project m_project;
@@ -107,6 +112,7 @@ class Editor final : public QObject {
     qint64 m_playhead = 0, m_revision = 0, m_previewSerial = 0;
     FrameProvider *m_frames;
     MediaAnalysis *m_analysis;
+    Thumbnails *m_thumbnails;
     Playback *m_playback;
     QTimer m_previewTimer, m_saveTimer, m_resumeTimer;
     QProcess *m_preview = nullptr, *m_job = nullptr, *m_probe = nullptr;

@@ -16,6 +16,8 @@ File drops queue asynchronous probes with stable destination track IDs. Each suc
 
 `MediaAnalysis` streams 8 kHz mono PCM into a bounded peak accumulator (at most 6,001 bins per asset). Disk cache keys cover canonical path, size, modification time, duration and algorithm version. It processes one asset at a time with a 120-second timeout; assets over 24 hours have no waveform. Cache failures do not block editing. This is an overview, not a sample-accurate peak pyramid.
 
+`Thumbnails` builds one filmstrip per video/image asset in the background, one asset at a time, pausing during playback and export. FFmpeg decodes keyframes only (`-skip_frame nokey`). This is roughly 10× faster than full decoding: 1.2 s instead of 15 s for 3 minutes of 1080p H.264. It samples one tile per second, spreading tiles further apart for media over 200 s. All tiles are stored side by side in one JPEG, keyed by the same file fingerprint as waveforms. The layout is derived from the asset alone, so the cache needs no metadata. The timeline creates tile images only for the visible part of each clip, and it maps each tile through the clip's trim, speed and reverse. Thumbnails show the nearest keyframe at or before a position, so sources with sparse keyframes repeat tiles.
+
 `KeyboardShortcuts` owns a validated registry and atomic per-user/portable preferences. QML disables timeline shortcuts during text entry and modal dialogs. 
 
 `Main.qml` and `Timeline.qml` expose the implemented editing controls. Native file dialogs handle paths. Portable mode is selected only by an application-adjacent `portable.json`; its data folder must be writable. QLockFile prevents two instances from sharing the same recovery/cache folder.
@@ -46,6 +48,6 @@ Two defects in the shared graph were found while proving window equivalence, and
 
 1. Windows clean-machine portable test, media corpus, large-project profiling, cache quota and render memory limits.
 2. D3D11 renderer and audio clock using the same project contract; deterministic CPU/GPU frame comparisons.
-3. Video thumbnails, multilevel waveforms, proxies, keyframes, advanced trims and linked-pair resync.
+3. Multilevel waveforms, proxies, keyframes, advanced trims and linked-pair resync.
 4. Colour management, broader codec qualification, installer and signed distribution.
 5. Optional local inference packs only after ordinary editing and offline packaging gates are stable.

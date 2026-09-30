@@ -43,6 +43,11 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
                  : QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     m_recovery = m_data + "/recovery.cutlery";
     m_analysis = new MediaAnalysis(m_data + "/cache/waveforms", executable("ffmpeg"), this);
+    m_thumbnails = new Thumbnails(m_data + "/cache/thumbnails", executable("ffmpeg"), this);
+    connect(m_thumbnails, &Thumbnails::changed, this, [this] {
+        emit thumbnailsChanged();
+        emit changed();
+    });
     connect(m_analysis, &MediaAnalysis::changed, this, [this] {
         emit analysisChanged();
         emit changed();
@@ -280,7 +285,7 @@ QVariantMap Editor::state() const {
             {"error", m_error},
             {"busy", m_busy},
             {"importing", m_importing},
-            {"analyzing", m_analysis->busy()},
+            {"analyzing", m_analysis->busy() || m_thumbnails->busy()},
             {"progress", m_progress},
             {"previewUrl", m_previewUrl},
             {"playing", m_playback->active() || m_resumeTimer.isActive()},
@@ -312,6 +317,7 @@ void Editor::edited() {
     m_previewTimer.start();
     m_saveTimer.start();
     m_analysis->setAssets(m_project.assets);
+    m_thumbnails->setAssets(m_project.assets);
     emit projectChanged();
     emit changed();
 }
@@ -355,6 +361,7 @@ void Editor::newProject() {
     ++m_revision;
     m_status = "New project";
     m_analysis->setAssets(m_project.assets);
+    m_thumbnails->setAssets(m_project.assets);
     emit projectChanged();
     emit changed();
 }
@@ -382,6 +389,7 @@ bool Editor::openProject(const QUrl &url) {
         m_status = "Opened " + QFileInfo(path).fileName();
         m_previewTimer.start();
         m_analysis->setAssets(m_project.assets);
+        m_thumbnails->setAssets(m_project.assets);
         emit projectChanged();
         emit changed();
         return true;
@@ -872,6 +880,7 @@ void Editor::play() {
         writeGraph(request.videoGraph, request.video.graph);
         writeGraph(request.audioGraph, request.audio.graph);
         m_analysis->setPaused(true);
+        m_thumbnails->setPaused(true);
         m_playback->start(request);
         m_status = "Playing";
     } catch (const std::exception &e) {
@@ -902,8 +911,10 @@ void Editor::stopPlayback() {
     if (!m_playback->active())
         return;
     m_playback->stop();
-    if (!m_busy)
+    if (!m_busy) {
         m_analysis->setPaused(false);
+        m_thumbnails->setPaused(false);
+    }
     emit playbackChanged();
 }
 void Editor::exportVideo(const QUrl &url, const QString &profile) {
@@ -939,6 +950,7 @@ void Editor::startRender(const QString &output, const QString &profile) {
         m_jobTemp = temp;
         m_busy = true;
         m_analysis->setPaused(true);
+        m_thumbnails->setPaused(true);
         m_cancelled = false;
         m_progress = 0;
         m_status = "Exporting…";
@@ -990,6 +1002,7 @@ void Editor::startRender(const QString &output, const QString &profile) {
                 m_status = "Export saved: " + output;
             }
             m_analysis->setPaused(false);
+            m_thumbnails->setPaused(false);
             m_previewTimer.start();
             emit changed();
         };
