@@ -13,7 +13,7 @@ The [187-row feature matrix](FEATURE_STATUS.md) is the detailed status record. T
 
 ## Main development areas still open
 
-1. **Responsive playback:** 0.4 streams playback live from the playhead with an audio clock. Remaining: GPU (D3D11) compositing for heavy multi-layer timelines, proxies for 4K sources, thumbnails, smooth scrubbing while dragging, and large-project performance.
+1. **Responsive playback:** 0.4 streams playback live from the playhead with an audio clock. Remaining: GPU (D3D11) compositing for heavy multi-layer timelines, proxies for 4K sources, smooth scrubbing while dragging, and large-project performance.
 2. **Editing tools:** multi-selection, groups, clip/attribute copy-paste, markers, in/out ranges, roll/slip/slide, overwrite, nested sequences and detached-pair resync.
 3. **Motion and transitions:** keyframes and easing, animated zoom/pan, transitions, masks, chroma key, broader effects and original presets.
 4. **Audio:** per-track gain and meters, pan, recording, crossfades, EQ/compressor, loudness analysis, noise reduction and beat tools.

@@ -3,6 +3,7 @@
 #include "MediaAnalysis.h"
 #include "Project.h"
 #include "RenderGraph.h"
+#include "Thumbnails.h"
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QStandardPaths>
@@ -348,6 +349,95 @@ class EngineTest : public QObject {
         KeyboardShortcuts failed(dir.path());
         QVERIFY(!failed.assign("play", "Ctrl+J"));
         QCOMPARE(failed.bindings()[16].toMap()["sequence"].toString(), QString("Space"));
+    }
+    void thumbnailStrips() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto video = dir.filePath("colours.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "color=red:s=160x90:r=30:d=1[a];color=lime:s=160x90:r=30:d=1[b];"
+                     "color=blue:s=160x90:r=30:d=1[c];color=white:s=160x90:r=30:d=1[d];"
+                     "[a][b][c][d]concat=n=4:v=1:a=0",
+                     "-c:v", "mpeg4", "-q:v", "2", "-g", "30", "-bf", "0", "-threads", "1", video});
+        const auto still = dir.filePath("still.png");
+        QImage image(320, 240, QImage::Format_RGB32);
+        image.fill(Qt::yellow);
+        QVERIFY(image.save(still));
+        Asset v;
+        v.id = "video";
+        v.path = video;
+        v.kind = "video";
+        v.duration = 4;
+        v.width = 160;
+        v.height = 90;
+        Asset i;
+        i.id = "image";
+        i.path = still;
+        i.kind = "image";
+        i.duration = 5;
+        i.width = 320;
+        i.height = 240;
+        Asset sound = v;
+        sound.id = "sound";
+        sound.kind = "audio";
+        auto layout = Thumbnails::layout(v);
+        QCOMPARE(layout.count, 4);
+        QCOMPARE(layout.interval, 1.);
+        QCOMPARE(layout.tile, QSize(96, 54));
+        Asset longVideo = v;
+        longVideo.duration = 3600;
+        QCOMPARE(Thumbnails::layout(longVideo).count, 200);
+        QCOMPARE(Thumbnails::layout(longVideo).interval, 18.);
+        QCOMPARE(Thumbnails::layout(i).count, 1);
+        QCOMPARE(Thumbnails::layout(i).tile, QSize(72, 54));
+        const auto cache = dir.filePath("cache");
+        {
+            Thumbnails thumbnails(cache, ffmpeg);
+            thumbnails.setAssets({v, i, sound});
+            QCOMPARE(thumbnails.strip("sound")["status"].toString(), QString("none"));
+            QTRY_VERIFY_WITH_TIMEOUT(!thumbnails.busy(), 30000);
+            const auto strip = thumbnails.strip("video");
+            QCOMPARE(strip["status"].toString(), QString("ready"));
+            QImage film(QUrl(strip["url"].toString()).toLocalFile());
+            QCOMPARE(film.size(), QSize(4 * 96, 54));
+            const QColor expected[] = {Qt::red, Qt::green, Qt::blue, Qt::white};
+            for (int tile = 0; tile < 4; ++tile) {
+                const auto c = film.pixelColor(tile * 96 + 48, 27);
+                const auto e = expected[tile];
+                QVERIFY2(std::abs(c.red() - e.red()) < 40 && std::abs(c.green() - e.green()) < 40 &&
+                             std::abs(c.blue() - e.blue()) < 40,
+                         qPrintable(QString("tile %1 is %2").arg(tile).arg(c.name())));
+            }
+            QImage poster(QUrl(thumbnails.strip("image")["url"].toString()).toLocalFile());
+            QCOMPARE(poster.size(), QSize(72, 54));
+            QVERIFY(poster.pixelColor(36, 27).red() > 200 && poster.pixelColor(36, 27).blue() < 60);
+        }
+        // A second session reuses the cached strip without running FFmpeg.
+        Thumbnails reused(cache, ffmpeg);
+        reused.setAssets({v});
+        QVERIFY(!reused.busy());
+        QCOMPARE(reused.strip("video")["status"].toString(), QString("ready"));
+        // Changed media gets a new fingerprint and is extracted again.
+        QTest::qWait(20);
+        QVERIFY(image.save(still));
+        {
+            QFile touched(still);
+            QVERIFY(touched.open(QIODevice::ReadWrite));
+            QVERIFY(touched.setFileTime(QDateTime::currentDateTime().addSecs(5),
+                                        QFileDevice::FileModificationTime));
+        }
+        reused.setAssets({v, i});
+        QVERIFY(reused.busy());
+        QTRY_VERIFY_WITH_TIMEOUT(!reused.busy(), 30000);
+        QCOMPARE(reused.strip("image")["status"].toString(), QString("ready"));
+        // Missing media is reported instead of blocking the queue.
+        Asset missing = v;
+        missing.id = "missing";
+        missing.path = dir.filePath("gone.mp4");
+        reused.setAssets({missing});
+        QTRY_VERIFY_WITH_TIMEOUT(!reused.busy(), 5000);
+        QCOMPARE(reused.strip("missing")["status"].toString(), QString("unavailable"));
     }
     void waveformPeaksAndCache() {
         PeakAccumulator peaks(2);

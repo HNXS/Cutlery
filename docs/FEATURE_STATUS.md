@@ -167,7 +167,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F161 | Interrupted render retry and recovery | Planned | Not implemented in this alpha. |
 | F162 | Convert/compress and export presets | Planned | Not implemented in this alpha. |
 | F163 | Proxy and optimized-media workflows | Planned | Not implemented in this alpha. |
-| F164 | Frame, thumbnail and render caches | Partial | Live streamed playback needs no render cache; no frame cache, quotas or thumbnails. |
+| F164 | Frame, thumbnail and render caches | Partial | Keyframe filmstrips (up to 200 tiles per asset) cached by file fingerprint; live playback needs no render cache. No frame cache or cache quotas. |
 | F165 | Async jobs, priorities and cancellation | Partial | Async import/render; no scheduler/priority system. |
 | F166 | RAM/VRAM budgets and decoder pooling | Planned | Not implemented in this alpha. |
 | F167 | GPU device loss and CPU fallback | Planned | Not implemented in this alpha. |
