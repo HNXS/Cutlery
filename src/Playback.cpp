@@ -40,11 +40,7 @@ void Playback::showImage(const QImage &image) {
         return;
     const auto rgba = image.convertToFormat(QImage::Format_RGBA8888);
     QVideoFrame frame(QVideoFrameFormat(rgba.size(), QVideoFrameFormat::Format_RGBA8888));
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-    if (!frame.map(QtVideo::MapMode::WriteOnly))
-#else
     if (!frame.map(QVideoFrame::WriteOnly))
-#endif
         return;
     for (int y = 0; y < rgba.height(); ++y)
         std::memcpy(frame.bits(0) + y * frame.bytesPerLine(0), rgba.constScanLine(y),
@@ -231,11 +227,7 @@ void Playback::present(const QByteArray &data) {
     format.setColorSpace(QVideoFrameFormat::ColorSpace_BT601);
     format.setColorRange(QVideoFrameFormat::ColorRange_Video);
     QVideoFrame frame(format);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-    if (!frame.map(QtVideo::MapMode::WriteOnly))
-#else
     if (!frame.map(QVideoFrame::WriteOnly))
-#endif
         return;
     const char *source = data.constData();
     const int widths[] = {w, w / 2, w / 2}, heights[] = {h, h / 2, h / 2};
