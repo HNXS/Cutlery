@@ -1,4 +1,6 @@
 #include "Editor.h"
+#include "KeyboardShortcuts.h"
+#include "MediaAnalysis.h"
 #include "Project.h"
 #include "RenderGraph.h"
 #include <QJsonArray>
@@ -154,6 +156,129 @@ class EngineTest : public QObject {
         QVERIFY2(editor.state()["error"].toString().contains("whitelist"),
                  qPrintable(editor.state()["error"].toString()));
     }
+    void schemaMigrationAndTracks() {
+        auto p = sample();
+        auto legacy = p.json();
+        legacy["schemaVersion"] = 1;
+        legacy.remove("trackSettings");
+        auto q = Project::fromJson(legacy, QDir::tempPath());
+        QCOMPARE(q.tracks, 3);
+        QCOMPARE(q.trackSettings.size(), 3);
+        QVERIFY(!q.trackSettings[0].locked);
+        q.addTrack("Music");
+        q.trackSettings[3].solo = true;
+        q.trackSettings[1].hidden = true;
+        const auto restored = Project::fromJson(q.json(), QDir::tempPath());
+        QCOMPARE(restored.json(), q.json());
+        QVERIFY(!restored.audioEnabled(0));
+        QVERIFY(restored.audioEnabled(3));
+        QVERIFY_EXCEPTION_THROWN(q.removeTrack(0), std::runtime_error);
+        q.removeTrack(2);
+        QCOMPARE(q.tracks, 3);
+        QCOMPARE(q.trackSettings[2].name, QString("Music"));
+        q.trackSettings[0].locked = true;
+        QVERIFY_EXCEPTION_THROWN(q.split("clip", 30), std::runtime_error);
+        QVERIFY_EXCEPTION_THROWN(q.remove("clip", false), std::runtime_error);
+    }
+    void exactTrimmingAndSnapping() {
+        auto p = sample();
+        p.clips[0].start = 60;
+        p.clips[0].sourceIn = Time(1);
+        p.clips[0].speed = Time(3, 2);
+        p.trim("clip", 90, 150);
+        p.validate();
+        QCOMPARE(p.clips[0].sourceIn, Time(5, 2));
+        QCOMPARE(p.clips[0].duration, qint64(60));
+        p = sample();
+        p.clips[0].reverse = true;
+        p.clips[0].start = 60;
+        p.clips[0].sourceIn = Time(1);
+        p.clips[0].speed = Time(3, 2);
+        p.trim("clip", 90, 150);
+        p.validate();
+        QCOMPARE(p.clips[0].sourceIn, Time(5, 2));
+        QCOMPARE(p.snap(88, 4, {}, 12), qint64(90));
+        QCOMPARE(p.snap(118, 4, "other", 0, 30), qint64(120));
+        QCOMPARE(p.snap(88, 4, "clip", 12), qint64(88));
+        QTemporaryDir dir;
+        FrameProvider frames;
+        Editor e(&frames);
+        e.addTitle();
+        const auto id = e.project().clips[0].id;
+        e.trimClip(id, 15, 75);
+        QCOMPARE(e.project().clips[0].start, qint64(15));
+        e.undo();
+        QCOMPARE(e.project().clips[0].start, qint64(0));
+        e.redo();
+        e.setTrack(2, "locked", true);
+        const auto original = e.project().json();
+        e.trimClip(id, 30, 60);
+        QCOMPARE(e.project().json(), original);
+        e.moveClip(id, 30, 0);
+        QCOMPARE(e.project().json(), original);
+        e.remove();
+        QCOMPARE(e.project().json(), original);
+        e.setTrack(2, "locked", false);
+        e.trimClip(id, 15, 15);
+        QCOMPARE(e.project().clips[0].duration, qint64(60));
+        e.save(QUrl::fromLocalFile(dir.filePath("trim.cutlery")));
+    }
+    void shortcutPreferences() {
+        QTemporaryDir dir;
+        const auto path = dir.filePath("shortcuts.json");
+        KeyboardShortcuts keys(path);
+        QCOMPARE(keys.bindings().size(), 31);
+        QVERIFY(!keys.assign("play", "Ctrl+B"));
+        QVERIFY(keys.error().contains("Already assigned"));
+        QVERIFY(!keys.assign("play", "Ctrl+NotARealKey"));
+        QVERIFY(keys.assign("split", ""));
+        QVERIFY(keys.assign("play", "Ctrl+B"));
+        KeyboardShortcuts loaded(path);
+        QCOMPARE(loaded.bindings(), keys.bindings());
+        QVERIFY(loaded.reset());
+        QCOMPARE(loaded.bindings()[16].toMap()["sequence"].toString(), QString("Space"));
+        KeyboardShortcuts failed(dir.path());
+        QVERIFY(!failed.assign("play", "Ctrl+J"));
+        QCOMPARE(failed.bindings()[16].toMap()["sequence"].toString(), QString("Space"));
+    }
+    void waveformPeaksAndCache() {
+        PeakAccumulator peaks(2);
+        const auto pcm = QByteArray::fromHex("0000004000800000");
+        peaks.append(pcm.left(3));
+        peaks.append(pcm.mid(3));
+        const auto bins = peaks.finish();
+        QCOMPARE(bins.size(), 2);
+        QCOMPARE(bins[0], .5f);
+        QCOMPARE(bins[1], 1.f);
+        QTemporaryDir dir;
+        const auto wav = dir.filePath("tone.wav");
+        run(Editor::executable("ffmpeg"),
+            {"-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=8000:duration=1",
+             "-c:a", "pcm_s16le", wav});
+        Asset a;
+        a.id = "tone";
+        a.path = wav;
+        a.kind = "audio";
+        a.hasAudio = true;
+        a.duration = 1;
+        MediaAnalysis analysis(dir.filePath("cache"), Editor::executable("ffmpeg"));
+        analysis.setAssets({a});
+        QTRY_COMPARE_WITH_TIMEOUT(analysis.waveform(a.id)["status"].toString(), QString("ready"),
+                                  15000);
+        const auto data = analysis.waveform(a.id);
+        QVERIFY(data["peaks"].toList().size() >= 99);
+        QVERIFY(data["peaks"].toList().first().toDouble() > .1);
+        MediaAnalysis cached(dir.filePath("cache"), "");
+        cached.setAssets({a});
+        QCOMPARE(cached.waveform(a.id), data);
+        QFile f(wav);
+        QVERIFY(f.open(QIODevice::Append));
+        f.write("changed");
+        f.close();
+        cached.setAssets({a});
+        QCOMPARE(cached.waveform(a.id)["status"].toString(), QString("unavailable"));
+        QVERIFY(cached.waveform(a.id)["peaks"].toList().isEmpty());
+    }
     void asynchronousJobs() {
         QTemporaryDir dir;
         const auto file = dir.filePath("image with spaces.png");
@@ -272,6 +397,66 @@ class EngineTest : public QObject {
                 break;
             }
         QVERIFY(sound);
+        auto renderVariant = [&](const Project &project, const QString &name) {
+            const auto plan = compileRender(project, dir.path(), 160, 90);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            const auto out = dir.filePath(name + ".mp4");
+            run(ffmpeg, renderArguments(plan, graph, out, "mpeg4"));
+            return out;
+        };
+        auto energy = [&](const QString &path) {
+            const auto data = run(ffmpeg, {"-v", "error", "-i", path, "-map", "0:a:0", "-f",
+                                           "s16le", "-acodec", "pcm_s16le", "pipe:1"});
+            qint64 sum = 0;
+            for (int i = 0; i + 1 < data.size(); i += 2) {
+                const auto sample = qint16(quint8(data[i]) | (quint16(quint8(data[i + 1])) << 8));
+                sum += std::abs(int(sample));
+            }
+            return sum;
+        };
+        auto picture = [&](const QString &path) {
+            QImage image;
+            image.loadFromData(
+                run(ffmpeg, {"-v", "error", "-ss", "0.7", "-i", path, "-frames:v", "1", "-threads",
+                             "1", "-f", "image2pipe", "-c:v", "png", "pipe:1"}),
+                "PNG");
+            return image;
+        };
+        auto hidden = p;
+        hidden.trackSettings[1].hidden = true;
+        const auto hiddenFile = renderVariant(hidden, "hidden");
+        QVERIFY(picture(hiddenFile).pixelColor(80, 45).red() > 180);
+        QVERIFY(energy(hiddenFile) > 100000);
+        auto muted = p;
+        muted.trackSettings[0].muted = true;
+        QVERIFY(energy(renderVariant(muted, "muted")) < 1000);
+        auto solo = p;
+        solo.trackSettings[1].solo = true;
+        QVERIFY(energy(renderVariant(solo, "solo")) < 1000);
+        auto audioOnly = p;
+        audioOnly.clips.resize(1);
+        audioOnly.clips[0].audioOnly = true;
+        const auto audioFile = renderVariant(audioOnly, "audio-only");
+        QVERIFY(picture(audioFile).pixelColor(80, 45).red() < 10);
+        QVERIFY(energy(audioFile) > 100000);
+        FrameProvider frames;
+        Editor ed(&frames);
+        const auto sourceProject = dir.filePath("source.cutlery");
+        saveProject(p, sourceProject);
+        QVERIFY(ed.openProject(QUrl::fromLocalFile(sourceProject)));
+        ed.select("base");
+        ed.detachAudio();
+        QCOMPARE(ed.project().tracks, 4);
+        QVERIFY(ed.project().clips[0].muted);
+        QVERIFY(ed.project().clips.last().audioOnly);
+        QCOMPARE(ed.project().clips.last().sourceIn, p.clips[0].sourceIn);
+        ed.undo();
+        QCOMPARE(ed.project().json(), p.json());
+        ed.save(QUrl::fromLocalFile(sourceProject));
         plan = compileRender(p, dir.path(), 160, 90, false);
         QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
         file.write(plan.graph.toUtf8());

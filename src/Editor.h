@@ -1,4 +1,5 @@
 #pragma once
+#include "MediaAnalysis.h"
 #include "Project.h"
 #include <QObject>
 #include <QProcess>
@@ -25,12 +26,23 @@ class Editor final : public QObject {
     Q_PROPERTY(QVariantMap state READ state NOTIFY changed)
     Q_PROPERTY(QVariantList assets READ assets NOTIFY projectChanged)
     Q_PROPERTY(QVariantList clips READ clips NOTIFY projectChanged)
+    Q_PROPERTY(QVariantList trackList READ trackList NOTIFY projectChanged)
   public:
     explicit Editor(FrameProvider *, QObject *parent = nullptr);
     ~Editor() override;
     QVariantMap state() const;
     QVariantList assets() const;
     QVariantList clips() const;
+    QVariantList trackList() const;
+    Q_INVOKABLE QVariantMap trimBounds(const QString &id) const;
+    Q_INVOKABLE qint64 snap(qint64 frame, qint64 threshold, const QString &exclude,
+                            qint64 length = 0) const;
+    Q_INVOKABLE void trimClip(const QString &id, qint64 start, qint64 end);
+    Q_INVOKABLE void addTrack();
+    Q_INVOKABLE void removeTrack(int track);
+    Q_INVOKABLE void setTrack(int track, const QString &key, const QVariant &value);
+    Q_INVOKABLE void detachAudio();
+    Q_INVOKABLE qint64 adjacentCut(bool forward) const;
     Q_INVOKABLE void newProject();
     Q_INVOKABLE bool openProject(const QUrl &);
     Q_INVOKABLE bool save(const QUrl &url = QUrl());
@@ -55,6 +67,9 @@ class Editor final : public QObject {
     Q_INVOKABLE void importSrt(const QUrl &);
     Q_INVOKABLE bool exportSrt(const QUrl &);
     Q_INVOKABLE void clearError();
+    Q_INVOKABLE QVariantMap waveform(const QString &assetId) const {
+        return m_analysis->waveform(assetId);
+    }
     static QString executable(const QString &name);
     const Project &project() const {
         return m_project;
@@ -62,6 +77,7 @@ class Editor final : public QObject {
   signals:
     void changed();
     void projectChanged();
+    void analysisChanged();
 
   private:
     Project m_project;
@@ -73,6 +89,7 @@ class Editor final : public QObject {
     double m_progress = 0;
     qint64 m_playhead = 0, m_revision = 0, m_previewSerial = 0;
     FrameProvider *m_frames;
+    MediaAnalysis *m_analysis;
     QTimer m_previewTimer, m_saveTimer;
     QProcess *m_preview = nullptr, *m_job = nullptr, *m_probe = nullptr;
     QString m_jobTemp;

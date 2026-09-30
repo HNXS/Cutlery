@@ -1,5 +1,8 @@
 #include "Editor.h"
+#include "KeyboardShortcuts.h"
+#include <QDataStream>
 #include <QDir>
+#include <QFile>
 #include <QGuiApplication>
 #include <QImage>
 #include <QLockFile>
@@ -9,13 +12,14 @@
 #include <QQuickWindow>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <cmath>
 #include <cstdio>
 
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
     app.setOrganizationName("HNXS");
     app.setApplicationName("Cutlery");
-    app.setApplicationVersion("0.1.0");
+    app.setApplicationVersion("0.2.0");
     QQuickStyle::setStyle("Basic");
     auto *frames = new cutlery::FrameProvider;
     cutlery::Editor editor(frames);
@@ -26,9 +30,11 @@ int main(int argc, char **argv) {
         delete frames;
         return 2;
     }
+    cutlery::KeyboardShortcuts shortcuts(editor.state()["dataPath"].toString() + "/shortcuts.json");
     QQmlApplicationEngine engine;
     engine.addImageProvider("frames", frames);
     engine.rootContext()->setContextProperty("editor", &editor);
+    engine.rootContext()->setContextProperty("shortcutSettings", &shortcuts);
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
         [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
@@ -73,6 +79,42 @@ int main(int argc, char **argv) {
         c.duration = 180;
         c.fontSize = 88;
         p.clips.push_back(c);
+        // Generated demonstration audio keeps --demo self-contained and reproducible.
+        const auto audioPath = demo.filePath("Synthetic rhythm.wav");
+        QFile audio(audioPath);
+        if (audio.open(QIODevice::WriteOnly)) {
+            const int samples = 8000 * 8;
+            QDataStream out(&audio);
+            out.setByteOrder(QDataStream::LittleEndian);
+            out.writeRawData("RIFF", 4);
+            out << quint32(36 + samples * 2);
+            out.writeRawData("WAVEfmt ", 8);
+            out << quint32(16) << quint16(1) << quint16(1) << quint32(8000) << quint32(16000)
+                << quint16(2) << quint16(16);
+            out.writeRawData("data", 4);
+            out << quint32(samples * 2);
+            for (int i = 0; i < samples; ++i) {
+                const double t = double(i) / 8000;
+                const double envelope = std::exp(-5 * std::fmod(t, .5));
+                out << qint16(22000 * envelope * std::sin(t * 440 * 6.283185307));
+            }
+            audio.close();
+            cutlery::Asset sound;
+            sound.id = "demo-audio";
+            sound.path = audioPath;
+            sound.name = "Synthetic rhythm";
+            sound.kind = "audio";
+            sound.hasAudio = true;
+            sound.duration = 8;
+            p.assets.push_back(sound);
+            cutlery::Clip rhythm;
+            rhythm.id = "rhythm";
+            rhythm.assetId = sound.id;
+            rhythm.name = sound.name;
+            rhythm.track = 1;
+            rhythm.duration = 240;
+            p.clips.push_back(rhythm);
+        }
         const auto project = demo.filePath("Demo.cutlery");
         cutlery::saveProject(p, project);
         editor.openProject(QUrl::fromLocalFile(project));

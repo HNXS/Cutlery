@@ -56,7 +56,13 @@ static qint64 integer(QJsonValue v) {
     return x;
 }
 QJsonObject Project::json(const QString &base) const {
-    QJsonArray aa, cc;
+    QJsonArray aa, cc, tt;
+    for (const auto &t : trackSettings)
+        tt.append(QJsonObject{{"name", t.name},
+                              {"locked", t.locked},
+                              {"muted", t.muted},
+                              {"hidden", t.hidden},
+                              {"solo", t.solo}});
     for (const auto &a : assets) {
         auto path = a.path;
         if (!base.isEmpty())
@@ -79,6 +85,7 @@ QJsonObject Project::json(const QString &base) const {
                       {"duration", QString::number(c.duration)},
                       {"sourceIn", timeJson(c.sourceIn)},
                       {"speed", timeJson(c.speed)},
+                      {"audioOnly", c.audioOnly},
                       {"muted", c.muted},
                       {"hidden", c.hidden},
                       {"reverse", c.reverse},
@@ -103,12 +110,13 @@ QJsonObject Project::json(const QString &base) const {
 #undef PUT
         cc.append(o);
     }
-    return {{"format", "cutlery"}, {"schemaVersion", 1}, {"name", name}, {"width", width},
-            {"height", height},    {"fpsN", fpsN},       {"fpsD", fpsD}, {"tracks", tracks},
-            {"assets", aa},        {"clips", cc}};
+    return {{"format", "cutlery"}, {"schemaVersion", 2}, {"name", name},       {"width", width},
+            {"height", height},    {"fpsN", fpsN},       {"fpsD", fpsD},       {"tracks", tracks},
+            {"assets", aa},        {"clips", cc},        {"trackSettings", tt}};
 }
 Project Project::fromJson(const QJsonObject &o, const QString &base) {
-    require(o["format"] == "cutlery" && o["schemaVersion"].toInt() == 1,
+    require(o["format"] == "cutlery" &&
+                (o["schemaVersion"].toInt() == 1 || o["schemaVersion"].toInt() == 2),
             "Unsupported project format/version. Original left unchanged.");
     require(o["assets"].isArray() && o["clips"].isArray(), "Missing project collections");
     Project p;
@@ -118,6 +126,22 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
     p.fpsN = o["fpsN"].toInt();
     p.fpsD = o["fpsD"].toInt();
     p.tracks = o["tracks"].toInt();
+    require(p.tracks > 0 && p.tracks <= 64, "Invalid track count");
+    p.trackSettings.clear();
+    if (o["schemaVersion"].toInt() == 1) {
+        for (int i = 0; i < p.tracks; ++i)
+            p.trackSettings.push_back(Track{QString("Track %1").arg(i + 1)});
+    } else {
+        require(o["trackSettings"].isArray() && o["trackSettings"].toArray().size() == p.tracks,
+                "Invalid track settings");
+        for (const auto &v : o["trackSettings"].toArray()) {
+            require(v.isObject(), "Invalid track entry");
+            const auto t = v.toObject();
+            p.trackSettings.push_back(Track{t["name"].toString(), t["locked"].toBool(),
+                                            t["muted"].toBool(), t["hidden"].toBool(),
+                                            t["solo"].toBool()});
+        }
+    }
     require(o["assets"].toArray().size() <= 10000 && o["clips"].toArray().size() <= 10000,
             "Project exceeds alpha resource limits");
     for (auto v : o["assets"].toArray()) {
@@ -147,6 +171,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.duration = integer(j["duration"]);
         c.sourceIn = timeRead(j["sourceIn"]);
         c.speed = timeRead(j["speed"]);
+        c.audioOnly = j["audioOnly"].toBool();
         c.muted = j["muted"].toBool();
         c.hidden = j["hidden"].toBool();
         c.reverse = j["reverse"].toBool();
@@ -182,6 +207,10 @@ void Project::validate() const {
                 double(fpsN) / fpsD <= 120,
             "Frame rate must be 1–120 fps");
     require(tracks > 0 && tracks <= 64, "Alpha supports 1–64 tracks");
+    require(trackSettings.size() == tracks, "Track settings do not match track count");
+    for (const auto &t : trackSettings)
+        require(!t.name.trimmed().isEmpty() && t.name.size() <= 80,
+                "Track names must be 1–80 characters");
     require(assets.size() <= 10000 && clips.size() <= 10000,
             "Project exceeds alpha resource limits");
     QSet<QString> ids;
@@ -198,6 +227,9 @@ void Project::validate() const {
         require(!c.id.isEmpty() && !ids.contains(c.id), "Duplicate clip ID");
         ids.insert(c.id);
         require(c.assetId.isEmpty() || asset(c.assetId), "Missing asset reference");
+        if (c.audioOnly)
+            require(asset(c.assetId) && asset(c.assetId)->hasAudio,
+                    "Audio-only clips require source audio");
         require(c.start >= 0 && c.start <= 100000000 && c.duration > 0 &&
                     c.duration <= 100000000 - c.start && c.track >= 0 && c.track < tracks,
                 "Invalid clip range/track");
@@ -228,6 +260,7 @@ bool Project::split(const QString &id, qint64 frame) {
     auto *c = clip(id);
     if (!c || frame <= c->start || frame >= c->start + c->duration)
         return false;
+    requireEditable(c->track);
     Clip b = *c;
     const auto left = frame - c->start;
     b.id = newId();
@@ -247,6 +280,7 @@ void Project::remove(const QString &id, bool ripple) {
     const auto *c = clip(id);
     if (!c)
         return;
+    requireEditable(c->track);
     const auto start = c->start, dur = c->duration;
     const auto track = c->track;
     clips.erase(
@@ -256,6 +290,76 @@ void Project::remove(const QString &id, bool ripple) {
         for (auto &x : clips)
             if (x.track == track && x.start >= start + dur)
                 x.start -= dur;
+}
+void Project::requireEditable(int track) const {
+    require(track >= 0 && track < tracks && track < trackSettings.size(), "Invalid track");
+    require(!trackSettings[track].locked, "This track is locked. Unlock it before editing.");
+}
+bool Project::audioEnabled(int track) const {
+    if (track < 0 || track >= trackSettings.size())
+        return false;
+    const bool solo = std::any_of(trackSettings.begin(), trackSettings.end(),
+                                  [](const Track &t) { return t.solo; });
+    return !trackSettings[track].muted && (!solo || trackSettings[track].solo);
+}
+void Project::addTrack(const QString &name) {
+    require(tracks < 64, "A project can have at most 64 tracks");
+    trackSettings.push_back(Track{name.isEmpty() ? QString("Track %1").arg(tracks + 1) : name});
+    ++tracks;
+}
+void Project::removeTrack(int track) {
+    requireEditable(track);
+    require(tracks > 1, "Keep at least one track");
+    require(
+        std::none_of(clips.begin(), clips.end(), [&](const Clip &c) { return c.track == track; }),
+        "Move or delete clips before removing this track");
+    trackSettings.removeAt(track);
+    --tracks;
+    for (auto &c : clips)
+        if (c.track > track)
+            --c.track;
+}
+void Project::trim(const QString &id, qint64 start, qint64 end) {
+    auto *c = clip(id);
+    if (!c)
+        return;
+    requireEditable(c->track);
+    require(start >= 0 && start < end && end <= 100000000, "A trim must leave at least one frame");
+    const auto oldEnd = c->start + c->duration;
+    // The source interval is stored in forward order, even for reverse playback.
+    const auto delta = c->reverse ? oldEnd - end : start - c->start;
+    const auto *a = asset(c->assetId);
+    if (a && a->kind != "image")
+        c->sourceIn = c->sourceIn + frameTime(delta, fpsN, fpsD) * c->speed;
+    c->start = start;
+    c->duration = end - start;
+    // Caller validates the complete candidate before committing an undo step.
+}
+qint64 Project::snap(qint64 frame, qint64 threshold, const QString &exclude, qint64 playhead,
+                     qint64 length) const {
+    frame = std::clamp(frame, qint64(0), qint64(100000000));
+    threshold = std::clamp(threshold, qint64(0), qint64(120));
+    qint64 best = frame, distance = threshold + 1;
+    auto candidate = [&](qint64 edge) {
+        for (qint64 offset : {qint64(0), length}) {
+            const auto value = edge - offset;
+            if (value < 0)
+                continue;
+            const auto diff = std::abs(value - frame);
+            if (diff < distance) {
+                distance = diff;
+                best = value;
+            }
+        }
+    };
+    candidate(0);
+    candidate(playhead);
+    for (const auto &c : clips)
+        if (c.id != exclude) {
+            candidate(c.start);
+            candidate(c.start + c.duration);
+        }
+    return best;
 }
 QString readUtf8File(const QString &path) {
     QFile f(path);

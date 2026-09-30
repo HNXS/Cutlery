@@ -42,6 +42,11 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
                  ? app + "/data"
                  : QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     m_recovery = m_data + "/recovery.cutlery";
+    m_analysis = new MediaAnalysis(m_data + "/cache/waveforms", executable("ffmpeg"), this);
+    connect(m_analysis, &MediaAnalysis::changed, this, [this] {
+        emit analysisChanged();
+        emit changed();
+    });
     if (!QDir().mkpath(m_data + "/cache"))
         m_error = "Cannot create application data folder: " + m_data;
     m_hasRecovery = QFileInfo::exists(m_recovery);
@@ -76,16 +81,116 @@ QVariantList Editor::assets() const {
 }
 QVariantList Editor::clips() const {
     QVariantList result;
-    for (const auto &c : m_project.clips)
-        result << QVariantMap{
-            {"id", c.id},
-            {"name", c.name},
-            {"track", c.track},
-            {"start", c.start},
-            {"duration", c.duration},
-            {"title", c.assetId.isEmpty()},
-            {"audio", m_project.asset(c.assetId) && m_project.asset(c.assetId)->kind == "audio"}};
+    for (const auto &c : m_project.clips) {
+        const auto *a = m_project.asset(c.assetId);
+        result << QVariantMap{{"id", c.id},
+                              {"assetId", c.assetId},
+                              {"name", c.name},
+                              {"track", c.track},
+                              {"start", c.start},
+                              {"duration", c.duration},
+                              {"title", c.assetId.isEmpty()},
+                              {"audio", c.audioOnly || (a && a->kind == "audio")},
+                              {"hasAudio", a && a->hasAudio},
+                              {"sourceIn", c.sourceIn.seconds()},
+                              {"speed", c.speed.seconds()},
+                              {"reverse", c.reverse},
+                              {"muted", c.muted || !m_project.audioEnabled(c.track)},
+                              {"hidden", c.hidden || m_project.trackSettings[c.track].hidden},
+                              {"locked", m_project.trackSettings[c.track].locked}};
+    }
     return result;
+}
+QVariantList Editor::trackList() const {
+    QVariantList result;
+    int index = 0;
+    for (const auto &t : m_project.trackSettings) {
+        result << QVariantMap{{"index", index++}, {"name", t.name},     {"locked", t.locked},
+                              {"muted", t.muted}, {"hidden", t.hidden}, {"solo", t.solo}};
+    }
+    return result;
+}
+QVariantMap Editor::trimBounds(const QString &id) const {
+    for (const auto &c : m_project.clips)
+        if (c.id == id) {
+            qint64 first = 0, last = qint64(86400. * m_project.fpsN / m_project.fpsD);
+            if (const auto *a = m_project.asset(c.assetId); a && a->kind != "image") {
+                const double rate = double(m_project.fpsN) / m_project.fpsD / c.speed.seconds();
+                const auto head =
+                    std::max(qint64(0), qint64(std::floor(c.sourceIn.seconds() * rate + 1e-6)));
+                const auto tail = std::max(
+                    qint64(0), qint64(std::floor((a->duration - c.sourceIn.seconds()) * rate -
+                                                 c.duration + 1e-6)));
+                first = std::max(qint64(0), c.start - (c.reverse ? tail : head));
+                last = c.start + c.duration + (c.reverse ? head : tail);
+            }
+            return {{"first", first}, {"last", last}};
+        }
+    return {};
+}
+qint64 Editor::snap(qint64 frame, qint64 threshold, const QString &exclude, qint64 length) const {
+    return m_project.snap(frame, threshold, exclude, m_playhead, length);
+}
+void Editor::trimClip(const QString &id, qint64 start, qint64 end) {
+    mutate([&](Project &p) { p.trim(id, start, end); });
+}
+void Editor::addTrack() {
+    mutate([](Project &p) { p.addTrack(); });
+}
+void Editor::removeTrack(int track) {
+    mutate([&](Project &p) { p.removeTrack(track); });
+}
+void Editor::setTrack(int track, const QString &key, const QVariant &value) {
+    mutate([&](Project &p) {
+        if (track < 0 || track >= p.tracks)
+            throw std::runtime_error("Invalid track");
+        auto &t = p.trackSettings[track];
+        if (key == "name")
+            t.name = value.toString().trimmed();
+        else if (key == "locked")
+            t.locked = value.toBool();
+        else if (key == "muted")
+            t.muted = value.toBool();
+        else if (key == "hidden")
+            t.hidden = value.toBool();
+        else if (key == "solo")
+            t.solo = value.toBool();
+    });
+}
+void Editor::detachAudio() {
+    const auto id = newId();
+    mutate([&](Project &p) {
+        auto *c = p.clip(m_selected);
+        if (!c)
+            return;
+        p.requireEditable(c->track);
+        const auto *a = p.asset(c->assetId);
+        if (!a || !a->hasAudio || a->kind != "video" || c->audioOnly)
+            throw std::runtime_error("Select a video clip with audio");
+        auto audio = *c;
+        audio.id = id;
+        audio.name = c->name + " · audio";
+        audio.audioOnly = true;
+        audio.hidden = false;
+        audio.muted = false;
+        p.addTrack("Audio");
+        audio.track = p.tracks - 1;
+        c->muted = true;
+        p.clips.push_back(audio);
+    });
+    if (m_project.clip(id))
+        select(id);
+}
+qint64 Editor::adjacentCut(bool forward) const {
+    qint64 target = forward ? std::max(qint64(0), m_project.duration() - 1) : 0;
+    for (const auto &c : m_project.clips)
+        for (auto edge : {c.start, c.start + c.duration}) {
+            if (forward && edge > m_playhead)
+                target = std::min(target, edge);
+            if (!forward && edge < m_playhead)
+                target = std::max(target, edge);
+        }
+    return target;
 }
 QVariantMap Editor::state() const {
     QVariantMap selected;
@@ -93,6 +198,11 @@ QVariantMap Editor::state() const {
         if (c.id == m_selected) {
             selected = {{"id", c.id},
                         {"assetId", c.assetId},
+                        {"audioOnly", c.audioOnly},
+                        {"locked", m_project.trackSettings[c.track].locked},
+                        {"canDetach", !c.audioOnly && m_project.asset(c.assetId) &&
+                                          m_project.asset(c.assetId)->kind == "video" &&
+                                          m_project.asset(c.assetId)->hasAudio},
                         {"name", c.name},
                         {"track", c.track},
                         {"start", c.start},
@@ -138,6 +248,7 @@ QVariantMap Editor::state() const {
             {"error", m_error},
             {"busy", m_busy},
             {"importing", m_importing},
+            {"analyzing", m_analysis->busy()},
             {"progress", m_progress},
             {"previewUrl", m_previewUrl},
             {"playbackUrl", m_playbackUrl},
@@ -164,6 +275,7 @@ void Editor::edited() {
         m_selected.clear();
     m_previewTimer.start();
     m_saveTimer.start();
+    m_analysis->setAssets(m_project.assets);
     emit projectChanged();
     emit changed();
 }
@@ -203,6 +315,7 @@ void Editor::newProject() {
     m_playbackUrl.clear();
     ++m_revision;
     m_status = "New project";
+    m_analysis->setAssets(m_project.assets);
     emit projectChanged();
     emit changed();
 }
@@ -228,6 +341,7 @@ bool Editor::openProject(const QUrl &url) {
         m_previewUrl.clear();
         m_status = "Opened " + QFileInfo(path).fileName();
         m_previewTimer.start();
+        m_analysis->setAssets(m_project.assets);
         emit projectChanged();
         emit changed();
         return true;
@@ -375,6 +489,9 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId) {
                 if ((a.width == 0 && !a.hasAudio) || a.duration <= 0)
                     throw std::runtime_error("No supported finite video/audio stream found");
                 mutate([&](Project &p) {
+                    for (const auto &clip : p.clips)
+                        if (clip.assetId == replaceId)
+                            p.requireEditable(clip.track);
                     if (replaceId.isEmpty())
                         p.assets.push_back(a);
                     else
@@ -410,6 +527,7 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId) {
 void Editor::addAsset(const QString &id, int track) {
     const auto newClipId = newId();
     mutate([&](Project &p) {
+        p.requireEditable(track);
         const auto *a = p.asset(id);
         if (!a)
             throw std::runtime_error("Media no longer exists");
@@ -434,6 +552,7 @@ void Editor::addTitle() {
         c.name = "Title";
         c.text = "Your story starts here";
         c.track = p.tracks - 1;
+        p.requireEditable(c.track);
         c.start = m_playhead;
         c.duration = qRound64(3. * p.fpsN / p.fpsD);
         p.clips.push_back(c);
@@ -443,6 +562,8 @@ void Editor::addTitle() {
 void Editor::moveClip(const QString &id, qint64 frame, int track) {
     mutate([&](Project &p) {
         if (auto *c = p.clip(id)) {
+            p.requireEditable(c->track);
+            p.requireEditable(track);
             c->start = std::max(qint64(0), frame);
             c->track = track;
         }
@@ -453,6 +574,9 @@ void Editor::setClip(const QString &key, const QVariant &v) {
         auto *c = p.clip(m_selected);
         if (!c)
             return;
+        p.requireEditable(c->track);
+        if (key == "track")
+            p.requireEditable(v.toInt());
         if (key == "start")
             c->start = v.toLongLong();
         else if (key == "duration")
@@ -508,6 +632,7 @@ void Editor::duplicate() {
     const auto id = newId();
     mutate([&](Project &p) {
         if (auto *c = p.clip(m_selected)) {
+            p.requireEditable(c->track);
             auto copy = *c;
             copy.id = id;
             copy.start += copy.duration;
@@ -631,6 +756,7 @@ void Editor::startRender(const QString &output, const QString &profile, bool pla
         m_job = process;
         m_jobTemp = temp;
         m_busy = true;
+        m_analysis->setPaused(true);
         m_cancelled = false;
         m_progress = 0;
         m_status = playback ? "Rendering playback cache…" : "Exporting…";
@@ -687,6 +813,7 @@ void Editor::startRender(const QString &output, const QString &profile, bool pla
                 if (playback)
                     m_playbackUrl = QUrl::fromLocalFile(output).toString();
             }
+            m_analysis->setPaused(false);
             m_previewTimer.start();
             emit changed();
         };
@@ -731,6 +858,7 @@ void Editor::importSrt(const QUrl &url) {
                 c.id = newId();
                 c.name = "Caption";
                 c.track = p.tracks - 1;
+                p.requireEditable(c.track);
                 c.start = qRound64(seconds(1) * p.fpsN / p.fpsD);
                 const auto end = qRound64(seconds(5) * p.fpsN / p.fpsD);
                 c.duration = end - c.start;
@@ -766,7 +894,7 @@ bool Editor::exportSrt(const QUrl &url) {
                 .arg(ms % 1000, 3, 10, QChar('0'));
         };
         for (const auto &c : clips)
-            if (c.assetId.isEmpty() && !c.hidden)
+            if (c.assetId.isEmpty() && !c.hidden && !m_project.trackSettings[c.track].hidden)
                 text += QString::number(++i) + "\n" + stamp(c.start) + " --> " +
                         stamp(c.start + c.duration) + "\n" + c.text + "\n\n";
         if (!i)

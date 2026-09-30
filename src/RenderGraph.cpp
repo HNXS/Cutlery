@@ -46,8 +46,10 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         const auto *asset = p.asset(c.assetId);
         const bool title = c.assetId.isEmpty();
         const bool image = title || (asset && asset->kind == "image");
-        const bool hasVideo = title || (asset && asset->kind != "audio");
-        const bool hasAudio = audio && asset && asset->hasAudio && !c.muted;
+        const bool hasVideo = (title || (asset && asset->kind != "audio")) && !c.audioOnly &&
+                              !p.trackSettings[c.track].hidden;
+        const bool hasAudio =
+            audio && asset && asset->hasAudio && !c.muted && p.audioEnabled(c.track);
         if ((!hasVideo || c.hidden) && !hasAudio)
             continue;
         const double duration = frameTime(c.duration, p.fpsN, p.fpsD).seconds();

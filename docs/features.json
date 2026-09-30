@@ -147,7 +147,7 @@
     "acceptance": "Open collected project on second PC with network disconnected",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F007",
@@ -171,8 +171,8 @@
     "status": "Planned",
     "acceptance": "Older fixture migrates; newer unsupported schema cannot be overwritten",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Reads schema 1 with neutral track defaults; writes schema 2. Older application versions cannot read new saves."
   },
   {
     "id": "F008",
@@ -272,7 +272,7 @@
     "acceptance": "Same project second writer rejected; Save As leaves original intact",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F012",
@@ -297,7 +297,7 @@
     "acceptance": "Find German and English phrases with correct source timecode",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F013",
@@ -322,7 +322,7 @@
     "acceptance": "Rank labeled reference clips and jump to matching segment",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F014",
@@ -347,7 +347,7 @@
     "acceptance": "Delete person index; project and source media remain intact",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F015",
@@ -372,7 +372,7 @@
     "acceptance": "Replace all slots, save, reload and export identical layout",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F016",
@@ -397,7 +397,7 @@
     "acceptance": "Reuse a style without login; missing licensed font is reported",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F017",
@@ -422,7 +422,7 @@
     "acceptance": "Round-trip cuts and markers; unsupported effects listed explicitly",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F018",
@@ -447,7 +447,7 @@
     "acceptance": "Reference exchange project produces explicit loss report",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F019",
@@ -472,7 +472,7 @@
     "acceptance": "No importer advertised before format and legal review",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F020",
@@ -496,8 +496,8 @@
     "status": "Planned",
     "acceptance": "Edit 100 tracks and 10000 clips with viewport virtualization",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Three visible tracks with video/audio/images/titles."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Up to 64 named tracks with video/audio/images/titles; large-project performance not qualified."
   },
   {
     "id": "F021",
@@ -546,8 +546,8 @@
     "status": "Planned",
     "acceptance": "Ripple maintains link; deliberate offset shows and can be reset",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Video and audio initially share timing; detach creates an independent audio-only clip. No pair resync."
   },
   {
     "id": "F023",
@@ -571,8 +571,8 @@
     "status": "Planned",
     "acceptance": "Locked track cannot change via ripple or group operation",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Track lock, audio mute/solo and picture hide; no clip groups."
   },
   {
     "id": "F024",
@@ -597,7 +597,7 @@
     "acceptance": "Snap behavior independent of zoom; ripple handles locked tracks",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Partial",
-    "alphaNotes": "Playhead snap and track-local ripple delete."
+    "alphaNotes": "Clip-edge/playhead/start snapping for moves and trims; track-local ripple delete. No magnetic mode."
   },
   {
     "id": "F025",
@@ -622,7 +622,7 @@
     "acceptance": "Insert at fractional rate preserves sample/frame boundary policy",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F026",
@@ -646,8 +646,8 @@
     "status": "Planned",
     "acceptance": "One-frame clips and zero-length deletion pass boundary tests",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Split/delete/duplicate; trims via inspector."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Split, drag-edge/source-aware trims, inspector trims, delete and duplicate; each committed edit is undoable."
   },
   {
     "id": "F027",
@@ -672,7 +672,7 @@
     "acceptance": "Each tool matches golden before/after model including audio links",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F028",
@@ -697,7 +697,7 @@
     "acceptance": "Two-level nesting renders correctly; cycles and excessive depth rejected",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F029",
@@ -722,7 +722,7 @@
     "acceptance": "Paste animation on a different-duration clip follows declared time policy",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F030",
@@ -747,7 +747,7 @@
     "acceptance": "In/out export yields exact frame count and defined audio range",
     "source": "Attachment 2, named section",
     "alphaStatus": "Partial",
-    "alphaNotes": "Frame navigation only."
+    "alphaNotes": "Frame and previous/next edit navigation; start/end shortcuts. No markers or in/out ranges."
   },
   {
     "id": "F031",
@@ -772,7 +772,7 @@
     "acceptance": "Random seeks land on reference frames in long-GOP and VFR fixtures",
     "source": "Attachment 2, named section",
     "alphaStatus": "Partial",
-    "alphaNotes": "Zoom and rendered frame seeking; latency not qualified."
+    "alphaNotes": "Timeline zoom/fit and rendered frame seeking; latency not qualified."
   },
   {
     "id": "F032",
@@ -797,7 +797,7 @@
     "acceptance": "Shuttle changes do not corrupt playhead; reverse limitations displayed",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F033",
@@ -847,7 +847,7 @@
     "acceptance": "Duration, preview and export agree across ramp and reverse segments",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F035",
@@ -897,7 +897,7 @@
     "acceptance": "Position, mask, audio, text, grade and effect tracks survive save and undo",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F037",
@@ -922,7 +922,7 @@
     "acceptance": "23.976,25,29.97,59.94 source timings do not accumulate drift",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F038",
@@ -997,7 +997,7 @@
     "acceptance": "Grid fixture remains stable at extreme valid transforms",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F041",
@@ -1047,7 +1047,7 @@
     "acceptance": "Mask controls and keyframes agree at viewer/export resolutions",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F043",
@@ -1072,7 +1072,7 @@
     "acceptance": "Concave curves and feather render without holes or NaNs",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F044",
@@ -1097,7 +1097,7 @@
     "acceptance": "Reference green-screen foreground retains edges; spill slider serialized",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F045",
@@ -1122,7 +1122,7 @@
     "acceptance": "Changing background never alters original media or durable matte",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F046",
@@ -1147,7 +1147,7 @@
     "acceptance": "Reordering two noncommutative effects changes output as defined",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F047",
@@ -1172,7 +1172,7 @@
     "acceptance": "Blur strength consistent between proxy preview and full export",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F048",
@@ -1197,7 +1197,7 @@
     "acceptance": "Seeded render repeats; glow handles alpha and HDR limits",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F049",
@@ -1222,7 +1222,7 @@
     "acceptance": "All declared parameters animate and render repeatably",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F050",
@@ -1247,7 +1247,7 @@
     "acceptance": "Overscan and border behavior documented in fixture outputs",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F051",
@@ -1272,7 +1272,7 @@
     "acceptance": "Moving geometry trails correctly; cuts do not blend unrelated shots",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F052",
@@ -1297,7 +1297,7 @@
     "acceptance": "Blend weights and boundary rules match golden sequence",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F053",
@@ -1322,7 +1322,7 @@
     "acceptance": "Editable camera preset exports as shown",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F054",
@@ -1372,7 +1372,7 @@
     "acceptance": "Aspect-ratio-independent paths; copy/paste and undo work",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F056",
@@ -1397,7 +1397,7 @@
     "acceptance": "No unintended black edges at supported parameter bounds",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F057",
@@ -1422,7 +1422,7 @@
     "acceptance": "Preview/export agree with deterministic random seed",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F058",
@@ -1447,7 +1447,7 @@
     "acceptance": "Changing duration maintains sequence timing according to selected edit mode",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F059",
@@ -1471,8 +1471,8 @@
     "status": "Planned",
     "acceptance": "Select correct stream in multi-audio container without rewriting source",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Detach audio reuses source media on an independent track; no extraction to a standalone audio file or resync."
   },
   {
     "id": "F060",
@@ -1496,8 +1496,8 @@
     "status": "Planned",
     "acceptance": "Waveform aligns with known impulses at all zoom levels",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Async bounded mono waveform overview cached by file fingerprint; follows trim/speed/reverse. No multilevel pyramid."
   },
   {
     "id": "F061",
@@ -1572,7 +1572,7 @@
     "acceptance": "Channel identification file maps correctly on export",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F064",
@@ -1597,7 +1597,7 @@
     "acceptance": "Recorded clap offset measured; device loss finalizes recoverable file",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F065",
@@ -1647,7 +1647,7 @@
     "acceptance": "Export includes requested tail; no unbounded feedback at limits",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F067",
@@ -1672,7 +1672,7 @@
     "acceptance": "Reference WAV meets chosen LUFS within 0.2 and true peak within 0.5 dB",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F068",
@@ -1722,7 +1722,7 @@
     "acceptance": "Review edits before applying; A/V links and pauses remain correct",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F070",
@@ -1747,7 +1747,7 @@
     "acceptance": "Known click-track beats within 30 ms; half/double tempo correctable",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F071",
@@ -1772,7 +1772,7 @@
     "acceptance": "Apply produces normal reversible timeline edits",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F072",
@@ -1797,7 +1797,7 @@
     "acceptance": "Noise fixture improves floor while preserving user-controlled original mix",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F073",
@@ -1822,7 +1822,7 @@
     "acceptance": "Speech corpus meets review threshold and analysis delay is compensated",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F074",
@@ -1847,7 +1847,7 @@
     "acceptance": "Stems aligned; recombined output measured; source and stem provenance retained",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F075",
@@ -1872,7 +1872,7 @@
     "acceptance": "No claim of recovery until intelligibility and artifact tests pass",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F076",
@@ -1897,7 +1897,7 @@
     "acceptance": "Preset parameter changes survive project reload",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F077",
@@ -1922,7 +1922,7 @@
     "acceptance": "Exact checkpoint rights, quality, deletion and provenance pass review",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F078",
@@ -1972,7 +1972,7 @@
     "acceptance": "Copied font pack works on second PC; unavailable font is reported",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F080",
@@ -2047,7 +2047,7 @@
     "acceptance": "Emoji/ligatures do not split incorrectly; editable animation exports",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F083",
@@ -2072,7 +2072,7 @@
     "acceptance": "Preset uses original/licensed fonts and reopens offline",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F084",
@@ -2147,7 +2147,7 @@
     "acceptance": "Round-trip supported tags; animation loss reported, not ignored",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F087",
@@ -2197,7 +2197,7 @@
     "acceptance": "DE/EN test corpus meets documented WER and timing thresholds",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F089",
@@ -2222,7 +2222,7 @@
     "acceptance": "Median word boundary error <=100 ms on labeled clean speech target",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F090",
@@ -2247,7 +2247,7 @@
     "acceptance": "No silent dropped words; maximum lines and length honored",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F091",
@@ -2272,7 +2272,7 @@
     "acceptance": "Deleting words trims linked A/V and is fully undoable",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F092",
@@ -2297,7 +2297,7 @@
     "acceptance": "User reviews each proposal; protected words remain unchanged",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F093",
@@ -2322,7 +2322,7 @@
     "acceptance": "DE/EN human-reviewed corpus; original captions retained",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F094",
@@ -2347,7 +2347,7 @@
     "acceptance": "Supported voice/language declared; naturalness review and offline run pass",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F095",
@@ -2372,7 +2372,7 @@
     "acceptance": "German pronunciation corpus and complete voice/frontend license pass",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F096",
@@ -2397,7 +2397,7 @@
     "acceptance": "Translated speech fits segments; no claim of lip synchronization",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F097",
@@ -2422,7 +2422,7 @@
     "acceptance": "Geometry editable and rendered at custom export resolution",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F098",
@@ -2497,7 +2497,7 @@
     "acceptance": "Replacing image preserves layout and editable transforms",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F101",
@@ -2547,7 +2547,7 @@
     "acceptance": "Restricted font/media copy produces actionable report",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F103",
@@ -2597,7 +2597,7 @@
     "acceptance": "Highlights/shadows/whites/blacks/fade follow endpoint fixtures",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F105",
@@ -2622,7 +2622,7 @@
     "acceptance": "Curve control points and hue ranges survive round-trip",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F106",
@@ -2647,7 +2647,7 @@
     "acceptance": "Auto action creates undoable ordinary grade settings",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F107",
@@ -2672,7 +2672,7 @@
     "acceptance": "Identity LUT exact; invalid sizes rejected; strength interpolates as specified",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F108",
@@ -2697,7 +2697,7 @@
     "acceptance": "Reference bars yield expected positions and channel ranges",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F109",
@@ -2722,7 +2722,7 @@
     "acceptance": "Limited/full and BT.601/709 fixtures avoid lifted blacks and double gamma",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F110",
@@ -2747,7 +2747,7 @@
     "acceptance": "HDR source previews and exports without silent clipping or wrong tags",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F111",
@@ -2772,7 +2772,7 @@
     "acceptance": "10-bit gradient and HDR reference validate pixels and metadata",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F112",
@@ -2797,7 +2797,7 @@
     "acceptance": "User selects output mapping; display mode and export tags verified",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F113",
@@ -2822,7 +2822,7 @@
     "acceptance": "Moving viewer between displays updates transform without altering project",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F114",
@@ -2847,7 +2847,7 @@
     "acceptance": "Synthetic motion error <=2 px; occlusion marks track lost",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F115",
@@ -2872,7 +2872,7 @@
     "acceptance": "Text/sticker follows path; user correction survives retracking",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F116",
@@ -2897,7 +2897,7 @@
     "acceptance": "Occlusion and multiple faces do not silently switch identity",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F117",
@@ -2922,7 +2922,7 @@
     "acceptance": "Tracked redaction stays aligned after source slip and timeline retime",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F118",
@@ -2947,7 +2947,7 @@
     "acceptance": "Measured residual motion decreases on corpus; crop loss disclosed",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F119",
@@ -2972,7 +2972,7 @@
     "acceptance": "Measured distortion improves on calibrated sample; no default guess",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F120",
@@ -2997,7 +2997,7 @@
     "acceptance": "Subject remains in safe region; cuts reset tracking; path editable",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F121",
@@ -3022,7 +3022,7 @@
     "acceptance": "Hair and motion corpus passes review; nonportrait limits visible",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F122",
@@ -3047,7 +3047,7 @@
     "acceptance": "User corrects masks; job cancellable; long-video state bounded",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F123",
@@ -3072,7 +3072,7 @@
     "acceptance": "Manual disable restores original; temporal artifacts pass review",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F124",
@@ -3097,7 +3097,7 @@
     "acceptance": "Static/noisy test improves noise metric without cross-cut ghosting",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F125",
@@ -3122,7 +3122,7 @@
     "acceptance": "Tile seams absent; original retained; video flicker benchmark reported",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F126",
@@ -3147,7 +3147,7 @@
     "acceptance": "Motion test and scene-cut fixtures show no invented cross-cut frames",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F127",
@@ -3172,7 +3172,7 @@
     "acceptance": "Detail recovery and ringing assessed against controlled blur corpus",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F128",
@@ -3197,7 +3197,7 @@
     "acceptance": "Temporal consistency and reference-light tests pass",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F129",
@@ -3222,7 +3222,7 @@
     "acceptance": "Removed-region and temporal consistency reviewed; original accessible",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F130",
@@ -3247,7 +3247,7 @@
     "acceptance": "Merged image retains explicit dimensions, alpha and color settings",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F131",
@@ -3272,7 +3272,7 @@
     "acceptance": "Labeled hard-cut corpus precision/recall >=0.95 target",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F132",
@@ -3297,7 +3297,7 @@
     "acceptance": "Produce editable sequences; no source overwritten; user ranks proposals",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F133",
@@ -3322,7 +3322,7 @@
     "acceptance": "High-cost source triggers suggestion; no ML needed; mapping verified",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F134",
@@ -3347,7 +3347,7 @@
     "acceptance": "Offline generation succeeds with declared pack; source/model provenance stored",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F135",
@@ -3372,7 +3372,7 @@
     "acceptance": "Generate editable local clip without network; measured runtime disclosed",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F136",
@@ -3397,7 +3397,7 @@
     "acceptance": "Malformed commands rejected; user approves edit set; undo works",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F137",
@@ -3422,7 +3422,7 @@
     "acceptance": "All scene assets local; unresolved assets shown; editable project produced",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F138",
@@ -3447,7 +3447,7 @@
     "acceptance": "Model and character rights resolved; output quality measured",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F139",
@@ -3472,7 +3472,7 @@
     "acceptance": "Enrollment, deletion, likeness authorization and full offline run verified",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F140",
@@ -3497,7 +3497,7 @@
     "acceptance": "Layouts obey safe areas, text overflow and editability rules",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F141",
@@ -3522,7 +3522,7 @@
     "acceptance": "Outputs editable as media; no promise of vector/logo exclusivity",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F142",
@@ -3547,7 +3547,7 @@
     "acceptance": "Define workflow from verified reference before claiming equivalence",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F143",
@@ -3597,7 +3597,7 @@
     "acceptance": "Timecode/audio selection and deinterlace fixtures pass",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F145",
@@ -3747,7 +3747,7 @@
     "acceptance": "Works offline with installed pack; missing capability explained",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F151",
@@ -3772,7 +3772,7 @@
     "acceptance": "Missing-number sequence prompts for policy; exact frame count exported",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F152",
@@ -3797,7 +3797,7 @@
     "acceptance": "Phone and screen capture sync stays within specified one-hour limit",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F153",
@@ -3847,7 +3847,7 @@
     "acceptance": "Alpha and 10-bit path verified; no unsupported codec offered",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F155",
@@ -3897,7 +3897,7 @@
     "acceptance": "Unsupported profile falls back or fails before render with explanation",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F157",
@@ -3922,7 +3922,7 @@
     "acceptance": "WAV and PNG results match corresponding timeline render",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F158",
@@ -3972,7 +3972,7 @@
     "acceptance": "Unavailable encoder disables cleanly; no silent quality preset change",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F160",
@@ -4022,7 +4022,7 @@
     "acceptance": "Crash never publishes truncated file as complete; retry uses same snapshot",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F162",
@@ -4047,7 +4047,7 @@
     "acceptance": "Conversion preserves chosen metadata and reports projected/actual size",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F163",
@@ -4072,7 +4072,7 @@
     "acceptance": "Final export defaults to originals; offline proxy-only export clearly labeled",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F164",
@@ -4147,7 +4147,7 @@
     "acceptance": "Large project degrades preview before allocation failure",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F167",
@@ -4172,7 +4172,7 @@
     "acceptance": "Simulated device loss preserves edits and produces usable recovery path",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F168",
@@ -4247,7 +4247,7 @@
     "acceptance": "All destructive edits undoable and reachable without pointer",
     "source": "Attachment 2, named section",
     "alphaStatus": "Partial",
-    "alphaNotes": "Save/open/undo/redo shortcuts only."
+    "alphaNotes": "31 customizable commands, conflict checks and portable settings; no command search or complete CapCut keymap."
   },
   {
     "id": "F171",
@@ -4272,7 +4272,7 @@
     "acceptance": "Keyboard editing path and screen-reader smoke workflow pass",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F172",
@@ -4322,7 +4322,7 @@
     "acceptance": "Clean standard-user VM installs and removes without elevation",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F174",
@@ -4372,7 +4372,7 @@
     "acceptance": "Signature and package integrity verified; policy blocks respected",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F176",
@@ -4397,7 +4397,7 @@
     "acceptance": "Missing, corrupt or incompatible pack fails without network download",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F177",
@@ -4422,7 +4422,7 @@
     "acceptance": "New effect added without changing timeline schema; ABI mismatch rejected",
     "source": "Attachment 2, named section",
     "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F178",
@@ -4522,7 +4522,7 @@
     "acceptance": "No cloud client, service account or remote storage dependency",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Excluded",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F182",
@@ -4547,7 +4547,7 @@
     "acceptance": "Editor opens and exports without account or activation",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Excluded",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F183",
@@ -4572,7 +4572,7 @@
     "acceptance": "No multi-user backend or online review requirement",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Excluded",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F184",
@@ -4597,7 +4597,7 @@
     "acceptance": "No social credentials or upload workflow",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Excluded",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F185",
@@ -4622,7 +4622,7 @@
     "acceptance": "No scraping, extraction or redistribution of CapCut assets",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Excluded",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F186",
@@ -4647,7 +4647,7 @@
     "acceptance": "No non-Windows UI or cloud frontend workstream",
     "source": "Attachment 2, named section",
     "alphaStatus": "Excluded",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   },
   {
     "id": "F187",
@@ -4672,6 +4672,6 @@
     "acceptance": "No promise of Seedance/Veo/CapCut proprietary output equivalence",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Excluded",
-    "alphaNotes": "Not implemented in 0.1.0."
+    "alphaNotes": "Not implemented in this alpha."
   }
 ]
