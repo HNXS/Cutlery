@@ -335,7 +335,7 @@ class EngineTest : public QObject {
         QTemporaryDir dir;
         const auto path = dir.filePath("shortcuts.json");
         KeyboardShortcuts keys(path);
-        QCOMPARE(keys.bindings().size(), 31);
+        QCOMPARE(keys.bindings().size(), 30);
         QVERIFY(!keys.assign("play", "Ctrl+B"));
         QVERIFY(keys.error().contains("Already assigned"));
         QVERIFY(!keys.assign("play", "Ctrl+NotARealKey"));
@@ -410,12 +410,23 @@ class EngineTest : public QObject {
         QVERIFY(editor.state()["error"].toString().contains("already exists"));
         QCOMPARE(QFileInfo(output).size(), originalSize);
         editor.clearError();
-        editor.renderPlayback();
-        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 30000);
-        QVERIFY2(!editor.state()["playbackUrl"].toString().isEmpty(),
-                 qPrintable(editor.state()["error"].toString()));
+        // Live playback starts immediately, survives an edit by restarting, and stops at the end.
+        editor.play();
+        QVERIFY(editor.playing());
+        QTRY_VERIFY_WITH_TIMEOUT(editor.playbackFrame() > 0, 10000);
         editor.setClip("opacity", .5);
-        QVERIFY(editor.state()["playbackUrl"].toString().isEmpty());
+        QVERIFY(editor.state()["playing"].toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(editor.playing(), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["playing"].toBool(), 15000);
+        QVERIFY2(editor.state()["error"].toString().isEmpty(),
+                 qPrintable(editor.state()["error"].toString()));
+        QCOMPARE(editor.state()["playhead"].toLongLong(), qint64(29));
+        editor.seek(5);
+        editor.play();
+        QTRY_VERIFY_WITH_TIMEOUT(editor.playbackFrame() > 5, 10000);
+        editor.pause();
+        QVERIFY(!editor.playing());
+        QVERIFY(editor.state()["playhead"].toLongLong() > 5);
         const auto cancelled = dir.filePath("cancelled.mp4");
         editor.exportVideo(QUrl::fromLocalFile(cancelled), "mpeg4");
         editor.cancelJob();
@@ -423,6 +434,148 @@ class EngineTest : public QObject {
         QVERIFY(!QFileInfo::exists(cancelled));
         QCOMPARE(QDir(dir.path()).entryList({".cutlery-*"}, QDir::Files | QDir::Hidden).size(), 0);
         QVERIFY(editor.save(QUrl::fromLocalFile(dir.filePath("jobs.cutlery"))));
+    }
+    void windowedRender() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("moving.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "testsrc2=s=160x90:r=30:d=4", "-f",
+                     "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=4", "-c:v",
+                     "ffv1", "-threads", "1", "-c:a", "pcm_s16le", "-shortest", source});
+        Project p;
+        p.width = 160;
+        p.height = 90;
+        Asset a;
+        a.id = "moving";
+        a.path = source;
+        a.name = "Moving";
+        a.kind = "video";
+        a.duration = 4;
+        a.hasAudio = true;
+        p.assets.push_back(a);
+        Clip c;
+        c.id = "forward";
+        c.assetId = a.id;
+        c.sourceIn = Time(1, 2);
+        c.duration = 45;
+        c.fadeIn = .5;
+        p.clips.push_back(c);
+        c.id = "reversed";
+        c.start = 45;
+        c.duration = 30;
+        c.sourceIn = Time(1);
+        c.speed = Time(2);
+        c.reverse = true;
+        c.fadeIn = 0;
+        c.fadeOut = .5;
+        p.clips.push_back(c);
+        c = {};
+        c.id = "overlay";
+        c.assetId = a.id;
+        c.track = 1;
+        c.start = 10;
+        c.duration = 35;
+        c.sourceIn = Time(2);
+        c.scale = .5;
+        c.x = .2;
+        c.fadeOut = .4;
+        p.clips.push_back(c);
+        QCOMPARE(p.duration(), qint64(75));
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const RenderOptions &options, double seek) {
+            const auto plan = compileRender(p, dir.filePath("work"), 160, 90, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", seek)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        auto difference = [](const QImage &l, const QImage &r) {
+            qint64 sum = 0;
+            for (int y = 0; y < 90; ++y)
+                for (int x = 0; x < 160; ++x) {
+                    const QColor a = l.pixelColor(x, y), b = r.pixelColor(x, y);
+                    sum += std::abs(a.red() - b.red()) + std::abs(a.green() - b.green()) +
+                           std::abs(a.blue() - b.blue());
+                }
+            return double(sum) / (160 * 90 * 3);
+        };
+        QVector<QImage> sourceFrames;
+        for (int i = 0; i < 120; ++i) {
+            QImage image;
+            image.loadFromData(run(ffmpeg, {"-v", "error", "-i", source, "-vf",
+                                            QString("select=eq(n\\,%1)").arg(i), "-frames:v",
+                                            "1", "-f", "image2pipe", "-c:v", "png", "pipe:1"}),
+                               "PNG");
+            sourceFrames << image.convertToFormat(QImage::Format_RGB32);
+        }
+        auto nearestSource = [&](const QImage &image) {
+            int best = -1;
+            double score = 1e9;
+            for (int i = 0; i < sourceFrames.size(); ++i)
+                if (const auto d = difference(image, sourceFrames[i]); d < score)
+                    score = d, best = i;
+            return best;
+        };
+        // A one-frame window must show the same picture as seeking the whole timeline.
+        for (qint64 frame : {0, 5, 10, 25, 44, 45, 52, 59, 74}) {
+            RenderOptions full;
+            full.audio = false;
+            const auto reference = still(full, frameTime(frame, 30, 1).seconds());
+            RenderOptions window = full;
+            window.from = frame;
+            window.to = frame + 1;
+            const auto windowed = still(window, 0);
+            QVERIFY(!reference.isNull() && !windowed.isNull());
+            if (frame < 45) {
+                QVERIFY2(difference(reference, windowed) <= 2,
+                         qPrintable(QString("frame %1 differs by %2")
+                                        .arg(frame)
+                                        .arg(difference(reference, windowed))));
+            } else {
+                // Reversed clips: FFmpeg reassigns reversed timestamps from the decoded range, so
+                // the window may select an adjacent source frame.
+                const int expected = nearestSource(reference), actual = nearestSource(windowed);
+                QVERIFY2(std::abs(expected - actual) <= 1,
+                         qPrintable(QString("frame %1 shows source %2, export %3")
+                                        .arg(frame)
+                                        .arg(actual)
+                                        .arg(expected)));
+            }
+        }
+        // Streamed playback output: exact raw frame and PCM sizes for a window.
+        RenderOptions stream;
+        stream.from = 30;
+        stream.audio = false;
+        stream.realtime = true;
+        auto plan = compileRender(p, dir.filePath("work"), 160, 90, stream);
+        QFile g(graph);
+        QVERIFY(g.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        g.write(plan.graph.toUtf8());
+        g.close();
+        QElapsedTimer timer;
+        timer.start();
+        QCOMPARE(run(ffmpeg, streamArguments(plan, graph, true)).size(),
+                 qsizetype(45) * (160 * 90 + 2 * 80 * 45));
+        // 45 frames paced to real time take about 1.5 s.
+        QVERIFY(timer.elapsed() > 1000);
+        stream.audio = true;
+        stream.video = false;
+        stream.realtime = false;
+        plan = compileRender(p, dir.filePath("work"), 160, 90, stream);
+        QVERIFY(g.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        g.write(plan.graph.toUtf8());
+        g.close();
+        const auto pcm = run(ffmpeg, streamArguments(plan, graph, false));
+        QCOMPARE(pcm.size(), qsizetype(48000 * 3 / 2) * 4);
+        RenderOptions outside;
+        outside.from = 75;
+        QVERIFY_EXCEPTION_THROWN(compileRender(p, dir.filePath("work"), 160, 90, outside),
+                                 std::runtime_error);
     }
     void actualRender() {
         const auto ffmpeg = Editor::executable("ffmpeg"), probe = Editor::executable("ffprobe");
@@ -565,7 +718,9 @@ class EngineTest : public QObject {
         ed.undo();
         QCOMPARE(ed.project().json(), p.json());
         ed.save(QUrl::fromLocalFile(sourceProject));
-        plan = compileRender(p, dir.path(), 160, 90, false);
+        RenderOptions stillOptions;
+        stillOptions.audio = false;
+        plan = compileRender(p, dir.path(), 160, 90, stillOptions);
         QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
         file.write(plan.graph.toUtf8());
         file.close();

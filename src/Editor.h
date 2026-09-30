@@ -1,5 +1,6 @@
 #pragma once
 #include "MediaAnalysis.h"
+#include "Playback.h"
 #include "Project.h"
 #include <QObject>
 #include <QProcess>
@@ -28,6 +29,9 @@ class Editor final : public QObject {
     Q_PROPERTY(QVariantList assets READ assets NOTIFY projectChanged)
     Q_PROPERTY(QVariantList clips READ clips NOTIFY projectChanged)
     Q_PROPERTY(QVariantList trackList READ trackList NOTIFY projectChanged)
+    // Live playback position; separate from `state` so the viewer clock updates cheaply.
+    Q_PROPERTY(bool playing READ playing NOTIFY playbackChanged)
+    Q_PROPERTY(qint64 playbackFrame READ playbackFrame NOTIFY playbackChanged)
   public:
     explicit Editor(FrameProvider *, QObject *parent = nullptr);
     ~Editor() override;
@@ -65,7 +69,16 @@ class Editor final : public QObject {
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE void configure(int width, int height, int fpsN, int fpsD);
-    Q_INVOKABLE void renderPlayback();
+    Q_INVOKABLE void play();
+    Q_INVOKABLE void pause();
+    Q_INVOKABLE void togglePlayback();
+    Q_INVOKABLE void setVideoSink(QObject *sink);
+    bool playing() const {
+        return m_playback->active();
+    }
+    qint64 playbackFrame() const {
+        return m_playback->active() ? m_playback->frame() : m_playhead;
+    }
     Q_INVOKABLE void exportVideo(const QUrl &, const QString &profile);
     Q_INVOKABLE void cancelJob();
     Q_INVOKABLE void importSrt(const QUrl &);
@@ -82,19 +95,20 @@ class Editor final : public QObject {
     void changed();
     void projectChanged();
     void analysisChanged();
+    void playbackChanged();
 
   private:
     Project m_project;
     QVector<Project> m_undo, m_redo;
-    QString m_selected, m_path, m_status = "Ready", m_error, m_data, m_recovery, m_previewUrl,
-                                m_playbackUrl;
+    QString m_selected, m_path, m_status = "Ready", m_error, m_data, m_recovery, m_previewUrl;
     bool m_dirty = false, m_busy = false, m_importing = false, m_cancelled = false,
          m_hasRecovery = false;
     double m_progress = 0;
     qint64 m_playhead = 0, m_revision = 0, m_previewSerial = 0;
     FrameProvider *m_frames;
     MediaAnalysis *m_analysis;
-    QTimer m_previewTimer, m_saveTimer;
+    Playback *m_playback;
+    QTimer m_previewTimer, m_saveTimer, m_resumeTimer;
     QProcess *m_preview = nullptr, *m_job = nullptr, *m_probe = nullptr;
     QString m_jobTemp;
     struct DropBatch {
@@ -115,7 +129,9 @@ class Editor final : public QObject {
     void probeNext();
     void probeFile(const QUrl &, const QString &replaceId, std::shared_ptr<DropBatch> drop = {});
     static QString insert(Project &, const QString &assetId, int track, qint64 frame);
-    void startRender(const QString &output, const QString &profile, bool playback);
+    void startRender(const QString &output, const QString &profile);
+    void stopPlayback();
+    QSize previewSize(int longSide) const;
     void autosave();
 };
 } // namespace cutlery

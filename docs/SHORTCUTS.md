@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-Open **Help → Keyboard shortcuts** (default **Ctrl+/**) to view or change any of these 31 bindings. Type one combination such as `Ctrl+Shift+B` and click Apply. Clear a field to disable that command; clear an existing assignment before reusing its key. Conflicts and invalid combinations are rejected. Restore defaults resets the whole list. Changes are saved with the portable application data.
+Open **Help → Keyboard shortcuts** (default **Ctrl+/**) to view or change any of these 30 bindings. Type one combination such as `Ctrl+Shift+B` and click Apply. Clear a field to disable that command; clear an existing assignment before reusing its key. Conflicts and invalid combinations are rejected. Restore defaults resets the whole list. Changes are saved with the portable application data.
 
 Click the timeline before using editing/playback keys. During text entry, normal typing and text editing take priority; timeline shortcuts are disabled. Modal dialogs suppress application shortcuts. Arrow keys continue to work in sliders, lists and numeric controls.
 
@@ -22,9 +22,8 @@ Click the timeline before using editing/playback keys. During text entry, normal
 | Trim end to playhead | Edit | `W` |
 | Detach audio | Edit | `Ctrl+Shift+A` |
 | Add title | Edit | `Ctrl+T` |
-| Play / pause (render if needed) | Playback | `Space` |
+| Play / pause | Playback | `Space` |
 | Pause at current frame | Playback | `K` |
-| Render playback cache | Playback | `Ctrl+R` |
 | Previous frame | Navigation | `Left` |
 | Next frame | Navigation | `Right` |
 | Previous edit | Navigation | `Up` |
@@ -38,7 +37,7 @@ Click the timeline before using editing/playback keys. During text entry, normal
 | Add track | Timeline | `Ctrl+Shift+N` |
 | Keyboard shortcuts | Help | `Ctrl+/` |
 
-**Playback:** Space renders the current timeline if the cache is missing, then starts playback from the playhead. Rendering can take time; progress and Cancel appear in the interface. Edits invalidate the cache. Space pauses/resumes; K pauses at the displayed frame. Ctrl+R prepares the cache without requesting playback. Export video creates a separate file that can be played in a compatible video player.
+**Playback:** Space starts live playback from the playhead within a fraction of a second; nothing is rendered to disk first. Edits made while playing restart playback from the current frame. Space pauses/resumes; K pauses at the displayed frame. Export video creates a separate file that can be played in a compatible video player. The 0.3 `Ctrl+R` render-cache command no longer exists; a saved binding for it is ignored.
 
 **Escape** cancels an active library or timeline drag. Editing shortcuts are suspended during a drag.
 

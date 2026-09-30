@@ -42,9 +42,8 @@ KeyboardShortcuts::KeyboardShortcuts(QString path, QObject *parent)
     add("trimEnd", "Trim end to playhead", "Edit", "W");
     add("detach", "Detach audio", "Edit", "Ctrl+Shift+A");
     add("title", "Add title", "Edit", "Ctrl+T");
-    add("play", "Play / pause (render if needed)", "Playback", "Space");
+    add("play", "Play / pause", "Playback", "Space");
     add("pause", "Pause at current frame", "Playback", "K");
-    add("render", "Render playback cache", "Playback", "Ctrl+R");
     add("previousFrame", "Previous frame", "Navigation", "Left");
     add("nextFrame", "Next frame", "Navigation", "Right");
     add("previousCut", "Previous edit", "Navigation", "Up");

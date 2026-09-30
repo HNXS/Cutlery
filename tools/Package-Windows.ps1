@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory=$true)][string]$QtRoot,
     [string]$BuildDir = "$PSScriptRoot/../build",
     [Parameter(Mandatory=$true)][string]$FFmpegBin,
-    [string]$OutputDir = "$PSScriptRoot/../dist/Cutlery-0.3.0-win64-portable"
+    [string]$OutputDir = "$PSScriptRoot/../dist/Cutlery-0.4.0-win64-portable"
 )
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/..").Path
@@ -27,6 +27,6 @@ Prefix=.
 Plugins=.
 QmlImports=qml' -replace '\\n',"`n" | Set-Content "$OutputDir/qt.conf" -Encoding utf8
 $commit = git -C $root rev-parse HEAD
-@{ application='Cutlery'; version='0.3.0'; commit=$commit; qt='6.8.3'; target='Windows x64'; mode='portable'; built_utc=(Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json | Set-Content "$OutputDir/build-manifest.json" -Encoding utf8
+@{ application='Cutlery'; version='0.4.0'; commit=$commit; qt='6.8.3'; target='Windows x64'; mode='portable'; built_utc=(Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json | Set-Content "$OutputDir/build-manifest.json" -Encoding utf8
 Get-ChildItem $OutputDir -File -Recurse | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(),$_.FullName.Substring($OutputDir.Length+1) } | Set-Content "$OutputDir/SHA256SUMS.txt" -Encoding utf8
 Write-Output $OutputDir
