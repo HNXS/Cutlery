@@ -799,6 +799,65 @@ ApplicationWindow {
                             Rule {}
                             ColumnLayout {
                                 Layout.fillWidth: true
+                                visible: win.selection.audioOnly !== true
+                                Caption {
+                                    text: "TRANSITION FROM PREVIOUS CLIP"
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: win.selection.canTransition !== true
+                                    text: "Place this clip directly after another clip on the same track to add a transition."
+                                    wrapMode: Text.Wrap
+                                    color: win.muted
+                                    font.pixelSize: 10
+                                }
+                                ComboBox {
+                                    id: transitionType
+                                    objectName: "transitionType"
+                                    Layout.fillWidth: true
+                                    visible: win.selection.canTransition === true
+                                    readonly property var entries: [{
+                                            id: "",
+                                            label: "None (straight cut)"
+                                        }].concat(editor.transitionTypes())
+                                    model: entries
+                                    textRole: "label"
+                                    currentIndex: Math.max(0, entries.findIndex(e => e.id === (win.selection.transition || "")))
+                                    onActivated: editor.setClip("transition", entries[currentIndex].id)
+                                }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 0
+                                    visible: win.selection.canTransition === true && (win.selection.transition || "") !== ""
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Label {
+                                            text: "Duration"
+                                            color: win.muted
+                                            Layout.fillWidth: true
+                                        }
+                                        Label {
+                                            text: ((win.selection.transitionLength || 0) / win.s.fps).toFixed(2) + " s" + ((win.selection.transitionLength || 0) < (win.selection.transitionFrames || 0) ? " (clip limit)" : "")
+                                            font.pixelSize: 10
+                                        }
+                                    }
+                                    Slider {
+                                        objectName: "transitionDuration"
+                                        Layout.fillWidth: true
+                                        from: .1
+                                        to: 3
+                                        stepSize: .05
+                                        value: (win.selection.transitionFrames || 0) / win.s.fps
+                                        onPressedChanged: if (!pressed)
+                                            editor.setClip("transitionFrames", Math.max(2, Math.round(value * win.s.fps)))
+                                        onMoved: if (!pressed)
+                                            editor.setClip("transitionFrames", Math.max(2, Math.round(value * win.s.fps)))
+                                    }
+                                }
+                                Rule {}
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
                                 visible: win.selection.assetId === ""
                                 Caption {
                                     text: "TITLE / CAPTION"

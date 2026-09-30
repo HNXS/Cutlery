@@ -57,11 +57,11 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F051 | Motion blur | Planned | Not implemented in this alpha. |
 | F052 | Frame blending slow motion | Planned | Not implemented in this alpha. |
 | F053 | Camera-like and pseudo-3D effects | Planned | Not implemented in this alpha. |
-| F054 | Dissolve, fade and dip to color | Partial | Clip video/audio fades only. |
-| F055 | Wipe, slide, push and directional transitions | Planned | Not implemented in this alpha. |
-| F056 | Zoom, spin, stretch and geometric transitions | Planned | Not implemented in this alpha. |
-| F057 | Blur, glitch and light transitions | Planned | Not implemented in this alpha. |
-| F058 | Transition duration and curve editing | Planned | Not implemented in this alpha. |
+| F054 | Dissolve, fade and dip to color | Implemented (alpha) | Two-clip dissolve and dip to black/white centred on a cut, with equal-power audio crossfades; clip fades as before. |
+| F055 | Wipe, slide, push and directional transitions | Partial | Wipe left/right, slide left/right/up/down, smooth left. No push. |
+| F056 | Zoom, spin, stretch and geometric transitions | Partial | Zoom in, circle open and radial. No spin or stretch. |
+| F057 | Blur, glitch and light transitions | Partial | Pixelize only. |
+| F058 | Transition duration and curve editing | Partial | Duration 0.1–3 s in the inspector, limited by both clips. No easing curves. |
 | F059 | Audio extraction and linked source streams | Partial | Detach audio reuses source media on an independent track; no extraction to a standalone audio file or resync. |
 | F060 | Waveform generation and peak pyramids | Partial | Async bounded mono waveform overview cached by file fingerprint; follows trim/speed/reverse. No multilevel pyramid. |
 | F061 | Volume, gain, pan, mute and fades | Partial | Volume/mute/fades, no pan. |

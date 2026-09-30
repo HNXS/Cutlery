@@ -29,7 +29,14 @@ struct Clip {
     double fadeIn = 0, fadeOut = 0;
     QString text, fontFamily = "Arial", textColor = "#ffffff";
     int fontSize = 72;
+    // Transition from the clip that ends exactly where this one starts on the same track. It is
+    // centred on the cut; both clips extend into the other's time using source handles or a held
+    // frame, so the timeline length does not change.
+    QString transition; // an xfade name from transitionTypes(); empty for a straight cut
+    qint64 transitionFrames = 0;
 };
+// Supported transitions: FFmpeg xfade names paired with display labels.
+const QVector<QPair<QString, QString>> &transitionTypes();
 struct Project {
     QString name = "Untitled";
     int width = 1920, height = 1080, fpsN = 30, fpsD = 1, tracks = 3;
@@ -42,6 +49,10 @@ struct Project {
     }
     const Asset *asset(const QString &id) const;
     Clip *clip(const QString &id);
+    // The clip a transition into `c` comes from, or nullptr when `c` does not start at a cut.
+    const Clip *previousAdjacent(const Clip &c) const;
+    // Effective transition length into `c` in frames (0 when inactive), limited by both clips.
+    qint64 transitionLength(const Clip &c) const;
     QJsonObject json(const QString &baseDir = {}) const;
     static Project fromJson(const QJsonObject &json, const QString &baseDir);
     void validate() const;
