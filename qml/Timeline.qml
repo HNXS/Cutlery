@@ -9,11 +9,66 @@ FocusScope {
     property real playbackFrame: -1
     property bool snapping: true
     property real snapGuide: -1
-    readonly property int rowHeight: 66
+    readonly property int rowHeight: 86
     readonly property int labelWidth: 174
     property int renameIndex: -1
     readonly property bool dialogOpen: renameDialog.visible
+    property var draggingClip: null
+    property real pointerX: 0
+    property real pointerY: 0
+    property bool dropHover: false
+    property int dropTrack: -1
+    property real dropRaw: 0
+    property real dropFrame: 0
+    property real dropDuration: 90
+    property string dropAsset: ""
+    property bool dropsEnabled: true
+    readonly property bool dropValid: dropTrack >= 0 && dropTrack < state.tracks && !(editor.trackList[dropTrack] || {}).locked
     signal seekRequested(real frame)
+    function trackAt(y) {
+        return state.tracks - 1 - Math.floor((y + timeline.contentY) / rowHeight);
+    }
+    function positionFor(frame, track, id, length) {
+        if (track < 0 || track >= state.tracks)
+            return Math.max(0, Math.round(frame));
+        if ((editor.trackList[track] || {}).magnetic) {
+            const p = editor.placement(track, Math.round(frame), id);
+            snapGuide = p;
+            return p;
+        }
+        return snapped(frame, id, length, track);
+    }
+    function updateDrop() {
+        dropTrack = trackAt(pointerY);
+        dropRaw = Math.max(0, (pointerX + timeline.contentX) / pixelsPerSecond * state.fps);
+        dropFrame = positionFor(dropRaw, dropTrack, "", dropDuration);
+    }
+    function cancelDrag() {
+        if (draggingClip)
+            draggingClip.operation = 0;
+        clearDrag();
+    }
+    function clearDrag() {
+        draggingClip = null;
+        snapGuide = -1;
+    }
+    Timer {
+        interval: 30
+        repeat: true
+        running: root.draggingClip !== null || root.dropHover
+        onTriggered: {
+            const dx = root.pointerX < 32 ? -14 : root.pointerX > timeline.width - 32 ? 14 : 0;
+            const dy = root.pointerY < 20 ? -8 : root.pointerY > timeline.height - 20 ? 8 : 0;
+            if (!dx && !dy)
+                return;
+            timeline.contentX = Math.max(0, Math.min(Math.max(0, timeline.contentWidth - timeline.width), timeline.contentX + dx));
+            timeline.contentY = Math.max(0, Math.min(Math.max(0, timeline.contentHeight - timeline.height), timeline.contentY + dy));
+            if (root.draggingClip)
+                root.draggingClip.updateAt(root.pointerX + timeline.contentX, root.pointerY + timeline.contentY);
+            else
+                root.updateDrop();
+        }
+    }
     function fit() {
         pixelsPerSecond = Math.max(.25, Math.min(180, (timeline.width - 40) / Math.max(1, state.duration / state.fps)));
     }
@@ -27,9 +82,9 @@ FocusScope {
         else if (x > timeline.contentX + timeline.width - 30)
             timeline.contentX = Math.max(0, x - timeline.width + 50);
     }
-    function snapped(frame, id, length) {
+    function snapped(frame, id, length, track) {
         const raw = Math.round(frame);
-        const result = snapping ? editor.snap(raw, Math.ceil(7 / pixelsPerSecond * state.fps), id, length || 0) : raw;
+        const result = snapping && (editor.trackList[track] || {}).snapping ? editor.snap(raw, Math.ceil(7 / pixelsPerSecond * state.fps), id, length || 0) : raw;
         snapGuide = result !== raw ? result : -1;
         return result;
     }
@@ -73,7 +128,7 @@ FocusScope {
                 onClicked: editor.addTrack()
             }
             CheckBox {
-                text: "Snap"
+                text: "Edge snap"
                 checked: root.snapping
                 onToggled: root.snapping = checked
                 ToolTip.visible: hovered
@@ -293,256 +348,376 @@ FocusScope {
                                         }
                                     }
                                 }
+                                Row {
+                                    spacing: 4
+                                    Repeater {
+                                        model: [
+                                            {
+                                                key: "snapping",
+                                                label: "Snap",
+                                                tip: "Align edges while dragging on this track (Edge snap must be on)"
+                                            },
+                                            {
+                                                key: "magnetic",
+                                                label: "Magnet",
+                                                tip: "Keep clips together from frame 0. Enabling closes existing gaps and overlaps; Undo restores them."
+                                            }
+                                        ]
+                                        Button {
+                                            required property var modelData
+                                            objectName: modelData.key + "-" + trackIndex
+                                            width: 69
+                                            height: 22
+                                            text: modelData.label
+                                            checkable: true
+                                            checked: track[modelData.key] || false
+                                            enabled: modelData.key !== "magnetic" || !track.locked
+                                            onClicked: editor.setTrack(trackIndex, modelData.key, checked)
+                                            background: Rectangle {
+                                                radius: 4
+                                                color: parent.checked ? "#356457" : "#303d47"
+                                                border.color: parent.checked ? "#64d8bc" : "#44525c"
+                                            }
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: modelData.tip
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
-            Flickable {
-                id: timeline
+            Item {
+                id: trackViewport
+                objectName: "trackViewport"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
-                boundsBehavior: Flickable.StopAtBounds
-                contentWidth: Math.max(width, (root.state.duration / root.state.fps + 5) * root.pixelsPerSecond)
-                contentHeight: root.state.tracks * root.rowHeight
-                ScrollBar.horizontal: ScrollBar {}
-                ScrollBar.vertical: ScrollBar {}
-                Item {
-                    id: body
-                    width: timeline.contentWidth
-                    height: timeline.contentHeight
-                    Repeater {
-                        model: root.state.tracks
-                        Rectangle {
-                            required property int index
-                            y: index * root.rowHeight
-                            width: body.width
-                            height: root.rowHeight
-                            color: index % 2 ? "#141c24" : "#17212a"
-                            border.color: "#293540"
-                        }
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        onPressed: function (mouse) {
-                            root.forceActiveFocus();
-                            root.seekRequested(Math.round(mouse.x / root.pixelsPerSecond * root.state.fps));
-                        }
-                    }
-                    Repeater {
-                        model: editor.clips
-                        Rectangle {
-                            id: clipRect
-                            required property var modelData
-                            objectName: "clip-" + modelData.id
-                            property int operation: 0 // 1 move, 2 start trim, 3 end trim
-                            property real grabOffset: 0
-                            property real dragStart: modelData.start
-                            property real dragEnd: modelData.start + modelData.duration
-                            property int dragTrack: modelData.track
-                            property var bounds: ({
-                                    first: 0,
-                                    last: 100000000
-                                })
-                            property var wave: ({})
-                            readonly property real shownStart: operation ? dragStart : modelData.start
-                            readonly property real shownEnd: operation ? dragEnd : modelData.start + modelData.duration
-                            function refreshWave() {
-                                wave = modelData.hasAudio ? editor.waveform(modelData.assetId) : ({});
-                                waveform.requestPaint();
+                Flickable {
+                    id: timeline
+                    objectName: "timelineScroll"
+                    anchors.fill: parent
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    contentWidth: Math.max(width, (Math.max(root.state.duration, root.draggingClip ? root.draggingClip.dragEnd : root.dropHover ? root.dropFrame + root.dropDuration : 0) / root.state.fps + 5) * root.pixelsPerSecond)
+                    contentHeight: root.state.tracks * root.rowHeight
+                    ScrollBar.horizontal: ScrollBar {}
+                    ScrollBar.vertical: ScrollBar {}
+                    Item {
+                        id: body
+                        width: timeline.contentWidth
+                        height: timeline.contentHeight
+                        objectName: "timelineBody"
+                        Repeater {
+                            model: root.state.tracks
+                            Rectangle {
+                                required property int index
+                                y: index * root.rowHeight
+                                width: body.width
+                                height: root.rowHeight
+                                color: index % 2 ? "#141c24" : "#17212a"
+                                border.color: "#293540"
                             }
-                            function begin(mode, mouse, area) {
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onPressed: function (mouse) {
                                 root.forceActiveFocus();
-                                editor.select(modelData.id);
-                                if (modelData.locked)
-                                    return;
-                                operation = mode;
-                                dragStart = modelData.start;
-                                dragEnd = modelData.start + modelData.duration;
-                                dragTrack = modelData.track;
-                                bounds = editor.trimBounds(modelData.id);
-                                grabOffset = area.mapToItem(body, mouse.x, mouse.y).x - (mode === 3 ? dragEnd : dragStart) / root.state.fps * root.pixelsPerSecond;
+                                root.seekRequested(Math.round(mouse.x / root.pixelsPerSecond * root.state.fps));
                             }
-                            function update(mouse, area) {
-                                if (!operation)
-                                    return;
-                                const p = area.mapToItem(body, mouse.x, mouse.y);
-                                if (operation === 1) {
-                                    const frame = root.snapped((p.x - grabOffset) / root.pixelsPerSecond * root.state.fps, modelData.id, modelData.duration);
-                                    dragStart = Math.max(0, frame);
-                                    dragEnd = dragStart + modelData.duration;
-                                    dragTrack = Math.max(0, Math.min(root.state.tracks - 1, root.state.tracks - 1 - Math.floor(p.y / root.rowHeight)));
-                                } else if (operation === 2)
-                                    dragStart = Math.max(bounds.first, Math.min(modelData.start + modelData.duration - 1, root.snapped((p.x - grabOffset) / root.pixelsPerSecond * root.state.fps, modelData.id, 0)));
-                                else
-                                    dragEnd = Math.max(modelData.start + 1, Math.min(bounds.last, root.snapped((p.x - grabOffset) / root.pixelsPerSecond * root.state.fps, modelData.id, 0)));
-                            }
-                            function commit() {
-                                const id = modelData.id, mode = operation, start = dragStart, end = dragEnd, track = dragTrack;
-                                operation = 0;
-                                root.snapGuide = -1;
-                                if (mode === 1)
-                                    editor.moveClip(id, start, track);
-                                else if (mode)
-                                    editor.trimClip(id, start, end);
-                            }
-                            x: shownStart / root.state.fps * root.pixelsPerSecond
-                            y: 4 + (root.state.tracks - 1 - (operation === 1 ? dragTrack : modelData.track)) * root.rowHeight
-                            width: Math.max(8, (shownEnd - shownStart) / root.state.fps * root.pixelsPerSecond)
-                            height: root.rowHeight - 8
-                            radius: 5
-                            clip: true
-                            color: modelData.title ? "#59453e" : modelData.audio ? "#28564c" : "#334a65"
-                            opacity: modelData.locked ? .65 : 1
-                            border.width: root.state.selectedId === modelData.id ? 2 : 1
-                            border.color: operation === 1 && (editor.trackList[dragTrack] || {}).locked ? "#ec947e" : root.state.selectedId === modelData.id ? "#64d8bc" : "#6481a0"
-                            Component.onCompleted: refreshWave()
-                            Connections {
-                                target: editor
-                                function onAnalysisChanged() {
-                                    clipRect.refreshWave();
+                        }
+                        Repeater {
+                            model: editor.clips
+                            Rectangle {
+                                id: clipRect
+                                required property var modelData
+                                objectName: "clip-" + modelData.id
+                                property int operation: 0 // 1 move, 2 start trim, 3 end trim
+                                property real grabOffset: 0
+                                property real requestedStart: modelData.start
+                                property real dragStart: modelData.start
+                                property real dragEnd: modelData.start + modelData.duration
+                                property int dragTrack: modelData.track
+                                property var bounds: ({
+                                        first: 0,
+                                        last: 100000000
+                                    })
+                                property var wave: ({})
+                                readonly property real shownStart: operation ? dragStart : modelData.start
+                                readonly property real shownEnd: operation ? dragEnd : modelData.start + modelData.duration
+                                function refreshWave() {
+                                    wave = modelData.hasAudio ? editor.waveform(modelData.assetId) : ({});
+                                    waveform.requestPaint();
                                 }
-                            }
-                            Label {
-                                x: 10
-                                y: 7
-                                width: parent.width - 20
-                                elide: Text.ElideRight
-                                font.pixelSize: 11
-                                font.bold: true
-                                text: (clipRect.modelData.locked ? "[L] " : "") + clipRect.modelData.name
-                            }
-                            Label {
-                                x: 10
-                                y: 33
-                                visible: !clipRect.modelData.hasAudio || clipRect.wave.status !== "ready"
-                                text: ((clipRect.shownEnd - clipRect.shownStart) / root.state.fps).toFixed(2) + " s" + (clipRect.wave.status === "reading" ? " · waveform…" : "")
-                                color: "#bcc9d5"
-                                font.pixelSize: 9
-                            }
-                            Canvas {
-                                id: waveform
-                                x: Math.max(0, timeline.contentX - clipRect.x)
-                                y: 27
-                                width: Math.max(0, Math.min(clipRect.width - x, timeline.width))
-                                height: 26
-                                visible: clipRect.modelData.hasAudio && clipRect.wave.status === "ready"
-                                onXChanged: requestPaint()
-                                onWidthChanged: requestPaint()
-                                onPaint: {
-                                    const ctx = getContext("2d");
-                                    ctx.reset();
-                                    const peaks = clipRect.wave.peaks || [];
-                                    const step = clipRect.wave.step;
-                                    if (!step || !peaks.length)
+                                function begin(mode, mouse, area) {
+                                    root.forceActiveFocus();
+                                    editor.select(modelData.id);
+                                    if (modelData.locked)
                                         return;
-                                    ctx.fillStyle = clipRect.modelData.muted ? "#7c8b91" : "#81e6c9";
-                                    const speed = clipRect.modelData.speed, duration = (clipRect.shownEnd - clipRect.shownStart) / root.state.fps;
-                                    const delta = clipRect.modelData.reverse ? clipRect.modelData.start + clipRect.modelData.duration - clipRect.shownEnd : clipRect.shownStart - clipRect.modelData.start;
-                                    const start = clipRect.modelData.sourceIn + delta / root.state.fps * speed;
-                                    for (let px = 0; px < width; px += 2) {
-                                        let a = (x + px) / root.pixelsPerSecond, b = (x + px + 2) / root.pixelsPerSecond;
-                                        if (clipRect.modelData.reverse) {
-                                            const prev = a;
-                                            a = duration - b;
-                                            b = duration - prev;
+                                    operation = mode;
+                                    dragStart = modelData.start;
+                                    dragEnd = modelData.start + modelData.duration;
+                                    dragTrack = modelData.track;
+                                    requestedStart = modelData.start;
+                                    root.draggingClip = clipRect;
+                                    const point = area.mapToItem(timeline, mouse.x, mouse.y);
+                                    root.pointerX = point.x;
+                                    root.pointerY = point.y;
+                                    bounds = editor.trimBounds(modelData.id);
+                                    grabOffset = area.mapToItem(body, mouse.x, mouse.y).x - (mode === 3 ? dragEnd : dragStart) / root.state.fps * root.pixelsPerSecond;
+                                }
+                                function update(mouse, area) {
+                                    if (!operation)
+                                        return;
+                                    const point = area.mapToItem(timeline, mouse.x, mouse.y);
+                                    root.pointerX = point.x;
+                                    root.pointerY = point.y;
+                                    updateAt(point.x + timeline.contentX, point.y + timeline.contentY);
+                                }
+                                function updateAt(x, y) {
+                                    if (operation === 1) {
+                                        dragTrack = root.state.tracks - 1 - Math.floor(y / root.rowHeight);
+                                        requestedStart = Math.max(0, Math.round((x - grabOffset) / root.pixelsPerSecond * root.state.fps));
+                                        dragStart = root.positionFor(requestedStart, dragTrack, modelData.id, modelData.duration);
+                                        dragEnd = dragStart + modelData.duration;
+                                    } else if (operation === 2)
+                                        dragStart = Math.max(bounds.first, Math.min(modelData.start + modelData.duration - 1, root.snapped((x - grabOffset) / root.pixelsPerSecond * root.state.fps, modelData.id, 0, modelData.track)));
+                                    else if (operation === 3)
+                                        dragEnd = Math.max(modelData.start + 1, Math.min(bounds.last, root.snapped((x - grabOffset) / root.pixelsPerSecond * root.state.fps, modelData.id, 0, modelData.track)));
+                                }
+                                function commit() {
+                                    const id = modelData.id, mode = operation, start = dragStart, end = dragEnd, track = dragTrack;
+                                    const frame = (editor.trackList[track] || {}).magnetic ? requestedStart : start;
+                                    operation = 0;
+                                    root.clearDrag();
+                                    if (mode === 1 && track >= 0 && track < root.state.tracks && !(editor.trackList[track] || {}).locked)
+                                        editor.moveClip(id, frame, track);
+                                    else if (mode > 1)
+                                        editor.trimClip(id, start, end);
+                                }
+                                x: shownStart / root.state.fps * root.pixelsPerSecond
+                                y: 4 + (root.state.tracks - 1 - (operation === 1 ? dragTrack : modelData.track)) * root.rowHeight
+                                width: Math.max(8, (shownEnd - shownStart) / root.state.fps * root.pixelsPerSecond)
+                                height: root.rowHeight - 8
+                                radius: 5
+                                clip: true
+                                color: modelData.title ? "#59453e" : modelData.audio ? "#28564c" : "#334a65"
+                                opacity: modelData.locked ? .65 : 1
+                                border.width: root.state.selectedId === modelData.id ? 2 : 1
+                                border.color: operation === 1 && (dragTrack < 0 || dragTrack >= root.state.tracks || (editor.trackList[dragTrack] || {}).locked) ? "#ec947e" : root.state.selectedId === modelData.id ? "#64d8bc" : "#6481a0"
+                                Component.onCompleted: refreshWave()
+                                Component.onDestruction: {
+                                    if (root.draggingClip === clipRect)
+                                        root.clearDrag();
+                                }
+                                Connections {
+                                    target: editor
+                                    function onAnalysisChanged() {
+                                        clipRect.refreshWave();
+                                    }
+                                }
+                                Label {
+                                    x: 10
+                                    y: 7
+                                    width: parent.width - 20
+                                    elide: Text.ElideRight
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                    text: (clipRect.modelData.locked ? "[L] " : "") + clipRect.modelData.name
+                                }
+                                Label {
+                                    x: 10
+                                    y: 33
+                                    visible: !clipRect.modelData.hasAudio || clipRect.wave.status !== "ready"
+                                    text: ((clipRect.shownEnd - clipRect.shownStart) / root.state.fps).toFixed(2) + " s" + (clipRect.wave.status === "reading" ? " · waveform…" : "")
+                                    color: "#bcc9d5"
+                                    font.pixelSize: 9
+                                }
+                                Canvas {
+                                    id: waveform
+                                    x: Math.max(0, timeline.contentX - clipRect.x)
+                                    y: 27
+                                    width: Math.max(0, Math.min(clipRect.width - x, timeline.width))
+                                    height: 26
+                                    visible: clipRect.modelData.hasAudio && clipRect.wave.status === "ready"
+                                    onXChanged: requestPaint()
+                                    onWidthChanged: requestPaint()
+                                    onPaint: {
+                                        const ctx = getContext("2d");
+                                        ctx.reset();
+                                        const peaks = clipRect.wave.peaks || [];
+                                        const step = clipRect.wave.step;
+                                        if (!step || !peaks.length)
+                                            return;
+                                        ctx.fillStyle = clipRect.modelData.muted ? "#7c8b91" : "#81e6c9";
+                                        const speed = clipRect.modelData.speed, duration = (clipRect.shownEnd - clipRect.shownStart) / root.state.fps;
+                                        const delta = clipRect.modelData.reverse ? clipRect.modelData.start + clipRect.modelData.duration - clipRect.shownEnd : clipRect.shownStart - clipRect.modelData.start;
+                                        const start = clipRect.modelData.sourceIn + delta / root.state.fps * speed;
+                                        for (let px = 0; px < width; px += 2) {
+                                            let a = (x + px) / root.pixelsPerSecond, b = (x + px + 2) / root.pixelsPerSecond;
+                                            if (clipRect.modelData.reverse) {
+                                                const prev = a;
+                                                a = duration - b;
+                                                b = duration - prev;
+                                            }
+                                            let lo = Math.max(0, Math.floor((start + a * speed) / step)), hi = Math.min(peaks.length - 1, Math.floor((start + b * speed) / step)), peak = 0;
+                                            for (let i = lo; i <= hi; ++i)
+                                                peak = Math.max(peak, peaks[i]);
+                                            const h = Math.max(1, peak * height);
+                                            ctx.fillRect(px, (height - h) / 2, 1.5, h);
                                         }
-                                        let lo = Math.max(0, Math.floor((start + a * speed) / step)), hi = Math.min(peaks.length - 1, Math.floor((start + b * speed) / step)), peak = 0;
-                                        for (let i = lo; i <= hi; ++i)
-                                            peak = Math.max(peak, peaks[i]);
-                                        const h = Math.max(1, peak * height);
-                                        ctx.fillRect(px, (height - h) / 2, 1.5, h);
+                                    }
+                                    Connections {
+                                        target: root
+                                        function onPixelsPerSecondChanged() {
+                                            waveform.requestPaint();
+                                        }
+                                    }
+                                    Connections {
+                                        target: clipRect
+                                        function onShownStartChanged() {
+                                            waveform.requestPaint();
+                                        }
+                                        function onShownEndChanged() {
+                                            waveform.requestPaint();
+                                        }
                                     }
                                 }
-                                Connections {
-                                    target: root
-                                    function onPixelsPerSecondChanged() {
-                                        waveform.requestPaint();
+                                MouseArea {
+                                    id: moveArea
+                                    anchors.fill: parent
+                                    preventStealing: true
+                                    cursorShape: clipRect.modelData.locked ? Qt.ForbiddenCursor : (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor)
+                                    onPressed: function (mouse) {
+                                        clipRect.begin(1, mouse, moveArea);
                                     }
-                                }
-                                Connections {
-                                    target: clipRect
-                                    function onShownStartChanged() {
-                                        waveform.requestPaint();
+                                    onPositionChanged: function (mouse) {
+                                        if (pressed)
+                                            clipRect.update(mouse, moveArea);
                                     }
-                                    function onShownEndChanged() {
-                                        waveform.requestPaint();
+                                    onReleased: clipRect.commit()
+                                    onCanceled: {
+                                        clipRect.operation = 0;
+                                        root.clearDrag();
                                     }
+                                    onDoubleClicked: root.seekRequested(clipRect.modelData.start)
                                 }
-                            }
-                            MouseArea {
-                                id: moveArea
-                                anchors.fill: parent
-                                cursorShape: clipRect.modelData.locked ? Qt.ForbiddenCursor : (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor)
-                                onPressed: function (mouse) {
-                                    clipRect.begin(1, mouse, moveArea);
-                                }
-                                onPositionChanged: function (mouse) {
-                                    if (pressed)
-                                        clipRect.update(mouse, moveArea);
-                                }
-                                onReleased: clipRect.commit()
-                                onCanceled: {
-                                    clipRect.operation = 0;
-                                    root.snapGuide = -1;
-                                }
-                                onDoubleClicked: root.seekRequested(clipRect.modelData.start)
-                            }
-                            Repeater {
-                                model: 2
-                                Rectangle {
-                                    required property int index
-                                    objectName: (index === 0 ? "trimStart-" : "trimEnd-") + clipRect.modelData.id
-                                    x: index === 0 ? 1 : clipRect.width - width - 1
-                                    y: 3
-                                    width: Math.min(9, clipRect.width / 3)
-                                    height: clipRect.height - 6
-                                    radius: 3
-                                    color: trimArea.containsMouse ? "#64d8bc" : "transparent"
-                                    visible: !clipRect.modelData.locked
+                                Repeater {
+                                    model: 2
                                     Rectangle {
-                                        anchors.centerIn: parent
-                                        width: 2
-                                        height: 16
-                                        color: "#b2d2d3"
-                                    }
-                                    MouseArea {
-                                        id: trimArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.SizeHorCursor
-                                        onPressed: function (mouse) {
-                                            clipRect.begin(index === 0 ? 2 : 3, mouse, trimArea);
+                                        required property int index
+                                        objectName: (index === 0 ? "trimStart-" : "trimEnd-") + clipRect.modelData.id
+                                        x: index === 0 ? 1 : clipRect.width - width - 1
+                                        y: 3
+                                        width: Math.min(9, clipRect.width / 3)
+                                        height: clipRect.height - 6
+                                        radius: 3
+                                        color: trimArea.containsMouse ? "#64d8bc" : "transparent"
+                                        visible: !clipRect.modelData.locked
+                                        Rectangle {
+                                            anchors.centerIn: parent
+                                            width: 2
+                                            height: 16
+                                            color: "#b2d2d3"
                                         }
-                                        onPositionChanged: function (mouse) {
-                                            if (pressed)
-                                                clipRect.update(mouse, trimArea);
-                                        }
-                                        onReleased: clipRect.commit()
-                                        onCanceled: {
-                                            clipRect.operation = 0;
-                                            root.snapGuide = -1;
+                                        MouseArea {
+                                            id: trimArea
+                                            anchors.fill: parent
+                                            preventStealing: true
+                                            hoverEnabled: true
+                                            cursorShape: Qt.SizeHorCursor
+                                            onPressed: function (mouse) {
+                                                clipRect.begin(index === 0 ? 2 : 3, mouse, trimArea);
+                                            }
+                                            onPositionChanged: function (mouse) {
+                                                if (pressed)
+                                                    clipRect.update(mouse, trimArea);
+                                            }
+                                            onReleased: clipRect.commit()
+                                            onCanceled: {
+                                                clipRect.operation = 0;
+                                                root.clearDrag();
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                        Rectangle {
+                            x: (root.playbackFrame >= 0 ? root.playbackFrame : root.state.playhead) / root.state.fps * root.pixelsPerSecond
+                            width: 2
+                            height: parent.height
+                            color: "#64d8bc"
+                            z: 10
+                        }
+                        Rectangle {
+                            visible: root.snapGuide >= 0
+                            x: root.snapGuide / root.state.fps * root.pixelsPerSecond
+                            width: 1
+                            height: parent.height
+                            color: "#ffd19c"
+                            z: 11
+                        }
                     }
-                    Rectangle {
-                        x: (root.playbackFrame >= 0 ? root.playbackFrame : root.state.playhead) / root.state.fps * root.pixelsPerSecond
-                        width: 2
-                        height: parent.height
-                        color: "#64d8bc"
-                        z: 10
+                }
+                DropArea {
+                    id: trackDrop
+                    anchors.fill: parent
+                    enabled: root.dropsEnabled
+                    function updateEvent(event) {
+                        root.pointerX = event.x;
+                        root.pointerY = event.y;
+                        root.dropAsset = event.source && event.source.assetId ? event.source.assetId : "";
+                        root.dropDuration = root.dropAsset.length ? Math.max(1, Math.floor(event.source.mediaDuration * root.state.fps)) : 3 * root.state.fps;
+                        root.dropHover = true;
+                        root.updateDrop();
                     }
-                    Rectangle {
-                        visible: root.snapGuide >= 0
-                        x: root.snapGuide / root.state.fps * root.pixelsPerSecond
-                        width: 1
-                        height: parent.height
-                        color: "#ffd19c"
-                        z: 11
+                    onEntered: function (drag) {
+                        drag.accepted = drag.hasUrls || !!(drag.source && drag.source.assetId);
+                        if (drag.accepted)
+                            updateEvent(drag);
+                    }
+                    onPositionChanged: function (drag) {
+                        updateEvent(drag);
+                    }
+                    onExited: {
+                        root.dropHover = false;
+                        root.snapGuide = -1;
+                    }
+                    onDropped: function (drop) {
+                        updateEvent(drop);
+                        const track = root.dropTrack, asset = root.dropAsset;
+                        const frame = (editor.trackList[track] || {}).magnetic ? Math.round(root.dropRaw) : root.dropFrame;
+                        if (root.dropValid) {
+                            if (asset.length)
+                                Qt.callLater(function () {
+                                    editor.insertAsset(asset, track, frame);
+                                });
+                            else if (drop.hasUrls)
+                                editor.dropFiles(drop.urls, track, frame);
+                            drop.accept(Qt.CopyAction);
+                        } else
+                            drop.accepted = false;
+                        root.dropHover = false;
+                        root.snapGuide = -1;
+                        root.forceActiveFocus();
+                    }
+                }
+                Rectangle {
+                    visible: root.dropHover
+                    x: root.dropFrame / root.state.fps * root.pixelsPerSecond - timeline.contentX
+                    y: (root.state.tracks - 1 - root.dropTrack) * root.rowHeight - timeline.contentY + 3
+                    width: Math.max(30, root.dropDuration / root.state.fps * root.pixelsPerSecond)
+                    height: root.rowHeight - 6
+                    radius: 5
+                    color: root.dropValid ? "#553c8070" : "#556b3333"
+                    border.width: 2
+                    border.color: root.dropValid ? "#64d8bc" : "#ff9d89"
+                    Label {
+                        x: 8
+                        y: 8
+                        text: root.dropValid ? ((editor.trackList[root.dropTrack] || {}).magnetic ? "Insert here · Magnet" : "Drop here") : "Track locked"
                     }
                 }
             }

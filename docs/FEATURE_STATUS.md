@@ -1,4 +1,4 @@
-# Feature status — 0.2.0 alpha
+# Feature status — 0.3.0 alpha
 
 The original 187 rows remain the design scope, not a claim of completion. “Implemented (alpha)” means a present code path, not production qualification. Partial rows list their actual boundary. Acceptance criteria in `features.json` remain the original future gates.
 
@@ -6,11 +6,11 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 |---|---|---|---|
 | F001 | Create, open, recent projects and settings | Partial | Create/open/save and presets; no recent list. |
 | F002 | Media bin, folders, collections and search | Partial | Flat media bin; no folders/search. |
-| F003 | Drag/drop and background media analysis | Partial | Async analysis; no file drop. |
+| F003 | Drag/drop and background media analysis | Partial | Library-to-track and local file drops, async probing and waveform analysis, partial-error reporting; no directory recursion or cancellable import queue. |
 | F004 | Nondestructive media references | Implemented (alpha) | Relative project references; originals never edited. |
 | F005 | Missing-media relink and replace | Partial | Validated source relinking; no batch relink. |
 | F006 | Collect Project and portable media bundle | Planned | Not implemented in this alpha. |
-| F007 | Project schema migrations | Implemented (alpha) | Reads schema 1 with neutral track defaults; writes schema 2. Older application versions cannot read new saves. |
+| F007 | Project schema migrations | Implemented (alpha) | Reads schema 1/2 without moving clips; writes schema 3 with stable track IDs and snapping/magnetic modes. Older versions cannot read new saves. |
 | F008 | Atomic save, autosave and rolling backup | Partial | Atomic save and one recovery file; no rolling backups. |
 | F009 | Undo/redo and deep edit history | Partial | 60 whole-project snapshots; no deep history persistence. |
 | F010 | Crash and corrupted-cache recovery | Partial | Recovery snapshot only. |
@@ -27,10 +27,10 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F021 | Layer order, overlays and adjustment tracks | Partial | Overlays and layer order; no adjustment tracks. |
 | F022 | Linked A/V, unlink and resync | Partial | Video and audio initially share timing; detach creates an independent audio-only clip. No pair resync. |
 | F023 | Groups, track lock, mute, solo and hide | Partial | Track lock, audio mute/solo and picture hide; no clip groups. |
-| F024 | Snapping and optional magnetic/ripple mode | Partial | Clip-edge/playhead/start snapping for moves and trims; track-local ripple delete. No magnetic mode. |
-| F025 | Insert, overwrite and reorder | Planned | Not implemented in this alpha. |
+| F024 | Snapping and optional magnetic/ripple mode | Implemented (alpha) | Per-track edge snapping and magnetic insertion/reorder/ripple edits. Master edge-snap switch is independent of Magnet; locks respected. |
+| F025 | Insert, overwrite and reorder | Partial | Magnetic insert and reorder; free-position drops. No overwrite edit mode. |
 | F026 | Split, trim, delete and duplicate | Implemented (alpha) | Split, drag-edge/source-aware trims, inspector trims, delete and duplicate; each committed edit is undoable. |
-| F027 | Ripple trim, roll, slip and slide | Planned | Not implemented in this alpha. |
+| F027 | Ripple trim, roll, slip and slide | Partial | Magnetic track trims ripple subsequent clips; no roll, slip, slide or linked-pair propagation. |
 | F028 | Nested sequences and compound clips | Planned | Not implemented in this alpha. |
 | F029 | Copy/paste clips and selected attributes | Planned | Not implemented in this alpha. |
 | F030 | Markers, in/out and timeline navigation | Partial | Frame and previous/next edit navigation; start/end shortcuts. No markers or in/out ranges. |
@@ -171,7 +171,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F165 | Async jobs, priorities and cancellation | Partial | Async import/render; no scheduler/priority system. |
 | F166 | RAM/VRAM budgets and decoder pooling | Planned | Not implemented in this alpha. |
 | F167 | GPU device loss and CPU fallback | Planned | Not implemented in this alpha. |
-| F168 | Dark UI, dockable panels and searchable tools | Partial | Dark resizable panels; no docking/search. |
+| F168 | Dark UI, dockable panels and searchable tools | Partial | Dark resizable panels and original app icon; no docking/search. |
 | F169 | High DPI, scaling and multi-monitor | Partial | Qt scaling support; manual qualification outstanding. |
 | F170 | Shortcuts, customization and command search | Partial | 31 customizable commands, conflict checks and portable settings; no command search or complete CapCut keymap. |
 | F171 | Accessible focus, labels and errors | Planned | Not implemented in this alpha. |

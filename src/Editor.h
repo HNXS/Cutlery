@@ -9,6 +9,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <functional>
+#include <memory>
 
 namespace cutlery {
 class FrameProvider final : public QQuickImageProvider {
@@ -48,6 +49,9 @@ class Editor final : public QObject {
     Q_INVOKABLE bool save(const QUrl &url = QUrl());
     Q_INVOKABLE void recover();
     Q_INVOKABLE void importMedia(const QList<QUrl> &);
+    Q_INVOKABLE void dropFiles(const QList<QUrl> &, int track, qint64 frame);
+    Q_INVOKABLE bool insertAsset(const QString &assetId, int track, qint64 frame);
+    Q_INVOKABLE qint64 placement(int track, qint64 frame, const QString &exclude = {}) const;
     Q_INVOKABLE void relink(const QString &assetId, const QUrl &);
     Q_INVOKABLE void addAsset(const QString &assetId, int track = 0);
     Q_INVOKABLE void addTitle();
@@ -93,13 +97,24 @@ class Editor final : public QObject {
     QTimer m_previewTimer, m_saveTimer;
     QProcess *m_preview = nullptr, *m_job = nullptr, *m_probe = nullptr;
     QString m_jobTemp;
-    QList<QUrl> m_importQueue;
+    struct DropBatch {
+        QString trackId;
+        qint64 frame = 0;
+        QString lastClip;
+    };
+    struct ImportRequest {
+        QUrl url;
+        std::shared_ptr<DropBatch> drop;
+    };
+    QList<ImportRequest> m_importQueue;
+    QStringList m_importErrors;
     void fail(const QString &);
-    void mutate(const std::function<void(Project &)> &);
+    bool mutate(const std::function<void(Project &)> &);
     void edited();
     void requestPreview();
     void probeNext();
-    void probeFile(const QUrl &, const QString &replaceId);
+    void probeFile(const QUrl &, const QString &replaceId, std::shared_ptr<DropBatch> drop = {});
+    static QString insert(Project &, const QString &assetId, int track, qint64 frame);
     void startRender(const QString &output, const QString &profile, bool playback);
     void autosave();
 };

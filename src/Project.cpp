@@ -62,7 +62,10 @@ QJsonObject Project::json(const QString &base) const {
                               {"locked", t.locked},
                               {"muted", t.muted},
                               {"hidden", t.hidden},
-                              {"solo", t.solo}});
+                              {"solo", t.solo},
+                              {"snapping", t.snapping},
+                              {"magnetic", t.magnetic},
+                              {"id", t.id}});
     for (const auto &a : assets) {
         auto path = a.path;
         if (!base.isEmpty())
@@ -110,13 +113,13 @@ QJsonObject Project::json(const QString &base) const {
 #undef PUT
         cc.append(o);
     }
-    return {{"format", "cutlery"}, {"schemaVersion", 2}, {"name", name},       {"width", width},
+    return {{"format", "cutlery"}, {"schemaVersion", 3}, {"name", name},       {"width", width},
             {"height", height},    {"fpsN", fpsN},       {"fpsD", fpsD},       {"tracks", tracks},
             {"assets", aa},        {"clips", cc},        {"trackSettings", tt}};
 }
 Project Project::fromJson(const QJsonObject &o, const QString &base) {
     require(o["format"] == "cutlery" &&
-                (o["schemaVersion"].toInt() == 1 || o["schemaVersion"].toInt() == 2),
+                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 3),
             "Unsupported project format/version. Original left unchanged.");
     require(o["assets"].isArray() && o["clips"].isArray(), "Missing project collections");
     Project p;
@@ -140,6 +143,13 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
             p.trackSettings.push_back(Track{t["name"].toString(), t["locked"].toBool(),
                                             t["muted"].toBool(), t["hidden"].toBool(),
                                             t["solo"].toBool()});
+            if (o["schemaVersion"].toInt() >= 3) {
+                require(t["snapping"].isBool() && t["magnetic"].isBool(), "Invalid track modes");
+                auto &track = p.trackSettings.last();
+                track.snapping = t["snapping"].toBool();
+                track.magnetic = t["magnetic"].toBool();
+                track.id = t["id"].toString();
+            }
         }
     }
     require(o["assets"].toArray().size() <= 10000 && o["clips"].toArray().size() <= 10000,
@@ -208,9 +218,13 @@ void Project::validate() const {
             "Frame rate must be 1–120 fps");
     require(tracks > 0 && tracks <= 64, "Alpha supports 1–64 tracks");
     require(trackSettings.size() == tracks, "Track settings do not match track count");
-    for (const auto &t : trackSettings)
+    QSet<QString> trackIds;
+    for (const auto &t : trackSettings) {
         require(!t.name.trimmed().isEmpty() && t.name.size() <= 80,
                 "Track names must be 1–80 characters");
+        require(!t.id.isEmpty() && !trackIds.contains(t.id), "Invalid or duplicate track ID");
+        trackIds.insert(t.id);
+    }
     require(assets.size() <= 10000 && clips.size() <= 10000,
             "Project exceeds alpha resource limits");
     QSet<QString> ids;
@@ -255,6 +269,17 @@ void Project::validate() const {
                     "Clip extends past source media");
     }
     require(seconds() <= 24 * 3600, "Alpha projects are limited to 24 hours");
+    for (int track = 0; track < tracks; ++track) {
+        if (!trackSettings[track].magnetic)
+            continue;
+        qint64 end = 0;
+        for (const auto &id : trackOrder(track)) {
+            const auto it =
+                std::find_if(clips.begin(), clips.end(), [&](const Clip &c) { return c.id == id; });
+            require(it->start == end, "Magnetic tracks must be contiguous");
+            end += it->duration;
+        }
+    }
 }
 bool Project::split(const QString &id, qint64 frame) {
     auto *c = clip(id);
@@ -290,6 +315,8 @@ void Project::remove(const QString &id, bool ripple) {
         for (auto &x : clips)
             if (x.track == track && x.start >= start + dur)
                 x.start -= dur;
+    if (trackSettings[track].magnetic)
+        packTrack(track, trackOrder(track));
 }
 void Project::requireEditable(int track) const {
     require(track >= 0 && track < tracks && track < trackSettings.size(), "Invalid track");
@@ -324,6 +351,7 @@ void Project::trim(const QString &id, qint64 start, qint64 end) {
     if (!c)
         return;
     requireEditable(c->track);
+    const auto order = trackOrder(c->track);
     require(start >= 0 && start < end && end <= 100000000, "A trim must leave at least one frame");
     const auto oldEnd = c->start + c->duration;
     // The source interval is stored in forward order, even for reverse playback.
@@ -333,7 +361,70 @@ void Project::trim(const QString &id, qint64 start, qint64 end) {
         c->sourceIn = c->sourceIn + frameTime(delta, fpsN, fpsD) * c->speed;
     c->start = start;
     c->duration = end - start;
+    if (trackSettings[c->track].magnetic)
+        packTrack(c->track, order);
     // Caller validates the complete candidate before committing an undo step.
+}
+QVector<QString> Project::trackOrder(int track, const QString &exclude) const {
+    QVector<const Clip *> ordered;
+    for (const auto &c : clips)
+        if (c.track == track && c.id != exclude)
+            ordered.push_back(&c);
+    std::stable_sort(ordered.begin(), ordered.end(),
+                     [](const Clip *a, const Clip *b) { return a->start < b->start; });
+    QVector<QString> result;
+    for (const auto *c : ordered)
+        result.push_back(c->id);
+    return result;
+}
+void Project::packTrack(int track, const QVector<QString> &order) {
+    requireEditable(track);
+    qint64 end = 0;
+    for (const auto &id : order) {
+        auto *c = clip(id);
+        require(c && c->track == track && c->duration > 0 && c->duration <= 100000000 - end,
+                "Invalid magnetic track range");
+        c->start = end;
+        end += c->duration;
+    }
+}
+qint64 Project::placement(int track, qint64 frame, const QString &exclude) const {
+    require(track >= 0 && track < tracks, "Invalid track");
+    frame = std::clamp(frame, qint64(0), qint64(100000000));
+    if (!trackSettings[track].magnetic)
+        return frame;
+    qint64 end = 0;
+    for (const auto &id : trackOrder(track, exclude)) {
+        const auto it =
+            std::find_if(clips.begin(), clips.end(), [&](const Clip &c) { return c.id == id; });
+        if (frame < it->start + (it->duration + 1) / 2)
+            break;
+        end += it->duration;
+    }
+    return end;
+}
+void Project::move(const QString &id, int track, qint64 frame) {
+    auto *c = clip(id);
+    if (!c)
+        return;
+    requireEditable(c->track);
+    requireEditable(track);
+    const int oldTrack = c->track;
+    auto order = trackOrder(track, id);
+    int index = 0;
+    for (; index < order.size(); ++index) {
+        const auto *other = clip(order[index]);
+        if (frame < other->start + (other->duration + 1) / 2)
+            break;
+    }
+    c->track = track;
+    c->start = std::clamp(frame, qint64(0), qint64(100000000));
+    if (trackSettings[track].magnetic) {
+        order.insert(index, id);
+        packTrack(track, order);
+    }
+    if (oldTrack != track && trackSettings[oldTrack].magnetic)
+        packTrack(oldTrack, trackOrder(oldTrack));
 }
 qint64 Project::snap(qint64 frame, qint64 threshold, const QString &exclude, qint64 playhead,
                      qint64 length) const {

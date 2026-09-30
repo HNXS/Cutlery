@@ -105,8 +105,10 @@ QVariantList Editor::trackList() const {
     QVariantList result;
     int index = 0;
     for (const auto &t : m_project.trackSettings) {
-        result << QVariantMap{{"index", index++}, {"name", t.name},     {"locked", t.locked},
-                              {"muted", t.muted}, {"hidden", t.hidden}, {"solo", t.solo}};
+        result << QVariantMap{
+            {"index", index++},       {"name", t.name},         {"locked", t.locked},
+            {"muted", t.muted},       {"hidden", t.hidden},     {"solo", t.solo},
+            {"snapping", t.snapping}, {"magnetic", t.magnetic}, {"id", t.id}};
     }
     return result;
 }
@@ -134,6 +136,11 @@ qint64 Editor::snap(qint64 frame, qint64 threshold, const QString &exclude, qint
 void Editor::trimClip(const QString &id, qint64 start, qint64 end) {
     mutate([&](Project &p) { p.trim(id, start, end); });
 }
+qint64 Editor::placement(int track, qint64 frame, const QString &exclude) const {
+    if (track < 0 || track >= m_project.tracks)
+        return std::max(qint64(0), frame);
+    return m_project.placement(track, frame, exclude);
+}
 void Editor::addTrack() {
     mutate([](Project &p) { p.addTrack(); });
 }
@@ -155,6 +162,14 @@ void Editor::setTrack(int track, const QString &key, const QVariant &value) {
             t.hidden = value.toBool();
         else if (key == "solo")
             t.solo = value.toBool();
+        else if (key == "snapping")
+            t.snapping = value.toBool();
+        else if (key == "magnetic") {
+            p.requireEditable(track);
+            t.magnetic = value.toBool();
+            if (t.magnetic)
+                p.packTrack(track, p.trackOrder(track));
+        }
     });
 }
 void Editor::detachAudio() {
@@ -279,13 +294,13 @@ void Editor::edited() {
     emit projectChanged();
     emit changed();
 }
-void Editor::mutate(const std::function<void(Project &)> &fn) {
+bool Editor::mutate(const std::function<void(Project &)> &fn) {
     try {
         auto next = m_project;
         fn(next);
         next.validate();
         if (next.json() == m_project.json())
-            return;
+            return true;
         m_undo.push_back(m_project);
         if (m_undo.size() > 60)
             m_undo.removeFirst();
@@ -293,8 +308,10 @@ void Editor::mutate(const std::function<void(Project &)> &fn) {
         m_project = std::move(next);
         m_error.clear();
         edited();
+        return true;
     } catch (const std::exception &e) {
         fail(QString::fromUtf8(e.what()));
+        return false;
     }
 }
 void Editor::newProject() {
@@ -412,18 +429,45 @@ void Editor::redo() {
     edited();
 }
 void Editor::importMedia(const QList<QUrl> &urls) {
-    m_importQueue += urls;
+    if (!m_importing)
+        m_importErrors.clear();
+    if (urls.size() + m_importQueue.size() > 500) {
+        fail("Drop at most 500 files at a time");
+        return;
+    }
+    for (const auto &url : urls)
+        m_importQueue.push_back({url, {}});
     if (!m_probe)
         probeNext();
+}
+void Editor::dropFiles(const QList<QUrl> &urls, int track, qint64 frame) {
+    try {
+        m_project.requireEditable(track);
+        if (urls.size() + m_importQueue.size() > 500)
+            throw std::runtime_error("Drop at most 500 files at a time");
+        if (!m_importing)
+            m_importErrors.clear();
+        auto batch = std::make_shared<DropBatch>();
+        batch->trackId = m_project.trackSettings[track].id;
+        batch->frame = std::max(qint64(0), frame);
+        for (const auto &url : urls)
+            m_importQueue.push_back({url, batch});
+        if (!m_probe)
+            probeNext();
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
 }
 void Editor::probeNext() {
     if (m_importQueue.empty()) {
         m_importing = false;
+        if (!m_importErrors.empty())
+            m_error = "Some files could not be added:\n" + m_importErrors.join('\n');
         emit changed();
         return;
     }
-    const auto url = m_importQueue.takeFirst();
-    probeFile(url, {});
+    const auto request = m_importQueue.takeFirst();
+    probeFile(request.url, {}, request.drop);
 }
 void Editor::relink(const QString &id, const QUrl &url) {
     if (m_probe) {
@@ -436,13 +480,14 @@ void Editor::relink(const QString &id, const QUrl &url) {
     }
     probeFile(url, id);
 }
-void Editor::probeFile(const QUrl &url, const QString &replaceId) {
+void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_ptr<DropBatch> drop) {
     QString path;
     try {
         path = localPath(url);
         if (!QFileInfo(path).isFile())
             throw std::runtime_error("Media file does not exist");
     } catch (const std::exception &e) {
+        m_importErrors << QString::fromUtf8(e.what()) + ": " + url.fileName();
         fail(e.what());
         probeNext();
         return;
@@ -452,14 +497,17 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId) {
     m_importing = true;
     m_status = "Reading " + QFileInfo(path).fileName();
     emit changed();
-    auto complete = [this, process, path, replaceId](bool success) {
+    auto complete = [this, process, path, replaceId, drop](bool success) {
         const auto bytes = process->readAllStandardOutput();
         const auto error = QString::fromUtf8(process->readAllStandardError());
         m_probe = nullptr;
         process->deleteLater();
-        if (!success)
-            fail("Cannot read media: " + QFileInfo(path).fileName() + "\n" + error.left(2000));
-        else
+        if (!success) {
+            const auto message =
+                "Cannot read media: " + QFileInfo(path).fileName() + "\n" + error.left(1000);
+            m_importErrors << message;
+            fail(message);
+        } else
             try {
                 auto root = QJsonDocument::fromJson(bytes).object();
                 Asset a;
@@ -488,7 +536,8 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId) {
                     a.duration = 5;
                 if ((a.width == 0 && !a.hasAudio) || a.duration <= 0)
                     throw std::runtime_error("No supported finite video/audio stream found");
-                mutate([&](Project &p) {
+                QString addedClip, dropWarning;
+                const bool imported = mutate([&](Project &p) {
                     for (const auto &clip : p.clips)
                         if (clip.assetId == replaceId)
                             p.requireEditable(clip.track);
@@ -502,9 +551,37 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId) {
                                         "Replacement must have the same media type");
                                 asset = a;
                             }
+                    if (drop) {
+                        int track = -1;
+                        for (int i = 0; i < p.tracks; ++i)
+                            if (p.trackSettings[i].id == drop->trackId)
+                                track = i;
+                        if (track < 0 || p.trackSettings[track].locked)
+                            dropWarning = a.name + ": imported into the library; destination track "
+                                                   "was removed or locked.";
+                        else {
+                            auto frame = drop->frame;
+                            if (auto *last = p.clip(drop->lastClip); last && last->track == track)
+                                frame = last->start + last->duration;
+                            addedClip = insert(p, a.id, track, frame);
+                        }
+                    }
                 });
-                m_status = replaceId.isEmpty() ? "Imported " + a.name : "Media relinked";
+                if (!imported)
+                    m_importErrors << a.name + ": " + m_error;
+                else {
+                    m_status = replaceId.isEmpty() ? "Imported " + a.name : "Media relinked";
+                    if (!dropWarning.isEmpty())
+                        m_importErrors << dropWarning;
+                    if (!addedClip.isEmpty()) {
+                        drop->lastClip = addedClip;
+                        const auto *c = m_project.clip(addedClip);
+                        drop->frame = c->start + c->duration;
+                        select(addedClip);
+                    }
+                }
             } catch (const std::exception &e) {
+                m_importErrors << QFileInfo(path).fileName() + ": " + QString::fromUtf8(e.what());
                 fail(e.what());
             }
         probeNext();
@@ -525,24 +602,34 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId) {
                                            "-show_format", "-show_streams", "-of", "json", path});
 }
 void Editor::addAsset(const QString &id, int track) {
-    const auto newClipId = newId();
-    mutate([&](Project &p) {
-        p.requireEditable(track);
-        const auto *a = p.asset(id);
-        if (!a)
-            throw std::runtime_error("Media no longer exists");
-        Clip c;
-        c.id = newClipId;
-        c.assetId = id;
-        c.name = a->name;
-        c.track = track;
-        for (const auto &clip : p.clips)
-            if (clip.track == track)
-                c.start = std::max(c.start, clip.start + clip.duration);
-        c.duration = std::max(qint64(1), qint64(std::floor(a->duration * p.fpsN / p.fpsD + 1e-6)));
-        p.clips.push_back(c);
-    });
-    select(newClipId);
+    qint64 end = 0;
+    for (const auto &c : m_project.clips)
+        if (c.track == track)
+            end = std::max(end, c.start + c.duration);
+    insertAsset(id, track, end);
+}
+QString Editor::insert(Project &p, const QString &id, int track, qint64 frame) {
+    p.requireEditable(track);
+    const auto *a = p.asset(id);
+    if (!a)
+        throw std::runtime_error("Media no longer exists");
+    Clip c;
+    c.id = newId();
+    c.assetId = id;
+    c.name = a->name;
+    c.track = track;
+    c.start = frame;
+    c.duration = std::max(qint64(1), qint64(std::floor(a->duration * p.fpsN / p.fpsD + 1e-6)));
+    p.clips.push_back(c);
+    p.move(c.id, track, frame);
+    return c.id;
+}
+bool Editor::insertAsset(const QString &id, int track, qint64 frame) {
+    QString added;
+    if (!mutate([&](Project &p) { added = insert(p, id, track, frame); }))
+        return false;
+    select(added);
+    return true;
 }
 void Editor::addTitle() {
     const auto id = newId();
@@ -556,18 +643,12 @@ void Editor::addTitle() {
         c.start = m_playhead;
         c.duration = qRound64(3. * p.fpsN / p.fpsD);
         p.clips.push_back(c);
+        p.move(c.id, c.track, c.start);
     });
     select(id);
 }
 void Editor::moveClip(const QString &id, qint64 frame, int track) {
-    mutate([&](Project &p) {
-        if (auto *c = p.clip(id)) {
-            p.requireEditable(c->track);
-            p.requireEditable(track);
-            c->start = std::max(qint64(0), frame);
-            c->track = track;
-        }
-    });
+    mutate([&](Project &p) { p.move(id, track, frame); });
 }
 void Editor::setClip(const QString &key, const QVariant &v) {
     mutate([&](Project &p) {
@@ -575,14 +656,14 @@ void Editor::setClip(const QString &key, const QVariant &v) {
         if (!c)
             return;
         p.requireEditable(c->track);
-        if (key == "track")
-            p.requireEditable(v.toInt());
-        if (key == "start")
-            c->start = v.toLongLong();
-        else if (key == "duration")
+        const auto order = p.trackOrder(c->track);
+        if (key == "track" || key == "start") {
+            p.move(c->id, key == "track" ? v.toInt() : c->track,
+                   key == "start" ? v.toLongLong() : c->start);
+            return;
+        }
+        if (key == "duration")
             c->duration = v.toLongLong();
-        else if (key == "track")
-            c->track = v.toInt();
         else if (key == "sourceIn") {
             const auto t = v.toDouble();
             if (!std::isfinite(t) || t < 0 || t > 86400)
@@ -620,6 +701,8 @@ void Editor::setClip(const QString &key, const QVariant &v) {
         FIELD(muted, toBool);
         FIELD(hidden, toBool);
 #undef FIELD
+        if (p.trackSettings[c->track].magnetic)
+            p.packTrack(c->track, order);
     });
 }
 void Editor::split() {
@@ -637,6 +720,7 @@ void Editor::duplicate() {
             copy.id = id;
             copy.start += copy.duration;
             p.clips.push_back(copy);
+            p.move(copy.id, copy.track, copy.start);
         }
     });
     select(id);
@@ -845,6 +929,9 @@ void Editor::importSrt(const QUrl &url) {
         const QRegularExpression stamp("(\\d{1,3}):(\\d{2}):(\\d{2})[,.](\\d{3})\\s*-->\\s*(\\d{1,"
                                        "3}):(\\d{2}):(\\d{2})[,.](\\d{3})");
         mutate([&](Project &p) {
+            if (p.trackSettings[p.tracks - 1].magnetic)
+                throw std::runtime_error("Turn off Magnet on the caption track before importing "
+                                         "SRT to preserve caption timing");
             int count = 0;
             for (const auto &block : blocks) {
                 auto m = stamp.match(block);

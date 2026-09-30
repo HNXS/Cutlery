@@ -10,7 +10,7 @@ Use Project → Recover autosave to load the last recovery snapshot, then Save A
 
 Keyboard bindings live in `data/shortcuts.json`. Edit them through Help → Keyboard shortcuts. Preserve this file when moving to a new portable build. Track controls are saved in the project: **L** prevents clip editing, **M** mutes audio, **S** solos audio (multiple solo tracks may play), and **V** hides picture. Hiding picture does not mute sound.
 
-Version 0.2 opens schema 1 projects and saves schema 2. Version 0.1 cannot read schema 2; use Save As if you need to keep an old-version copy.
+Version 0.3 opens schema 1/2 projects and saves schema 3. Versions 0.1/0.2 cannot read schema 3; use Save As if you need to keep an old-version copy.
 
 Close Cutlery before deleting `data/cache` to reclaim disk space. Completed playback caches are disposable. Preserve `data/recovery.cutlery` if you need recovery. A hard kill can leave `.cutlery-<id>.mp4`/`.webm` partial files in an export destination; these can be deleted after confirming no render is active.
 

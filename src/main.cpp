@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QImage>
 #include <QLockFile>
 #include <QQmlApplicationEngine>
@@ -19,7 +20,8 @@ int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
     app.setOrganizationName("HNXS");
     app.setApplicationName("Cutlery");
-    app.setApplicationVersion("0.2.0");
+    app.setWindowIcon(QIcon(":/assets/cutlery.png"));
+    app.setApplicationVersion("0.3.0");
     QQuickStyle::setStyle("Basic");
     auto *frames = new cutlery::FrameProvider;
     cutlery::Editor editor(frames);

@@ -223,6 +223,114 @@ class EngineTest : public QObject {
         QCOMPARE(e.project().clips[0].duration, qint64(60));
         e.save(QUrl::fromLocalFile(dir.filePath("trim.cutlery")));
     }
+    void magneticTracks() {
+        QTemporaryDir dir;
+        Project p;
+        for (int i = 0; i < 3; ++i) {
+            Clip c;
+            c.id = QString(QChar('a' + i));
+            c.text = c.id;
+            c.duration = (i + 1) * 30;
+            c.start = (i + 1) * (i + 1) * 30;
+            p.clips.push_back(c);
+        }
+        Clip other;
+        other.id = "other";
+        other.text = "Unchanged";
+        other.track = 1;
+        other.start = 450;
+        other.duration = 30;
+        p.clips.push_back(other);
+        const auto path = dir.filePath("magnetic.cutlery");
+        saveProject(p, path);
+        FrameProvider frames;
+        Editor e(&frames);
+        QVERIFY(e.openProject(QUrl::fromLocalFile(path)));
+        auto clip = [&](const QString &id) {
+            for (const auto &c : e.project().clips)
+                if (c.id == id)
+                    return c;
+            return Clip{};
+        };
+        e.setTrack(0, "magnetic", true);
+        QCOMPARE(clip("a").start, qint64(0));
+        QCOMPARE(clip("b").start, qint64(30));
+        QCOMPARE(clip("c").start, qint64(90));
+        QCOMPARE(clip("other").start, qint64(450));
+        e.moveClip("c", 0, 0);
+        QCOMPARE(clip("c").start, qint64(0));
+        QCOMPARE(clip("a").start, qint64(90));
+        QCOMPARE(clip("b").start, qint64(120));
+        e.moveClip("a", 500, 1);
+        QCOMPARE(clip("a").start, qint64(500));
+        QCOMPARE(clip("b").start, qint64(90));
+        e.undo();
+        QCOMPARE(clip("a").track, 0);
+        QCOMPARE(clip("b").start, qint64(120));
+        e.trimClip("c", 15, 75);
+        QCOMPARE(clip("c").start, qint64(0));
+        QCOMPARE(clip("c").duration, qint64(60));
+        QCOMPARE(clip("a").start, qint64(60));
+        e.select("a");
+        e.remove();
+        QCOMPARE(clip("b").start, qint64(60));
+        e.select("c");
+        e.duplicate();
+        QCOMPARE(clip("b").start, qint64(120));
+        e.setTrack(0, "snapping", false);
+        QVERIFY(e.save());
+        QCOMPARE(loadProject(path).json(), e.project().json());
+        e.setTrack(0, "locked", true);
+        const auto locked = e.project().json();
+        e.moveClip("c", 400, 1);
+        QCOMPARE(e.project().json(), locked);
+        e.setTrack(0, "magnetic", false);
+        QCOMPARE(e.project().json(), locked);
+        auto legacy = p.json();
+        legacy["schemaVersion"] = 2;
+        const auto restored = Project::fromJson(legacy, dir.path());
+        QVERIFY(restored.trackSettings[0].snapping);
+        QVERIFY(!restored.trackSettings[0].magnetic);
+        QCOMPARE(restored.clips[0].start, p.clips[0].start);
+        e.save();
+    }
+    void fileDropPlacement() {
+        QTemporaryDir dir;
+        const auto path = dir.filePath("Drop image.png");
+        QImage image(160, 90, QImage::Format_RGB32);
+        image.fill(Qt::blue);
+        QVERIFY(image.save(path));
+        FrameProvider frames;
+        Editor e(&frames);
+        // The target survives removal of a lower empty track while ffprobe is running.
+        e.dropFiles({QUrl::fromLocalFile(path), QUrl::fromLocalFile(dir.filePath("missing.mp4")),
+                     QUrl::fromLocalFile(path)},
+                    1, 60);
+        e.removeTrack(0);
+        QTRY_VERIFY_WITH_TIMEOUT(!e.state()["importing"].toBool(), 15000);
+        QCOMPARE(e.project().assets.size(), 2);
+        QCOMPARE(e.project().clips.size(), 2);
+        QCOMPARE(e.project().clips[0].track, 0);
+        QCOMPARE(e.project().clips[0].start, qint64(60));
+        QCOMPARE(e.project().clips[1].start, qint64(210));
+        QVERIFY(e.state()["error"].toString().contains("missing.mp4"));
+        e.undo();
+        QCOMPARE(e.project().clips.size(), 1);
+        e.redo();
+        QCOMPARE(e.project().clips.size(), 2);
+        e.setTrack(0, "locked", true);
+        const auto before = e.project().json();
+        QVERIFY(!e.insertAsset(e.project().assets.first().id, 0, 0));
+        QCOMPARE(e.project().json(), before);
+        // A removed destination imports safely into the library, never an unrelated track.
+        e.dropFiles({QUrl::fromLocalFile(path)}, 1, 0);
+        e.removeTrack(1);
+        QTRY_VERIFY_WITH_TIMEOUT(!e.state()["importing"].toBool(), 15000);
+        QCOMPARE(e.project().assets.size(), 3);
+        QCOMPARE(e.project().clips.size(), 2);
+        QVERIFY(e.state()["error"].toString().contains("destination track"));
+        QVERIFY(e.save(QUrl::fromLocalFile(dir.filePath("dropped.cutlery"))));
+    }
     void shortcutPreferences() {
         QTemporaryDir dir;
         const auto path = dir.filePath("shortcuts.json");

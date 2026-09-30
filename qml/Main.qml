@@ -35,8 +35,18 @@ ApplicationWindow {
     property bool allowClose: false
     property bool showPlayback: false
     property bool playWhenReady: false
+    property var libraryGesture: null
     property bool textEditing: activeFocusItem && typeof activeFocusItem.cursorPosition === "number"
     property bool shortcutsBlocked: openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || srtOpen.visible || srtSave.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || playbackError.visible || timelinePanel.dialogOpen
+    Shortcut {
+        sequence: "Escape"
+        enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
+        onActivated: {
+            if (win.libraryGesture)
+                win.libraryGesture.cancelDrag();
+            timelinePanel.cancelDrag();
+        }
+    }
     function goTo(frame) {
         player.pause();
         showPlayback = false;
@@ -44,6 +54,8 @@ ApplicationWindow {
         timelinePanel.reveal(s.playhead);
     }
     function shortcutEnabled(command) {
+        if ((libraryGesture && libraryGesture.dragging) || timelinePanel.draggingClip)
+            return false;
         if (shortcutsBlocked)
             return false;
         if (textEditing)
@@ -305,6 +317,34 @@ ApplicationWindow {
             onActivated: win.command(modelData.id)
         }
     }
+    DropArea {
+        id: fileImportDrop
+        anchors.fill: parent
+        enabled: !win.shortcutsBlocked
+        onEntered: function (drag) {
+            drag.accepted = drag.hasUrls;
+        }
+        onDropped: function (drop) {
+            if (drop.hasUrls) {
+                editor.importMedia(drop.urls);
+                drop.acceptProposedAction();
+            }
+        }
+    }
+    Rectangle {
+        parent: Overlay.overlay
+        visible: fileImportDrop.containsDrag
+        anchors.centerIn: parent
+        width: 350
+        height: 58
+        radius: 10
+        color: "#183b34"
+        border.color: win.mint
+        Label {
+            anchors.centerIn: parent
+            text: "Drop files to import into the media library"
+        }
+    }
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -422,7 +462,7 @@ ApplicationWindow {
                         onClicked: importDialog.open()
                     }
                     Label {
-                        text: "Double-click media to append it.\nDrag clips in the timeline to arrange."
+                        text: "Drag media onto any track.\nDrop files here to import them."
                         color: win.muted
                         font.pixelSize: 11
                         wrapMode: Text.Wrap
@@ -442,13 +482,23 @@ ApplicationWindow {
                         }
                     }
                     ListView {
+                        objectName: "mediaLibrary"
+                        ScrollBar.vertical: ScrollBar {}
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
                         spacing: 8
                         model: editor.assets
                         delegate: Rectangle {
+                            id: mediaTile
                             required property var modelData
+                            objectName: "asset-" + modelData.id
+                            property string assetId: modelData.id
+                            property real mediaDuration: modelData.seconds
+                            Component.onDestruction: {
+                                if (win.libraryGesture === mediaMouse)
+                                    win.libraryGesture = null;
+                            }
                             width: ListView.view.width
                             height: 76
                             radius: 7
@@ -486,10 +536,71 @@ ApplicationWindow {
                                     }
                                 }
                             }
+                            Rectangle {
+                                id: libraryDrag
+                                parent: win.contentItem
+                                z: 1000
+                                width: 180
+                                height: 42
+                                radius: 7
+                                color: "#28564c"
+                                border.color: win.mint
+                                opacity: .92
+                                visible: mediaMouse.dragging
+                                Drag.active: mediaMouse.dragging
+                                Drag.source: mediaTile
+                                Drag.keys: ["cutlery/asset"]
+                                Drag.supportedActions: Qt.CopyAction
+                                Drag.proposedAction: Qt.CopyAction
+                                Drag.hotSpot.x: 12
+                                Drag.hotSpot.y: 12
+                                Label {
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    text: mediaTile.modelData.name
+                                    elide: Text.ElideRight
+                                }
+                            }
                             MouseArea {
                                 id: mediaMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
+                                preventStealing: true
+                                enabled: !mediaTile.modelData.missing
+                                cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                                property bool dragging: false
+                                property bool cancelled: false
+                                property point pressedAt
+                                function cancelDrag() {
+                                    cancelled = true;
+                                    libraryDrag.Drag.cancel();
+                                    dragging = false;
+                                    win.libraryGesture = null;
+                                }
+                                onPressed: function (mouse) {
+                                    const p = mapToItem(win.contentItem, mouse.x, mouse.y);
+                                    pressedAt = p;
+                                    cancelled = false;
+                                    win.libraryGesture = mediaMouse;
+                                    libraryDrag.x = p.x - 12;
+                                    libraryDrag.y = p.y - 12;
+                                }
+                                onPositionChanged: function (mouse) {
+                                    if (!pressed || cancelled)
+                                        return;
+                                    const p = mapToItem(win.contentItem, mouse.x, mouse.y);
+                                    libraryDrag.x = p.x - 12;
+                                    libraryDrag.y = p.y - 12;
+                                    if (Math.abs(p.x - pressedAt.x) + Math.abs(p.y - pressedAt.y) > 6)
+                                        dragging = true;
+                                }
+                                onReleased: {
+                                    if (dragging)
+                                        libraryDrag.Drag.drop();
+                                    dragging = false;
+                                    win.libraryGesture = null;
+                                }
+                                onCanceled: cancelDrag()
                                 onDoubleClicked: editor.addAsset(modelData.id, Math.min(win.targetTrack, win.s.tracks - 1))
                             }
                         }
@@ -942,7 +1053,8 @@ ApplicationWindow {
             id: timelinePanel
             objectName: "timelinePanel"
             Layout.fillWidth: true
-            Layout.preferredHeight: 310
+            Layout.preferredHeight: 360
+            dropsEnabled: !win.shortcutsBlocked
             state: win.s
             playbackFrame: win.showPlayback ? player.position / 1000 * win.s.fps : -1
             onSeekRequested: function (frame) {
@@ -976,7 +1088,7 @@ ApplicationWindow {
                     implicitHeight: 25
                 }
                 Label {
-                    text: "0.2.0 ALPHA"
+                    text: "0.3.0 ALPHA"
                     font.pixelSize: 9
                     font.letterSpacing: 1
                     color: win.mint
@@ -1195,7 +1307,7 @@ ApplicationWindow {
     Dialog {
         id: about
         anchors.centerIn: parent
-        title: "Cutlery · 0.2.0 alpha"
+        title: "Cutlery · 0.3.0 alpha"
         modal: true
         width: 490
         standardButtons: Dialog.Ok

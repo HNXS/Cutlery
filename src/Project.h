@@ -9,6 +9,8 @@ QString newId();
 struct Track {
     QString name;
     bool locked = false, muted = false, hidden = false, solo = false;
+    bool snapping = true, magnetic = false;
+    QString id = newId();
 };
 struct Asset {
     QString id, path, name, kind; // video, audio, image
@@ -50,6 +52,10 @@ struct Project {
     void addTrack(const QString &name = {});
     void removeTrack(int track);
     void trim(const QString &id, qint64 start, qint64 end);
+    QVector<QString> trackOrder(int track, const QString &exclude = {}) const;
+    void packTrack(int track, const QVector<QString> &order);
+    qint64 placement(int track, qint64 frame, const QString &exclude = {}) const;
+    void move(const QString &id, int track, qint64 frame);
     qint64 snap(qint64 frame, qint64 threshold, const QString &exclude, qint64 playhead,
                 qint64 length = 0) const;
 };

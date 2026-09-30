@@ -72,7 +72,7 @@
     "acceptance": "Drop mixed valid and corrupt files; valid files remain usable",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Partial",
-    "alphaNotes": "Async analysis; no file drop."
+    "alphaNotes": "Library-to-track and local file drops, async probing and waveform analysis, partial-error reporting; no directory recursion or cancellable import queue."
   },
   {
     "id": "F004",
@@ -172,7 +172,7 @@
     "acceptance": "Older fixture migrates; newer unsupported schema cannot be overwritten",
     "source": "Attachment 2, named section",
     "alphaStatus": "Implemented (alpha)",
-    "alphaNotes": "Reads schema 1 with neutral track defaults; writes schema 2. Older application versions cannot read new saves."
+    "alphaNotes": "Reads schema 1/2 without moving clips; writes schema 3 with stable track IDs and snapping/magnetic modes. Older versions cannot read new saves."
   },
   {
     "id": "F008",
@@ -596,8 +596,8 @@
     "status": "Planned",
     "acceptance": "Snap behavior independent of zoom; ripple handles locked tracks",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Clip-edge/playhead/start snapping for moves and trims; track-local ripple delete. No magnetic mode."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Per-track edge snapping and magnetic insertion/reorder/ripple edits. Master edge-snap switch is independent of Magnet; locks respected."
   },
   {
     "id": "F025",
@@ -621,8 +621,8 @@
     "status": "Planned",
     "acceptance": "Insert at fractional rate preserves sample/frame boundary policy",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Magnetic insert and reorder; free-position drops. No overwrite edit mode."
   },
   {
     "id": "F026",
@@ -671,8 +671,8 @@
     "status": "Planned",
     "acceptance": "Each tool matches golden before/after model including audio links",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Magnetic track trims ripple subsequent clips; no roll, slip, slide or linked-pair propagation."
   },
   {
     "id": "F028",
@@ -4197,7 +4197,7 @@
     "acceptance": "Media/viewer/inspector/timeline keyboard focus remains predictable",
     "source": "Attachment 2, named section",
     "alphaStatus": "Partial",
-    "alphaNotes": "Dark resizable panels; no docking/search."
+    "alphaNotes": "Dark resizable panels and original app icon; no docking/search."
   },
   {
     "id": "F169",

@@ -40,4 +40,6 @@ Click the timeline before using editing/playback keys. During text entry, normal
 
 **Playback:** Space renders the current timeline if the cache is missing, then starts playback from the playhead. Rendering can take time; progress and Cancel appear in the interface. Edits invalidate the cache. Space pauses/resumes; K pauses at the displayed frame. Ctrl+R prepares the cache without requesting playback. Export video creates a separate file that can be played in a compatible video player.
 
-Q/W require the playhead to be inside the selected clip. Delete closes no gap; Shift+Delete moves later clips on the same track back by the removed duration. Locked tracks reject clip edits. Up/Down navigate clip starts and ends. These bindings cover implemented Cutlery commands; they are not a complete CapCut keymap. J/L shuttle, markers, copy/paste and other future editing features are not implemented yet.
+**Escape** cancels an active library or timeline drag. Editing shortcuts are suspended during a drag.
+
+Q/W require the playhead to be inside the selected clip. On free tracks, Delete closes no gap; Shift+Delete moves later clips on the same track back by the removed duration. On magnetic tracks, Delete closes the gap automatically. Locked tracks reject clip edits. Up/Down navigate clip starts and ends. These bindings cover implemented Cutlery commands; they are not a complete CapCut keymap. J/L shuttle, markers, copy/paste and other future editing features are not implemented yet.
