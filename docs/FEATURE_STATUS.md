@@ -45,9 +45,9 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F039 | Crop, mirror and aspect ratios | Partial | Equal-edge crop, horizontal mirror, canvas presets. |
 | F040 | Perspective and corner pin | Planned | Not implemented in this alpha. |
 | F041 | Blend modes and alpha compositing | Partial | Normal alpha compositing only. |
-| F042 | Rectangle and ellipse masks | Planned | Not implemented in this alpha. |
+| F042 | Rectangle and ellipse masks | Partial | Overlay shapes: rounded rectangle (adjustable radius) and centre-square circle, antialiased; no feather or free positioning of the mask. |
 | F043 | Polygon, freeform and Bezier masks | Planned | Not implemented in this alpha. |
-| F044 | Luma key, chroma key and spill suppression | Planned | Not implemented in this alpha. |
+| F044 | Luma key, chroma key and spill suppression | Partial | Colour key (green/blue presets) with tolerance and edge softness, plus automatic green/blue spill suppression; no luma key or colour picker. |
 | F045 | Background replacement and canvas | Planned | Not implemented in this alpha. |
 | F046 | Adjustment layers and filter ordering | Planned | Not implemented in this alpha. |
 | F047 | Blur variants, mosaic and pixelation | Planned | Not implemented in this alpha. |

@@ -657,6 +657,99 @@ ApplicationWindow {
                                 visible: win.s.duration > 0
                                 Component.onCompleted: editor.setVideoSink(videoSink)
                             }
+                            // Selected clip on the canvas: drag inside to move, drag a corner to
+                            // resize around the centre. One undo step on release; animated
+                            // properties get a keyframe at the playhead.
+                            Item {
+                                id: transformBox
+                                objectName: "transformBox"
+                                readonly property var bounds: {
+                                    win.s.revision;
+                                    win.s.playhead;
+                                    return win.s.selectedId.length > 0 ? editor.clipBounds(win.s.selectedId) : ({});
+                                }
+                                readonly property real canvasWidth: parent.width
+                                readonly property real canvasHeight: parent.height
+                                property real dragX: 0
+                                property real dragY: 0
+                                property real dragScale: 1
+                                visible: bounds.inside === true && !editor.playing && win.selection.locked !== true && win.s.duration > 0
+                                x: ((bounds.x || 0) + dragX) * canvasWidth + (bounds.width || 0) * canvasWidth * (1 - dragScale) / 2
+                                y: ((bounds.y || 0) + dragY) * canvasHeight + (bounds.height || 0) * canvasHeight * (1 - dragScale) / 2
+                                width: (bounds.width || 0) * canvasWidth * dragScale
+                                height: (bounds.height || 0) * canvasHeight * dragScale
+                                function commit() {
+                                    const now = win.selection.animated || {};
+                                    const values = {};
+                                    if (dragX !== 0 || dragY !== 0) {
+                                        values.x = Math.max(-2, Math.min(2, now.x + dragX));
+                                        values.y = Math.max(-2, Math.min(2, now.y + dragY));
+                                    }
+                                    if (dragScale !== 1)
+                                        values.scale = Math.max(.1, Math.min(3, now.scale * dragScale));
+                                    dragX = 0;
+                                    dragY = 0;
+                                    dragScale = 1;
+                                    if (Object.keys(values).length > 0)
+                                        editor.setClipValues(values);
+                                }
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: "transparent"
+                                    border.color: win.mint
+                                    border.width: 2
+                                }
+                                MouseArea {
+                                    id: moveHandle
+                                    objectName: "transformMove"
+                                    anchors.fill: parent
+                                    cursorShape: Qt.SizeAllCursor
+                                    property point origin
+                                    onPressed: function (mouse) {
+                                        origin = mapToItem(transformBox.parent, mouse.x, mouse.y);
+                                    }
+                                    onPositionChanged: function (mouse) {
+                                        const point = mapToItem(transformBox.parent, mouse.x, mouse.y);
+                                        transformBox.dragX = (point.x - origin.x) / transformBox.canvasWidth;
+                                        transformBox.dragY = (point.y - origin.y) / transformBox.canvasHeight;
+                                    }
+                                    onReleased: transformBox.commit()
+                                    onCanceled: transformBox.commit()
+                                }
+                                Repeater {
+                                    model: 4
+                                    Rectangle {
+                                        required property int index
+                                        objectName: "transformCorner" + index
+                                        x: (index % 2) * transformBox.width - width / 2
+                                        y: (index < 2 ? 0 : 1) * transformBox.height - height / 2
+                                        width: 12
+                                        height: 12
+                                        radius: 3
+                                        color: win.mint
+                                        border.color: "#0b1016"
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            anchors.margins: -4
+                                            cursorShape: index === 0 || index === 3 ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor
+                                            property point centre
+                                            property real reach: 1
+                                            onPressed: function (mouse) {
+                                                const b = transformBox.bounds;
+                                                centre = Qt.point((b.x + b.width / 2) * transformBox.canvasWidth, (b.y + b.height / 2) * transformBox.canvasHeight);
+                                                const point = mapToItem(transformBox.parent, mouse.x, mouse.y);
+                                                reach = Math.max(4, Math.hypot(point.x - centre.x, point.y - centre.y));
+                                            }
+                                            onPositionChanged: function (mouse) {
+                                                const point = mapToItem(transformBox.parent, mouse.x, mouse.y);
+                                                transformBox.dragScale = Math.max(.05, Math.hypot(point.x - centre.x, point.y - centre.y) / reach);
+                                            }
+                                            onReleased: transformBox.commit()
+                                            onCanceled: transformBox.commit()
+                                        }
+                                    }
+                                }
+                            }
                             ColumnLayout {
                                 anchors.centerIn: parent
                                 visible: win.s.duration === 0
@@ -922,6 +1015,169 @@ ApplicationWindow {
                                     placeholderText: "Text colour (#rrggbb)"
                                     onEditingFinished: editor.setClip("textColor", text)
                                 }
+                            }
+                            // Presenter overlays: corner placement, shape, border, shadow, green screen.
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                visible: win.selection.audioOnly !== true && editor.clipBounds(win.s.selectedId).width !== undefined
+                                spacing: 6
+                                Caption {
+                                    text: "PRESENTER OVERLAY"
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Repeater {
+                                        model: [
+                                            { id: "topLeft", label: "↖" },
+                                            { id: "topRight", label: "↗" },
+                                            { id: "bottomLeft", label: "↙" },
+                                            { id: "bottomRight", label: "↘" },
+                                            { id: "full", label: "⛶" }
+                                        ]
+                                        Action {
+                                            required property var modelData
+                                            objectName: "place-" + modelData.id
+                                            text: modelData.label
+                                            padding: 6
+                                            Layout.fillWidth: true
+                                            enabled: win.selection.locked !== true
+                                            onClicked: editor.placeClip(modelData.id)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: modelData.id === "full" ? "Full frame" : "Picture-in-picture in this corner"
+                                        }
+                                    }
+                                }
+                                ComboBox {
+                                    id: overlayShape
+                                    objectName: "overlayShape"
+                                    Layout.fillWidth: true
+                                    readonly property var shapes: ["rect", "rounded", "circle"]
+                                    model: ["Rectangle", "Rounded corners", "Circle"]
+                                    currentIndex: Math.max(0, shapes.indexOf(win.selection.shape || "rect"))
+                                    onActivated: editor.setClip("shape", shapes[currentIndex])
+                                }
+                                Repeater {
+                                    model: [
+                                        { key: "radius", name: "Corner radius", lo: 0, hi: .5, step: .01, show: "rounded" },
+                                        { key: "border", name: "Border", lo: 0, hi: .03, step: .001, show: "" },
+                                        { key: "shadow", name: "Shadow", lo: 0, hi: 1, step: .05, show: "" }
+                                    ]
+                                    ColumnLayout {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        spacing: 0
+                                        visible: modelData.show === "" || win.selection.shape === modelData.show
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Label {
+                                                text: modelData.name
+                                                color: win.muted
+                                                Layout.fillWidth: true
+                                            }
+                                            Label {
+                                                text: Number(win.selection[modelData.key] ?? 0).toFixed(modelData.key === "border" ? 3 : 2)
+                                                font.pixelSize: 10
+                                            }
+                                        }
+                                        Slider {
+                                            objectName: "style-" + modelData.key
+                                            Layout.fillWidth: true
+                                            from: modelData.lo
+                                            to: modelData.hi
+                                            stepSize: modelData.step
+                                            value: win.selection[modelData.key] ?? 0
+                                            onPressedChanged: if (!pressed)
+                                                editor.setClip(modelData.key, value)
+                                            onMoved: if (!pressed)
+                                                editor.setClip(modelData.key, value)
+                                        }
+                                    }
+                                }
+                                RowLayout {
+                                    visible: (win.selection.border || 0) > 0
+                                    Label {
+                                        text: "Border colour"
+                                        color: win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    Repeater {
+                                        model: ["#ffffff", "#000000", "#64d8bc", "#ffd479", "#ec6f5a"]
+                                        Rectangle {
+                                            required property string modelData
+                                            width: 20
+                                            height: 20
+                                            radius: 10
+                                            color: modelData
+                                            border.width: win.selection.borderColor === modelData ? 3 : 1
+                                            border.color: win.selection.borderColor === modelData ? win.mint : "#6481a0"
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: editor.setClip("borderColor", parent.modelData)
+                                            }
+                                        }
+                                    }
+                                }
+                                CheckBox {
+                                    objectName: "chromaKey"
+                                    text: "Remove green/blue screen"
+                                    checked: win.selection.chromaKey || false
+                                    onToggled: editor.setClip("chromaKey", checked)
+                                }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    visible: win.selection.chromaKey === true
+                                    spacing: 0
+                                    RowLayout {
+                                        Label {
+                                            text: "Screen colour"
+                                            color: win.muted
+                                            Layout.fillWidth: true
+                                        }
+                                        Repeater {
+                                            model: ["#00ff00", "#00b140", "#0047bb"]
+                                            Rectangle {
+                                                required property string modelData
+                                                width: 20
+                                                height: 20
+                                                radius: 10
+                                                color: modelData
+                                                border.width: (win.selection.keyColor || "") === modelData ? 3 : 1
+                                                border.color: (win.selection.keyColor || "") === modelData ? win.mint : "#6481a0"
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    onClicked: editor.setClip("keyColor", parent.modelData)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Repeater {
+                                        model: [
+                                            { key: "keySimilarity", name: "Tolerance", lo: .01, hi: .6 },
+                                            { key: "keyBlend", name: "Edge softness", lo: 0, hi: .4 }
+                                        ]
+                                        ColumnLayout {
+                                            required property var modelData
+                                            Layout.fillWidth: true
+                                            spacing: 0
+                                            Label {
+                                                text: modelData.name + "  " + Number(win.selection[modelData.key] ?? 0).toFixed(2)
+                                                color: win.muted
+                                            }
+                                            Slider {
+                                                Layout.fillWidth: true
+                                                from: modelData.lo
+                                                to: modelData.hi
+                                                stepSize: .01
+                                                value: win.selection[modelData.key] ?? 0
+                                                onPressedChanged: if (!pressed)
+                                                    editor.setClip(modelData.key, value)
+                                                onMoved: if (!pressed)
+                                                    editor.setClip(modelData.key, value)
+                                            }
+                                        }
+                                    }
+                                }
+                                Rule {}
                             }
                             Caption {
                                 text: "PICTURE & SOUND"

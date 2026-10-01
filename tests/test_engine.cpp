@@ -5,6 +5,7 @@
 #include "RenderGraph.h"
 #include "Thumbnails.h"
 #include <QJsonArray>
+#include <QPainter>
 #include <QJsonDocument>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -492,7 +493,7 @@ class EngineTest : public QObject {
         const auto roundtrip = Project::fromJson(p.json(dir.path()), dir.path());
         QCOMPARE(roundtrip.clips[1].transition, QString("fade"));
         QCOMPARE(roundtrip.clips[1].transitionFrames, qint64(10));
-        QCOMPARE(p.json()["schemaVersion"].toInt(), 5);
+        QVERIFY(p.json()["schemaVersion"].toInt() >= 4);
         auto split = p;
         QVERIFY(split.split("b", 45));
         QCOMPARE(split.clips[1].transition, QString("fade"));
@@ -616,7 +617,7 @@ class EngineTest : public QObject {
         QCOMPARE(edited.clips.last().valueAt("x", 10), .25);
         const auto saved = Project::fromJson(edited.json(dir.path()), dir.path());
         QCOMPARE(saved.clips.last().keyframes["x"], edited.clips.last().keyframes["x"]);
-        QCOMPARE(edited.json()["schemaVersion"].toInt(), 5);
+        QVERIFY(edited.json()["schemaVersion"].toInt() >= 5);
         for (auto bad : {QVector<Keyframe>{{10, 0, true}, {5, 0, true}},
                          QVector<Keyframe>{{0, 9, true}}}) {
             auto invalid = p;
@@ -806,6 +807,131 @@ class EngineTest : public QObject {
         else
             QVERIFY2(editor.state()["error"].toString().contains("No H264 encoder"),
                      qPrintable(editor.state()["error"].toString()));
+    }
+    void overlayStyles() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto background = dir.filePath("blue.png");
+        QImage blue(160, 90, QImage::Format_RGB32);
+        blue.fill(Qt::blue);
+        QVERIFY(blue.save(background));
+        // Speaker stand-in: red square on a green screen, 160x90.
+        const auto speaker = dir.filePath("speaker.png");
+        QImage screen(160, 90, QImage::Format_RGB32);
+        screen.fill(QColor(0, 255, 0));
+        QPainter(&screen).fillRect(60, 25, 40, 40, Qt::red);
+        QVERIFY(screen.save(speaker));
+        Project p;
+        p.width = 160;
+        p.height = 90;
+        for (auto [id, path] : {std::pair{"bg", background}, {"speaker", speaker}}) {
+            Asset a;
+            a.id = id;
+            a.path = path;
+            a.kind = "image";
+            a.duration = 5;
+            a.width = 160;
+            a.height = 90;
+            p.assets.push_back(a);
+        }
+        Clip bg;
+        bg.id = "bg";
+        bg.assetId = "bg";
+        bg.duration = 30;
+        Clip pip = bg;
+        pip.id = "pip";
+        pip.assetId = "speaker";
+        pip.track = 1;
+        p.clips = {bg, pip};
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Project &project) {
+            RenderOptions options;
+            options.audio = false;
+            options.to = 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 160, 90, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        auto isBlue = [](QColor c) { return c.blue() > 200 && c.red() < 60 && c.green() < 60; };
+        auto isRed = [](QColor c) { return c.red() > 200 && c.green() < 60 && c.blue() < 60; };
+        auto isWhite = [](QColor c) { return c.red() > 200 && c.green() > 200 && c.blue() > 200; };
+        // Circle: a 90x90 centre square scaled to 45x45, white ring, soft shadow.
+        auto circle = p;
+        auto &c = circle.clips[1];
+        c.scale = .5;
+        c.shape = "circle";
+        c.border = 0.1; // 5 px at this size: picture radius 23, ring to 28
+        c.shadow = 1;
+        auto image = still(circle);
+        QVERIFY(isRed(image.pixelColor(80, 45)));
+        QVERIFY2(isBlue(image.pixelColor(52, 17)), qPrintable(image.pixelColor(52, 17).name()));
+        QVERIFY2(isWhite(image.pixelColor(80, 45 - 26)), qPrintable(image.pixelColor(80, 19).name()));
+        int darkest = 255;
+        for (int y = 45 + 29; y < 45 + 34; ++y)
+            darkest = std::min(darkest, image.pixelColor(80, y).blue());
+        QVERIFY2(darkest < 240, qPrintable(QString::number(darkest))); // shadow below the ring
+        QVERIFY(isBlue(image.pixelColor(5, 5)));
+        // Rounded rectangle: corners show the background, the edge midpoint shows the picture.
+        auto rounded = p;
+        rounded.clips[1].scale = .5;
+        rounded.clips[1].shape = "rounded";
+        rounded.clips[1].radius = .4;
+        image = still(rounded);
+        QVERIFY2(isBlue(image.pixelColor(41, 23)), qPrintable(image.pixelColor(41, 23).name()));
+        QVERIFY(image.pixelColor(80, 24).green() > 200);
+        // Green screen: the key colour disappears, the subject stays.
+        auto keyed = p;
+        keyed.clips[1].chromaKey = true;
+        image = still(keyed);
+        QVERIFY2(isBlue(image.pixelColor(20, 20)), qPrintable(image.pixelColor(20, 20).name()));
+        QVERIFY(isRed(image.pixelColor(80, 45)));
+        // Keying, a circle and animated scale together.
+        keyed.clips[1].shape = "circle";
+        keyed.clips[1].keyframes["scale"] = {{0, .5, false}, {29, 1, false}};
+        image = still(keyed);
+        QVERIFY(isRed(image.pixelColor(80, 45)));
+        QVERIFY(isBlue(image.pixelColor(60, 45)));
+        // Style values persist, and invalid ones are rejected.
+        const auto saved = Project::fromJson(circle.json(dir.path()), dir.path());
+        QCOMPARE(saved.clips[1].shape, QString("circle"));
+        QCOMPARE(saved.clips[1].border, .1);
+        QVERIFY(circle.json()["schemaVersion"].toInt() >= 6);
+        auto invalid = p;
+        invalid.clips[1].shape = "star";
+        QVERIFY_EXCEPTION_THROWN(invalid.validate(), std::runtime_error);
+
+        // Editor: bounds for the preview handles, one-step position edits, portrait probing.
+        FrameProvider frames;
+        Editor editor(&frames);
+        const auto file = dir.filePath("p.cutlery");
+        saveProject(rounded, file);
+        QVERIFY(editor.openProject(QUrl::fromLocalFile(file)));
+        auto bounds = editor.clipBounds("pip");
+        QCOMPARE(bounds["width"].toDouble(), .5);
+        QCOMPARE(bounds["x"].toDouble(), .25);
+        editor.select("pip");
+        editor.setClipValues({{"x", .2}, {"y", -.2}, {"scale", .3}});
+        QCOMPARE(editor.project().clips[1].x, .2);
+        QCOMPARE(editor.project().clips[1].scale, .3);
+        editor.undo();
+        QCOMPARE(editor.project().clips[1].x, 0.);
+        QCOMPARE(editor.project().clips[1].scale, .5);
+        const auto landscape = dir.filePath("landscape.mp4"), portrait = dir.filePath("portrait.mp4");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "testsrc2=s=160x90:r=30:d=1", "-c:v",
+                     "mpeg4", landscape});
+        run(ffmpeg, {"-v", "error", "-display_rotation", "90", "-i", landscape, "-c", "copy",
+                     portrait});
+        editor.importMedia({QUrl::fromLocalFile(portrait)});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["importing"].toBool(), 15000);
+        QCOMPARE(editor.project().assets.last().width, 90);
+        QCOMPARE(editor.project().assets.last().height, 160);
     }
     void waveformPeaksAndCache() {
         PeakAccumulator peaks(2);

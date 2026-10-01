@@ -106,6 +106,16 @@ void Clip::scaleKeyframes(double factor) {
         list = scaled;
     }
 }
+QSizeF Project::pictureSize(const Clip &c, double boxWidth, double boxHeight) const {
+    const auto *a = asset(c.assetId);
+    double aspect = a && a->width > 0 && a->height > 0 ? double(a->width) / a->height
+                                                       : double(width) / height;
+    if (c.shape == "circle")
+        aspect = 1;
+    if (boxWidth / boxHeight > aspect)
+        return {boxHeight * aspect, boxHeight};
+    return {boxWidth, boxWidth / aspect};
+}
 const Clip *Project::previousAdjacent(const Clip &c) const {
     const Clip *found = nullptr;
     for (const auto &x : clips)
@@ -212,17 +222,26 @@ QJsonObject Project::json(const QString &base) const {
             }
             o["keyframes"] = animated;
         }
+        o["shape"] = c.shape;
+        o["radius"] = c.radius;
+        o["border"] = c.border;
+        o["borderColor"] = c.borderColor;
+        o["shadow"] = c.shadow;
+        o["chromaKey"] = c.chromaKey;
+        o["keyColor"] = c.keyColor;
+        o["keySimilarity"] = c.keySimilarity;
+        o["keyBlend"] = c.keyBlend;
         o["transition"] = c.transition;
         o["transitionFrames"] = QString::number(c.transitionFrames);
         cc.append(o);
     }
-    return {{"format", "cutlery"}, {"schemaVersion", 5}, {"name", name},       {"width", width},
+    return {{"format", "cutlery"}, {"schemaVersion", 6}, {"name", name},       {"width", width},
             {"height", height},    {"fpsN", fpsN},       {"fpsD", fpsD},       {"tracks", tracks},
             {"assets", aa},        {"clips", cc},        {"trackSettings", tt}};
 }
 Project Project::fromJson(const QJsonObject &o, const QString &base) {
     require(o["format"] == "cutlery" &&
-                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 5),
+                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 6),
             "Unsupported project format/version. Original left unchanged.");
     require(o["assets"].isArray() && o["clips"].isArray(), "Missing project collections");
     Project p;
@@ -318,6 +337,15 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
                 c.keyframes[it.key()].push_back({integer(k[0]), k[1].toDouble(), k[2].toBool()});
             }
         }
+        c.shape = j["shape"].toString("rect");
+        c.radius = j["radius"].toDouble(0.12);
+        c.border = j["border"].toDouble(0);
+        c.borderColor = j["borderColor"].toString("#ffffff");
+        c.shadow = j["shadow"].toDouble(0);
+        c.chromaKey = j["chromaKey"].toBool();
+        c.keyColor = j["keyColor"].toString("#00ff00");
+        c.keySimilarity = j["keySimilarity"].toDouble(0.25);
+        c.keyBlend = j["keyBlend"].toDouble(0.08);
         c.transition = j["transition"].toString();
         if (j.contains("transitionFrames"))
             c.transitionFrames = integer(j["transitionFrames"]);
@@ -388,6 +416,12 @@ void Project::validate() const {
                         "Invalid keyframe");
             }
         }
+        require(QStringList{"rect", "rounded", "circle"}.contains(c.shape) &&
+                    bounded(c.radius, 0, 0.5) && bounded(c.border, 0, 0.1) &&
+                    QColor(c.borderColor).isValid() && bounded(c.shadow, 0, 1) &&
+                    QColor(c.keyColor).isValid() && bounded(c.keySimilarity, 0.01, 1) &&
+                    bounded(c.keyBlend, 0, 1),
+                "Invalid overlay style");
         require(c.transitionFrames >= 0 && c.transitionFrames <= 100000000 &&
                     (c.transition.isEmpty() ||
                      std::any_of(transitionTypes().begin(), transitionTypes().end(),

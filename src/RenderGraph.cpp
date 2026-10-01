@@ -19,6 +19,89 @@ static bool animatedGeometry(const Clip &c) {
     return c.keyframes.contains("scale") || c.keyframes.contains("x") ||
            c.keyframes.contains("y") || c.keyframes.contains("rotation");
 }
+// Alpha mask of a styled overlay: rounded rectangle or circle, antialiased.
+static QImage overlayMask(const Clip &c, int w, int h) {
+    QImage mask(w, h, QImage::Format_ARGB32_Premultiplied);
+    mask.fill(Qt::transparent);
+    QPainter paint(&mask);
+    paint.setRenderHint(QPainter::Antialiasing);
+    paint.setPen(Qt::NoPen);
+    paint.setBrush(Qt::white);
+    if (c.shape == "circle")
+        paint.drawEllipse(QRectF(0, 0, w, h));
+    else {
+        const double r = c.radius * std::min(w, h);
+        paint.drawRoundedRect(QRectF(0, 0, w, h), r, r);
+    }
+    return mask;
+}
+struct Decoration {
+    QImage image;
+    QPoint offset; // where the picture goes inside the image
+};
+// Border ring and soft drop shadow around a styled overlay, drawn once per render.
+static Decoration overlayDecoration(const Clip &c, int w, int h, double scaleHeight) {
+    const int b = int(std::lround(c.border * scaleHeight));
+    const int s = c.shadow > 0 ? std::max(4, int(std::lround(0.04 * scaleHeight))) : 0;
+    const int dw = w + 2 * (b + s), dh = h + 2 * (b + s);
+    QImage image(dw, dh, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    const QRectF ring(s, s, w + 2 * b, h + 2 * b), picture(s + b, s + b, w, h);
+    auto shapePath = [&](const QRectF &rect, double extra) {
+        QPainterPath path;
+        if (c.shape == "circle")
+            path.addEllipse(rect);
+        else if (c.shape == "rounded") {
+            const double r = c.radius * std::min(w, h) + extra;
+            path.addRoundedRect(rect, r, r);
+        } else
+            path.addRect(rect);
+        return path;
+    };
+    if (s > 0) {
+        // Shadow: the shape in black, offset down, box-blurred three times on alpha.
+        QImage shadow(dw, dh, QImage::Format_ARGB32);
+        shadow.fill(Qt::transparent);
+        QPainter paint(&shadow);
+        paint.setRenderHint(QPainter::Antialiasing);
+        // Only outside the picture, so keyed (transparent) areas show the background cleanly.
+        paint.fillPath(shapePath(ring.translated(0, s * 0.35), b).subtracted(shapePath(picture, 0)),
+                       QColor(0, 0, 0));
+        paint.end();
+        const int radius = std::max(1, s / 3);
+        QVector<int> alpha(dw * dh), tmp(dw * dh);
+        for (int y = 0; y < dh; ++y)
+            for (int x = 0; x < dw; ++x)
+                alpha[y * dw + x] = qAlpha(shadow.pixel(x, y));
+        for (int pass = 0; pass < 3; ++pass) {
+            for (int y = 0; y < dh; ++y)
+                for (int x = 0; x < dw; ++x) {
+                    int sum = 0, n = 0;
+                    for (int k = std::max(0, x - radius); k <= std::min(dw - 1, x + radius); ++k, ++n)
+                        sum += alpha[y * dw + k];
+                    tmp[y * dw + x] = sum / n;
+                }
+            for (int y = 0; y < dh; ++y)
+                for (int x = 0; x < dw; ++x) {
+                    int sum = 0, n = 0;
+                    for (int k = std::max(0, y - radius); k <= std::min(dh - 1, y + radius); ++k, ++n)
+                        sum += tmp[k * dw + x];
+                    alpha[y * dw + x] = sum / n;
+                }
+        }
+        for (int y = 0; y < dh; ++y)
+            for (int x = 0; x < dw; ++x)
+                image.setPixel(x, y, qPremultiply(qRgba(0, 0, 0,
+                                                        int(alpha[y * dw + x] * 0.6 * c.shadow))));
+    }
+    if (b > 0) {
+        QPainter paint(&image);
+        paint.setRenderHint(QPainter::Antialiasing);
+        paint.fillPath(shapePath(ring, b).subtracted(shapePath(picture, 0)),
+                       QColor(c.borderColor));
+    }
+    return {image, QPoint(s + b, s + b)};
+}
 // FFmpeg expression for a property over clip-local frame `frame`, matching Clip::valueAt.
 static QString curve(const Clip &c, const QString &property, const QString &frame) {
     const auto k = c.keyframes.value(property);
@@ -211,14 +294,24 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                  .arg(l0 + base);
         if (c.crop > 0)
             f += QString(",crop=iw*(1-2*%1):ih*(1-2*%1)").arg(num(c.crop));
+        if (c.shape == "circle")
+            f += ",crop='min(iw,ih)':'min(iw,ih)'";
         const bool moving = animatedGeometry(c);
         // Animated geometry first fits the canvas at scale 1 and is resized per frame below;
         // otherwise the clip is scaled once.
+        const double boxScale = moving ? 1 : c.scale;
         int w = moving ? width : std::max(2, int(width * c.scale) / 2 * 2),
             h = moving ? height : std::max(2, int(height * c.scale) / 2 * 2);
-        f += QString(",scale=%1:%2:force_original_aspect_ratio=decrease,setsar=1,format=rgba")
-                 .arg(w)
-                 .arg(h);
+        if (c.styled()) {
+            // Styled overlays need the exact picture size for their mask and decoration.
+            const auto size = p.pictureSize(c, w, h);
+            w = std::max(2, int(std::lround(size.width() / 2)) * 2);
+            h = std::max(2, int(std::lround(size.height() / 2)) * 2);
+            f += QString(",scale=%1:%2,setsar=1,format=rgba").arg(w).arg(h);
+        } else
+            f += QString(",scale=%1:%2:force_original_aspect_ratio=decrease,setsar=1,format=rgba")
+                     .arg(w)
+                     .arg(h);
         if (c.flip)
             f += ",hflip";
         if (c.brightness != 0 || c.contrast != 1) {
@@ -228,6 +321,49 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         }
         if (c.saturation != 1)
             f += ",hue=s=" + num(c.saturation);
+        if (c.chromaKey) {
+            const QColor key(c.keyColor);
+            f += QString(",colorkey=0x%1:%2:%3")
+                     .arg(key.name().mid(1), num(c.keySimilarity), num(c.keyBlend));
+            // Remove the green or blue light reflected onto the subject.
+            if (key.green() > key.red() && key.green() > key.blue())
+                f += ",despill=type=green,format=rgba";
+            else if (key.blue() > key.red() && key.blue() > key.green())
+                f += ",despill=type=blue,format=rgba";
+        }
+        // Each still layer (mask, decoration) is a looped image retimed to the clip's frames.
+        auto stillInput = [&](const QImage &image, const QString &kind) {
+            const auto file = QDir(work).filePath(QString("%1-%2.png").arg(kind).arg(serial++));
+            if (!image.save(file))
+                throw std::runtime_error("Cannot write overlay style asset");
+            r.inputs << "-loop" << "1" << "-framerate" << fps << "-i" << file;
+            return QString("[%1:v:0]settb=%2/%3,setpts=N+%4")
+                .arg(input++)
+                .arg(p.fpsD)
+                .arg(p.fpsN)
+                .arg(l0 + base);
+        };
+        if (c.shape != "rect") {
+            // Multiply the picture's alpha by the shape: keeps chroma-key transparency.
+            const auto id = QString::number(serial++);
+            nodes << f + QString(",format=gbrap[pic%1]").arg(id);
+            nodes << stillInput(overlayMask(c, w, h), "mask") +
+                         QString(",format=gbrap[mask%1]").arg(id);
+            f = QString("[pic%1][mask%1]blend=c0_mode=normal:c1_mode=normal:c2_mode=normal:"
+                        "c3_mode=multiply:shortest=1,format=rgba")
+                    .arg(id);
+        }
+        if (c.border > 0 || c.shadow > 0) {
+            // Border and shadow are drawn once into a larger image the picture sits on.
+            const auto deco = overlayDecoration(c, w, h, height * boxScale);
+            const auto id = QString::number(serial++);
+            nodes << f + QString("[pic%1]").arg(id);
+            nodes << stillInput(deco.image, "deco") + QString(",format=rgba[deco%1]").arg(id);
+            f = QString("[deco%1][pic%1]overlay=x=%2:y=%3:format=auto:eof_action=endall")
+                    .arg(id)
+                    .arg(deco.offset.x())
+                    .arg(deco.offset.y());
+        }
         if (!moving && c.rotation != 0)
             f += QString(",rotate=%1*PI/180:ow=rotw(%1*PI/180):oh=roth(%1*PI/180):c=black@0")
                      .arg(num(c.rotation));

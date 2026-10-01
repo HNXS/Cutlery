@@ -380,6 +380,89 @@ class UiTest : public QObject {
         QCOMPARE(dialog->property("preview").toMap()["extension"].toString(), QString("mov"));
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void presenterControls() {
+        QTemporaryDir dir;
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.configure(1280, 720, 30, 1);
+        editor.addTitle();
+        editor.addTitle();
+        auto &clips = editor.project().clips;
+        const auto top = clips.last().id;
+        editor.select(top);
+        editor.seek(10);
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        QTest::qWait(100);
+        auto press = [&](const QString &name) {
+            auto *item = findItem(window->contentItem(), name);
+            QVERIFY2(item && item->isVisible() && item->isEnabled(), qPrintable(name));
+            QVERIFY(QMetaObject::invokeMethod(item, "clicked"));
+        };
+        auto clip = [&]() { return *editor.project().clip(top); };
+        press("place-bottomRight");
+        QCOMPARE(clip().scale, .3);
+        // 30% of 1280x720 is 384x216; centred 0.03*720 = 21.6 px from the bottom-right corner.
+        QVERIFY(std::abs(clip().x - (0.5 - (192 + 21.6) / 1280)) < 1e-9);
+        QVERIFY(std::abs(clip().y - (0.5 - (108 + 21.6) / 720)) < 1e-9);
+        auto *box = findItem(window->contentItem(), "transformBox");
+        QTRY_VERIFY(box && box->isVisible());
+        auto *move = findItem(window->contentItem(), "transformMove");
+        QVERIFY(move);
+        // Drag the overlay left by a quarter of the viewer width.
+        const auto canvasWidth = box->property("canvasWidth").toDouble();
+        const auto start = move->mapToScene(QPointF(move->width() / 2, move->height() / 2)).toPoint();
+        const auto end = start - QPoint(int(canvasWidth / 4), 0);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, start);
+        QTest::mouseMove(window, start - QPoint(10, 0), 20);
+        QTest::mouseMove(window, end, 20);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, end);
+        const double movedX = 0.5 - (192 + 21.6) / 1280 - 0.25;
+        QTRY_VERIFY2(std::abs(clip().x - movedX) < 0.01, qPrintable(QString::number(clip().x)));
+        QCOMPARE(clip().scale, .3);
+        // Drag the bottom-right corner outwards to enlarge.
+        auto *corner = findItem(window->contentItem(), "transformCorner3");
+        QVERIFY(corner);
+        const auto cornerPoint =
+            corner->mapToScene(QPointF(corner->width() / 2, corner->height() / 2)).toPoint();
+        const auto centre = box->mapToScene(QPointF(box->width() / 2, box->height() / 2)).toPoint();
+        const auto outward = cornerPoint + (cornerPoint - centre) / 2;
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, cornerPoint);
+        QTest::mouseMove(window, cornerPoint + QPoint(3, 3), 20);
+        QTest::mouseMove(window, outward, 20);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, outward);
+        QTRY_VERIFY2(clip().scale > .4 && clip().scale < .5, qPrintable(QString::number(clip().scale)));
+        editor.undo();
+        QCOMPARE(clip().scale, .3);
+        // Style controls.
+        auto *shape = findItem(window->contentItem(), "overlayShape");
+        QVERIFY(shape);
+        shape->setProperty("currentIndex", 2);
+        QVERIFY(QMetaObject::invokeMethod(shape, "activated", Q_ARG(int, 2)));
+        QCOMPARE(clip().shape, QString("circle"));
+        auto *key = findItem(window->contentItem(), "chromaKey");
+        QVERIFY(key);
+        key->setProperty("checked", true);
+        QVERIFY(QMetaObject::invokeMethod(key, "toggled"));
+        QVERIFY(clip().chromaKey);
+        press("place-full");
+        QCOMPARE(clip().scale, 1.);
+        QCOMPARE(clip().x, 0.);
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void editingAndPlayback() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;

@@ -2,6 +2,7 @@
 #include "RationalTime.h"
 #include <QJsonObject>
 #include <QMap>
+#include <QSizeF>
 #include <QString>
 #include <QVector>
 
@@ -47,6 +48,19 @@ struct Clip {
     // the clip start and stay attached to the picture when the clip is trimmed or split. A
     // property with keyframes ignores its static value.
     QMap<QString, QVector<Keyframe>> keyframes;
+    // Overlay styling for picture-in-picture (presenter) layouts.
+    QString shape = "rect"; // rect, rounded, circle (centre square)
+    double radius = 0.12;   // rounded corners, fraction of the shorter side
+    double border = 0;      // border width, fraction of the canvas height at scale 1
+    QString borderColor = "#ffffff";
+    double shadow = 0; // soft drop shadow strength, 0..1
+    // Background removal by colour (green/blue screen).
+    bool chromaKey = false;
+    QString keyColor = "#00ff00";
+    double keySimilarity = 0.25, keyBlend = 0.08;
+    bool styled() const {
+        return shape != "rect" || border > 0 || shadow > 0;
+    }
     double staticValue(const QString &property) const;
     // Property value at a clip-local frame, interpolating keyframes when present.
     double valueAt(const QString &property, double frame) const;
@@ -71,6 +85,9 @@ struct Project {
     const Clip *clip(const QString &id) const {
         return const_cast<Project *>(this)->clip(id);
     }
+    // Size of a clip's picture fitted into a box at scale 1, before styling. Circles use the
+    // centre square; equal-edge crop keeps the aspect ratio.
+    QSizeF pictureSize(const Clip &c, double boxWidth, double boxHeight) const;
     // The clip a transition into `c` comes from, or nullptr when `c` does not start at a cut.
     const Clip *previousAdjacent(const Clip &c) const;
     // Effective transition length into `c` in frames (0 when inactive), limited by both clips.

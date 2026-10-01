@@ -303,6 +303,15 @@ QVariantMap Editor::state() const {
             PROP(flip);
             PROP(muted);
             PROP(hidden);
+            PROP(shape);
+            PROP(radius);
+            PROP(border);
+            PROP(borderColor);
+            PROP(shadow);
+            PROP(chromaKey);
+            PROP(keyColor);
+            PROP(keySimilarity);
+            PROP(keyBlend);
 #undef PROP
         }
     return {{"name", m_project.name},
@@ -591,6 +600,14 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                     if (type == "video" && a.width == 0) {
                         a.width = s["width"].toInt();
                         a.height = s["height"].toInt();
+                        // Phones store portrait video as rotated landscape; FFmpeg decodes
+                        // it upright, so report the upright size.
+                        int rotation = s["tags"].toObject()["rotate"].toString().toInt();
+                        for (const auto &d : s["side_data_list"].toArray())
+                            if (d.toObject().contains("rotation"))
+                                rotation = d.toObject()["rotation"].toInt();
+                        if (std::abs(rotation) % 180 == 90)
+                            std::swap(a.width, a.height);
                     }
                     if (type == "audio")
                         a.hasAudio = true;
@@ -721,7 +738,17 @@ void Editor::moveClip(const QString &id, qint64 frame, int track) {
     mutate([&](Project &p) { p.move(id, track, frame); });
 }
 void Editor::setClip(const QString &key, const QVariant &v) {
+    setClipValues({{key, v}});
+}
+void Editor::setClipValues(const QVariantMap &values) {
+    // One undo step for several values, e.g. position and size from a preview drag.
     mutate([&](Project &p) {
+        for (auto it = values.begin(); it != values.end(); ++it)
+            applyClipValue(p, it.key(), it.value());
+    });
+}
+void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
+    {
         auto *c = p.clip(m_selected);
         if (!c)
             return;
@@ -793,10 +820,57 @@ void Editor::setClip(const QString &key, const QVariant &v) {
         FIELD(flip, toBool);
         FIELD(muted, toBool);
         FIELD(hidden, toBool);
+        FIELD(radius, toDouble);
+        FIELD(border, toDouble);
+        FIELD(shadow, toDouble);
+        FIELD(chromaKey, toBool);
+        FIELD(keySimilarity, toDouble);
+        FIELD(keyBlend, toDouble);
+        FIELD(shape, toString);
+        FIELD(borderColor, toString);
+        FIELD(keyColor, toString);
 #undef FIELD
         if (p.trackSettings[c->track].magnetic)
             p.packTrack(c->track, order);
-    });
+    }
+}
+QVariantMap Editor::clipBounds(const QString &id) const {
+    const auto *c = m_project.clip(id);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!c || c->audioOnly || (a && a->kind == "audio"))
+        return {};
+    // The picture's rectangle on the canvas at the playhead, in canvas fractions.
+    const double local = m_playhead - c->start;
+    const double scale = c->valueAt("scale", local);
+    const auto size = m_project.pictureSize(*c, m_project.width * scale,
+                                            m_project.height * scale);
+    return {{"x", 0.5 + c->valueAt("x", local) - size.width() / m_project.width / 2},
+            {"y", 0.5 + c->valueAt("y", local) - size.height() / m_project.height / 2},
+            {"width", size.width() / m_project.width},
+            {"height", size.height() / m_project.height},
+            {"rotation", c->valueAt("rotation", local)},
+            {"inside", local >= 0 && local < c->duration}};
+}
+void Editor::placeClip(const QString &corner) {
+    const auto *c = m_project.clip(m_selected);
+    if (!c)
+        return;
+    if (corner == "full") {
+        setClipValues({{"scale", 1.}, {"x", 0.}, {"y", 0.}});
+        return;
+    }
+    const double local = m_playhead - c->start;
+    double scale = c->valueAt("scale", local);
+    if (scale > 0.6)
+        scale = 0.3;
+    // Keep the whole element, border included, inside a margin of 3% of the height.
+    const auto size = m_project.pictureSize(*c, m_project.width * scale, m_project.height * scale);
+    const double border = c->border * m_project.height * scale;
+    const double margin = 0.03 * m_project.height;
+    const double dx = 0.5 - (size.width() / 2 + border + margin) / m_project.width,
+                 dy = 0.5 - (size.height() / 2 + border + margin) / m_project.height;
+    const double x = corner.endsWith("Left") ? -dx : dx, y = corner.startsWith("top") ? -dy : dy;
+    setClipValues({{"scale", scale}, {"x", x}, {"y", y}});
 }
 void Editor::toggleKeyframe(const QString &property) {
     mutate([&](Project &p) {
