@@ -493,6 +493,58 @@ void Project::remove(const QString &id, bool ripple) {
     if (trackSettings[track].magnetic)
         packTrack(track, trackOrder(track));
 }
+qint64 Project::cutRanges(const QString &id, QVector<QPair<qint64, qint64>> ranges) {
+    const auto *c = clip(id);
+    if (!c)
+        return 0;
+    requireEditable(c->track);
+    const qint64 length = c->duration;
+    for (auto &r : ranges)
+        r = {std::clamp<qint64>(r.first, 0, length), std::clamp<qint64>(r.second, 0, length)};
+    ranges.erase(std::remove_if(ranges.begin(), ranges.end(),
+                                [](const auto &r) { return r.second <= r.first; }),
+                 ranges.end());
+    std::sort(ranges.begin(), ranges.end());
+    // Merge overlaps, then cut from the end so earlier positions stay valid.
+    QVector<QPair<qint64, qint64>> merged;
+    for (const auto &r : ranges)
+        if (!merged.isEmpty() && r.first <= merged.last().second)
+            merged.last().second = std::max(merged.last().second, r.second);
+        else
+            merged.push_back(r);
+    QString head = id; // the piece that starts where the original clip starts
+    const qint64 origin = c->start;
+    qint64 removed = 0;
+    for (int i = int(merged.size()) - 1; i >= 0; --i) {
+        const qint64 from = origin + merged[i].first, to = origin + merged[i].second;
+        // Split off what follows the range, then the range itself.
+        split(head, to);
+        QString victim = head;
+        if (split(head, from))
+            victim = clips.last().id;
+        const auto *v = clip(victim);
+        if (!v)
+            continue;
+        removed += v->duration;
+        const bool whole = victim == head;
+        remove(victim, true);
+        if (whole)
+            break; // the cut reached the clip's start: nothing earlier is left
+    }
+    return removed;
+}
+QStringList Project::linkedClips(const QString &id) const {
+    QStringList ids;
+    const auto *c = clip(id);
+    if (!c || c->assetId.isEmpty())
+        return ids;
+    for (const auto &x : clips)
+        if (x.id != id && x.track != c->track && x.assetId == c->assetId && x.start == c->start &&
+            x.duration == c->duration && x.sourceIn == c->sourceIn && x.speed == c->speed &&
+            x.reverse == c->reverse)
+            ids << x.id;
+    return ids;
+}
 void Project::requireEditable(int track) const {
     require(track >= 0 && track < tracks && track < trackSettings.size(), "Invalid track");
     require(!trackSettings[track].locked, "This track is locked. Unlock it before editing.");

@@ -2,6 +2,7 @@
 #include "Captions.h"
 #include "RenderGraph.h"
 #include <QCoreApplication>
+#include <cmath>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -117,7 +118,7 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
 Editor::~Editor() {
     if (m_dirty)
         autosave();
-    for (auto *p : {m_preview, m_job, m_probe})
+    for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess})
         if (p) {
             p->disconnect(this);
             p->kill();
@@ -303,7 +304,9 @@ QVariantMap Editor::state() const {
                         {"transition", c.transition},
                         {"transitionFrames", c.transitionFrames},
                         {"transitionLength", m_project.transitionLength(c)},
-                        {"canTransition", m_project.previousAdjacent(c) != nullptr}};
+                        {"canTransition", m_project.previousAdjacent(c) != nullptr},
+                        {"hasAudio", m_project.asset(c.assetId) &&
+                                         m_project.asset(c.assetId)->hasAudio}};
             // Animated values and keyframe state at the playhead for the inspector.
             const auto local = m_playhead - c.start;
             QVariantMap animated, keyed, counts;
@@ -379,6 +382,7 @@ QVariantMap Editor::state() const {
                                       {"upscale", m_ai->missing("upscale")},
                                       {"transcribe", m_ai->missing("transcribe")}}},
             {"captions", captionState()},
+            {"pauses", pauseState()},
             {"progress", m_progress},
             {"previewUrl", m_previewUrl},
             {"playing", m_playback->active() || m_resumeTimer.isActive()},
@@ -1170,6 +1174,121 @@ void Editor::generateCaptions(const QString &language) {
     emit changed();
     placeCaptions();
 }
+void Editor::findPauses(double thresholdDb, double minPause) {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || !a->hasAudio)
+        return fail("Select a clip with sound to find pauses");
+    if (c->reverse)
+        return fail("Pauses cannot be removed from reversed clips");
+    thresholdDb = std::clamp(thresholdDb, -70., -10.);
+    minPause = std::clamp(minPause, 0.2, 10.);
+    if (m_pauseProcess) {
+        m_pauseProcess->disconnect(this);
+        m_pauseProcess->kill();
+        m_pauseProcess->deleteLater();
+    }
+    const double speed = c->speed.seconds(), in = c->sourceIn.seconds(),
+                 length = frameTime(c->duration, m_project.fpsN, m_project.fpsD).seconds() *
+                          speed;
+    m_pauses = {c->id, "finding", {}, m_revision};
+    auto *p = new QProcess(this);
+    m_pauseProcess = p;
+    auto log = std::make_shared<QByteArray>();
+    connect(p, &QProcess::readyReadStandardError, this,
+            [p, log] { *log += p->readAllStandardError(); });
+    const qint64 frames = c->duration;
+    const double fps = double(m_project.fpsN) / m_project.fpsD;
+    auto complete = [this, p, log, in, speed, fps, frames, length](bool success) {
+        *log += p->readAllStandardError();
+        p->deleteLater();
+        m_pauseProcess = nullptr;
+        if (!success) {
+            m_pauses.status = "failed";
+            emit changed();
+            return;
+        }
+        // silencedetect logs "silence_start: S" and "silence_end: E" in seconds from the seek.
+        static const QRegularExpression mark("silence_(start|end): (-?[0-9.]+)");
+        double open = -1;
+        // Keep a little sound around speech so words are not clipped.
+        const double padding = 0.12;
+        auto add = [&](double a, double b) {
+            a += padding;
+            b -= padding;
+            if (b - a < 0.1)
+                return;
+            m_pauses.ranges.push_back({qint64(std::ceil(a / speed * fps)),
+                                       qint64(std::floor(b / speed * fps))});
+        };
+        for (auto it = mark.globalMatch(QString::fromUtf8(*log)); it.hasNext();) {
+            const auto m = it.next();
+            const double t = std::max(0., m.captured(2).toDouble());
+            if (m.captured(1) == "start")
+                open = t;
+            else if (open >= 0) {
+                add(open == 0 ? -padding : open, t);
+                open = -1;
+            }
+        }
+        if (open >= 0) // silence until the end of the clip
+            add(open, length + padding);
+        m_pauses.ranges.erase(std::remove_if(m_pauses.ranges.begin(), m_pauses.ranges.end(),
+                                             [&](const auto &r) {
+                                                 return r.second <= r.first || r.first >= frames;
+                                             }),
+                              m_pauses.ranges.end());
+        m_pauses.status = "ready";
+        emit changed();
+    };
+    connect(p, &QProcess::finished, this, [complete](int code, QProcess::ExitStatus status) {
+        complete(code == 0 && status == QProcess::NormalExit);
+    });
+    connect(p, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart)
+            complete(false);
+    });
+    p->start(executable("ffmpeg"),
+             {"-hide_banner", "-nostdin", "-nostats", "-ss", QString::number(in, 'f', 6), "-t",
+              QString::number(length, 'f', 6), "-i", a->path, "-map", "0:a:0", "-vn", "-af",
+              QString("silencedetect=noise=%1dB:d=%2")
+                  .arg(thresholdDb, 0, 'f', 1)
+                  .arg(minPause, 0, 'f', 3),
+              "-f", "null", "-"});
+    emit changed();
+}
+void Editor::removePauses() {
+    if (m_pauses.status != "ready" || m_pauses.revision != m_revision || m_pauses.ranges.isEmpty())
+        return fail("Find pauses again: the clip has changed");
+    const auto id = m_pauses.clipId;
+    const auto ranges = m_pauses.ranges;
+    qint64 removed = 0;
+    const bool ok = mutate([&](Project &p) {
+        const auto linked = p.linkedClips(id);
+        removed = p.cutRanges(id, ranges);
+        for (const auto &other : linked)
+            p.cutRanges(other, ranges);
+    });
+    if (!ok)
+        return;
+    m_pauses = {};
+    m_status = QString("Removed %1 pause%2 (%3 s)")
+                   .arg(ranges.size())
+                   .arg(ranges.size() == 1 ? "" : "s")
+                   .arg(frameTime(removed, m_project.fpsN, m_project.fpsD).seconds(), 0, 'f', 1);
+    emit changed();
+}
+QVariantMap Editor::pauseState() const {
+    if (m_pauses.clipId.isEmpty())
+        return {{"status", "idle"}};
+    qint64 frames = 0;
+    for (const auto &r : m_pauses.ranges)
+        frames += r.second - r.first;
+    return {{"status", m_pauses.revision == m_revision ? m_pauses.status : QString("stale")},
+            {"clipId", m_pauses.clipId},
+            {"count", int(m_pauses.ranges.size())},
+            {"seconds", frameTime(frames, m_project.fpsN, m_project.fpsD).seconds()}};
+}
 QVariantMap Editor::captionState() const {
     if (m_captionAssets.isEmpty())
         return {{"running", false}, {"language", m_captionLanguage}};
@@ -1337,6 +1456,9 @@ static ExportSettings exportSettings(const QVariantMap &m) {
     s.format = m.value("format", s.format).toString();
     s.quality = m.value("quality", s.quality).toString();
     s.height = m.value("height", 0).toInt();
+    s.loudness = m.value("loudness", 0).toDouble();
+    if (s.loudness != 0 && (s.loudness < -36 || s.loudness > -6))
+        throw std::runtime_error("Loudness target must be between -36 and -6 LUFS");
     if (!exportFormats().contains(s.format))
         throw std::runtime_error("Unknown export format");
     if (!QStringList{"max", "high", "balanced", "small"}.contains(s.quality))
@@ -1376,11 +1498,13 @@ void Editor::exportWith(const QUrl &url, const QVariantMap &settings) {
         m_busy = true;
         m_cancelled = false;
         m_progress = 0;
+        m_loudness.clear();
         m_status = "Choosing an encoder…";
         emit changed();
         // Hardware encoders are tried first; each is proven with a short test encode.
         m_encoders->resolve(encoderCandidates(s, size, fps), size, fps,
-                            [this, output, size, format = s.format](const Encoder *e) {
+                            [this, output, size, format = s.format,
+                             loudness = s.loudness](const Encoder *e) {
                                 if (m_cancelled || !m_busy) {
                                     m_busy = false;
                                     emit changed();
@@ -1394,13 +1518,86 @@ void Editor::exportWith(const QUrl &url, const QVariantMap &settings) {
                                          "ProRes, which always work.");
                                     return;
                                 }
-                                startRender(output, size, *e);
+                                if (loudness != 0)
+                                    measureLoudness(output, size, *e, loudness);
+                                else
+                                    startRender(output, size, *e);
                             });
     } catch (const std::exception &e) {
         fail(e.what());
     }
 }
-void Editor::startRender(const QString &output, QSize size, const Encoder &encoder) {
+void Editor::measureLoudness(const QString &output, QSize size, const Encoder &encoder,
+                             double target) {
+    try {
+        auto work = std::make_shared<QTemporaryDir>(m_data + "/cache/render-XXXXXX");
+        if (!work->isValid())
+            throw std::runtime_error("Cannot create render folder");
+        RenderOptions options;
+        options.video = false;
+        options.measureLoudness = true;
+        const auto plan = compileRender(m_project, work->path(), size.width(), size.height(),
+                                        options);
+        const auto graph = work->filePath("measure.txt");
+        writeGraph(graph, plan.graph);
+        auto *process = new QProcess(this);
+        m_job = process;
+        m_busy = true;
+        m_cancelled = false;
+        m_progress = 0;
+        m_status = "Measuring loudness…";
+        auto log = std::make_shared<QByteArray>();
+        connect(process, &QProcess::readyReadStandardError, this, [process, log] {
+            *log += process->readAllStandardError();
+            if (log->size() > 64000)
+                *log = log->right(32000);
+        });
+        connect(process, &QProcess::readyReadStandardOutput, this,
+                [this, process, duration = plan.duration] {
+                    for (const auto &line : process->readAllStandardOutput().split('\n'))
+                        if (line.startsWith("out_time_us="))
+                            m_progress =
+                                std::clamp(line.mid(12).toDouble() / 1e6 / duration, 0., 1.);
+                    emit changed();
+                });
+        auto complete = [this, process, work, output, size, encoder, target, log](bool success) {
+            *log += process->readAllStandardError();
+            m_job = nullptr;
+            m_busy = false;
+            process->deleteLater();
+            if (m_cancelled) {
+                m_status = "Export cancelled";
+                emit changed();
+                return;
+            }
+            const double measured = parseIntegratedLoudness(QString::fromUtf8(*log));
+            if (!success || std::isnan(measured)) {
+                m_status = "Export failed";
+                return fail("Loudness measurement failed. " + QString::fromUtf8(*log).right(2000));
+            }
+            // Silence (or near silence) stays as it is; otherwise one gain for the whole mix,
+            // within reason, with the limiter catching the peaks it creates.
+            const double gain = measured < -60 ? 0 : std::clamp(target - measured, -30., 30.);
+            m_loudness = {{"measured", measured}, {"target", target}, {"gain", gain}};
+            startRender(output, size, encoder, gain);
+        };
+        connect(process, &QProcess::finished, this,
+                [complete](int code, QProcess::ExitStatus status) {
+                    complete(code == 0 && status == QProcess::NormalExit);
+                });
+        connect(process, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+            if (e == QProcess::FailedToStart)
+                complete(false);
+        });
+        process->start(executable("ffmpeg"), measureArguments(plan, graph));
+        emit changed();
+    } catch (const std::exception &e) {
+        m_busy = false;
+        fail(e.what());
+    }
+}
+void Editor::startRender(const QString &output, QSize size, const Encoder &encoder,
+                         double gainDb) {
     try {
         auto work = std::make_shared<QTemporaryDir>(m_data + "/cache/render-XXXXXX");
         if (!work->isValid())
@@ -1408,6 +1605,12 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
         RenderOptions options;
         options.highQuality = true;
         options.pixelFormat = encoder.pixelFormat;
+        if (gainDb != 0 || m_loudness.contains("target")) {
+            // Normalised exports keep peaks about 1 dB below full scale, as streaming services
+            // expect; the limiter works on samples, so leave some room for true peaks.
+            options.gainDb = gainDb;
+            options.limit = 0.84;
+        }
         addAiMedia(options);
         const auto plan =
             compileRender(m_project, work->path(), size.width(), size.height(), options);
@@ -1473,6 +1676,10 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
             } else {
                 m_progress = 1;
                 m_status = "Export saved (" + label + "): " + output;
+                if (m_loudness.contains("measured"))
+                    m_status += QString(" · loudness %1 → %2 LUFS")
+                                    .arg(m_loudness["measured"].toDouble(), 0, 'f', 1)
+                                    .arg(m_loudness["target"].toDouble(), 0, 'f', 0);
             }
             m_analysis->setPaused(false);
             m_thumbnails->setPaused(false);

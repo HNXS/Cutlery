@@ -30,6 +30,11 @@ struct RenderOptions {
     // Export: high-quality (Lanczos, accurate) scaling and the encoder's pixel format.
     bool highQuality = false;
     QString pixelFormat = "yuv420p";
+    // Master audio: gain before the output limiter (loudness normalisation) and the limiter's
+    // ceiling as linear amplitude. `measureLoudness` replaces the limiter with an EBU R128 meter
+    // whose summary FFmpeg logs at the "info" level (see parseIntegratedLoudness).
+    double gainDb = 0, limit = 0.95;
+    bool measureLoudness = false;
     // Mattes by asset id, used by clips with AI cutout.
     QHash<QString, MatteSource> mattes;
     // AI-upscaled pictures by asset id, used instead of the source by clips with AI upscale.
@@ -47,6 +52,10 @@ QStringList exportArguments(const RenderPlan &, const QString &graphFile, const 
                             const Encoder &);
 // Raw output for live playback on stdout: yuv420p frames, or 48 kHz interleaved stereo PCM
 // (signed 16-bit, or 32-bit float when the audio device requires it).
+// Integrated loudness (LUFS) from an EBU R128 meter summary in FFmpeg's log; NaN when absent.
+double parseIntegratedLoudness(const QString &log);
+// Audio-only measuring pass for a plan compiled with `measureLoudness`.
+QStringList measureArguments(const RenderPlan &, const QString &graphFile);
 QStringList streamArguments(const RenderPlan &, const QString &graphFile, bool video,
                             bool floatAudio = false);
 } // namespace cutlery

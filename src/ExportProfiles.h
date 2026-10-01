@@ -12,6 +12,9 @@ struct ExportSettings {
     QString format = "h264"; // h264, hevc, av1, vp9, prores, mpeg4
     QString quality = "high"; // max, high, balanced, small
     int height = 0;           // 0: project size
+    // Target integrated loudness in LUFS (-14 YouTube/streaming, -16 podcasts, -23 EBU R128 TV);
+    // 0 keeps the mix as it is.
+    double loudness = 0;
 };
 // One concrete way to produce that format. Candidates are tried in order; hardware encoders are
 // only used after a short probe proves they work on this machine.

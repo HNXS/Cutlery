@@ -33,7 +33,8 @@ ApplicationWindow {
     property var exportChoice: ({
             format: "h264",
             quality: "high",
-            height: 0
+            height: 0,
+            loudness: -14
         })
     property string pendingAction: ""
     property bool allowClose: false
@@ -1262,6 +1263,14 @@ ApplicationWindow {
                             Caption {
                                 text: "PICTURE & SOUND"
                             }
+                            Action {
+                                objectName: "removePauses"
+                                Layout.fillWidth: true
+                                visible: win.selection.hasAudio === true && win.selection.reverse !== true
+                                enabled: win.selection.locked !== true
+                                text: "Remove pauses…"
+                                onClicked: pauseDialog.open()
+                            }
                             AiOption {
                                 task: "upscale"
                                 flag: "aiUpscale"
@@ -1572,6 +1581,86 @@ ApplicationWindow {
         nameFilters: ["SubRip captions (*.srt)"]
         onAccepted: editor.exportSrt(selectedFile)
     }
+    // Remove pauses: silence detection on the selected clip's sound, then one ripple edit.
+    Dialog {
+        id: pauseDialog
+        objectName: "pauseDialog"
+        anchors.centerIn: parent
+        title: "Remove pauses"
+        modal: true
+        width: 420
+        readonly property var state: win.s.pauses || ({})
+        footer: DialogButtonBox {
+            Button {
+                objectName: "pauseFind"
+                text: "Find pauses"
+                enabled: pauseDialog.state.status !== "finding"
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+                onClicked: editor.findPauses(pauseThreshold.value, pauseLength.value)
+            }
+            Button {
+                objectName: "pauseRemove"
+                text: "Remove " + (pauseDialog.state.count || 0)
+                enabled: pauseDialog.state.status === "ready" && (pauseDialog.state.count || 0) > 0
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+                onClicked: {
+                    editor.removePauses();
+                    pauseDialog.close();
+                }
+            }
+            Button {
+                text: "Close"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                onClicked: pauseDialog.close()
+            }
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 6
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: "Cuts out the quiet moments between sentences and closes the gaps on this clip's track. Detached audio of the clip is cut the same way. Undo restores everything."
+            }
+            Label {
+                text: "Quieter than  " + pauseThreshold.value.toFixed(0) + " dB"
+                color: win.muted
+            }
+            Slider {
+                id: pauseThreshold
+                objectName: "pauseThreshold"
+                Layout.fillWidth: true
+                from: -60
+                to: -20
+                stepSize: 1
+                value: -40
+            }
+            Label {
+                text: "For at least  " + pauseLength.value.toFixed(1) + " s"
+                color: win.muted
+            }
+            Slider {
+                id: pauseLength
+                objectName: "pauseLength"
+                Layout.fillWidth: true
+                from: .3
+                to: 3
+                stepSize: .1
+                value: .7
+            }
+            Label {
+                objectName: "pauseStatus"
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: pauseDialog.state.status === "failed" ? "#ec6f5a" : win.muted
+                text: pauseDialog.state.status === "finding" ? "Listening…"
+                    : pauseDialog.state.status === "failed" ? "Could not read the clip's sound."
+                    : pauseDialog.state.status === "stale" ? "The clip changed. Find pauses again."
+                    : pauseDialog.state.status === "ready" ? (pauseDialog.state.count > 0 ? pauseDialog.state.count + (pauseDialog.state.count === 1 ? " pause, " : " pauses, ") + Number(pauseDialog.state.seconds).toFixed(1) + " s in total. A short gap is kept around speech." : "No pauses found. Try a higher threshold or shorter pauses.")
+                    : "Raise the threshold if background noise hides the pauses."
+            }
+        }
+    }
     // Automatic captions: speech recognition on the audible clips, placed on their own track.
     Dialog {
         id: captionDialog
@@ -1719,29 +1808,37 @@ ApplicationWindow {
             { id: "small", label: "Small file" }
         ]
         readonly property var heights: [0, 720, 1080, 1440, 2160]
+        readonly property var loudnessTargets: [
+            { value: 0, label: "Keep as mixed" },
+            { value: -14, label: "YouTube & streaming (−14 LUFS)" },
+            { value: -16, label: "Podcast, Apple (−16 LUFS)" },
+            { value: -23, label: "TV broadcast, EBU R128 (−23 LUFS)" }
+        ]
         // Presets fill the fields below; any manual change makes the choice "Custom".
         readonly property var presets: [
             { label: "Custom", settings: null },
-            { label: "YouTube (best quality, 4K upload)", settings: { format: "h264", quality: "max", height: 2160 } },
-            { label: "Share quickly (small H.264 1080p)", settings: { format: "h264", quality: "small", height: 1080 } },
-            { label: "Archive (AV1, maximum quality)", settings: { format: "av1", quality: "max", height: 0 } },
-            { label: "Editing master (ProRes 422 HQ)", settings: { format: "prores", quality: "max", height: 0 } }
+            { label: "YouTube (best quality, 4K upload)", settings: { format: "h264", quality: "max", height: 2160, loudness: -14 } },
+            { label: "Share quickly (small H.264 1080p)", settings: { format: "h264", quality: "small", height: 1080, loudness: -14 } },
+            { label: "Archive (AV1, maximum quality)", settings: { format: "av1", quality: "max", height: 0, loudness: 0 } },
+            { label: "Editing master (ProRes 422 HQ)", settings: { format: "prores", quality: "max", height: 0, loudness: 0 } }
         ]
-        property var current: ({ format: "h264", quality: "high", height: 0 })
+        property var current: ({ format: "h264", quality: "high", height: 0, loudness: -14 })
         readonly property var preview: editor.exportPreview(current)
         function apply(settings) {
             current = settings;
             exportFormat.currentIndex = formats.findIndex(f => f.id === settings.format);
             exportQuality.currentIndex = qualities.findIndex(q => q.id === settings.quality);
             exportHeight.currentIndex = Math.max(0, heights.indexOf(settings.height));
+            exportLoudness.currentIndex = Math.max(0, loudnessTargets.findIndex(l => l.value === (settings.loudness || 0)));
         }
         function changed() {
             current = {
                 format: formats[exportFormat.currentIndex].id,
                 quality: qualities[exportQuality.currentIndex].id,
-                height: heights[exportHeight.currentIndex]
+                height: heights[exportHeight.currentIndex],
+                loudness: loudnessTargets[exportLoudness.currentIndex].value
             };
-            const match = presets.findIndex(p => p.settings && p.settings.format === current.format && p.settings.quality === current.quality && p.settings.height === current.height);
+            const match = presets.findIndex(p => p.settings && p.settings.format === current.format && p.settings.quality === current.quality && p.settings.height === current.height && p.settings.loudness === current.loudness);
             exportPreset.currentIndex = Math.max(0, match);
         }
         onAboutToShow: apply(win.exportChoice)
@@ -1790,6 +1887,17 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 model: exportSettings.heights.map(h => h === 0 ? "Project (" + win.s.width + " × " + win.s.height + ")" : h === 2160 ? "4K (2160p)" : h + "p")
                 onActivated: exportSettings.changed()
+            }
+            Label { text: "Loudness" }
+            ComboBox {
+                id: exportLoudness
+                objectName: "exportLoudness"
+                Layout.fillWidth: true
+                model: exportSettings.loudnessTargets
+                textRole: "label"
+                onActivated: exportSettings.changed()
+                ToolTip.visible: hovered
+                ToolTip.text: "Measures the whole mix first and sets one gain, so the video plays as loud as others on the platform. Peaks are limited 1 dB below full scale."
             }
             Label {
                 Layout.columnSpan: 2

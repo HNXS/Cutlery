@@ -1,5 +1,24 @@
 # Validation record
 
+## Windows portable build — 2026-10-01, pause removal and loudness (0.5 development)
+
+[GitHub Actions run 36896811347](https://github.com/HNXS/Cutlery/actions/runs/36896811347) completed successfully for commit `4eb7315b14f7df539e23c5b43726a53620700cdd`, with the same toolchain as the automatic-captions build. New coverage:
+
+- **Engine test `pausesAndLoudness`:**
+  - `Project::cutRanges` with overlapping, unsorted and out-of-range ranges, a cut at the clip start, ripple on the clip's track only, and detached-audio linking.
+  - Parsing the EBU R128 summary.
+  - End to end: a 3.5 s clip with a 1.5 s silence. One pause of about 1.26 s is found and removed, and undo restores the clip.
+  - An MPEG-4 export normalised to −14 LUFS, measured afterwards within 1 LU of the target.
+- **Interface tests:**
+  - The loudness choice in the export dialog: the YouTube preset sets −14 LUFS, and a manual change makes the preset "Custom".
+  - The Remove pauses dialog: find, preview text and removal.
+- `Get-FFmpeg.ps1` now also requires `volume`, `ebur128` and `silencedetect`.
+
+Downloads (expire 2026-10-31):
+
+- [Portable build](https://github.com/HNXS/Cutlery/actions/runs/36896811347/artifacts/11181295204): 148,476,115 bytes, archive SHA-256 `7cb5ca46f8cc361a161765e62653f83bd830caf11c2405841832123888c2f0ca`.
+- [AI pack](https://github.com/HNXS/Cutlery/actions/runs/36896811347/artifacts/11180780838): 701,994,508 bytes, archive SHA-256 `74558d1c4eb8d6bcb973e2df1da9da5af7f9f16743ea3d8370b44d44d0f8e2f8`.
+
 ## Windows portable build — 2026-10-01, automatic captions (0.5 development)
 
 [GitHub Actions run 36875006979](https://github.com/HNXS/Cutlery/actions/runs/36875006979) completed successfully for commit `dbc9d576e6ec3ca2af75e35d76ebaa68147f79b9`. It used Windows Server 2022, MSVC 2022, Qt 6.8.3, LGPL FFmpeg 8.1, ONNX Runtime 1.22.0 with DirectML, and whisper.cpp v1.9.4. whisper.cpp was built from commit `927cfce34f31707e17f2bff35c349632fb9e2c3a` (static, AVX2, OpenMP). The run covered:

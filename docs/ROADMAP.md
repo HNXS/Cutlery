@@ -16,7 +16,7 @@ The [187-row feature matrix](FEATURE_STATUS.md) is the detailed status record. T
 1. **Responsive playback:** 0.4 streams playback live from the playhead with an audio clock. Remaining: GPU (D3D11) compositing for heavy multi-layer timelines, proxies for 4K sources, smooth scrubbing while dragging, and large-project performance.
 2. **Editing tools:** multi-selection, groups, clip/attribute copy-paste, markers, in/out ranges, roll/slip/slide, overwrite, nested sequences and detached-pair resync.
 3. **Motion and transitions:** keyframe graph editor and easing presets, more transitions, masks, chroma key, broader effects and original presets.
-4. **Audio:** per-track gain and meters, pan, recording, crossfades, EQ/compressor, loudness analysis, noise reduction and beat tools.
+4. **Audio:** per-track gain and meters, pan, recording, EQ/compressor, noise reduction and beat tools. Pause removal and export loudness normalisation exist; loudness meters in the editor and true-peak limiting are open.
 5. **Text and captions:** richer typography, title presets, text animation, word highlighting and transcript editing. Automatic captions work offline (AI pack).
 6. **Colour and AI:** LUTs/curves/scopes, colour-managed HDR, tracking, stabilization, denoise. Person background removal and AI upscaling work offline with the optional AI pack (DirectML GPU or CPU); automatic captions use whisper.cpp offline (CPU). Open are sharper hair edges, object segmentation, image upscaling, word-level caption highlighting, GPU speech recognition and eye contact.
 7. **Media and export:** collection/relink workflows, media search, broader codec qualification, hardware-encoder qualification on real GPUs, export queue/ranges, explicit bitrate/fps controls.
