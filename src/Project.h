@@ -102,6 +102,12 @@ struct Project {
     void validate() const;
     bool split(const QString &id, qint64 frame);
     void remove(const QString &id, bool ripple);
+    // Cuts clip-local frame ranges out of a clip and closes each gap on its track (ripple), as
+    // when removing pauses. Ranges are clamped to the clip; returns the frames removed.
+    qint64 cutRanges(const QString &id, QVector<QPair<qint64, qint64>> ranges);
+    // Clips on other tracks that play the same media at the same time and range as `id`, such
+    // as audio detached from it.
+    QStringList linkedClips(const QString &id) const;
     void requireEditable(int track) const;
     bool audioEnabled(int track) const;
     void addTrack(const QString &name = {});

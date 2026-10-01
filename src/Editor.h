@@ -116,6 +116,12 @@ class Editor final : public QObject {
     // covering every clip of that media using it. Results are cached per media file.
     Q_INVOKABLE void runAi(const QString &task);
     Q_INVOKABLE void cancelAi();
+    // Pauses in the selected clip's sound: finds stretches quieter than `thresholdDb` for at
+    // least `minPause` seconds (asynchronously; see state "pauses"), then removePauses() cuts
+    // them out, keeping `padding` seconds of room around speech, and closes the gaps on the
+    // clip's track and on tracks with its detached audio. One undo step.
+    Q_INVOKABLE void findPauses(double thresholdDb, double minPause);
+    Q_INVOKABLE void removePauses();
     // Automatic captions: transcribes every audible clip's media (language "auto", "de", "en",
     // ...) and puts the captions on the "AI captions" track, replacing earlier ones.
     Q_INVOKABLE void generateCaptions(const QString &language);
@@ -151,6 +157,14 @@ class Editor final : public QObject {
     QTimer m_previewTimer, m_saveTimer, m_resumeTimer;
     QProcess *m_preview = nullptr, *m_job = nullptr, *m_probe = nullptr;
     QString m_jobTemp;
+    QVariantMap m_loudness; // measurement of the running export, when normalising
+    struct Pauses {
+        QString clipId, status; // status: idle, finding, ready, failed
+        QVector<QPair<qint64, qint64>> ranges; // clip-local frames
+        qint64 revision = -1;
+    } m_pauses;
+    QProcess *m_pauseProcess = nullptr;
+    QVariantMap pauseState() const;
     struct DropBatch {
         QString trackId;
         qint64 frame = 0;
@@ -169,7 +183,12 @@ class Editor final : public QObject {
     void probeNext();
     void probeFile(const QUrl &, const QString &replaceId, std::shared_ptr<DropBatch> drop = {});
     static QString insert(Project &, const QString &assetId, int track, qint64 frame);
-    void startRender(const QString &output, QSize size, const Encoder &encoder);
+    void startRender(const QString &output, QSize size, const Encoder &encoder,
+                     double gainDb = 0);
+    // First export pass for loudness normalisation: measures the mix, then starts the render
+    // with the gain that reaches `target` LUFS.
+    void measureLoudness(const QString &output, QSize size, const Encoder &encoder,
+                         double target);
     void applyClipValue(Project &, const QString &key, const QVariant &value);
     void stopPlayback();
     QSize previewSize(int longSide) const;

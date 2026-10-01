@@ -1,4 +1,6 @@
 #include "RenderGraph.h"
+#include <QRegularExpression>
+#include <limits>
 #include "ExportProfiles.h"
 #include <QColor>
 #include <QDir>
@@ -622,13 +624,22 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                      .arg(visual)
                      .arg(r.frames)
                      .arg(o.pixelFormat, pace);
-    if (audio)
+    if (audio) {
+        // Mix, master gain, then a peak limiter so no gain can clip; or the loudness meter.
+        QString master;
+        if (o.gainDb != 0)
+            master += ",volume=" + num(o.gainDb) + "dB";
+        master += o.measureLoudness
+                      ? QString(",ebur128=peak=true:framelog=quiet")
+                      : QString(",alimiter=limit=%1:level=0:latency=1").arg(num(o.limit));
         nodes << audioLabels.join("") +
-                     QString("amix=inputs=%1:duration=longest:normalize=0,alimiter=limit=0.95:"
-                             "level=0:latency=1,atrim=end_sample=%2%3[aout]")
+                     QString("amix=inputs=%1:duration=longest:normalize=0%2,atrim=end_sample=%3%4"
+                             "[aout]")
                          .arg(audioLabels.size())
+                         .arg(master)
                          .arg(qRound64(r.duration * 48000))
                          .arg(o.realtime ? ",arealtime" : "");
+    }
     r.graph = nodes.join(";\n");
     if (o.highQuality)
         r.graph = "sws_flags=lanczos+accurate_rnd+full_chroma_int;\n" + r.graph;
@@ -672,6 +683,23 @@ QStringList exportArguments(const RenderPlan &r, const QString &graph, const QSt
     if (e.extension != "webm")
         a << "-movflags" << "+faststart";
     a << "-progress" << "pipe:1" << output;
+    return a;
+}
+double parseIntegratedLoudness(const QString &log) {
+    // The summary comes last: "Integrated loudness:\n    I:  -16.2 LUFS".
+    static const QRegularExpression integrated("Integrated loudness:\\s*I:\\s*(-?[0-9.]+|-inf)\\s*LUFS");
+    double value = std::numeric_limits<double>::quiet_NaN();
+    for (auto it = integrated.globalMatch(log); it.hasNext();) {
+        const auto m = it.next().captured(1);
+        value = m == "-inf" ? -std::numeric_limits<double>::infinity() : m.toDouble();
+    }
+    return value;
+}
+QStringList measureArguments(const RenderPlan &r, const QString &graph) {
+    QStringList a{"-hide_banner", "-nostdin", "-loglevel", "info", "-nostats"};
+    a += r.inputs;
+    a << "-filter_complex_script" << graph << "-map" << "[aout]" << "-t" << num(r.duration)
+      << "-progress" << "pipe:1" << "-f" << "null" << "-";
     return a;
 }
 QStringList streamArguments(const RenderPlan &r, const QString &graph, bool video,

@@ -373,7 +373,14 @@ class UiTest : public QObject {
                  QString("4K (2160p)"));
         const auto current = dialog->property("current").toMap();
         QCOMPARE(current["quality"].toString(), QString("max"));
+        QCOMPARE(current["loudness"].toDouble(), -14.);
+        QCOMPARE(findItem(window->contentItem(), "exportLoudness")->property("currentText").toString(),
+                 QString("YouTube & streaming (−14 LUFS)"));
         QCOMPARE(dialog->property("preview").toMap()["width"].toInt(), 3840);
+        choose("exportLoudness", 0); // keep the mix: no longer the YouTube preset
+        QCOMPARE(dialog->property("current").toMap()["loudness"].toDouble(), 0.);
+        QCOMPARE(preset->property("currentIndex").toInt(), 0);
+        choose("exportPreset", 1);
         choose("exportQuality", 2);
         QCOMPARE(preset->property("currentIndex").toInt(), 0);
         choose("exportFormat", 4);
@@ -552,6 +559,56 @@ class UiTest : public QObject {
                     .toString()
                     .contains("missing"));
         QVERIFY(QMetaObject::invokeMethod(captions, "close"));
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
+    void pauseControls() {
+        QTemporaryDir dir;
+        const auto source = dir.filePath("talk.mkv");
+        QProcess ffmpeg;
+        ffmpeg.start(Editor::executable("ffmpeg"),
+                     {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=30:d=3", "-f",
+                      "lavfi", "-i",
+                      "sine=d=1[a];anullsrc=r=44100:cl=mono,atrim=duration=1[b];sine=d=1[c];"
+                      "[a][b][c]concat=n=3:v=0:a=1",
+                      "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest", source});
+        QVERIFY(ffmpeg.waitForFinished(30000) && ffmpeg.exitCode() == 0);
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        editor.select(editor.project().clips.first().id);
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        QTest::qWait(100);
+        auto *open = findItem(window->contentItem(), "removePauses");
+        QVERIFY(open && open->isVisible() && open->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(open, "clicked"));
+        QTRY_VERIFY(window->findChild<QQuickItem *>("pauseFind"));
+        auto *remove = window->findChild<QQuickItem *>("pauseRemove");
+        QVERIFY(remove && !remove->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(window->findChild<QQuickItem *>("pauseFind"), "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(remove->isEnabled(), 15000);
+        QVERIFY(window->findChild<QQuickItem *>("pauseStatus")
+                    ->property("text")
+                    .toString()
+                    .startsWith("1 pause,"));
+        QVERIFY(QMetaObject::invokeMethod(remove, "clicked"));
+        QCOMPARE(editor.project().clips.size(), size_t(2));
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void editingAndPlayback() {

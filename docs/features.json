@@ -772,7 +772,7 @@
     "acceptance": "Random seeks land on reference frames in long-GOP and VFR fixtures",
     "source": "Attachment 2, named section",
     "alphaStatus": "Partial",
-    "alphaNotes": "Timeline zoom/fit and rendered frame seeking; latency not qualified."
+    "alphaNotes": "Timeline zoom/fit; seeking renders only the playhead frame, so latency no longer grows with position (about 0.1 s for 1080p H.264 on a 4-core development container). Not qualified on the hardware profiles."
   },
   {
     "id": "F032",
@@ -896,8 +896,8 @@
     "status": "Planned",
     "acceptance": "Position, mask, audio, text, grade and effect tracks survive save and undo",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Keyframes for scale, position, rotation, opacity and volume, with smooth (ease in/out) interpolation. Set at the playhead in the inspector, shown as timeline markers, kept attached through trim, split and speed changes. No graph editor or per-key easing choice in the UI."
   },
   {
     "id": "F037",
@@ -1046,8 +1046,8 @@
     "status": "Planned",
     "acceptance": "Mask controls and keyframes agree at viewer/export resolutions",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Overlay shapes: rounded rectangle (adjustable radius) and centre-square circle, antialiased; no feather or free positioning of the mask."
   },
   {
     "id": "F043",
@@ -1096,8 +1096,8 @@
     "status": "Planned",
     "acceptance": "Reference green-screen foreground retains edges; spill slider serialized",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Colour key (green/blue presets) with tolerance and edge softness, plus automatic green/blue spill suppression; no luma key or colour picker."
   },
   {
     "id": "F045",
@@ -1346,8 +1346,8 @@
     "status": "Planned",
     "acceptance": "Endpoints and midpoint correct; insufficient handles flagged",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Clip video/audio fades only."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Two-clip dissolve and dip to black/white centred on a cut, with equal-power audio crossfades; clip fades as before."
   },
   {
     "id": "F055",
@@ -1371,8 +1371,8 @@
     "status": "Planned",
     "acceptance": "Aspect-ratio-independent paths; copy/paste and undo work",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Wipe left/right, slide left/right/up/down, smooth left. No push."
   },
   {
     "id": "F056",
@@ -1396,8 +1396,8 @@
     "status": "Planned",
     "acceptance": "No unintended black edges at supported parameter bounds",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Zoom in, circle open and radial. No spin or stretch."
   },
   {
     "id": "F057",
@@ -1421,8 +1421,8 @@
     "status": "Planned",
     "acceptance": "Preview/export agree with deterministic random seed",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Pixelize only."
   },
   {
     "id": "F058",
@@ -1446,8 +1446,8 @@
     "status": "Planned",
     "acceptance": "Changing duration maintains sequence timing according to selected edit mode",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Duration 0.1–3 s in the inspector, limited by both clips. No easing curves."
   },
   {
     "id": "F059",
@@ -1671,8 +1671,8 @@
     "status": "Planned",
     "acceptance": "Reference WAV meets chosen LUFS within 0.2 and true peak within 0.5 dB",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Export option: two-pass loudness normalisation. FFmpeg's EBU R128 meter measures the whole mix, then one gain reaches the target (-14 YouTube/streaming, -16 podcast, -23 EBU R128) and a peak limiter holds peaks about 1.5 dB below full scale. No meters in the editor, no true-peak limiting or per-clip normalisation."
   },
   {
     "id": "F068",
@@ -1721,8 +1721,8 @@
     "status": "Planned",
     "acceptance": "Review edits before applying; A/V links and pauses remain correct",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Remove pauses on a clip: FFmpeg silencedetect with an adjustable threshold and minimum length, 0.12 s kept around speech, preview of count and total length, then one undoable ripple edit on the clip's track and on its detached audio. Other tracks keep their timing."
   },
   {
     "id": "F070",
@@ -3821,8 +3821,8 @@
     "status": "Planned",
     "acceptance": "1080p preset plays with exact duration; software fallback tested",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Optional H.264 Media Foundation; MPEG-4 default."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "H.264 via NVENC, AMF, Quick Sync or Media Foundation, whichever passes a probe; no software H.264 encoder in the LGPL build."
   },
   {
     "id": "F154",
@@ -3846,8 +3846,8 @@
     "status": "Planned",
     "acceptance": "Alpha and 10-bit path verified; no unsupported codec offered",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "ProRes 422 HQ/422/LT MOV export with PCM audio; no alpha-channel export."
   },
   {
     "id": "F155",
@@ -3896,8 +3896,8 @@
     "status": "Planned",
     "acceptance": "Unsupported profile falls back or fails before render with explanation",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "HEVC via hardware or Media Foundation; AV1 via hardware or SVT-AV1 software."
   },
   {
     "id": "F157",
@@ -3947,7 +3947,7 @@
     "acceptance": "720p/1080p/1440p/4K/custom and rational rates encode as requested",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Partial",
-    "alphaNotes": "Canvas/fps and three fixed codec profiles; no bitrate control."
+    "alphaNotes": "Presets plus format, four quality levels and output height (720p–4K); no explicit bitrate or fps override."
   },
   {
     "id": "F159",
@@ -3971,8 +3971,8 @@
     "status": "Planned",
     "acceptance": "Unavailable encoder disables cleanly; no silent quality preset change",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Candidates are probed with a short test encode at the real size and arguments, cached per session. Software formats always remain available. Not qualified on real NVIDIA/AMD/Intel hardware yet."
   },
   {
     "id": "F160",
@@ -4097,7 +4097,7 @@
     "acceptance": "Parameter change invalidates dependent results and not unrelated clips",
     "source": "Attachment 2, named section",
     "alphaStatus": "Partial",
-    "alphaNotes": "Still and playback cache; no quotas or thumbnails."
+    "alphaNotes": "Keyframe filmstrips (up to 200 tiles per asset) cached by file fingerprint; live playback needs no render cache. No frame cache or cache quotas."
   },
   {
     "id": "F165",

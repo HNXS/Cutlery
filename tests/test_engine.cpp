@@ -1216,6 +1216,133 @@ class EngineTest : public QObject {
         QCOMPARE(editor.project().tracks, tracks + 1);
 #endif
     }
+    void pausesAndLoudness() {
+        // Cutting ranges out of a clip closes the gaps on its track only.
+        Project p;
+        p.fpsN = 30;
+        Asset a;
+        a.id = "talk";
+        a.kind = "video";
+        a.hasAudio = true;
+        a.duration = 60;
+        p.assets = {a};
+        Clip talk;
+        talk.id = "talk";
+        talk.assetId = "talk";
+        talk.duration = 300;
+        talk.sourceIn = Time(1);
+        Clip next = talk;
+        next.id = "next";
+        next.start = 300;
+        next.duration = 30;
+        Clip above = talk; // another track keeps its timing
+        above.id = "above";
+        above.track = 1;
+        above.start = 200;
+        above.duration = 30;
+        p.clips = {talk, next, above};
+        auto cut = p;
+        QCOMPARE(cut.cutRanges("talk", {{100, 150}, {30, 60}, {280, 400}}), qint64(100));
+        QCOMPARE(cut.clips.size(), size_t(5));
+        auto on = [&](int track) {
+            QVector<Clip> list;
+            for (const auto &c : cut.clips)
+                if (c.track == track)
+                    list << c;
+            std::sort(list.begin(), list.end(),
+                      [](const Clip &x, const Clip &y) { return x.start < y.start; });
+            return list;
+        };
+        const auto pieces = on(0);
+        QCOMPARE(pieces.size(), 4);
+        QCOMPARE(pieces[0].start, qint64(0));
+        QCOMPARE(pieces[0].duration, qint64(30));
+        QCOMPARE(pieces[1].start, qint64(30)); // local frame 60: source 1 s + 2 s
+        QCOMPARE(pieces[1].sourceIn, Time(3));
+        QCOMPARE(pieces[1].duration, qint64(40));
+        QCOMPARE(pieces[2].start, qint64(70));
+        QCOMPARE(pieces[2].duration, qint64(130));
+        QCOMPARE(pieces[3].id, QString("next"));
+        QCOMPARE(pieces[3].start, qint64(200));
+        QCOMPARE(on(1)[0].start, qint64(200));
+        // A cut from the very start removes the head.
+        cut = p;
+        QCOMPARE(cut.cutRanges("talk", {{0, 10}}), qint64(10));
+        QCOMPARE(cut.clip("talk"), nullptr);
+        QCOMPARE(on(0)[0].sourceIn, Time(1) + frameTime(10, 30, 1));
+        // Detached audio is linked; an unrelated clip of the same media is not.
+        auto detached = talk;
+        detached.id = "audio";
+        detached.track = 2;
+        detached.audioOnly = true;
+        p.clips << detached;
+        QCOMPARE(p.linkedClips("talk"), QStringList{"audio"});
+        QVERIFY(p.linkedClips("next").isEmpty());
+
+        // Loudness meter summary parsing.
+        QCOMPARE(parseIntegratedLoudness("[Parsed_ebur128_0 @ 0x1] Summary:\n\n  Integrated "
+                                         "loudness:\n    I:         -23.4 LUFS\n    Threshold: "
+                                         "-33.7 LUFS\n"),
+                 -23.4);
+        QVERIFY(std::isnan(parseIntegratedLoudness("nothing")));
+
+        // End to end: a tone, 1.5 s of silence, a tone; then a loudness-normalised export.
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("speech.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=30:d=3.5", "-f",
+                     "lavfi", "-i",
+                     "sine=f=300:d=1,volume=0.3[a];anullsrc=r=44100:cl=mono,atrim=duration=1.5[b];"
+                     "sine=f=300:d=1,volume=0.3[c];[a][b][c]concat=n=3:v=0:a=1",
+                     "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest", source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto id = editor.project().clips.first().id;
+        editor.select(id);
+        QVERIFY(editor.state()["selected"].toMap()["hasAudio"].toBool());
+        editor.findPauses(-40, 0.7);
+        QCOMPARE(editor.state()["pauses"].toMap()["status"].toString(), QString("finding"));
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["pauses"].toMap()["status"].toString(),
+                                  QString("ready"), 15000);
+        const auto found = editor.state()["pauses"].toMap();
+        QCOMPARE(found["count"].toInt(), 1);
+        // 1.5 s of silence minus 0.12 s kept on each side.
+        QVERIFY2(std::abs(found["seconds"].toDouble() - 1.26) < 0.1,
+                 qPrintable(found["seconds"].toString()));
+        editor.removePauses();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        qint64 total = 0;
+        for (const auto &c : editor.project().clips)
+            total += c.duration;
+        QVERIFY2(std::abs(total - (105 - 38)) <= 2, qPrintable(QString::number(total)));
+        QCOMPARE(editor.state()["pauses"].toMap()["status"].toString(), QString("idle"));
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+
+        // Export normalised to -14 LUFS: measured afterwards, it is within a decibel.
+        const auto out = dir.filePath("loud.mp4");
+        editor.exportWith(QUrl::fromLocalFile(out),
+                          {{"format", "mpeg4"}, {"quality", "small"}, {"loudness", -14}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(QFileInfo::exists(out), qPrintable(editor.state()["error"].toString()));
+        QVERIFY2(editor.state()["status"].toString().contains("→ -14 LUFS"),
+                 qPrintable(editor.state()["status"].toString()));
+        QProcess meter;
+        meter.start(ffmpeg, {"-hide_banner", "-nostats", "-i", out, "-map", "0:a", "-af",
+                             "ebur128=framelog=quiet", "-f", "null", "-"});
+        QVERIFY(meter.waitForFinished(30000));
+        const double loudness = parseIntegratedLoudness(meter.readAllStandardError());
+        QVERIFY2(std::abs(loudness + 14) < 1, qPrintable(QString::number(loudness)));
+        // Out-of-range targets are refused.
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("bad.mp4")),
+                          {{"format", "mpeg4"}, {"loudness", -2}});
+        QVERIFY(editor.state()["error"].toString().contains("LUFS"));
+    }
     void waveformPeaksAndCache() {
         PeakAccumulator peaks(2);
         const auto pcm = QByteArray::fromHex("0000004000800000");

@@ -70,9 +70,9 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F064 | Voice-over and audio recording | Planned | Not implemented in this alpha. |
 | F065 | EQ, compressor, limiter and noise gate | Partial | Fixed output limiter only. |
 | F066 | Reverb and delay | Planned | Not implemented in this alpha. |
-| F067 | Loudness measurement and normalization | Planned | Not implemented in this alpha. |
+| F067 | Loudness measurement and normalization | Partial | Export option: two-pass loudness normalisation. FFmpeg's EBU R128 meter measures the whole mix, then one gain reaches the target (-14 YouTube/streaming, -16 podcast, -23 EBU R128) and a peak limiter holds peaks about 1.5 dB below full scale. No meters in the editor, no true-peak limiting or per-clip normalisation. |
 | F068 | Pitch shift and tempo preservation | Partial | Speed with pitch preservation; no independent pitch. |
-| F069 | Silence detection and removal | Planned | Not implemented in this alpha. |
+| F069 | Silence detection and removal | Partial | Remove pauses on a clip: FFmpeg silencedetect with an adjustable threshold and minimum length, 0.12 s kept around speech, preview of count and total length, then one undoable ripple edit on the clip's track and on its detached audio. Other tracks keep their timing. |
 | F070 | Beat detection and markers | Planned | Not implemented in this alpha. |
 | F071 | Beat-synchronized edits | Planned | Not implemented in this alpha. |
 | F072 | Classical noise reduction | Planned | Not implemented in this alpha. |
