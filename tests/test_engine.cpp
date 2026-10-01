@@ -1,4 +1,5 @@
 #include "Editor.h"
+#include "Mattes.h"
 #include "KeyboardShortcuts.h"
 #include "MediaAnalysis.h"
 #include "Project.h"
@@ -932,6 +933,126 @@ class EngineTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["importing"].toBool(), 15000);
         QCOMPARE(editor.project().assets.last().width, 90);
         QCOMPARE(editor.project().assets.last().height, 160);
+    }
+    void aiCutout() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto background = dir.filePath("blue.png");
+        QImage blue(160, 90, QImage::Format_RGB32);
+        blue.fill(Qt::blue);
+        QVERIFY(blue.save(background));
+        // Speaker: a red video. Matte: left half opaque for the first second, then the right.
+        const auto speaker = dir.filePath("speaker.mkv"), matteFile = dir.filePath("matte.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=red:s=160x90:r=30:d=3", "-c:v",
+                     "ffv1", speaker});
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=black:s=80x45:r=8:d=3", "-vf",
+                     "format=gray,geq=lum='if(lt(T,1),if(lt(X,W/2),255,0),if(lt(X,W/2),0,255))'",
+                     "-c:v", "ffv1", "-g", "1", matteFile});
+        Project p;
+        p.width = 160;
+        p.height = 90;
+        Asset bgAsset;
+        bgAsset.id = "bg";
+        bgAsset.path = background;
+        bgAsset.kind = "image";
+        bgAsset.duration = 5;
+        bgAsset.width = 160;
+        bgAsset.height = 90;
+        Asset video = bgAsset;
+        video.id = "speaker";
+        video.path = speaker;
+        video.kind = "video";
+        video.duration = 3;
+        p.assets = {bgAsset, video};
+        Clip bg;
+        bg.id = "bg";
+        bg.assetId = "bg";
+        bg.duration = 60;
+        Clip pip = bg;
+        pip.id = "pip";
+        pip.assetId = "speaker";
+        pip.track = 1;
+        pip.aiCutout = true;
+        p.clips = {bg, pip};
+        QVERIFY(pip.styled());
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Project &project, qint64 frame, const MatteSource &m) {
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            if (!m.path.isEmpty())
+                options.mattes.insert("speaker", m);
+            const auto plan = compileRender(project, dir.filePath("work"), 160, 90, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        auto isBlue = [](QColor c) { return c.blue() > 200 && c.red() < 60 && c.green() < 60; };
+        auto isRed = [](QColor c) { return c.red() > 200 && c.green() < 60 && c.blue() < 60; };
+        const MatteSource matte{matteFile, 0, 3, 8};
+        // Without an analysed matte the picture stays whole.
+        auto image = still(p, 15, {});
+        QVERIFY(isRed(image.pixelColor(20, 45)) && isRed(image.pixelColor(140, 45)));
+        image = still(p, 15, matte); // source 0.5 s
+        QVERIFY2(isRed(image.pixelColor(20, 45)), qPrintable(image.pixelColor(20, 45).name()));
+        QVERIFY2(isBlue(image.pixelColor(140, 45)), qPrintable(image.pixelColor(140, 45).name()));
+        image = still(p, 45, matte); // source 1.5 s
+        QVERIFY(isBlue(image.pixelColor(20, 45)) && isRed(image.pixelColor(140, 45)));
+        // Seeking between analysed frames: source 0.8 + 0.5 s.
+        auto trimmed = p;
+        trimmed.clips[1].sourceIn = Time(4, 5);
+        image = still(trimmed, 15, matte);
+        QVERIFY(isBlue(image.pixelColor(20, 45)) && isRed(image.pixelColor(140, 45)));
+        // A matte starting later in the source: source 1.3 s is matte time 0.8 s.
+        image = still(trimmed, 15, MatteSource{matteFile, .5, 3.5, 8});
+        QVERIFY(isRed(image.pixelColor(20, 45)) && isBlue(image.pixelColor(140, 45)));
+        // Mirrored picture, mirrored matte; with a circle on top.
+        auto flipped = p;
+        flipped.clips[1].flip = true;
+        flipped.clips[1].shape = "circle";
+        image = still(flipped, 15, matte);
+        QVERIFY(isBlue(image.pixelColor(70, 45)) && isRed(image.pixelColor(90, 45)));
+        QVERIFY(isBlue(image.pixelColor(5, 45)));
+        // The cutout persists in the project file.
+        QVERIFY(Project::fromJson(p.json(dir.path()), dir.path()).clips[1].aiCutout);
+        QVERIFY(p.json()["schemaVersion"].toInt() >= 7);
+
+#ifdef CUTLERY_MATTE_WORKER
+        // The worker with a stand-in model whose matte is the red channel: red left half,
+        // blue right half.
+        const auto halves = dir.filePath("halves.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=160x90:r=30:d=2", "-vf",
+                     "drawbox=x=0:y=0:w=80:h=90:c=red:t=fill", "-c:v", "ffv1", halves});
+        video.path = halves;
+        video.duration = 2;
+        Mattes mattes(dir.filePath("mattes"), ffmpeg, CUTLERY_MATTE_WORKER,
+                      CUTLERY_SOURCE_DIR "/tests/fixtures/red-matte.onnx");
+        QVERIFY2(mattes.available(), qPrintable(mattes.missing()));
+        QCOMPARE(mattes.status(video)["status"].toString(), QString("none"));
+        mattes.analyze(video, .5, 1.5);
+        QVERIFY(mattes.busy());
+        QTRY_VERIFY_WITH_TIMEOUT(!mattes.busy(), 60000);
+        QCOMPARE(mattes.status(video)["status"].toString(), QString("ready"));
+        const auto made = mattes.matte(video);
+        QCOMPARE(made.start, .5);
+        QCOMPARE(made.end, 1.5);
+        const auto frames = run(ffmpeg, {"-v", "error", "-i", made.path, "-f", "rawvideo",
+                                         "-pix_fmt", "gray", "-"});
+        QCOMPARE(frames.size(), qsizetype(160 * 90 * 8)); // 1 s at 8 fps, picture size
+        QVERIFY(uchar(frames[45 * 160 + 20]) > 200);
+        QVERIFY(uchar(frames[45 * 160 + 140]) < 50);
+        // A missing model reports the AI pack as unavailable instead of failing later.
+        Mattes none(dir.filePath("mattes"), ffmpeg, CUTLERY_MATTE_WORKER, dir.filePath("x.onnx"));
+        QVERIFY(!none.available());
+        QVERIFY(!none.missing().isEmpty());
+#endif
     }
     void waveformPeaksAndCache() {
         PeakAccumulator peaks(2);

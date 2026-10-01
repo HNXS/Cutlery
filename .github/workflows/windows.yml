@@ -33,9 +33,15 @@ jobs:
           $bin = ./tools/Get-FFmpeg.ps1
           "FFMPEG_BIN=$bin" | Out-File $env:GITHUB_ENV -Append
           $bin | Out-File $env:GITHUB_PATH -Append
+      - name: Fetch and verify AI runtime and model
+        run: |
+          $ort = ./tools/Get-OnnxRuntime.ps1
+          "ONNXRUNTIME_DIR=$ort" | Out-File $env:GITHUB_ENV -Append
+          $models = ./tools/Get-Models.ps1
+          "MODELS_DIR=$models" | Out-File $env:GITHUB_ENV -Append
       - name: Configure and compile
         run: |
-          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR"
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DCUTLERY_ONNXRUNTIME_DIR=$env:ONNXRUNTIME_DIR"
           if ($LASTEXITCODE -ne 0) { throw 'Configuration failed' }
           cmake --build build --config Release --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
@@ -48,9 +54,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
           $p = Start-Process build/bin/Release/Cutlery.exe -ArgumentList '--smoke-test' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw 'QML startup failed' }
+      - name: Check the real model on a test picture
+        run: |
+          ffmpeg -v error -f lavfi -i "color=c=0x406080:s=320x240:r=8:d=1" -c:v ffv1 build/blank.mkv
+          if ($LASTEXITCODE -ne 0) { throw 'Test video failed' }
+          build/bin/Release/cutlery-matte.exe --ffmpeg (Get-Command ffmpeg).Source --model "$env:MODELS_DIR/u2net_human_seg.onnx" --input build/blank.mkv --output build/blank-matte.mkv --size 320x240 --duration 1
+          if ($LASTEXITCODE -ne 0) { throw 'Model inference failed' }
       - name: Package portable application
         run: |
-          ./tools/Package-Windows.ps1 -QtRoot $env:QT_ROOT_DIR -FFmpegBin $env:FFMPEG_BIN
+          ./tools/Package-Windows.ps1 -QtRoot $env:QT_ROOT_DIR -FFmpegBin $env:FFMPEG_BIN -OnnxRuntime $env:ONNXRUNTIME_DIR -Models $env:MODELS_DIR
       - name: Smoke-test deployed executable
         env:
           QT_QUICK_BACKEND: software
@@ -62,10 +74,20 @@ jobs:
           $exe = Resolve-Path dist/Cutlery-0.4.0-win64-portable/Cutlery.exe
           $p = Start-Process $exe -ArgumentList '--smoke-test' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw 'Deployed application failed' }
+          # The deployed worker starts with only the packaged DLLs.
+          $dist = Split-Path $exe
+          & "$dist/cutlery-matte.exe" --ffmpeg "$dist/codecs/ffmpeg.exe" --model "$env:MODELS_DIR/u2net_human_seg.onnx" --input build/blank.mkv --output build/deployed-matte.mkv --size 320x240 --duration 1
+          if ($LASTEXITCODE -ne 0) { throw 'Deployed AI worker failed' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Cutlery-0.4.0-win64-portable
           path: dist/Cutlery-0.4.0-win64-portable/
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Cutlery-0.4.0-AI-pack
+          path: dist/Cutlery-0.4.0-AI-pack/
           if-no-files-found: error
           retention-days: 30
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -463,6 +463,68 @@ class UiTest : public QObject {
         QCOMPARE(clip().x, 0.);
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void aiCutoutControls() {
+        QTemporaryDir dir;
+        const auto video = dir.filePath("speaker.mkv");
+        QProcess ffmpeg;
+        ffmpeg.start(Editor::executable("ffmpeg"),
+                     {"-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=160x90:r=30:d=2", "-vf",
+                      "drawbox=x=0:y=0:w=80:h=90:c=red:t=fill", "-c:v", "ffv1", video});
+        QVERIFY(ffmpeg.waitForFinished(30000) && ffmpeg.exitCode() == 0);
+#ifdef CUTLERY_MATTE_WORKER
+        qputenv("CUTLERY_MATTE_WORKER", CUTLERY_MATTE_WORKER);
+#else
+        qputenv("CUTLERY_MATTE_WORKER", dir.filePath("missing").toUtf8());
+#endif
+        qputenv("CUTLERY_MATTE_MODEL", CUTLERY_SOURCE_DIR "/tests/fixtures/red-matte.onnx");
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        qunsetenv("CUTLERY_MATTE_WORKER");
+        qunsetenv("CUTLERY_MATTE_MODEL");
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(video)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        QCOMPARE(editor.project().clips.size(), 1);
+        const auto id = editor.project().clips.first().id;
+        editor.select(id);
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        QTest::qWait(100);
+        auto *box = findItem(window->contentItem(), "aiCutout");
+        QVERIFY(box && box->isVisible());
+#ifdef CUTLERY_MATTE_WORKER
+        QVERIFY(box->isEnabled());
+        box->setProperty("checked", true);
+        QVERIFY(QMetaObject::invokeMethod(box, "toggled"));
+        QVERIFY(editor.project().clips.first().aiCutout);
+        // Turning the cutout on starts the analysis, which ends with the matte covering the clip.
+        QTRY_VERIFY_WITH_TIMEOUT(
+            editor.state()["selected"].toMap()["cutout"].toMap()["covered"].toBool(), 60000);
+        auto *status = findItem(window->contentItem(), "cutoutStatus");
+        QVERIFY(status);
+        QTRY_COMPARE(status->property("text").toString(), QString("Speaker found ✓"));
+        QVERIFY(!findItem(window->contentItem(), "cutoutAnalyze")->isVisible());
+#else
+        // Without the AI pack the option is off and explains why.
+        QVERIFY(!box->isEnabled());
+        QVERIFY(!editor.state()["aiMissing"].toString().isEmpty());
+#endif
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void editingAndPlayback() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;

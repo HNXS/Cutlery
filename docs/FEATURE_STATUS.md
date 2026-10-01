@@ -124,7 +124,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F118 | Stabilization and auto crop | Planned | Not implemented in this alpha. |
 | F119 | Rolling-shutter and lens correction | Planned | Not implemented in this alpha. |
 | F120 | Smart crop and automatic reframing | Planned | Not implemented in this alpha. |
-| F121 | Portrait background removal | Planned | Not implemented in this alpha. |
+| F121 | Portrait background removal | Partial | U²-Net human segmentation (ONNX Runtime, CPU) in the separate cutlery-matte worker; 8 fps analysis with temporal smoothing, cached grayscale FFV1 matte per media file, interpolated and applied as alpha in preview, playback and export. Model ships in the optional AI pack. No GPU acceleration or hair refinement. |
 | F122 | Interactive object segmentation | Planned | Not implemented in this alpha. |
 | F123 | Portrait retouch and enhancement | Planned | Not implemented in this alpha. |
 | F124 | Temporal denoise and flicker reduction | Planned | Not implemented in this alpha. |

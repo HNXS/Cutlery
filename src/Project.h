@@ -58,8 +58,11 @@ struct Clip {
     bool chromaKey = false;
     QString keyColor = "#00ff00";
     double keySimilarity = 0.25, keyBlend = 0.08;
+    // Background removal with the AI person matte of the asset (see Mattes). Takes precedence
+    // over the colour key; without an analysed matte the picture stays as it is.
+    bool aiCutout = false;
     bool styled() const {
-        return shape != "rect" || border > 0 || shadow > 0;
+        return shape != "rect" || border > 0 || shadow > 0 || aiCutout;
     }
     double staticValue(const QString &property) const;
     // Property value at a clip-local frame, interpolating keyframes when present.

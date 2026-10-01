@@ -1117,6 +1117,61 @@ ApplicationWindow {
                                         }
                                     }
                                 }
+                                // AI background removal: analysis runs in the background once per
+                                // media file; the cutout applies wherever the matte covers the clip.
+                                ColumnLayout {
+                                    id: cutout
+                                    Layout.fillWidth: true
+                                    visible: win.selection.cutout !== undefined
+                                    spacing: 4
+                                    readonly property var info: win.selection.cutout || ({})
+                                    readonly property bool analyzing: info.status === "analyzing"
+                                    CheckBox {
+                                        objectName: "aiCutout"
+                                        text: "Remove background (AI)"
+                                        checked: win.selection.aiCutout || false
+                                        enabled: win.s.aiAvailable === true || checked
+                                        onToggled: {
+                                            editor.setClip("aiCutout", checked)
+                                            if (checked && cutout.info.covered !== true && !cutout.analyzing)
+                                                editor.analyzeCutout()
+                                        }
+                                    }
+                                    ProgressBar {
+                                        Layout.fillWidth: true
+                                        visible: cutout.analyzing
+                                        value: cutout.info.progress || 0
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        visible: win.selection.aiCutout === true || cutout.analyzing
+                                        Label {
+                                            objectName: "cutoutStatus"
+                                            Layout.fillWidth: true
+                                            wrapMode: Text.Wrap
+                                            font.pixelSize: 11
+                                            color: cutout.info.status === "failed" ? "#ec6f5a" : win.muted
+                                            text: cutout.analyzing ? "Finding the speaker… " + Math.round((cutout.info.progress || 0) * 100) + "%"
+                                                : cutout.info.status === "failed" ? "Analysis failed: " + (cutout.info.error || "")
+                                                : cutout.info.covered === true ? "Speaker found ✓"
+                                                : win.s.aiAvailable === true ? "Not analysed for this range yet"
+                                                : (win.s.aiMissing || "AI pack not installed")
+                                        }
+                                        Action {
+                                            objectName: "cutoutAnalyze"
+                                            visible: !cutout.analyzing && win.selection.aiCutout === true && cutout.info.covered !== true && win.s.aiAvailable === true
+                                            text: "Analyse"
+                                            padding: 6
+                                            onClicked: editor.analyzeCutout()
+                                        }
+                                        Action {
+                                            visible: cutout.analyzing
+                                            text: "Stop"
+                                            padding: 6
+                                            onClicked: editor.cancelCutout()
+                                        }
+                                    }
+                                }
                                 CheckBox {
                                     objectName: "chromaKey"
                                     text: "Remove green/blue screen"

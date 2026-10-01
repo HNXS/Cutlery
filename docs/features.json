@@ -3021,8 +3021,8 @@
     "status": "Planned",
     "acceptance": "Hair and motion corpus passes review; nonportrait limits visible",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "U²-Net human segmentation (ONNX Runtime, CPU) in the separate cutlery-matte worker; 8 fps analysis with temporal smoothing, cached grayscale FFV1 matte per media file, interpolated and applied as alpha in preview, playback and export. Model ships in the optional AI pack. No GPU acceleration or hair refinement."
   },
   {
     "id": "F122",

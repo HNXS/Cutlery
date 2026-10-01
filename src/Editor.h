@@ -3,6 +3,7 @@
 #include "MediaAnalysis.h"
 #include "Playback.h"
 #include "Thumbnails.h"
+#include "Mattes.h"
 #include "Project.h"
 #include <QObject>
 #include <QProcess>
@@ -111,6 +112,10 @@ class Editor final : public QObject {
             result << QVariantMap{{"id", id}, {"label", label}};
         return result;
     }
+    // AI background removal: analyses the selected clip's media (all of its AI cutout clips'
+    // ranges) with the optional AI pack. The result is cached per media file.
+    Q_INVOKABLE void analyzeCutout();
+    Q_INVOKABLE void cancelCutout();
     Q_INVOKABLE QVariantMap thumbnails(const QString &assetId) const {
         return m_thumbnails->strip(assetId);
     }
@@ -136,6 +141,7 @@ class Editor final : public QObject {
     FrameProvider *m_frames;
     MediaAnalysis *m_analysis;
     Thumbnails *m_thumbnails;
+    Mattes *m_mattes;
     EncoderResolver *m_encoders;
     Playback *m_playback;
     QTimer m_previewTimer, m_saveTimer, m_resumeTimer;
@@ -163,6 +169,9 @@ class Editor final : public QObject {
     void applyClipValue(Project &, const QString &key, const QVariant &value);
     void stopPlayback();
     QSize previewSize(int longSide) const;
+    // Source seconds the AI cutout needs for an asset: its cutout clips plus `extra`.
+    std::pair<double, double> cutoutSpan(const Asset &, const Clip *extra = nullptr) const;
+    void addMattes(RenderOptions &) const;
     void autosave();
 };
 } // namespace cutlery
