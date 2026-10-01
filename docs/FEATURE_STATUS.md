@@ -39,7 +39,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F033 | Constant speed 0.1x to 100x | Partial | 0.25–4x only, preserves pitch via atempo. |
 | F034 | Speed ramps and curve editor | Planned | Not implemented in this alpha. |
 | F035 | Reverse and freeze frames | Partial | Reverse only. |
-| F036 | Property keyframes and graph editor | Planned | Not implemented in this alpha. |
+| F036 | Property keyframes and graph editor | Partial | Keyframes for scale, position, rotation, opacity and volume, with smooth (ease in/out) interpolation. Set at the playhead in the inspector, shown as timeline markers, kept attached through trim, split and speed changes. No graph editor or per-key easing choice in the UI. |
 | F037 | Frame-rate changes and mixed-rate sequences | Planned | Not implemented in this alpha. |
 | F038 | Scale, position, rotate, anchor and opacity | Partial | Scale/position/rotation/opacity; fixed center anchor. |
 | F039 | Crop, mirror and aspect ratios | Partial | Equal-edge crop, horizontal mirror, canvas presets. |

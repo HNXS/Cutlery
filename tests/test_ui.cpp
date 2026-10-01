@@ -271,6 +271,69 @@ class UiTest : public QObject {
         QVERIFY(editor.project().clips.last().transition.isEmpty());
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void keyframeControls() {
+        QTemporaryDir dir;
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.configure(160, 90, 30, 1);
+        editor.addTitle();
+        const auto id = editor.project().clips.first().id;
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        QTest::qWait(100);
+        auto click = [&](QQuickItem *item) {
+            QVERIFY(item && item->isVisible() && item->isEnabled());
+            QTest::mouseClick(
+                window, Qt::LeftButton, Qt::NoModifier,
+                item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint());
+        };
+        // Inspector buttons may be scrolled out of view; press them directly.
+        auto press = [&](QQuickItem *item) {
+            QVERIFY(item && item->isVisible() && item->isEnabled());
+            QVERIFY(QMetaObject::invokeMethod(item, "clicked"));
+        };
+        editor.seek(0);
+        auto *diamond = findItem(window->contentItem(), "keyframe-scale");
+        press(diamond);
+        QTRY_COMPARE(editor.project().clips.first().keyframes["scale"].size(), 1);
+        QCOMPARE(diamond->property("text").toString(), QString("◆"));
+        // With keyframes, editing the value at another frame adds a keyframe there.
+        editor.seek(60);
+        QCOMPARE(diamond->property("text").toString(), QString("◇"));
+        editor.setClip("scale", .5);
+        const auto &list = editor.project().clips.first().keyframes["scale"];
+        QCOMPARE(list.size(), 2);
+        QCOMPARE(list.last().frame, qint64(60));
+        QCOMPARE(editor.project().clips.first().scale, 1.);
+        editor.seek(30);
+        const auto animated = editor.state()["selected"].toMap()["animated"].toMap();
+        QCOMPARE(animated["scale"].toDouble(), .75);
+        QTRY_VERIFY(findItem(window->contentItem(), "keyframe-" + id + "-60"));
+        click(findItem(window->contentItem(), "keyframe-" + id + "-60"));
+        QTRY_COMPARE(editor.state()["playhead"].toLongLong(), qint64(60));
+        press(findItem(window->contentItem(), "previousKeyframe"));
+        QTRY_COMPARE(editor.state()["playhead"].toLongLong(), qint64(0));
+        press(diamond);
+        QTRY_COMPARE(editor.project().clips.first().keyframes["scale"].size(), 1);
+        editor.seek(60);
+        press(diamond);
+        QTRY_VERIFY(!editor.project().clips.first().keyframes.contains("scale"));
+        QCOMPARE(editor.project().clips.first().scale, .5);
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void editingAndPlayback() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;

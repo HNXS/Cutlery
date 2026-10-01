@@ -101,6 +101,19 @@ QVariantList Editor::assets() const {
             {"kind", a.kind}, {"seconds", a.duration}, {"missing", !QFileInfo::exists(a.path)}};
     return result;
 }
+// Distinct keyframe positions of a clip, for the timeline markers.
+static QVariantList keyframeFrames(const Clip &c) {
+    QVector<qint64> frames;
+    for (const auto &list : c.keyframes)
+        for (const auto &k : list)
+            if (k.frame >= 0 && k.frame < c.duration && !frames.contains(k.frame))
+                frames.push_back(k.frame);
+    std::sort(frames.begin(), frames.end());
+    QVariantList result;
+    for (auto f : frames)
+        result << f;
+    return result;
+}
 QVariantList Editor::clips() const {
     QVariantList result;
     for (const auto &c : m_project.clips) {
@@ -123,7 +136,8 @@ QVariantList Editor::clips() const {
                               {"transition", c.transition},
                               {"transitionFrames", c.transitionFrames},
                               {"transitionLength", m_project.transitionLength(c)},
-                              {"canTransition", m_project.previousAdjacent(c) != nullptr}};
+                              {"canTransition", m_project.previousAdjacent(c) != nullptr},
+                              {"keyframes", keyframeFrames(c)}};
     }
     return result;
 }
@@ -257,6 +271,20 @@ QVariantMap Editor::state() const {
                         {"transitionFrames", c.transitionFrames},
                         {"transitionLength", m_project.transitionLength(c)},
                         {"canTransition", m_project.previousAdjacent(c) != nullptr}};
+            // Animated values and keyframe state at the playhead for the inspector.
+            const auto local = m_playhead - c.start;
+            QVariantMap animated, keyed, counts;
+            for (const auto &property : animatableProperties()) {
+                const auto list = c.keyframes.value(property);
+                animated[property] = c.valueAt(property, local);
+                keyed[property] = std::any_of(list.begin(), list.end(),
+                                              [&](const Keyframe &k) { return k.frame == local; });
+                counts[property] = list.size();
+            }
+            selected["animated"] = animated;
+            selected["keyed"] = keyed;
+            selected["keyframeCount"] = counts;
+            selected["playheadInside"] = local >= 0 && local < c.duration;
 #define PROP(k) selected[#k] = c.k
             PROP(scale);
             PROP(x);
@@ -703,6 +731,21 @@ void Editor::setClip(const QString &key, const QVariant &v) {
                    key == "start" ? v.toLongLong() : c->start);
             return;
         }
+        if (c->keyframes.contains(key)) {
+            // Animated property: edits set the keyframe at the playhead.
+            const auto frame = m_playhead - c->start;
+            if (frame < 0 || frame >= c->duration)
+                throw std::runtime_error("Move the playhead into the clip to change an animated "
+                                         "value");
+            auto &list = c->keyframes[key];
+            auto it = std::find_if(list.begin(), list.end(),
+                                   [&](const Keyframe &k) { return k.frame >= frame; });
+            if (it != list.end() && it->frame == frame)
+                it->value = v.toDouble();
+            else
+                list.insert(it, {frame, v.toDouble(), true});
+            return;
+        }
         if (key == "duration")
             c->duration = v.toLongLong();
         else if (key == "sourceIn") {
@@ -716,6 +759,7 @@ void Editor::setClip(const QString &key, const QVariant &v) {
                 throw std::runtime_error("Speed must be 0.25–4x");
             auto old = c->speed;
             c->speed = Time(qRound64(speed * 1000), 1000);
+            c->scaleKeyframes(old.seconds() / c->speed.seconds());
             c->duration = std::max(
                 qint64(1), qint64(std::floor(c->duration * old.seconds() / c->speed.seconds())));
         } else if (key == "text")
@@ -752,6 +796,60 @@ void Editor::setClip(const QString &key, const QVariant &v) {
         if (p.trackSettings[c->track].magnetic)
             p.packTrack(c->track, order);
     });
+}
+void Editor::toggleKeyframe(const QString &property) {
+    mutate([&](Project &p) {
+        auto *c = p.clip(m_selected);
+        if (!c)
+            return;
+        p.requireEditable(c->track);
+        if (!animatableProperties().contains(property))
+            throw std::runtime_error("This property cannot be animated");
+        const auto frame = m_playhead - c->start;
+        if (frame < 0 || frame >= c->duration)
+            throw std::runtime_error("Move the playhead into the clip to add a keyframe");
+        auto &list = c->keyframes[property];
+        auto it = std::find_if(list.begin(), list.end(),
+                               [&](const Keyframe &k) { return k.frame >= frame; });
+        if (it != list.end() && it->frame == frame) {
+            // Removing the last keyframe keeps the value it had as the static value.
+            const auto value = it->value;
+            list.erase(it);
+            if (list.isEmpty()) {
+                c->keyframes.remove(property);
+                if (property == "scale")
+                    c->scale = value;
+                else if (property == "x")
+                    c->x = value;
+                else if (property == "y")
+                    c->y = value;
+                else if (property == "rotation")
+                    c->rotation = value;
+                else if (property == "opacity")
+                    c->opacity = value;
+                else
+                    c->volume = value;
+            }
+        } else
+            list.insert(it, {frame, c->valueAt(property, frame), true});
+    });
+}
+qint64 Editor::adjacentKeyframe(bool forward) const {
+    const auto *c = m_project.clip(m_selected);
+    if (!c)
+        return m_playhead;
+    qint64 target = m_playhead;
+    for (const auto &list : c->keyframes)
+        for (const auto &k : list) {
+            const auto frame = c->start + k.frame;
+            if (frame < c->start || frame >= c->start + c->duration)
+                continue;
+            if (forward && frame > m_playhead && (target == m_playhead || frame < target))
+                target = frame;
+            if (!forward && frame < m_playhead && (target == m_playhead || frame > target))
+                target = frame;
+        }
+    return target;
 }
 void Editor::split() {
     mutate([&](Project &p) { p.split(m_selected, m_playhead); });

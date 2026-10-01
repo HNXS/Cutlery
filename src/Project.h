@@ -1,6 +1,7 @@
 #pragma once
 #include "RationalTime.h"
 #include <QJsonObject>
+#include <QMap>
 #include <QString>
 #include <QVector>
 
@@ -18,6 +19,14 @@ struct Asset {
     int width = 0, height = 0;
     bool hasAudio = false;
 };
+// A property value at a clip-local frame. Smooth keyframes ease in and out towards the next one;
+// others interpolate linearly.
+struct Keyframe {
+    qint64 frame = 0;
+    double value = 0;
+    bool smooth = true;
+    bool operator==(const Keyframe &) const = default;
+};
 struct Clip {
     QString id, assetId, name;
     int track = 0;
@@ -34,7 +43,17 @@ struct Clip {
     // frame, so the timeline length does not change.
     QString transition; // an xfade name from transitionTypes(); empty for a straight cut
     qint64 transitionFrames = 0;
+    // Animated properties (see animatableProperties()), sorted by frame. Frames are relative to
+    // the clip start and stay attached to the picture when the clip is trimmed or split. A
+    // property with keyframes ignores its static value.
+    QMap<QString, QVector<Keyframe>> keyframes;
+    double staticValue(const QString &property) const;
+    // Property value at a clip-local frame, interpolating keyframes when present.
+    double valueAt(const QString &property, double frame) const;
+    void shiftKeyframes(qint64 delta);
+    void scaleKeyframes(double factor);
 };
+const QStringList &animatableProperties();
 // Supported transitions: FFmpeg xfade names paired with display labels.
 const QVector<QPair<QString, QString>> &transitionTypes();
 struct Project {
@@ -49,6 +68,9 @@ struct Project {
     }
     const Asset *asset(const QString &id) const;
     Clip *clip(const QString &id);
+    const Clip *clip(const QString &id) const {
+        return const_cast<Project *>(this)->clip(id);
+    }
     // The clip a transition into `c` comes from, or nullptr when `c` does not start at a cut.
     const Clip *previousAdjacent(const Clip &c) const;
     // Effective transition length into `c` in frames (0 when inactive), limited by both clips.

@@ -654,6 +654,32 @@ FocusScope {
                                     }
                                     onDoubleClicked: root.seekRequested(clipRect.modelData.start)
                                 }
+                                // Keyframes: click to jump the playhead there.
+                                Repeater {
+                                    model: clipRect.modelData.keyframes
+                                    Rectangle {
+                                        required property var modelData
+                                        objectName: "keyframe-" + clipRect.modelData.id + "-" + modelData
+                                        x: (modelData - (clipRect.shownStart - clipRect.modelData.start)) / root.state.fps * root.pixelsPerSecond - width / 2
+                                        y: clipRect.height - 13
+                                        width: 9
+                                        height: 9
+                                        rotation: 45
+                                        color: "#ffd479"
+                                        border.color: "#0b1016"
+                                        visible: x > -width && x < clipRect.width
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            anchors.margins: -3
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                root.forceActiveFocus();
+                                                editor.select(clipRect.modelData.id);
+                                                root.seekRequested(clipRect.modelData.start + parent.modelData);
+                                            }
+                                        }
+                                    }
+                                }
                                 Repeater {
                                     model: 2
                                     Rectangle {
