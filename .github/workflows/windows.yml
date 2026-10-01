@@ -57,6 +57,7 @@ jobs:
           ctest --test-dir build -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) {
             # Show the failing checks directly; CTest's captured output can be empty here.
+            $env:QT_QPA_FONTDIR = "$env:WINDIR/Fonts"
             build/bin/Release/cutlery_tests.exe -o build/engine.txt,txt -o -,txt | Out-Null
             Write-Output "Engine tests exit code: $LASTEXITCODE"
             Get-Content build/engine.txt | Select-String -NotMatch '^PASS'
