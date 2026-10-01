@@ -1,5 +1,26 @@
 # Validation record
 
+## Windows portable build — 2026-10-01, automatic captions (0.5 development)
+
+[GitHub Actions run 36875006979](https://github.com/HNXS/Cutlery/actions/runs/36875006979) completed successfully for commit `dbc9d576e6ec3ca2af75e35d76ebaa68147f79b9`. It used Windows Server 2022, MSVC 2022, Qt 6.8.3, LGPL FFmpeg 8.1, ONNX Runtime 1.22.0 with DirectML, and whisper.cpp v1.9.4. whisper.cpp was built from commit `927cfce34f31707e17f2bff35c349632fb9e2c3a` (static, AVX2, OpenMP). The run covered:
+
+- Compilation and both CTest suites, including the new `automaticCaptions` test:
+  - SRT parsing;
+  - caption placement through trims, positions and speed, with duplicate and reverse handling and no overlaps;
+  - the full Editor path through `cutlery-ai transcribe` and whisper-cli on whisper.cpp's test model ("No speech found", the "AI captions" track, and cache reuse on a second run).
+- The interface check that the caption dialog explains a missing speech-recognition component.
+- The real Whisper large-v3-turbo q5_0 model with Silero VAD through `cutlery-ai`, on speech synthesized by Windows text-to-speech: "Welcome to Cutlery. This video editor works on your own computer." (5.7 s).
+  - The transcript matched word for word.
+  - On the 2-core runner the transcription took 71 s, of which 69 s was the encoder for one 30-second block.
+- The packaged `whisper-cli.exe` with `PATH` limited to System32, using the bundled MSVC and OpenMP runtimes.
+
+An earlier build without OpenMP did not finish within 15 minutes on the same runner: ggml's spinning thread pool stalls when threads outnumber free cores. It was replaced before release.
+
+Downloads (expire 2026-10-31):
+
+- [Portable build](https://github.com/HNXS/Cutlery/actions/runs/36875006979/artifacts/11169526333): 148,456,184 bytes, archive SHA-256 `7e07c1791dbec230af01a6d8aeb6525abea15b205a0dbc4590cbe9279741ada9`.
+- [AI pack](https://github.com/HNXS/Cutlery/actions/runs/36875006979/artifacts/11168892705): 701,994,440 bytes, archive SHA-256 `37870c4234d9ff7a27f19340fe8adc462b76ed2b5bb5ba175704669851e3d1bb`.
+
 ## Windows portable build — 2026-10-01, AI upscale and DirectML (0.5 development)
 
 [GitHub Actions run 36862210410](https://github.com/HNXS/Cutlery/actions/runs/36862210410) completed successfully for commit `bd98b4ce9614e712ff27dc8972eb16203232b68d` on Windows Server 2022 with MSVC 2022, Qt 6.8.3, LGPL FFmpeg 8.1 and ONNX Runtime 1.22.0 with DirectML 1.15.4. Both NuGet packages are pinned by SHA-256. The Real-ESRGAN weights were converted to ONNX in CI by `tools/convert-realesrgan.py`. The run covered:

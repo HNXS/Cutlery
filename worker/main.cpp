@@ -3,6 +3,7 @@
 //
 //   cutlery-ai matte   ... person matte for background removal (see matte.cpp)
 //   cutlery-ai upscale ... super-resolution of a video range (see upscale.cpp)
+//   cutlery-ai transcribe ... speech to subtitles with whisper.cpp (see transcribe.cpp)
 //
 // Common options: --ffmpeg F --model M --input IN --output OUT [--cpu 1]. Prints
 // "device gpu|cpu" and "progress <done> <total>" lines; exits non-zero on failure.
@@ -16,9 +17,11 @@ int main(int argc, char **argv) {
             return worker::matte(o);
         if (task == "upscale")
             return worker::upscale(o);
+        if (task == "transcribe")
+            return worker::transcribe(o);
     } catch (const Ort::Exception &e) {
         return worker::fail(QString("ONNX Runtime: ") + e.what());
     }
-    return worker::fail("usage: cutlery-ai matte|upscale --ffmpeg F --model M --input IN "
+    return worker::fail("usage: cutlery-ai matte|upscale|transcribe --ffmpeg F --model M --input IN "
                         "--output OUT ...");
 }

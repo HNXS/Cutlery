@@ -116,6 +116,10 @@ class Editor final : public QObject {
     // covering every clip of that media using it. Results are cached per media file.
     Q_INVOKABLE void runAi(const QString &task);
     Q_INVOKABLE void cancelAi();
+    // Automatic captions: transcribes every audible clip's media (language "auto", "de", "en",
+    // ...) and puts the captions on the "AI captions" track, replacing earlier ones.
+    Q_INVOKABLE void generateCaptions(const QString &language);
+    static constexpr auto captionTrackName = "AI captions";
     Q_INVOKABLE QVariantMap thumbnails(const QString &assetId) const {
         return m_thumbnails->strip(assetId);
     }
@@ -172,7 +176,15 @@ class Editor final : public QObject {
     // Source seconds an AI task needs for an asset: the clips using it, plus `extra`.
     std::pair<double, double> aiSpan(const QString &task, const Asset &,
                                      const Clip *extra = nullptr) const;
-    bool aiCovered(const QString &task, const Asset &, const Clip &) const;
+    bool aiCovered(const QString &task, const Asset &, const Clip *extra = nullptr) const;
+    bool usesAi(const Clip &, const QString &task) const;
+    QString aiVariant(const QString &task, const Asset &) const;
+    bool startAi(const QString &task, const Asset &, const Clip *extra = nullptr);
+    QStringList speakingAssets() const;
+    void placeCaptions();
+    QVariantMap captionState() const;
+    QString m_captionLanguage = "auto";
+    QStringList m_captionAssets; // media of a running caption request
     static int upscaleHeight(const Asset &);
     void addAiMedia(RenderOptions &) const;
     void autosave();

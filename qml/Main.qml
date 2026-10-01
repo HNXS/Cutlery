@@ -321,6 +321,10 @@ ApplicationWindow {
         Menu {
             title: "Captions"
             MenuItem {
+                text: "Generate captions (AI)…"
+                onTriggered: captionDialog.open()
+            }
+            MenuItem {
                 text: "Import SRT…"
                 onTriggered: srtOpen.open()
             }
@@ -1567,6 +1571,81 @@ ApplicationWindow {
         defaultSuffix: "srt"
         nameFilters: ["SubRip captions (*.srt)"]
         onAccepted: editor.exportSrt(selectedFile)
+    }
+    // Automatic captions: speech recognition on the audible clips, placed on their own track.
+    Dialog {
+        id: captionDialog
+        objectName: "captionDialog"
+        anchors.centerIn: parent
+        title: "Generate captions"
+        modal: true
+        width: 420
+        readonly property var state: win.s.captions || ({})
+        readonly property string missing: (win.s.aiMissing || {}).transcribe || ""
+        readonly property var languages: [
+            { id: "auto", label: "Detect automatically" },
+            { id: "de", label: "Deutsch" },
+            { id: "en", label: "English" },
+            { id: "fr", label: "Français" },
+            { id: "es", label: "Español" },
+            { id: "it", label: "Italiano" },
+            { id: "nl", label: "Nederlands" },
+            { id: "pl", label: "Polski" },
+            { id: "pt", label: "Português" },
+            { id: "tr", label: "Türkçe" }
+        ]
+        footer: DialogButtonBox {
+            Button {
+                objectName: "captionStart"
+                text: "Generate"
+                enabled: captionDialog.missing === "" && captionDialog.state.running !== true
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+                onClicked: editor.generateCaptions(captionDialog.languages[captionLanguage.currentIndex].id)
+            }
+            Button {
+                text: captionDialog.state.running === true ? "Stop" : "Close"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                onClicked: {
+                    if (captionDialog.state.running === true)
+                        editor.cancelAi()
+                    else
+                        captionDialog.close()
+                }
+            }
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 8
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: "Cutlery listens to every audible clip on the timeline and writes captions on the “AI captions” track. Running it again replaces that track. Everything stays on this computer."
+            }
+            Label {
+                text: "Spoken language"
+                color: win.muted
+            }
+            ComboBox {
+                id: captionLanguage
+                objectName: "captionLanguage"
+                Layout.fillWidth: true
+                model: captionDialog.languages.map(l => l.label)
+            }
+            ProgressBar {
+                Layout.fillWidth: true
+                visible: captionDialog.state.running === true
+                value: captionDialog.state.progress || 0
+            }
+            Label {
+                objectName: "captionStatus"
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: captionDialog.missing !== "" ? "#ec6f5a" : win.muted
+                text: captionDialog.missing !== "" ? captionDialog.missing
+                    : captionDialog.state.running === true ? "Recognising speech… " + Math.round((captionDialog.state.progress || 0) * 100) + "%"
+                    : win.s.status
+            }
+        }
     }
     Dialog {
         id: discardDialog

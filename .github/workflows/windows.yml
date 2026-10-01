@@ -13,7 +13,7 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-2022
-    timeout-minutes: 40
+    timeout-minutes: 60
     defaults:
       run:
         shell: pwsh
@@ -39,9 +39,13 @@ jobs:
           "ONNXRUNTIME_DIR=$ort" | Out-File $env:GITHUB_ENV -Append
           $models = ./tools/Get-Models.ps1
           "MODELS_DIR=$models" | Out-File $env:GITHUB_ENV -Append
+      - name: Build speech recognition (whisper.cpp)
+        run: |
+          $whisper = ./tools/Get-Whisper.ps1
+          "WHISPER_DIR=$whisper" | Out-File $env:GITHUB_ENV -Append
       - name: Configure and compile
         run: |
-          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DCUTLERY_ONNXRUNTIME_DIR=$env:ONNXRUNTIME_DIR"
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DCUTLERY_ONNXRUNTIME_DIR=$env:ONNXRUNTIME_DIR" "-DCUTLERY_WHISPER_CLI=$env:WHISPER_DIR/whisper-cli.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Configuration failed' }
           cmake --build build --config Release --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
@@ -67,9 +71,30 @@ jobs:
           build/bin/Release/cutlery-ai.exe upscale --ffmpeg $ff --model "$env:MODELS_DIR/realesr-general-x4v3.onnx" --input build/test.mkv --output build/test-up-cpu.mov --source 320x240 --size 1280x960 --rate 8/1 --duration 0.25 --cpu 1
           if ($LASTEXITCODE -ne 0) { throw 'CPU upscale failed' }
           ffprobe -v error -show_entries stream=width,height,codec_name,nb_frames -of compact build/test-up.mov
+      - name: Check speech recognition on synthesized speech
+        timeout-minutes: 20
+        run: |
+          # Windows text-to-speech says a known sentence; the captions must contain its words.
+          $tts = Start-Job { param($out) Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.Rate = -1; $s.SetOutputToWaveFile($out); $s.Speak('Welcome to Cutlery. This video editor works on your own computer.'); $s.Dispose() } -ArgumentList (Join-Path $PWD 'build/speech.wav') -PSVersion 5.1
+          if (!(Wait-Job $tts -Timeout 120)) { Stop-Job $tts; Write-Warning 'Text-to-speech timed out; skipping the speech check'; exit 0 }
+          Receive-Job $tts
+          if (!(Test-Path build/speech.wav) -or (Get-Item build/speech.wav).Length -lt 10000) { Write-Warning 'No text-to-speech voice on this runner; skipping the speech check'; exit 0 }
+          ffprobe -v error -show_entries format=duration -of csv=p=0 build/speech.wav
+          $watch = [Diagnostics.Stopwatch]::StartNew()
+          $p = Start-Process build/bin/Release/cutlery-ai.exe -NoNewWindow -PassThru -RedirectStandardOutput build/speech-out.txt -RedirectStandardError build/speech-err.txt -ArgumentList @('transcribe', '--ffmpeg', (Get-Command ffmpeg).Source, '--whisper', "$env:WHISPER_DIR/whisper-cli.exe", '--model', "$env:MODELS_DIR/ggml-large-v3-turbo-q5_0.bin", '--vad', "$env:WHISPER_DIR/ggml-silero-v6.2.0.bin", '--input', 'build/speech.wav', '--output', 'build/speech.srt', '--language', 'en')
+          $null = $p.Handle # keeps the exit code readable after the process ends
+          $done = $p.WaitForExit(300000)
+          Write-Output "Transcription took $($watch.Elapsed.TotalSeconds) s"
+          Get-Content build/speech-out.txt -Tail 5
+          Get-Content build/speech-err.txt -Tail 15
+          if (!$done) { $p.Kill(); throw 'Transcription timed out' }
+          if ($p.ExitCode -ne 0) { throw 'Transcription failed' }
+          $text = Get-Content build/speech.srt -Raw
+          Write-Output $text
+          if ($text -notmatch 'Cutlery|cutlery' -or $text -notmatch 'video editor' -or $text -notmatch 'computer') { throw 'Transcript does not match the spoken sentence' }
       - name: Package portable application
         run: |
-          ./tools/Package-Windows.ps1 -QtRoot $env:QT_ROOT_DIR -FFmpegBin $env:FFMPEG_BIN -OnnxRuntime $env:ONNXRUNTIME_DIR -Models $env:MODELS_DIR
+          ./tools/Package-Windows.ps1 -QtRoot $env:QT_ROOT_DIR -FFmpegBin $env:FFMPEG_BIN -OnnxRuntime $env:ONNXRUNTIME_DIR -Models $env:MODELS_DIR -Whisper $env:WHISPER_DIR
       - name: Smoke-test deployed executable
         env:
           QT_QUICK_BACKEND: software
@@ -85,6 +110,10 @@ jobs:
           $dist = Split-Path $exe
           & "$dist/cutlery-ai.exe" matte --ffmpeg "$dist/codecs/ffmpeg.exe" --model "$env:MODELS_DIR/u2net_human_seg.onnx" --input build/test.mkv --output build/deployed-matte.mkv --size 320x240 --duration 1
           if ($LASTEXITCODE -ne 0) { throw 'Deployed AI worker failed' }
+          # whisper-cli with the packaged runtime only, on whisper.cpp's small test model.
+          & "$dist/codecs/ffmpeg.exe" -v error -y -f lavfi -i "sine=d=1" -ar 16000 -ac 1 build/tone.wav
+          & "$dist/whisper-cli.exe" -np -m tests/fixtures/whisper-for-tests-tiny.bin -f build/tone.wav
+          if ($LASTEXITCODE -ne 0) { throw 'Deployed whisper-cli failed' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Cutlery-0.4.0-win64-portable

@@ -1,3 +1,6 @@
+# whisper-for-tests-tiny.bin is whisper.cpp's models/for-tests-ggml-tiny.bin (MIT, v1.9.4): a
+# loadable model without trained weights, for running speech recognition end to end.
+#
 # Regenerates the stand-in models used to test the cutlery-ai worker end to end without the real
 # models. Requires the `onnx` Python package. Run in this folder.
 #  - red-matte.onnx: [1,3,32,32] -> [1,1,32,32], the matte is the input's red channel.

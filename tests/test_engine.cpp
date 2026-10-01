@@ -1,5 +1,6 @@
 #include "Editor.h"
 #include "AiJobs.h"
+#include "Captions.h"
 #include "KeyboardShortcuts.h"
 #include "MediaAnalysis.h"
 #include "Project.h"
@@ -1072,9 +1073,9 @@ class EngineTest : public QObject {
         QVERIFY2(jobs.available("matte"), qPrintable(jobs.missing("matte")));
         QCOMPARE(jobs.status("matte", video)["status"].toString(), QString("none"));
         jobs.start("matte", video, .5, 1.5);
-        jobs.start("upscale", video, .5, 1.5, 180);
+        jobs.start("upscale", video, .5, 1.5, "180");
         QVERIFY(jobs.busy());
-        QCOMPARE(jobs.status("upscale", video, 180)["status"].toString(), QString("queued"));
+        QCOMPARE(jobs.status("upscale", video, "180")["status"].toString(), QString("queued"));
         QTRY_VERIFY_WITH_TIMEOUT(!jobs.busy(), 60000);
         QCOMPARE(jobs.status("matte", video)["status"].toString(), QString("ready"));
         const auto made = jobs.result("matte", video);
@@ -1085,9 +1086,9 @@ class EngineTest : public QObject {
         QCOMPARE(frames.size(), qsizetype(160 * 90 * 8)); // 1 s at 8 fps, picture size
         QVERIFY(uchar(frames[45 * 160 + 20]) > 200);
         QVERIFY(uchar(frames[45 * 160 + 140]) < 50);
-        QVERIFY2(jobs.status("upscale", video, 180)["status"].toString() == "ready",
-                 qPrintable(jobs.status("upscale", video, 180)["error"].toString()));
-        const auto sharp = jobs.result("upscale", video, 180);
+        QVERIFY2(jobs.status("upscale", video, "180")["status"].toString() == "ready",
+                 qPrintable(jobs.status("upscale", video, "180")["error"].toString()));
+        const auto sharp = jobs.result("upscale", video, "180");
         QCOMPARE(sharp.rate, 30.);
         frames = run(ffmpeg, {"-v", "error", "-i", sharp.path, "-f", "rawvideo", "-pix_fmt",
                               "rgb24", "-"});
@@ -1098,12 +1099,121 @@ class EngineTest : public QObject {
         QVERIFY(isBlue(QColor(px[(90 * 320 + 280) * 3], px[(90 * 320 + 280) * 3 + 1],
                               px[(90 * 320 + 280) * 3 + 2])));
         // Results are per size; a missing model reports the AI pack as unavailable.
-        QCOMPARE(jobs.status("upscale", video, 360)["status"].toString(), QString("none"));
+        QCOMPARE(jobs.status("upscale", video, "360")["status"].toString(), QString("none"));
         AiJobs none(dir.filePath("ai"), ffmpeg, Editor::executable("ffprobe"), CUTLERY_AI_WORKER,
                     {{"matte", dir.filePath("x.onnx")}});
         QVERIFY(!none.available("matte"));
         QVERIFY(!none.available("upscale"));
         QVERIFY(!none.missing("matte").isEmpty());
+#endif
+    }
+    void automaticCaptions() {
+        // SRT parsing: CRLF, BOM, multi-line text.
+        const auto cues = parseSrt(QString(QChar(0xfeff)) +
+                                   "1\r\n00:00:01,000 --> 00:00:01,500\r\nbefore\r\n\r\n"
+                                   "2\n00:00:02.200 --> 00:00:03,000\nfirst\nline\n\n");
+        QCOMPARE(cues.size(), 2);
+        QCOMPARE(cues[1].start, 2.2);
+        QCOMPARE(cues[1].text, QString("first\nline"));
+        QVERIFY_EXCEPTION_THROWN(parseSrt("1\nnot a time\ntext"), std::runtime_error);
+        QVERIFY(parseSrt("\n\n").isEmpty());
+
+        // Placement: a 30 fps project; speech from a source file used by three clips.
+        Project p;
+        p.fpsN = 30;
+        Asset a;
+        a.id = "talk";
+        a.kind = "video";
+        a.hasAudio = true;
+        a.duration = 60;
+        p.assets = {a};
+        Clip first; // timeline 1 s..4 s plays source 2 s..5 s
+        first.id = "first";
+        first.assetId = "talk";
+        first.start = 30;
+        first.duration = 90;
+        first.sourceIn = Time(2);
+        Clip fast = first; // timeline 5 s..6 s plays source 10 s..12 s at 2x
+        fast.id = "fast";
+        fast.start = 150;
+        fast.duration = 30;
+        fast.sourceIn = Time(10);
+        fast.speed = Time(2);
+        Clip quiet = first; // muted: no captions
+        quiet.id = "quiet";
+        quiet.start = 300;
+        quiet.muted = true;
+        Clip echo = first; // the same speech on another track: no duplicates
+        echo.id = "echo";
+        echo.track = 1;
+        p.clips = {first, fast, quiet, echo};
+        QHash<QString, QVector<Cue>> transcripts{
+            {"talk",
+             {{1.0, 1.5, "cut away"},   // before the trim
+              {2.5, 3.5, "hello"},      // timeline 1.5 s..2.5 s
+              {4.5, 5.5, "half"},       // half outside the trim: kept, clipped at 4 s
+              {4.8, 6.0, "mostly out"}, // mostly outside: dropped
+              {10.0, 11.0, "quick"}}}}; // timeline 5 s..5.5 s
+        auto clips = captionClips(p, transcripts, 2);
+        QCOMPARE(clips.size(), 3);
+        QCOMPARE(clips[0].text, QString("hello"));
+        QCOMPARE(clips[0].start, qint64(45));
+        QCOMPARE(clips[0].duration, qint64(30));
+        QCOMPARE(clips[1].text, QString("half"));
+        QCOMPARE(clips[1].start + clips[1].duration, qint64(120));
+        QCOMPARE(clips[2].text, QString("quick"));
+        QCOMPARE(clips[2].start, qint64(150));
+        QCOMPARE(clips[2].duration, qint64(15));
+        QCOMPARE(clips[2].track, 2);
+        // Overlapping cues never overlap on the track.
+        transcripts["talk"] = {{2.5, 3.5, "a"}, {3.2, 4.0, "b"}};
+        clips = captionClips(p, transcripts, 2);
+        QCOMPARE(clips.size(), 2);
+        QCOMPARE(clips[0].start + clips[0].duration, clips[1].start);
+        // Reversed clips are not captioned.
+        p.clips = {first};
+        p.clips[0].reverse = true;
+        QVERIFY(captionClips(p, transcripts, 2).isEmpty());
+
+#if defined(CUTLERY_AI_WORKER) && defined(CUTLERY_WHISPER_CLI)
+        // End to end with whisper.cpp's untrained test model: audio is extracted and recognised,
+        // and an empty result reports that no speech was found.
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QTemporaryDir dir;
+        const auto clip = dir.filePath("tone.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=30:d=3", "-f",
+                     "lavfi", "-i", "sine=f=300:d=3", "-c:v", "ffv1", "-c:a", "pcm_s16le",
+                     "-shortest", clip});
+        QDir().mkpath(dir.filePath("models"));
+        QVERIFY(QFile::copy(CUTLERY_SOURCE_DIR "/tests/fixtures/whisper-for-tests-tiny.bin",
+                            dir.filePath("models/ggml-large-v3-turbo-q5_0.bin")));
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+        qputenv("CUTLERY_WHISPER", CUTLERY_WHISPER_CLI);
+        qputenv("CUTLERY_AI_MODELS", dir.filePath("models").toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_WHISPER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        QVERIFY2(editor.state()["aiMissing"].toMap()["transcribe"].toString().isEmpty(),
+                 qPrintable(editor.state()["aiMissing"].toMap()["transcribe"].toString()));
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(clip)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const int tracks = editor.project().tracks;
+        editor.generateCaptions("en");
+        QVERIFY(editor.state()["captions"].toMap()["running"].toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["captions"].toMap()["running"].toBool(), 60000);
+        QVERIFY2(editor.state()["error"].toString().isEmpty(),
+                 qPrintable(editor.state()["error"].toString()));
+        QCOMPARE(editor.state()["status"].toString(), QString("No speech found"));
+        QCOMPARE(editor.project().tracks, tracks + 1);
+        QCOMPARE(editor.project().trackSettings.last().name, QString(Editor::captionTrackName));
+        // A second run reuses the cached transcript and the caption track.
+        editor.generateCaptions("en");
+        QVERIFY(!editor.state()["captions"].toMap()["running"].toBool());
+        QCOMPARE(editor.project().tracks, tracks + 1);
 #endif
     }
     void waveformPeaksAndCache() {
