@@ -1,5 +1,11 @@
 #pragma once
 // Shared helpers for the cutlery-ai worker tasks.
+#ifdef _WIN32
+// The DirectML header includes windows.h; keep its min/max macros out of std::min/std::max.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#endif
 #include <onnxruntime_cxx_api.h>
 #ifdef CUTLERY_DIRECTML
 #include <dml_provider_factory.h>

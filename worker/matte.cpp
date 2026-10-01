@@ -67,7 +67,7 @@ int worker::matte(const QHash<QString, QString> &o) {
         const float mean[] = {0.485f, 0.456f, 0.406f}, deviation[] = {0.229f, 0.224f, 0.225f};
         const auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
         const char *inputs[] = {inputName.get()}, *outputs[] = {outputName.get()};
-        QImage small(mw, mh, QImage::Format_Grayscale8);
+        QImage lowRes(mw, mh, QImage::Format_Grayscale8);
         qint64 done = 0;
         while (readExactly(decoder, rgb.data(), qint64(rgb.size()))) {
             // Normalised like the model's training data: scaled by the frame maximum, then
@@ -94,14 +94,14 @@ int worker::matte(const QHash<QString, QString> &o) {
                     matte[i] = 0.65f * matte[i] + 0.35f * previous[i];
             previous = matte;
             for (int y = 0; y < mh; ++y) {
-                auto *line = small.scanLine(y);
+                auto *line = lowRes.scanLine(y);
                 for (int x = 0; x < mw; ++x) {
                     // Firmer edges: an opaque body and a clear background without a halo.
                     const float v = (matte[size_t(y) * mw + x] - 0.15f) / 0.75f;
                     line[x] = uchar(std::lround(std::clamp(v, 0.f, 1.f) * 255));
                 }
             }
-            const auto frame = small.scaled(width, height, Qt::IgnoreAspectRatio,
+            const auto frame = lowRes.scaled(width, height, Qt::IgnoreAspectRatio,
                                             Qt::SmoothTransformation)
                                    .convertToFormat(QImage::Format_Grayscale8);
             for (int y = 0; y < height; ++y)
