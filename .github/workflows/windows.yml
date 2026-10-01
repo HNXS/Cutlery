@@ -55,7 +55,11 @@ jobs:
           QT_QUICK_BACKEND: software
         run: |
           ctest --test-dir build -C Release --output-on-failure
-          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+          if ($LASTEXITCODE -ne 0) {
+            # Show the failing checks directly; CTest's captured output can be empty here.
+            build/bin/Release/cutlery_tests.exe 2>&1 | Select-String -NotMatch '^PASS'
+            throw 'Tests failed'
+          }
           $p = Start-Process build/bin/Release/Cutlery.exe -ArgumentList '--smoke-test' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw 'QML startup failed' }
       - name: Check the real models on a test video
