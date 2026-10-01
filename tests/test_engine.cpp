@@ -711,6 +711,102 @@ class EngineTest : public QObject {
                  qPrintable(QString("%1 %2").arg(loud).arg(middle)));
         QVERIFY(end < loud * .02);
     }
+    void exportProfiles() {
+        const auto ffmpeg = Editor::executable("ffmpeg"), probe = Editor::executable("ffprobe");
+        QVERIFY2(!ffmpeg.isEmpty() && !probe.isEmpty(), "FFmpeg is required for integration tests");
+        Project shape;
+        shape.width = 1920;
+        shape.height = 1080;
+        QCOMPARE(exportSize(shape, 0), QSize(1920, 1080));
+        QCOMPARE(exportSize(shape, 2160), QSize(3840, 2160));
+        shape.width = 1080;
+        shape.height = 1920;
+        QCOMPARE(exportSize(shape, 1080), QSize(608, 1080));
+        ExportSettings h264;
+        const auto hardware = encoderCandidates(h264, {1920, 1080}, 30);
+        QCOMPARE(hardware.size(), 4);
+        QCOMPARE(hardware.first().name, QString("h264_nvenc"));
+        QCOMPARE(hardware.last().name, QString("h264_mf"));
+        QVERIFY(std::all_of(hardware.begin(), hardware.end(), [](const Encoder &e) { return e.probe; }));
+        ExportSettings av1{"av1", "max", 0};
+        QCOMPARE(encoderCandidates(av1, {1920, 1080}, 30).last().name, QString("libsvtav1"));
+        QVERIFY(!encoderCandidates(av1, {1920, 1080}, 30).last().probe);
+        ExportSettings prores{"prores", "high", 0};
+        QCOMPARE(encoderCandidates(prores, {1920, 1080}, 30).first().pixelFormat,
+                 QString("yuv422p10le"));
+        QCOMPARE(formatExtension("vp9"), QString("webm"));
+
+        // A missing hardware encoder is skipped; with no working candidate the result is null.
+        EncoderResolver resolver(ffmpeg);
+        Encoder fake;
+        fake.name = "not_a_real_encoder";
+        fake.videoArguments = {"-c:v", "not_a_real_encoder"};
+        fake.probe = true;
+        Encoder fallback = encoderCandidates({"mpeg4", "high", 0}, {320, 180}, 30).first();
+        QString chosen = "pending";
+        resolver.resolve({fake, fallback}, {320, 180}, 30,
+                         [&](const Encoder *e) { chosen = e ? e->name : QString(); });
+        QTRY_COMPARE_WITH_TIMEOUT(chosen, QString("mpeg4"), 20000);
+        chosen = "pending";
+        resolver.resolve({fake}, {320, 180}, 30,
+                         [&](const Encoder *e) { chosen = e ? e->name : QString(); });
+        QCOMPARE(chosen, QString()); // Cached as unavailable: answered without a new probe.
+
+        QTemporaryDir dir;
+        const auto source = dir.filePath("bars.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=1", "-f",
+                     "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1", "-c:v",
+                     "ffv1", "-c:a", "pcm_s16le", "-shortest", source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["importing"].toBool(), 15000);
+        editor.addAsset(editor.project().assets.first().id, 0);
+        auto streams = [&](const QString &file) {
+            return QJsonDocument::fromJson(run(probe, {"-v", "error", "-show_streams", "-of", "json",
+                                                       file}))
+                .object()["streams"]
+                .toArray();
+        };
+        struct Case {
+            QString format, quality;
+            int height;
+            QString video, audio, file;
+            int width;
+        };
+        const QVector<Case> cases{{"av1", "small", 180, "av1", "aac", "a.mp4", 320},
+                                  {"vp9", "balanced", 0, "vp9", "opus", "v.webm", 160},
+                                  {"prores", "high", 0, "prores", "pcm_s16le", "p.mov", 160},
+                                  {"mpeg4", "max", 0, "mpeg4", "aac", "m.mp4", 160}};
+        for (const auto &c : cases) {
+            const auto out = dir.filePath(c.file);
+            editor.exportWith(QUrl::fromLocalFile(out),
+                              {{"format", c.format}, {"quality", c.quality}, {"height", c.height}});
+            QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+            QVERIFY2(QFileInfo::exists(out), qPrintable(c.format + ": " +
+                                                        editor.state()["error"].toString()));
+            const auto list = streams(out);
+            QCOMPARE(list.size(), 2);
+            QCOMPARE(list[0].toObject()["codec_name"].toString(), c.video);
+            QCOMPARE(list[0].toObject()["width"].toInt(), c.width);
+            QCOMPARE(list[1].toObject()["codec_name"].toString(), c.audio);
+        }
+        QVERIFY(editor.state()["status"].toString().contains("MPEG-4"));
+        // A filename must match the format.
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("wrong.mp4")), {{"format", "vp9"}});
+        QVERIFY(editor.state()["error"].toString().contains(".webm"));
+        editor.clearError();
+        // H.264 depends on the machine: it either exports or explains what to choose instead.
+        const auto h264File = dir.filePath("h.mp4");
+        editor.exportWith(QUrl::fromLocalFile(h264File), {{"format", "h264"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 90000);
+        if (QFileInfo::exists(h264File))
+            QCOMPARE(streams(h264File)[0].toObject()["codec_name"].toString(), QString("h264"));
+        else
+            QVERIFY2(editor.state()["error"].toString().contains("No H264 encoder"),
+                     qPrintable(editor.state()["error"].toString()));
+    }
     void waveformPeaksAndCache() {
         PeakAccumulator peaks(2);
         const auto pcm = QByteArray::fromHex("0000004000800000");

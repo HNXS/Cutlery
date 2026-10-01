@@ -1,4 +1,5 @@
 #include "RenderGraph.h"
+#include "ExportProfiles.h"
 #include <QColor>
 #include <QDir>
 #include <QFileInfo>
@@ -439,10 +440,10 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
     }
     const QString pace = o.realtime ? ",realtime" : "";
     if (o.video)
-        nodes << QString("[%1]trim=end_frame=%2,setpts=PTS-STARTPTS,format=yuv420p%3[vout]")
+        nodes << QString("[%1]trim=end_frame=%2,setpts=PTS-STARTPTS,format=%3%4[vout]")
                      .arg(visual)
                      .arg(r.frames)
-                     .arg(pace);
+                     .arg(o.pixelFormat, pace);
     if (audio)
         nodes << audioLabels.join("") +
                      QString("amix=inputs=%1:duration=longest:normalize=0,alimiter=limit=0.95:"
@@ -451,6 +452,8 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                          .arg(qRound64(r.duration * 48000))
                          .arg(o.realtime ? ",arealtime" : "");
     r.graph = nodes.join(";\n");
+    if (o.highQuality)
+        r.graph = "sws_flags=lanczos+accurate_rnd+full_chroma_int;\n" + r.graph;
     return r;
 }
 QStringList renderArguments(const RenderPlan &r, const QString &graph, const QString &output,
@@ -477,6 +480,20 @@ QStringList renderArguments(const RenderPlan &r, const QString &graph, const QSt
         a << "-c:v" << "mpeg4" << "-q:v" << "3" << "-c:a" << "aac" << "-b:a" << "192k"
           << "-movflags" << "+faststart";
     a << "-pix_fmt" << "yuv420p" << "-progress" << "pipe:1" << output;
+    return a;
+}
+QStringList exportArguments(const RenderPlan &r, const QString &graph, const QString &output,
+                            const Encoder &e) {
+    QStringList a{"-hide_banner", "-nostdin", "-y", "-loglevel", "error"};
+    a += r.inputs;
+    a << "-filter_complex_script" << graph << "-map" << "[vout]" << "-map" << "[aout]"
+      << "-frames:v" << QString::number(r.frames) << "-t" << num(r.duration);
+    a += e.videoArguments;
+    a << "-pix_fmt" << e.pixelFormat;
+    a += e.audioArguments;
+    if (e.extension != "webm")
+        a << "-movflags" << "+faststart";
+    a << "-progress" << "pipe:1" << output;
     return a;
 }
 QStringList streamArguments(const RenderPlan &r, const QString &graph, bool video,

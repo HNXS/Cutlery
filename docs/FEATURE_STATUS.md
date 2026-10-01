@@ -156,13 +156,13 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F150 | HEIF/HEIC import | Planned | Not implemented in this alpha. |
 | F151 | Numbered image sequences | Planned | Not implemented in this alpha. |
 | F152 | Variable frame rate and timestamp repair | Planned | Not implemented in this alpha. |
-| F153 | MP4/H.264/AAC export | Partial | Optional H.264 Media Foundation; MPEG-4 default. |
-| F154 | MOV and mezzanine/alpha workflow | Planned | Not implemented in this alpha. |
+| F153 | MP4/H.264/AAC export | Implemented (alpha) | H.264 via NVENC, AMF, Quick Sync or Media Foundation, whichever passes a probe; no software H.264 encoder in the LGPL build. |
+| F154 | MOV and mezzanine/alpha workflow | Partial | ProRes 422 HQ/422/LT MOV export with PCM audio; no alpha-channel export. |
 | F155 | WebM VP9/Opus software export | Implemented (alpha) | VP9/Opus export profile (integration coverage to expand). |
-| F156 | HEVC and AV1 hardware/software export | Planned | Not implemented in this alpha. |
+| F156 | HEVC and AV1 hardware/software export | Implemented (alpha) | HEVC via hardware or Media Foundation; AV1 via hardware or SVT-AV1 software. |
 | F157 | Audio-only and image-sequence export | Planned | Not implemented in this alpha. |
-| F158 | Resolution, fps, quality, bitrate and format controls | Partial | Canvas/fps and three fixed codec profiles; no bitrate control. |
-| F159 | Hardware encoder selection and CPU fallback | Planned | Not implemented in this alpha. |
+| F158 | Resolution, fps, quality, bitrate and format controls | Partial | Presets plus format, four quality levels and output height (720p–4K); no explicit bitrate or fps override. |
+| F159 | Hardware encoder selection and CPU fallback | Implemented (alpha) | Candidates are probed with a short test encode at the real size and arguments, cached per session. Software formats always remain available. Not qualified on real NVIDIA/AMD/Intel hardware yet. |
 | F160 | Queue, range export, progress and cancellation | Partial | One full-sequence job with progress/cancel; no queue/range. |
 | F161 | Interrupted render retry and recovery | Planned | Not implemented in this alpha. |
 | F162 | Convert/compress and export presets | Planned | Not implemented in this alpha. |

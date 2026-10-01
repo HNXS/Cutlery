@@ -334,6 +334,52 @@ class UiTest : public QObject {
         QCOMPARE(editor.project().clips.first().scale, .5);
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void exportDialog() {
+        QTemporaryDir dir;
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.configure(1920, 1080, 30, 1);
+        editor.addTitle();
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        auto *dialog = window->findChild<QObject *>("exportSettings");
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        auto *preset = findItem(window->contentItem(), "exportPreset");
+        QTRY_VERIFY(preset && preset->isVisible());
+        auto choose = [&](const char *name, int index) {
+            auto *combo = findItem(window->contentItem(), name);
+            QVERIFY(combo);
+            combo->setProperty("currentIndex", index);
+            QVERIFY(QMetaObject::invokeMethod(combo, "activated", Q_ARG(int, index)));
+        };
+        choose("exportPreset", 1);
+        QCOMPARE(findItem(window->contentItem(), "exportFormat")->property("currentText").toString(),
+                 QString("H.264 · MP4 (plays everywhere)"));
+        QCOMPARE(findItem(window->contentItem(), "exportHeight")->property("currentText").toString(),
+                 QString("4K (2160p)"));
+        const auto current = dialog->property("current").toMap();
+        QCOMPARE(current["quality"].toString(), QString("max"));
+        QCOMPARE(dialog->property("preview").toMap()["width"].toInt(), 3840);
+        choose("exportQuality", 2);
+        QCOMPARE(preset->property("currentIndex").toInt(), 0);
+        choose("exportFormat", 4);
+        QCOMPARE(dialog->property("preview").toMap()["extension"].toString(), QString("mov"));
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void editingAndPlayback() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;

@@ -19,13 +19,19 @@ struct RenderOptions {
     // Pace output to wall-clock speed. Live playback reads frames from a pipe; pacing bounds the
     // amount of decoded media waiting in memory.
     bool realtime = false;
+    // Export: high-quality (Lanczos, accurate) scaling and the encoder's pixel format.
+    bool highQuality = false;
+    QString pixelFormat = "yuv420p";
 };
+struct Encoder;
 // The same compiler handles preview stills, live playback and final export.
 // FFmpeg is the first CPU reference backend; a D3D11 backend is not implemented.
 RenderPlan compileRender(const Project &, const QString &workDir, int width, int height,
                          const RenderOptions & = {});
 QStringList renderArguments(const RenderPlan &, const QString &graphFile, const QString &output,
                             const QString &profile, double seek = -1);
+QStringList exportArguments(const RenderPlan &, const QString &graphFile, const QString &output,
+                            const Encoder &);
 // Raw output for live playback on stdout: yuv420p frames, or 48 kHz interleaved stereo PCM
 // (signed 16-bit, or 32-bit float when the audio device requires it).
 QStringList streamArguments(const RenderPlan &, const QString &graphFile, bool video,
