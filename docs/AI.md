@@ -63,7 +63,7 @@ Choose **Captions → Generate captions (AI)…**, pick the spoken language (or 
 
 ### Speed and limits
 
-- Speech recognition uses the CPU and needs a processor with AVX2 (Intel from 2013, AMD from 2015). On a typical 8-core PC, expect about a third to a half of the speaking time: roughly 3 to 5 minutes for 10 minutes of speech.
+- Speech recognition uses the CPU and needs a processor with AVX2 (Intel from 2013, AMD from 2015). Whisper works through the audio in 30-second blocks. On a 2-core CI machine, one block took about 70 seconds, so 10 minutes of speech would take about 25 minutes there. A modern 8-core PC should be roughly four times faster: about 6 minutes for 10 minutes of speech. Silence and music skipped by the voice detector cost almost nothing.
 - Reversed clips are not captioned. When the same speech plays on two tracks, it is captioned once.
 - Names, brands and technical terms can come out wrong. Read the captions before publishing.
 - There is no word-by-word highlighting or speaker labelling yet.
