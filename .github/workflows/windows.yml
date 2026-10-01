@@ -82,6 +82,7 @@ jobs:
           ffprobe -v error -show_entries format=duration -of csv=p=0 build/speech.wav
           $watch = [Diagnostics.Stopwatch]::StartNew()
           $p = Start-Process build/bin/Release/cutlery-ai.exe -NoNewWindow -PassThru -RedirectStandardOutput build/speech-out.txt -RedirectStandardError build/speech-err.txt -ArgumentList @('transcribe', '--ffmpeg', (Get-Command ffmpeg).Source, '--whisper', "$env:WHISPER_DIR/whisper-cli.exe", '--model', "$env:MODELS_DIR/ggml-large-v3-turbo-q5_0.bin", '--vad', "$env:WHISPER_DIR/ggml-silero-v6.2.0.bin", '--input', 'build/speech.wav', '--output', 'build/speech.srt', '--language', 'en')
+          $null = $p.Handle # keeps the exit code readable after the process ends
           $done = $p.WaitForExit(900000)
           Write-Output "Transcription took $($watch.Elapsed.TotalSeconds) s"
           Get-Content build/speech-out.txt -Tail 5
