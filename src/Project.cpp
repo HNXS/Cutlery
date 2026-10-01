@@ -43,6 +43,69 @@ const QVector<QPair<QString, QString>> &transitionTypes() {
         {"radial", "Radial"},          {"pixelize", "Pixelize"}};
     return types;
 }
+const QStringList &animatableProperties() {
+    static const QStringList properties{"scale", "x", "y", "rotation", "opacity", "volume"};
+    return properties;
+}
+// Valid range of each animatable property, shared with static-value validation.
+static std::pair<double, double> propertyRange(const QString &p) {
+    if (p == "scale")
+        return {0.1, 3};
+    if (p == "x" || p == "y")
+        return {-2, 2};
+    if (p == "rotation")
+        return {-360, 360};
+    if (p == "opacity")
+        return {0, 1};
+    return {0, 4}; // volume
+}
+double Clip::staticValue(const QString &p) const {
+    if (p == "scale")
+        return scale;
+    if (p == "x")
+        return x;
+    if (p == "y")
+        return y;
+    if (p == "rotation")
+        return rotation;
+    if (p == "opacity")
+        return opacity;
+    return volume;
+}
+double Clip::valueAt(const QString &p, double frame) const {
+    const auto k = keyframes.value(p);
+    if (k.isEmpty())
+        return staticValue(p);
+    if (frame <= k.first().frame)
+        return k.first().value;
+    if (frame >= k.last().frame)
+        return k.last().value;
+    int i = 0;
+    while (frame >= k[i + 1].frame)
+        ++i;
+    double u = (frame - k[i].frame) / double(k[i + 1].frame - k[i].frame);
+    if (k[i].smooth)
+        u = u * u * (3 - 2 * u);
+    return k[i].value + (k[i + 1].value - k[i].value) * u;
+}
+void Clip::shiftKeyframes(qint64 delta) {
+    for (auto &list : keyframes)
+        for (auto &k : list)
+            k.frame += delta;
+}
+void Clip::scaleKeyframes(double factor) {
+    for (auto &list : keyframes) {
+        QVector<Keyframe> scaled;
+        for (auto k : list) {
+            k.frame = qRound64(k.frame * factor);
+            if (!scaled.isEmpty() && scaled.last().frame == k.frame)
+                scaled.last() = k;
+            else
+                scaled.push_back(k);
+        }
+        list = scaled;
+    }
+}
 const Clip *Project::previousAdjacent(const Clip &c) const {
     const Clip *found = nullptr;
     for (const auto &x : clips)
@@ -139,17 +202,27 @@ QJsonObject Project::json(const QString &base) const {
         PUT(fadeIn);
         PUT(fadeOut);
 #undef PUT
+        if (!c.keyframes.isEmpty()) {
+            QJsonObject animated;
+            for (auto it = c.keyframes.begin(); it != c.keyframes.end(); ++it) {
+                QJsonArray list;
+                for (const auto &k : *it)
+                    list.append(QJsonArray{QString::number(k.frame), k.value, k.smooth});
+                animated[it.key()] = list;
+            }
+            o["keyframes"] = animated;
+        }
         o["transition"] = c.transition;
         o["transitionFrames"] = QString::number(c.transitionFrames);
         cc.append(o);
     }
-    return {{"format", "cutlery"}, {"schemaVersion", 4}, {"name", name},       {"width", width},
+    return {{"format", "cutlery"}, {"schemaVersion", 5}, {"name", name},       {"width", width},
             {"height", height},    {"fpsN", fpsN},       {"fpsD", fpsD},       {"tracks", tracks},
             {"assets", aa},        {"clips", cc},        {"trackSettings", tt}};
 }
 Project Project::fromJson(const QJsonObject &o, const QString &base) {
     require(o["format"] == "cutlery" &&
-                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 4),
+                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 5),
             "Unsupported project format/version. Original left unchanged.");
     require(o["assets"].isArray() && o["clips"].isArray(), "Missing project collections");
     Project p;
@@ -234,6 +307,17 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         GET(fadeIn, 0);
         GET(fadeOut, 0);
 #undef GET
+        const auto animated = j["keyframes"].toObject();
+        require(animated.size() <= 16, "Invalid keyframes");
+        for (auto it = animated.begin(); it != animated.end(); ++it) {
+            const auto list = it.value().toArray();
+            require(list.size() <= 1000, "Too many keyframes");
+            for (const auto &v : list) {
+                const auto k = v.toArray();
+                require(k.size() == 3 && k[1].isDouble() && k[2].isBool(), "Invalid keyframe");
+                c.keyframes[it.key()].push_back({integer(k[0]), k[1].toDouble(), k[2].toBool()});
+            }
+        }
         c.transition = j["transition"].toString();
         if (j.contains("transitionFrames"))
             c.transitionFrames = integer(j["transitionFrames"]);
@@ -292,6 +376,18 @@ void Project::validate() const {
                     bounded(c.brightness, -0.5, 0.5) && bounded(c.contrast, 0.1, 3) &&
                     bounded(c.saturation, 0, 3) && bounded(c.crop, 0, 0.45),
                 "Invalid effect value");
+        for (auto it = c.keyframes.begin(); it != c.keyframes.end(); ++it) {
+            require(animatableProperties().contains(it.key()) && !it->isEmpty() &&
+                        it->size() <= 1000,
+                    "Invalid keyframe property");
+            const auto [lo, hi] = propertyRange(it.key());
+            for (int i = 0; i < it->size(); ++i) {
+                const auto &k = it->at(i);
+                require(std::abs(k.frame) <= 100000000 && bounded(k.value, lo, hi) &&
+                            (i == 0 || it->at(i - 1).frame < k.frame),
+                        "Invalid keyframe");
+            }
+        }
         require(c.transitionFrames >= 0 && c.transitionFrames <= 100000000 &&
                     (c.transition.isEmpty() ||
                      std::any_of(transitionTypes().begin(), transitionTypes().end(),
@@ -338,6 +434,7 @@ bool Project::split(const QString &id, qint64 frame) {
     b.fadeIn = 0;
     b.transition.clear();
     b.transitionFrames = 0;
+    b.shiftKeyframes(-left);
     clips.push_back(b);
     return true;
 }
@@ -399,6 +496,8 @@ void Project::trim(const QString &id, qint64 start, qint64 end) {
     const auto *a = asset(c->assetId);
     if (a && a->kind != "image")
         c->sourceIn = c->sourceIn + frameTime(delta, fpsN, fpsD) * c->speed;
+    // Keyframes stay on the same picture: they keep their timeline position while the start moves.
+    c->shiftKeyframes(c->start - start);
     c->start = start;
     c->duration = end - start;
     if (trackSettings[c->track].magnetic)

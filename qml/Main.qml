@@ -922,6 +922,32 @@ ApplicationWindow {
                             Caption {
                                 text: "PICTURE & SOUND"
                             }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: win.selection.playheadInside ? "◇ sets a keyframe at the playhead" : "Move the playhead into the clip to animate"
+                                    color: win.muted
+                                    font.pixelSize: 10
+                                    wrapMode: Text.Wrap
+                                }
+                                Action {
+                                    objectName: "previousKeyframe"
+                                    text: "◀◆"
+                                    padding: 6
+                                    onClicked: win.goTo(editor.adjacentKeyframe(false))
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Previous keyframe"
+                                }
+                                Action {
+                                    objectName: "nextKeyframe"
+                                    text: "◆▶"
+                                    padding: 6
+                                    onClicked: win.goTo(editor.adjacentKeyframe(true))
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Next keyframe"
+                                }
+                            }
                             Repeater {
                                 model: [
                                     {
@@ -1010,19 +1036,36 @@ ApplicationWindow {
                                     }
                                 ]
                                 ColumnLayout {
+                                    id: propertyRow
                                     required property var modelData
+                                    readonly property bool animatable: ["scale", "x", "y", "rotation", "opacity", "volume"].indexOf(modelData.key) >= 0
+                                    readonly property bool animated: animatable && ((win.selection.keyframeCount || {})[modelData.key] || 0) > 0
+                                    // Animated properties show their value at the playhead.
+                                    readonly property real current: animated ? win.selection.animated[modelData.key] : Number(win.selection[modelData.key] ?? 0)
                                     Layout.fillWidth: true
                                     spacing: 0
                                     RowLayout {
                                         Layout.fillWidth: true
                                         Label {
                                             text: modelData.name
-                                            color: win.muted
+                                            color: propertyRow.animated ? win.mint : win.muted
                                             Layout.fillWidth: true
                                         }
                                         Label {
-                                            text: Number(win.selection[modelData.key] ?? 0).toFixed(2)
+                                            text: propertyRow.current.toFixed(2)
                                             font.pixelSize: 10
+                                        }
+                                        ToolButton {
+                                            objectName: "keyframe-" + modelData.key
+                                            visible: propertyRow.animatable
+                                            enabled: win.selection.playheadInside === true && win.selection.locked !== true
+                                            implicitWidth: 24
+                                            implicitHeight: 22
+                                            text: (win.selection.keyed || {})[modelData.key] ? "◆" : "◇"
+                                            palette.buttonText: propertyRow.animated ? "#ffd479" : "#e7edf2"
+                                            onClicked: editor.toggleKeyframe(modelData.key)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: (win.selection.keyed || {})[modelData.key] ? "Remove keyframe" : "Add keyframe at playhead"
                                         }
                                     }
                                     Slider {
@@ -1030,7 +1073,7 @@ ApplicationWindow {
                                         from: modelData.lo
                                         to: modelData.hi
                                         stepSize: modelData.step
-                                        value: win.selection[modelData.key] ?? 0
+                                        value: propertyRow.current
                                         onPressedChanged: if (!pressed)
                                             editor.setClip(modelData.key, value)
                                         onMoved: if (!pressed)

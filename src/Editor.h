@@ -65,6 +65,10 @@ class Editor final : public QObject {
     Q_INVOKABLE void setClip(const QString &key, const QVariant &value);
     Q_INVOKABLE void moveClip(const QString &id, qint64 frame, int track);
     Q_INVOKABLE void split();
+    // Adds a keyframe at the playhead with the current value, or removes the one there.
+    Q_INVOKABLE void toggleKeyframe(const QString &property);
+    // Previous/next keyframe position of the selected clip (the playhead when there is none).
+    Q_INVOKABLE qint64 adjacentKeyframe(bool forward) const;
     Q_INVOKABLE void remove(bool ripple = false);
     Q_INVOKABLE void duplicate();
     Q_INVOKABLE void undo();

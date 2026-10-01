@@ -14,6 +14,30 @@ namespace cutlery {
 static QString num(double v) {
     return QString::number(v, 'f', 9);
 }
+// Transparent margin around perspective-drawn clips.
+constexpr int border = 2;
+static bool animatedGeometry(const Clip &c) {
+    return c.keyframes.contains("scale") || c.keyframes.contains("x") ||
+           c.keyframes.contains("y") || c.keyframes.contains("rotation");
+}
+// FFmpeg expression for a property over clip-local frame `frame`, matching Clip::valueAt.
+static QString curve(const Clip &c, const QString &property, const QString &frame) {
+    const auto k = c.keyframes.value(property);
+    if (k.isEmpty())
+        return num(c.staticValue(property));
+    QString expr = num(k.last().value);
+    for (auto i = k.size() - 2; i >= 0; --i) {
+        const auto u = QString("((%1-%2)/%3)").arg(frame).arg(k[i].frame).arg(
+            k[i + 1].frame - k[i].frame);
+        const auto eased = k[i].smooth ? QString("(%1*%1*(3-2*%1))").arg(u) : u;
+        expr = QString("if(lt(%1,%2),%3+(%4)*%5,%6)")
+                   .arg(frame)
+                   .arg(k[i + 1].frame)
+                   .arg(num(k[i].value), num(k[i + 1].value - k[i].value), eased, expr);
+    }
+    return QString("if(lt(%1,%2),%3,%4)").arg(frame).arg(k.first().frame).arg(
+        num(k.first().value), expr);
+}
 RenderPlan compileRender(const Project &p, const QString &work, int width, int height,
                          const RenderOptions &o) {
     p.validate();
@@ -188,8 +212,11 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                  .arg(l0 + base);
         if (c.crop > 0)
             f += QString(",crop=iw*(1-2*%1):ih*(1-2*%1)").arg(num(c.crop));
-        int w = std::max(2, int(width * c.scale) / 2 * 2),
-            h = std::max(2, int(height * c.scale) / 2 * 2);
+        const bool moving = animatedGeometry(c);
+        // Animated geometry is drawn by perspective on a fixed canvas-sized frame, because filter
+        // links cannot change size per frame; otherwise the clip is scaled once.
+        int w = moving ? width : std::max(2, int(width * c.scale) / 2 * 2),
+            h = moving ? height : std::max(2, int(height * c.scale) / 2 * 2);
         f += QString(",scale=%1:%2:force_original_aspect_ratio=decrease,setsar=1,format=rgba")
                  .arg(w)
                  .arg(h);
@@ -202,10 +229,53 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         }
         if (c.saturation != 1)
             f += ",hue=s=" + num(c.saturation);
-        if (c.rotation != 0)
+        if (moving) {
+            // A transparent border keeps perspective's edge clamping invisible.
+            f += QString(",pad=%1:%2:(ow-iw)/2:(oh-ih)/2:color=black@0")
+                     .arg(width + 2 * border)
+                     .arg(height + 2 * border);
+            // Clip-local frame of each output frame; perspective counts its input frames.
+            const auto frameVar = QString("(%1+in)").arg(l0);
+            const auto scaleExpr = curve(c, "scale", frameVar),
+                       angle = "(" + curve(c, "rotation", frameVar) + ")*PI/180";
+            const double cx = width / 2. + border, cy = height / 2. + border;
+            const auto px = QString("%1+%2*(%3)").arg(num(cx)).arg(width).arg(
+                                curve(c, "x", frameVar)),
+                       py = QString("%1+%2*(%3)").arg(num(cy)).arg(height).arg(
+                           curve(c, "y", frameVar));
+            QStringList corners;
+            const double dx[] = {-cx, cx, -cx, cx}, dy[] = {-cy, -cy, cy, cy};
+            for (int i = 0; i < 4; ++i) {
+                corners << QString("x%1='%2+(%3)*(%4*cos(%6)-(%5)*sin(%6))'")
+                               .arg(i)
+                               .arg(px, scaleExpr, num(dx[i]), num(dy[i]), angle);
+                corners << QString("y%1='%2+(%3)*(%4*sin(%6)+(%5)*cos(%6))'")
+                               .arg(i)
+                               .arg(py, scaleExpr, num(dx[i]), num(dy[i]), angle);
+            }
+            f += ",perspective=sense=destination:eval=frame:interpolation=linear:" +
+                 corners.join(":");
+        } else if (c.rotation != 0)
             f += QString(",rotate=%1*PI/180:ow=rotw(%1*PI/180):oh=roth(%1*PI/180):c=none")
                      .arg(num(c.rotation));
-        if (c.opacity != 1)
+        if (c.keyframes.contains("opacity")) {
+            // Opacity changes per frame through runtime commands, one per run of equal values.
+            const auto name = QString("colorchannelmixer@op%1").arg(serial++);
+            QStringList commands;
+            auto value = [&](qint64 f) { return qRound(c.valueAt("opacity", f) * 1000) / 1000.; };
+            for (qint64 f = l0; f < l1;) {
+                qint64 e = f + 1;
+                while (e < l1 && value(e) == value(f))
+                    ++e;
+                commands << QString("%1-%2 %3 aa %4")
+                                .arg(num(std::max(0., secs(f + base) - half)),
+                                     num(secs(e + base) - half), name,
+                                     num(value(f)));
+                f = e;
+            }
+            f += QString(",sendcmd=c='%1',%2=aa=%3")
+                     .arg(commands.join(";"), name, num(value(l0)));
+        } else if (c.opacity != 1)
             f += ",colorchannelmixer=aa=" + num(c.opacity);
         const double k = secs(base);
         if (c.fadeIn > 0)
@@ -217,6 +287,8 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         return f + ",setpts=PTS-STARTPTS";
     };
     auto overlayPosition = [&](const Clip &c) {
+        if (animatedGeometry(c))
+            return QString("x=-%1:y=-%1").arg(border);
         return QString("x=(W-w)/2+%1*W:y=(H-h)/2+%2*H").arg(num(c.x), num(c.y));
     };
     // Composites a zero-based stream onto the picture for window frames [place, place + length).
@@ -342,8 +414,17 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             tempo *= 2;
         }
         a += ",atempo=" + num(tempo);
-        a += ",aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=" +
-             num(c.volume) + ",asetpts=PTS+" + num(t0 + k) + "/TB";
+        a += ",aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS+" +
+             num(t0 + k) + "/TB";
+        if (c.keyframes.contains("volume"))
+            // Audio timestamps here are clip-local seconds plus the handle.
+            a += QString(",volume=eval=frame:volume='%1'")
+                     .arg(curve(c, "volume", QString("((t-%1)*%2/%3)")
+                                                 .arg(num(k))
+                                                 .arg(p.fpsN)
+                                                 .arg(p.fpsD)));
+        else
+            a += ",volume=" + num(c.volume);
         if (c.fadeIn > 0)
             a += ",afade=t=in:st=" + num(k) + ":d=" + num(std::min(c.fadeIn, d));
         if (c.fadeOut > 0) {

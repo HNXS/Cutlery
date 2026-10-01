@@ -492,7 +492,7 @@ class EngineTest : public QObject {
         const auto roundtrip = Project::fromJson(p.json(dir.path()), dir.path());
         QCOMPARE(roundtrip.clips[1].transition, QString("fade"));
         QCOMPARE(roundtrip.clips[1].transitionFrames, qint64(10));
-        QCOMPARE(p.json()["schemaVersion"].toInt(), 4);
+        QCOMPARE(p.json()["schemaVersion"].toInt(), 5);
         auto split = p;
         QVERIFY(split.split("b", 45));
         QCOMPARE(split.clips[1].transition, QString("fade"));
@@ -572,6 +572,144 @@ class EngineTest : public QObject {
             QVERIFY2(level > steady * 0.8 && level < steady * 1.25,
                      qPrintable(QString("%1 s: %2 vs %3").arg(t).arg(level).arg(steady)));
         }
+    }
+    void keyframes() {
+        // Model: interpolation, editing semantics and persistence.
+        Clip c;
+        c.duration = 60;
+        c.keyframes["scale"] = {{0, 1, false}, {50, .5, false}};
+        QCOMPARE(c.valueAt("scale", -5), 1.);
+        QCOMPARE(c.valueAt("scale", 25), .75);
+        QCOMPARE(c.valueAt("scale", 80), .5);
+        QCOMPARE(c.valueAt("opacity", 10), 1.);
+        c.keyframes["scale"][0].smooth = true;
+        QVERIFY(c.valueAt("scale", 10) > .9 && c.valueAt("scale", 40) < .6);
+        QCOMPARE(c.valueAt("scale", 25), .75);
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("red.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=red:s=160x90:r=30:d=3", "-f",
+                     "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=3", "-c:v",
+                     "ffv1", "-threads", "1", "-c:a", "pcm_s16le", "-shortest", source});
+        Project p;
+        p.width = 160;
+        p.height = 90;
+        Asset a;
+        a.id = "red";
+        a.path = source;
+        a.kind = "video";
+        a.duration = 3;
+        a.hasAudio = true;
+        p.assets.push_back(a);
+        Clip clip;
+        clip.id = "clip";
+        clip.assetId = "red";
+        clip.duration = 60;
+        p.clips.push_back(clip);
+        auto edited = p;
+        edited.clips[0].keyframes["x"] = {{10, 0, true}, {40, .25, true}};
+        edited.trim("clip", 5, 60);
+        QCOMPARE(edited.clips[0].keyframes["x"][0].frame, qint64(5));
+        QVERIFY(edited.split("clip", 30));
+        QCOMPARE(edited.clips.last().keyframes["x"][1].frame, qint64(10));
+        QCOMPARE(edited.clips.last().valueAt("x", 10), .25);
+        const auto saved = Project::fromJson(edited.json(dir.path()), dir.path());
+        QCOMPARE(saved.clips.last().keyframes["x"], edited.clips.last().keyframes["x"]);
+        QCOMPARE(edited.json()["schemaVersion"].toInt(), 5);
+        for (auto bad : {QVector<Keyframe>{{10, 0, true}, {5, 0, true}},
+                         QVector<Keyframe>{{0, 9, true}}}) {
+            auto invalid = p;
+            invalid.clips[0].keyframes["scale"] = bad;
+            QVERIFY_EXCEPTION_THROWN(invalid.validate(), std::runtime_error);
+        }
+        auto unknown = p;
+        unknown.clips[0].keyframes["brightness"] = {{0, 0, true}};
+        QVERIFY_EXCEPTION_THROWN(unknown.validate(), std::runtime_error);
+
+        // Rendering: measure the red picture on the black canvas.
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Project &project, qint64 frame, bool window) {
+            RenderOptions options;
+            options.audio = false;
+            if (window) {
+                options.from = frame;
+                options.to = frame + 1;
+            }
+            const auto plan = compileRender(project, dir.filePath("work"), 160, 90, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(
+                run(ffmpeg, renderArguments(plan, graph, {}, "",
+                                            window ? 0 : frameTime(frame, 30, 1).seconds())),
+                "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        auto redWidth = [](const QImage &image, int y) {
+            int n = 0;
+            for (int x = 0; x < image.width(); ++x)
+                n += image.pixelColor(x, y).red() > 128;
+            return n;
+        };
+        auto shrinking = p;
+        shrinking.clips[0].keyframes["scale"] = {{0, 1, false}, {50, .5, false}};
+        QVERIFY(std::abs(redWidth(still(shrinking, 0, false), 45) - 160) <= 2);
+        QVERIFY(std::abs(redWidth(still(shrinking, 25, false), 45) - 120) <= 3);
+        const auto small = still(shrinking, 55, false);
+        QVERIFY(std::abs(redWidth(small, 45) - 80) <= 3);
+        QVERIFY(small.pixelColor(5, 5).red() < 40);
+        // A window inside the animation sees the same frame.
+        for (qint64 frame : {10, 25, 49}) {
+            const auto full = redWidth(still(shrinking, frame, false), 45),
+                       window = redWidth(still(shrinking, frame, true), 45);
+            QVERIFY2(std::abs(full - window) <= 1,
+                     qPrintable(QString("frame %1: %2 vs %3").arg(frame).arg(full).arg(window)));
+        }
+        auto moving = p;
+        moving.clips[0].scale = .5;
+        moving.clips[0].keyframes["x"] = {{0, 0, false}, {30, .25, false}};
+        moving.clips[0].keyframes["rotation"] = {{0, 0, false}, {30, 90, false}};
+        const auto turned = still(moving, 30, false);
+        // 80x45 picture rotated a quarter turn and moved right by 40 px: 45 wide, 80 tall.
+        QVERIFY(turned.pixelColor(120, 10).red() > 128 && turned.pixelColor(120, 80).red() > 128);
+        QVERIFY(turned.pixelColor(90, 45).red() < 128 && turned.pixelColor(150, 45).red() < 128);
+        QVERIFY(std::abs(redWidth(turned, 45) - 45) <= 3);
+        auto fading = p;
+        fading.clips[0].keyframes["opacity"] = {{0, 1, false}, {60, 0, false}};
+        QVERIFY(still(fading, 0, false).pixelColor(80, 45).red() > 240);
+        const auto halfway = still(fading, 30, false).pixelColor(80, 45).red();
+        QVERIFY2(std::abs(halfway - 128) < 12, qPrintable(QString::number(halfway)));
+        QVERIFY(std::abs(still(fading, 30, true).pixelColor(80, 45).red() - halfway) <= 2);
+
+        // Volume keyframes: full level, then silence by frame 45.
+        auto quieter = p;
+        quieter.clips[0].keyframes["volume"] = {{15, 1, false}, {45, 0, false}};
+        RenderOptions sound;
+        sound.video = false;
+        const auto plan = compileRender(quieter, dir.filePath("work"), 160, 90, sound);
+        QFile g(graph);
+        QVERIFY(g.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        g.write(plan.graph.toUtf8());
+        g.close();
+        const auto pcm = run(ffmpeg, streamArguments(plan, graph, false));
+        auto rms = [&](double from, double to) {
+            double sum = 0;
+            qint64 count = 0;
+            for (qint64 i = qint64(from * 48000); i < qint64(to * 48000); ++i) {
+                const auto *sample = reinterpret_cast<const qint16 *>(pcm.constData()) + i * 2;
+                sum += double(sample[0]) * sample[0];
+                ++count;
+            }
+            return std::sqrt(sum / count);
+        };
+        const double loud = rms(.1, .4), middle = rms(.97, 1.03), end = rms(1.6, 1.9);
+        QVERIFY2(middle > loud * .4 && middle < loud * .6,
+                 qPrintable(QString("%1 %2").arg(loud).arg(middle)));
+        QVERIFY(end < loud * .02);
     }
     void waveformPeaksAndCache() {
         PeakAccumulator peaks(2);
