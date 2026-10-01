@@ -64,6 +64,13 @@ class Editor final : public QObject {
     Q_INVOKABLE void select(const QString &id);
     Q_INVOKABLE void seek(qint64 frame);
     Q_INVOKABLE void setClip(const QString &key, const QVariant &value);
+    Q_INVOKABLE void setClipValues(const QVariantMap &values);
+    // Picture rectangle of a clip on the canvas at the playhead: {x, y, width, height} as
+    // fractions of the canvas, plus rotation and whether the playhead is inside the clip.
+    Q_INVOKABLE QVariantMap clipBounds(const QString &id) const;
+    // Picture-in-picture placement: "topLeft", "topRight", "bottomLeft", "bottomRight" shrink
+    // a full-size clip to 30% and inset it by a margin; "full" restores a centred full frame.
+    Q_INVOKABLE void placeClip(const QString &corner);
     Q_INVOKABLE void moveClip(const QString &id, qint64 frame, int track);
     Q_INVOKABLE void split();
     // Adds a keyframe at the playhead with the current value, or removes the one there.
@@ -153,6 +160,7 @@ class Editor final : public QObject {
     void probeFile(const QUrl &, const QString &replaceId, std::shared_ptr<DropBatch> drop = {});
     static QString insert(Project &, const QString &assetId, int track, qint64 frame);
     void startRender(const QString &output, QSize size, const Encoder &encoder);
+    void applyClipValue(Project &, const QString &key, const QVariant &value);
     void stopPlayback();
     QSize previewSize(int longSide) const;
     void autosave();

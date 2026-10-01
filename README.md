@@ -27,6 +27,11 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - 30 configurable keyboard commands with conflict checks and portable preferences. Open **Help → Keyboard shortcuts** or press **Ctrl+/**; see the [shortcut reference](docs/SHORTCUTS.md).
 - 14 transitions between touching clips on a track: dissolve, dips to black/white, wipes, slides, zoom, circle, radial and pixelize. Click **+** on a cut or use the inspector; duration 0.1–3 s. Audio crossfades automatically. Clips keep their timing; each extends into the other using spare source media, or holds its edge frame.
 - Keyframe animation of scale, position, rotation, opacity and volume. Put the playhead in the clip and click ◇ next to a slider. Once a property has keyframes, moving its slider at another time adds a keyframe there. Keyframes show as yellow diamonds on the clip; click one to jump there, or use ◀◆ / ◆▶.
+- Presenter overlays for picture-in-picture, e.g. a speaker over a screen recording:
+  - ↖ ↗ ↙ ↘ place the clip in a corner at 30 % size; ⛶ returns it to full frame.
+  - Drag the turquoise frame in the preview to move the clip; drag a corner to resize.
+  - Shapes: rectangle, rounded corners or circle, with a coloured border and soft shadow.
+  - Green/blue screen removal with automatic spill suppression.
 - Static transforms, equal-edge crop, horizontal flip, opacity, brightness/contrast/saturation, clip fades.
 - Constant speed **0.25–4×**, reverse, volume/mute, stereo mixing with an output limiter.
 - Rasterized Unicode titles, manual captions, SRT import/export and subtitle burn-in.
@@ -41,7 +46,7 @@ This is a CPU reference implementation. It does **not** yet implement the planne
 
 Only finite local media files are supported. Source audio/video remain together until you use **Detach audio**; detached clips can then be edited independently. Relinking or resynchronizing detached pairs is not implemented. Timing is rounded to sequence frames; SRT timing is quantized on import. Colour operations are simple SDR adjustments, not a colour-managed grading pipeline. Output filenames must be new; exports never overwrite an existing file. Temporary render folders live under `cache`; remove it while Cutlery is closed if space is needed.
 
-The current development build saves schema 5, which adds transitions and keyframes; 0.4 and older cannot open it. It reads all earlier schemas. Use **Save As** to preserve an older project copy.
+The current development build saves schema 6, which adds transitions, keyframes and overlay styles; 0.4 and older cannot open it. It reads all earlier schemas. Use **Save As** to preserve an older project copy.
 
 See [what remains](docs/ROADMAP.md), [drag/drop and magnetic tracks](docs/TIMELINE.md), [BUILDING](docs/BUILDING.md), [PORTABLE](docs/PORTABLE.md), [architecture](docs/ARCHITECTURE.md), [feature status](docs/FEATURE_STATUS.md), [the original blueprint](docs/BLUEPRINT.md), and [third-party notices](docs/THIRD_PARTY.md).
 
