@@ -541,6 +541,17 @@ class UiTest : public QObject {
         QVERIFY(!editor.state()["aiMissing"].toMap()["matte"].toString().isEmpty());
         QVERIFY(!findItem(window->contentItem(), "aiUpscale")->isEnabled());
 #endif
+        // Automatic captions without speech recognition installed: explained, not startable.
+        auto *captions = window->findChild<QObject *>("captionDialog");
+        QVERIFY(captions);
+        QVERIFY(QMetaObject::invokeMethod(captions, "open"));
+        QTRY_VERIFY(window->findChild<QQuickItem *>("captionStart"));
+        QVERIFY(!window->findChild<QQuickItem *>("captionStart")->isEnabled());
+        QVERIFY(window->findChild<QQuickItem *>("captionStatus")
+                    ->property("text")
+                    .toString()
+                    .contains("missing"));
+        QVERIFY(QMetaObject::invokeMethod(captions, "close"));
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void editingAndPlayback() {

@@ -1,4 +1,5 @@
 #include "Editor.h"
+#include "Captions.h"
 #include "RenderGraph.h"
 #include <QCoreApplication>
 #include <QDir>
@@ -56,13 +57,26 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     }
     if (models.isEmpty())
         models = app + "/models";
+    QString whisper = qEnvironmentVariable("CUTLERY_WHISPER");
+    if (whisper.isEmpty()) {
+        whisper = app + "/whisper-cli";
+#ifdef Q_OS_WIN
+        whisper += ".exe";
+#endif
+    }
     m_ai = new AiJobs(m_data + "/ai", executable("ffmpeg"), executable("ffprobe"), worker,
                       {{"matte", models + "/u2net_human_seg.onnx"},
-                       {"upscale", models + "/realesr-general-x4v3.onnx"}},
+                       {"upscale", models + "/realesr-general-x4v3.onnx"},
+                       {"transcribe", models + "/ggml-large-v3-turbo-q5_0.bin"},
+                       {"vad", models + "/ggml-silero-v6.2.0.bin"},
+                       {"whisper", whisper}},
                       this);
     connect(m_ai, &AiJobs::changed, this, &Editor::changed);
     // A finished result changes the picture.
-    connect(m_ai, &AiJobs::finished, this, [this] { m_previewTimer.start(); });
+    connect(m_ai, &AiJobs::finished, this, [this] {
+        m_previewTimer.start();
+        placeCaptions(); // when every transcript of a caption request is ready
+    });
     connect(m_thumbnails, &Thumbnails::changed, this, [this] {
         emit thumbnailsChanged();
         emit changed();
@@ -335,8 +349,8 @@ QVariantMap Editor::state() const {
 #undef PROP
             if (const auto *a = m_project.asset(c.assetId); a && a->kind == "video") {
                 for (const auto &[task, name] : {std::pair{"matte", "cutout"}, {"upscale", "upscale"}}) {
-                    auto info = m_ai->status(task, *a, upscaleHeight(*a));
-                    info["covered"] = aiCovered(task, *a, c);
+                    auto info = m_ai->status(task, *a, aiVariant(task, *a));
+                    info["covered"] = aiCovered(task, *a, &c);
                     selected[name] = info;
                 }
                 // Already at least 4K: nothing to gain.
@@ -362,7 +376,9 @@ QVariantMap Editor::state() const {
             {"importing", m_importing},
             {"analyzing", m_analysis->busy() || m_thumbnails->busy()},
             {"aiMissing", QVariantMap{{"matte", m_ai->missing("matte")},
-                                      {"upscale", m_ai->missing("upscale")}}},
+                                      {"upscale", m_ai->missing("upscale")},
+                                      {"transcribe", m_ai->missing("transcribe")}}},
+            {"captions", captionState()},
             {"progress", m_progress},
             {"previewUrl", m_previewUrl},
             {"playing", m_playback->active() || m_resumeTimer.isActive()},
@@ -1054,8 +1070,15 @@ void Editor::requestPreview() {
         fail(e.what());
     }
 }
-static bool usesAi(const Clip &c, const QString &task) {
+bool Editor::usesAi(const Clip &c, const QString &task) const {
+    if (task == "transcribe")
+        return speaks(m_project, c) && !c.reverse;
     return task == "upscale" ? c.aiUpscale : c.aiCutout;
+}
+QString Editor::aiVariant(const QString &task, const Asset &a) const {
+    if (task == "upscale")
+        return QString::number(upscaleHeight(a));
+    return task == "transcribe" ? m_captionLanguage : QString();
 }
 std::pair<double, double> Editor::aiSpan(const QString &task, const Asset &a,
                                          const Clip *extra) const {
@@ -1077,9 +1100,9 @@ int Editor::upscaleHeight(const Asset &a) {
     // Four times the source (the model's factor), at most 4K; 0 when the source is 4K already.
     return a.height > 0 && a.height < 2160 ? std::min(4 * a.height, 2160) / 2 * 2 : 0;
 }
-bool Editor::aiCovered(const QString &task, const Asset &a, const Clip &c) const {
-    const auto r = m_ai->result(task, a, upscaleHeight(a));
-    const auto [from, to] = aiSpan(task, a, &c);
+bool Editor::aiCovered(const QString &task, const Asset &a, const Clip *c) const {
+    const auto r = m_ai->result(task, a, aiVariant(task, a));
+    const auto [from, to] = aiSpan(task, a, c);
     // A matte holds its last analysed frame, so its end may fall short by one.
     const double slack = task == "matte" ? 1 / AiJobs::matteRate : 0.05;
     return !r.path.isEmpty() && r.start <= from + 1e-3 && r.end + slack >= to;
@@ -1091,10 +1114,23 @@ void Editor::addAiMedia(RenderOptions &options) const {
                 if (const auto m = m_ai->result("matte", *a); !m.path.isEmpty())
                     options.mattes.insert(a->id, m);
             if (c.aiUpscale && upscaleHeight(*a) > 0 && !options.upscaled.contains(a->id))
-                if (const auto u = m_ai->result("upscale", *a, upscaleHeight(*a));
+                if (const auto u = m_ai->result("upscale", *a, aiVariant("upscale", *a));
                     !u.path.isEmpty())
                     options.upscaled.insert(a->id, u);
         }
+}
+bool Editor::startAi(const QString &task, const Asset &a, const Clip *extra) {
+    if (aiCovered(task, a, extra))
+        return false;
+    auto [from, to] = aiSpan(task, a, extra);
+    // Keep what an earlier result covered when it overlaps, so other clips keep it.
+    if (const auto r = m_ai->result(task, a, aiVariant(task, a));
+        !r.path.isEmpty() && r.start <= to && r.end >= from) {
+        from = std::min(from, r.start);
+        to = std::max(to, r.end);
+    }
+    m_ai->start(task, a, from, to, aiVariant(task, a));
+    return true;
 }
 void Editor::runAi(const QString &task) {
     const auto *c = m_project.clip(m_selected);
@@ -1103,22 +1139,103 @@ void Editor::runAi(const QString &task) {
         return fail("AI processing works on video clips");
     if (!m_ai->available(task))
         return fail(m_ai->missing(task) + " Download the AI pack next to Cutlery.exe.");
-    const int height = upscaleHeight(*a);
-    if (task == "upscale" && height == 0)
+    if (task == "upscale" && upscaleHeight(*a) == 0)
         return fail("This video is already 4K or larger");
-    if (aiCovered(task, *a, *c))
-        return;
-    auto [from, to] = aiSpan(task, *a, c);
-    // Keep what an earlier result covered when it overlaps, so other clips keep it.
-    if (const auto r = m_ai->result(task, *a, height);
-        !r.path.isEmpty() && r.start <= to && r.end >= from) {
-        from = std::min(from, r.start);
-        to = std::max(to, r.end);
-    }
-    m_ai->start(task, *a, from, to, task == "upscale" ? height : 0);
+    startAi(task, *a, c);
 }
 void Editor::cancelAi() {
+    m_captionAssets.clear();
     m_ai->cancel();
+}
+QStringList Editor::speakingAssets() const {
+    QStringList ids;
+    for (const auto &c : m_project.clips)
+        if (usesAi(c, "transcribe") && !ids.contains(c.assetId))
+            ids << c.assetId;
+    return ids;
+}
+void Editor::generateCaptions(const QString &language) {
+    static const QRegularExpression code("^(auto|[a-z]{2,3})$");
+    if (!code.match(language).hasMatch())
+        return fail("Unknown caption language");
+    if (!m_ai->available("transcribe"))
+        return fail(m_ai->missing("transcribe") + " Download the AI pack next to Cutlery.exe.");
+    m_captionLanguage = language;
+    m_captionAssets = speakingAssets();
+    if (m_captionAssets.isEmpty())
+        return fail("No audible clips to caption");
+    for (const auto &id : m_captionAssets)
+        startAi("transcribe", *m_project.asset(id));
+    m_status = "Recognising speech…";
+    emit changed();
+    placeCaptions();
+}
+QVariantMap Editor::captionState() const {
+    if (m_captionAssets.isEmpty())
+        return {{"running", false}, {"language", m_captionLanguage}};
+    double done = 0;
+    for (const auto &id : m_captionAssets)
+        if (const auto *a = m_project.asset(id)) {
+            const auto st = m_ai->status("transcribe", *a, m_captionLanguage);
+            done += st["status"] == "ready" ? 1. : st["progress"].toDouble();
+        }
+    return {{"running", true},
+            {"language", m_captionLanguage},
+            {"progress", done / m_captionAssets.size()}};
+}
+void Editor::placeCaptions() {
+    if (m_captionAssets.isEmpty())
+        return;
+    QHash<QString, QVector<Cue>> transcripts;
+    for (const auto &id : m_captionAssets) {
+        const auto *a = m_project.asset(id);
+        if (!a)
+            continue;
+        const auto status = m_ai->status("transcribe", *a, m_captionLanguage)["status"].toString();
+        if (status == "queued" || status == "running")
+            return; // wait for the remaining media
+        if (status == "failed") {
+            m_captionAssets.clear();
+            return fail("Speech recognition failed: " +
+                        m_ai->status("transcribe", *a, m_captionLanguage)["error"].toString());
+        }
+        const auto r = m_ai->result("transcribe", *a, m_captionLanguage);
+        if (r.path.isEmpty())
+            continue;
+        try {
+            auto cues = parseSrt(readUtf8File(r.path));
+            for (auto &cue : cues) {
+                cue.start += r.start;
+                cue.end += r.start;
+            }
+            transcripts.insert(id, cues);
+        } catch (const std::exception &e) {
+            m_captionAssets.clear();
+            return fail(QString("Cannot read the transcript: ") + e.what());
+        }
+    }
+    m_captionAssets.clear();
+    int count = 0;
+    mutate([&](Project &p) {
+        // Captions go to their own track, replaced on every run.
+        int track = -1;
+        for (int t = 0; t < p.tracks; ++t)
+            if (p.trackSettings[t].name == captionTrackName)
+                track = t;
+        if (track < 0) {
+            p.addTrack(captionTrackName);
+            track = p.tracks - 1;
+        }
+        p.requireEditable(track);
+        p.clips.erase(std::remove_if(p.clips.begin(), p.clips.end(),
+                                     [&](const Clip &c) { return c.track == track; }),
+                      p.clips.end());
+        const auto captions = captionClips(p, transcripts, track);
+        count = int(captions.size());
+        p.clips += captions;
+    });
+    m_status = count ? QString("%1 captions added").arg(count) : QString("No speech found");
+    emit changed();
 }
 QSize Editor::previewSize(int longSide) const {
     int w = longSide, h = qRound(double(longSide) * m_project.height / m_project.width / 2) * 2;
@@ -1394,41 +1511,28 @@ void Editor::cancelJob() {
 }
 void Editor::importSrt(const QUrl &url) {
     try {
-        QString text = readUtf8File(localPath(url));
-        text.replace("\r", "");
-        const auto blocks = text.split(QRegularExpression("\\n\\s*\\n"), Qt::SkipEmptyParts);
-        const QRegularExpression stamp("(\\d{1,3}):(\\d{2}):(\\d{2})[,.](\\d{3})\\s*-->\\s*(\\d{1,"
-                                       "3}):(\\d{2}):(\\d{2})[,.](\\d{3})");
+        const auto cues = parseSrt(readUtf8File(localPath(url)));
         mutate([&](Project &p) {
             if (p.trackSettings[p.tracks - 1].magnetic)
                 throw std::runtime_error("Turn off Magnet on the caption track before importing "
                                          "SRT to preserve caption timing");
-            int count = 0;
-            for (const auto &block : blocks) {
-                auto m = stamp.match(block);
-                if (!m.hasMatch())
-                    throw std::runtime_error("Invalid SRT timing block");
-                auto seconds = [&](int i) {
-                    return m.captured(i).toInt() * 3600. + m.captured(i + 1).toInt() * 60. +
-                           m.captured(i + 2).toInt() + m.captured(i + 3).toInt() / 1000.;
-                };
+            for (const auto &cue : cues) {
                 Clip c;
                 c.id = newId();
                 c.name = "Caption";
                 c.track = p.tracks - 1;
                 p.requireEditable(c.track);
-                c.start = qRound64(seconds(1) * p.fpsN / p.fpsD);
-                const auto end = qRound64(seconds(5) * p.fpsN / p.fpsD);
+                c.start = qRound64(cue.start * p.fpsN / p.fpsD);
+                const auto end = qRound64(cue.end * p.fpsN / p.fpsD);
                 c.duration = end - c.start;
-                c.text = block.mid(m.capturedEnd()).trimmed();
+                c.text = cue.text;
                 c.fontSize = 48;
                 c.y = .32;
                 if (c.duration <= 0 || c.text.isEmpty())
                     throw std::runtime_error("Empty or reversed SRT cue");
                 p.clips.push_back(c);
-                ++count;
             }
-            if (!count)
+            if (cues.isEmpty())
                 throw std::runtime_error("No SRT captions found");
         });
     } catch (const std::exception &e) {

@@ -14,20 +14,22 @@
 namespace cutlery {
 namespace {
 QString extension(const QString &task) {
-    return task == "upscale" ? ".mov" : ".mkv";
+    return task == "upscale" ? ".mov" : task == "transcribe" ? ".srt" : ".mkv";
 }
 } // namespace
 AiJobs::AiJobs(QString dir, QString ffmpeg, QString ffprobe, QString worker,
-               QHash<QString, QString> models, QObject *parent)
+               QHash<QString, QString> files, QObject *parent)
     : QObject(parent), m_dir(std::move(dir)), m_ffmpeg(std::move(ffmpeg)),
-      m_ffprobe(std::move(ffprobe)), m_worker(std::move(worker)), m_models(std::move(models)) {}
+      m_ffprobe(std::move(ffprobe)), m_worker(std::move(worker)), m_files(std::move(files)) {}
 AiJobs::~AiJobs() {
     cancel();
 }
 QString AiJobs::missing(const QString &task) const {
     if (m_worker.isEmpty() || !QFileInfo(m_worker).isExecutable())
         return "The AI worker (cutlery-ai) is missing from this build.";
-    const auto model = m_models.value(task);
+    if (task == "transcribe" && !QFileInfo(m_files.value("whisper")).isExecutable())
+        return "Speech recognition (whisper-cli) is missing from this build.";
+    const auto model = m_files.value(task);
     if (model.isEmpty() || !QFileInfo(model).isFile())
         return "The AI pack is not installed: models/" +
                QFileInfo(model.isEmpty() ? task : model).fileName() + " is missing.";
@@ -39,12 +41,12 @@ QSize AiJobs::upscaleSize(const Asset &a, int height) {
     const double aspect = a.width > 0 && a.height > 0 ? double(a.width) / a.height : 16. / 9;
     return {std::max(2, int(std::lround(height * aspect / 2)) * 2), std::max(2, height / 2 * 2)};
 }
-QString AiJobs::key(const QString &task, const Asset &a, int height) const {
-    return MediaAnalysis::fingerprint(a) +
-           (task == "upscale" ? QString("-upscale-v1-%1").arg(height) : QString("-matte-v1"));
+QString AiJobs::key(const QString &task, const Asset &a, const QString &variant) const {
+    return MediaAnalysis::fingerprint(a) + "-" + task + "-v1" +
+           (variant.isEmpty() ? QString() : "-" + variant);
 }
-MatteSource AiJobs::result(const QString &task, const Asset &a, int height) const {
-    const auto base = QDir(m_dir).filePath(key(task, a, height));
+MatteSource AiJobs::result(const QString &task, const Asset &a, const QString &variant) const {
+    const auto base = QDir(m_dir).filePath(key(task, a, variant));
     QFile meta(base + ".json");
     if (!QFileInfo(base + extension(task)).isFile() || !meta.open(QIODevice::ReadOnly))
         return {};
@@ -58,15 +60,15 @@ MatteSource AiJobs::result(const QString &task, const Asset &a, int height) cons
         return {};
     return m;
 }
-QVariantMap AiJobs::status(const QString &task, const Asset &a, int height) const {
-    const auto k = key(task, a, height);
+QVariantMap AiJobs::status(const QString &task, const Asset &a, const QString &variant) const {
+    const auto k = key(task, a, variant);
     if (m_process && m_job.key == k)
         return {{"status", "running"}, {"progress", m_progress}, {"device", m_device}};
     if (std::any_of(m_queue.begin(), m_queue.end(), [&](const Job &j) { return j.key == k; }))
         return {{"status", "queued"}};
     if (m_errorKey == k)
         return {{"status", "failed"}, {"error", m_error}};
-    const auto r = result(task, a, height);
+    const auto r = result(task, a, variant);
     if (r.path.isEmpty())
         return {{"status", "none"}};
     return {{"status", "ready"}, {"start", r.start}, {"end", r.end}};
@@ -83,16 +85,20 @@ void AiJobs::cancel() {
     }
     emit changed();
 }
-void AiJobs::start(const QString &task, const Asset &a, double start, double end, int height) {
-    if (!available(task) || a.kind != "video" || a.width <= 0 || a.height <= 0)
+void AiJobs::start(const QString &task, const Asset &a, double start, double end,
+                   const QString &variant) {
+    if (!available(task))
+        return;
+    if (task == "transcribe" ? !a.hasAudio
+                             : a.kind != "video" || a.width <= 0 || a.height <= 0)
         return;
     Job job;
     job.task = task;
     job.asset = a;
     job.start = std::clamp(start, 0., a.duration);
     job.end = std::clamp(end, job.start, a.duration);
-    job.height = height;
-    job.key = key(task, a, height);
+    job.variant = variant;
+    job.key = key(task, a, variant);
     if (job.end - job.start < 0.05)
         return;
     m_queue.erase(std::remove_if(m_queue.begin(), m_queue.end(),
@@ -140,7 +146,7 @@ void AiJobs::run(const Job &job, const QString &rate) {
     const auto part = QDir(m_dir).filePath(job.key + ".part" + extension(job.task));
     const auto &a = job.asset;
     QStringList args{job.task,     "--ffmpeg",        m_ffmpeg,
-                     "--model",    m_models.value(job.task),
+                     "--model",    m_files.value(job.task),
                      "--input",    a.path,            "--output",
                      part,         "--start",         QString::number(job.start, 'f', 6),
                      "--duration", QString::number(job.end - job.start, 'f', 6)};
@@ -150,12 +156,17 @@ void AiJobs::run(const Job &job, const QString &rate) {
         const double fit = std::min(1., std::min(1920. / a.width, 1080. / a.height));
         const QSize source(std::max(2, int(std::lround(a.width * fit / 2)) * 2),
                            std::max(2, int(std::lround(a.height * fit / 2)) * 2));
-        const auto size = upscaleSize(a, job.height);
+        const auto size = upscaleSize(a, job.variant.toInt());
         args << "--source" << QString("%1x%2").arg(source.width()).arg(source.height())
              << "--size" << QString("%1x%2").arg(size.width()).arg(size.height()) << "--rate"
              << rate;
         const auto parts = rate.split('/');
         resultRate = parts[0].toDouble() / parts[1].toDouble();
+    } else if (job.task == "transcribe") {
+        args << "--whisper" << m_files.value("whisper") << "--language"
+             << (job.variant.isEmpty() ? QString("auto") : job.variant);
+        if (QFileInfo(m_files.value("vad")).isFile())
+            args << "--vad" << m_files.value("vad");
     } else {
         // About 640 pixels on the long side: enough for soft edges, small on disk.
         const double fit = std::min(1., 640. / std::max(a.width, a.height));
@@ -200,7 +211,7 @@ void AiJobs::run(const Job &job, const QString &rate) {
                                              {"start", m_job.start},
                                              {"end", m_job.end},
                                              {"rate", resultRate},
-                                             {"model", QFileInfo(m_models.value(m_job.task))
+                                             {"model", QFileInfo(m_files.value(m_job.task))
                                                            .fileName()},
                                          })
                                .toJson());
