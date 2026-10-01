@@ -50,7 +50,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F044 | Luma key, chroma key and spill suppression | Partial | Colour key (green/blue presets) with tolerance and edge softness, plus automatic green/blue spill suppression; no luma key or colour picker. |
 | F045 | Background replacement and canvas | Planned | Not implemented in this alpha. |
 | F046 | Adjustment layers and filter ordering | Planned | Not implemented in this alpha. |
-| F047 | Blur variants, mosaic and pixelation | Planned | Not implemented in this alpha. |
+| F047 | Blur variants, mosaic and pixelation | Partial | Gaussian blur of a clip's picture (inspector slider), and blur or mosaic (pixelate) areas: rectangles on an upper track that affect everything below, placed and resized in the preview, position keyframable, strength 0–100 %. Rectangles only; no ellipse/feathered shape, animated size or face tracking. |
 | F048 | Glow, grain, vignette and sharpen | Planned | Not implemented in this alpha. |
 | F049 | Glitch, shake, VHS, retro and film effects | Planned | Not implemented in this alpha. |
 | F050 | Distortion, edge, lens and stylize effects | Planned | Not implemented in this alpha. |

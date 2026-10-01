@@ -117,6 +117,8 @@ void Clip::scaleKeyframes(double factor) {
     }
 }
 QSizeF Project::pictureSize(const Clip &c, double boxWidth, double boxHeight) const {
+    if (!c.effect.isEmpty())
+        return {boxWidth * c.effectWidth, boxHeight * c.effectHeight};
     const auto *a = asset(c.assetId);
     double aspect = a && a->width > 0 && a->height > 0 ? double(a->width) / a->height
                                                        : double(width) / height;
@@ -134,10 +136,10 @@ const Clip *Project::previousAdjacent(const Clip &c) const {
     return found;
 }
 qint64 Project::transitionLength(const Clip &c) const {
-    if (c.transition.isEmpty() || c.transitionFrames < 2)
+    if (c.transition.isEmpty() || c.transitionFrames < 2 || !c.effect.isEmpty())
         return 0;
     const auto *prev = previousAdjacent(c);
-    if (!prev)
+    if (!prev || !prev->effect.isEmpty())
         return 0;
     // Each clip gives at most its whole length, so a transition never spans three clips.
     return std::min({c.transitionFrames, prev->duration, c.duration});
@@ -208,6 +210,14 @@ QJsonObject Project::json(const QString &base) const {
                       {"fontFamily", c.fontFamily},
                       {"textColor", c.textColor},
                       {"fontSize", c.fontSize}};
+        if (!c.effect.isEmpty()) {
+            o["effect"] = c.effect;
+            o["effectStrength"] = c.effectStrength;
+            o["effectWidth"] = c.effectWidth;
+            o["effectHeight"] = c.effectHeight;
+        }
+        if (c.blur > 0)
+            o["blur"] = c.blur;
         if (!c.captionStyle.isEmpty() || !c.wordStarts.isEmpty()) {
             o["captionStyle"] = c.captionStyle;
             o["highlightColor"] = c.highlightColor;
@@ -255,13 +265,13 @@ QJsonObject Project::json(const QString &base) const {
         o["transitionFrames"] = QString::number(c.transitionFrames);
         cc.append(o);
     }
-    return {{"format", "cutlery"}, {"schemaVersion", 8}, {"name", name},       {"width", width},
+    return {{"format", "cutlery"}, {"schemaVersion", 9}, {"name", name},       {"width", width},
             {"height", height},    {"fpsN", fpsN},       {"fpsD", fpsD},       {"tracks", tracks},
             {"assets", aa},        {"clips", cc},        {"trackSettings", tt}};
 }
 Project Project::fromJson(const QJsonObject &o, const QString &base) {
     require(o["format"] == "cutlery" &&
-                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 8),
+                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 9),
             "Unsupported project format/version. Original left unchanged.");
     require(o["assets"].isArray() && o["clips"].isArray(), "Missing project collections");
     Project p;
@@ -332,6 +342,11 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.fontFamily = j["fontFamily"].toString("Arial");
         c.textColor = j["textColor"].toString("#ffffff");
         c.fontSize = j["fontSize"].toInt(72);
+        c.effect = j["effect"].toString();
+        c.effectStrength = j["effectStrength"].toDouble(0.6);
+        c.effectWidth = j["effectWidth"].toDouble(0.3);
+        c.effectHeight = j["effectHeight"].toDouble(0.2);
+        c.blur = j["blur"].toDouble(0);
         c.captionStyle = j["captionStyle"].toString();
         c.highlightColor = j["highlightColor"].toString("#ffd23f");
         for (const auto &w : j["wordStarts"].toArray())
@@ -461,6 +476,11 @@ void Project::validate() const {
                     QColor(c.highlightColor).isValid() && c.wordStarts.size() <= 2000 &&
                     std::is_sorted(c.wordStarts.begin(), c.wordStarts.end()),
                 "Invalid caption style");
+        require((c.effect.isEmpty() || ((c.effect == "blur" || c.effect == "pixelate") &&
+                                        c.assetId.isEmpty())) &&
+                    bounded(c.effectStrength, 0, 1) && bounded(c.effectWidth, 0.02, 1) &&
+                    bounded(c.effectHeight, 0.02, 1) && bounded(c.blur, 0, 1),
+                "Invalid blur or mosaic setting");
         if (const auto *a = asset(c.assetId); a && a->kind != "image")
             require(c.sourceIn.seconds() +
                             frameTime(c.duration, fpsN, fpsD).seconds() * c.speed.seconds() <=

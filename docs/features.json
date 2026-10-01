@@ -1171,8 +1171,8 @@
     "status": "Planned",
     "acceptance": "Blur strength consistent between proxy preview and full export",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Gaussian blur of a clip's picture (inspector slider), and blur or mosaic (pixelate) areas: rectangles on an upper track that affect everything below, placed and resized in the preview, position keyframable, strength 0–100 %. Rectangles only; no ellipse/feathered shape, animated size or face tracking."
   },
   {
     "id": "F048",

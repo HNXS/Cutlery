@@ -448,7 +448,7 @@ FocusScope {
                                 readonly property real shownStart: operation ? dragStart : modelData.start
                                 readonly property real shownEnd: operation ? dragEnd : modelData.start + modelData.duration
                                 function refreshThumbs() {
-                                    thumbs = modelData.title || modelData.audio ? ({}) : editor.thumbnails(modelData.assetId);
+                                    thumbs = modelData.title || modelData.effect || modelData.audio ? ({}) : editor.thumbnails(modelData.assetId);
                                 }
                                 // Strip tile for a filmstrip slot: the source frame at the slot's centre,
                                 // following trims (including live trim drags), speed and reverse.
@@ -514,7 +514,7 @@ FocusScope {
                                 height: root.rowHeight - 8
                                 radius: 5
                                 clip: true
-                                color: modelData.title ? "#59453e" : modelData.audio ? "#28564c" : "#334a65"
+                                color: modelData.effect ? "#4d3f66" : modelData.title ? "#59453e" : modelData.audio ? "#28564c" : "#334a65"
                                 opacity: modelData.locked ? .65 : 1
                                 border.width: root.state.selectedId === modelData.id ? 2 : 1
                                 border.color: operation === 1 && (dragTrack < 0 || dragTrack >= root.state.tracks || (editor.trackList[dragTrack] || {}).locked) ? "#ec947e" : root.state.selectedId === modelData.id ? "#64d8bc" : "#6481a0"

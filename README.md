@@ -34,7 +34,8 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
   - Green/blue screen removal with automatic spill suppression.
   - Offline AI background removal for speakers without a green screen.
 - Offline AI upscaling (Real-ESRGAN) of low-resolution video clips to up to 4K. Both AI features use the GPU through DirectML when available, run in the background once per media file and need the separate [AI pack](docs/AI.md).
-- Static transforms, equal-edge crop, horizontal flip, opacity, brightness/contrast/saturation, clip fades.
+- Static transforms, equal-edge crop, horizontal flip, opacity, brightness/contrast/saturation, blur, clip fades.
+- **Blur and mosaic areas** (library panel): a rectangle on an upper track blurs or pixelates whatever the tracks below show, e.g. private data in a screen recording or a face. Drag it in the preview; keyframe its position to follow movement.
 - Constant speed **0.25–4×**, reverse, volume/mute, stereo mixing with an output limiter.
 - **Remove pauses…** (inspector) finds the quiet moments in a clip's sound and cuts them out in one undoable step, keeping a little room around speech; detached audio is cut alongside.
 - Loudness normalisation on export: Cutlery measures the whole mix (EBU R128) and sets one gain for YouTube/streaming (−14 LUFS), podcasts (−16) or TV (−23), with peaks limited below full scale.
@@ -51,7 +52,7 @@ This is a CPU reference implementation. It does **not** yet implement the planne
 
 Only finite local media files are supported. Source audio/video remain together until you use **Detach audio**; detached clips can then be edited independently. Relinking or resynchronizing detached pairs is not implemented. Timing is rounded to sequence frames; SRT timing is quantized on import. Colour operations are simple SDR adjustments, not a colour-managed grading pipeline. Output filenames must be new; exports never overwrite an existing file. Temporary render folders live under `cache`; remove it while Cutlery is closed if space is needed.
 
-The current development build saves schema 8, which adds transitions, keyframes, overlay styles, AI cutout and timed captions; 0.4 and older cannot open it. It reads all earlier schemas. Use **Save As** to preserve an older project copy.
+The current development build saves schema 9, which adds transitions, keyframes, overlay styles, AI cutout, timed captions and blur/mosaic areas; 0.4 and older cannot open it. It reads all earlier schemas. Use **Save As** to preserve an older project copy.
 
 See [what remains](docs/ROADMAP.md), [drag/drop and magnetic tracks](docs/TIMELINE.md), [BUILDING](docs/BUILDING.md), [PORTABLE](docs/PORTABLE.md), [architecture](docs/ARCHITECTURE.md), [feature status](docs/FEATURE_STATUS.md), [offline AI](docs/AI.md), [the original blueprint](docs/BLUEPRINT.md), and [third-party notices](docs/THIRD_PARTY.md).
 

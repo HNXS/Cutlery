@@ -468,6 +468,18 @@ class UiTest : public QObject {
         press("place-full");
         QCOMPARE(clip().scale, 1.);
         QCOMPARE(clip().x, 0.);
+        // A mosaic area: added from the library panel, configured in its own section.
+        press("addMosaicArea");
+        const auto area = editor.project().clips.last();
+        QCOMPARE(area.effect, QString("pixelate"));
+        QCOMPARE(editor.state()["selectedId"].toString(), area.id);
+        auto *type = findItem(window->contentItem(), "effectType");
+        QTRY_VERIFY(type && type->isVisible());
+        QCOMPARE(type->property("currentIndex").toInt(), 1);
+        type->setProperty("currentIndex", 0);
+        QVERIFY(QMetaObject::invokeMethod(type, "activated", Q_ARG(int, 0)));
+        QCOMPARE(editor.project().clip(area.id)->effect, QString("blur"));
+        QVERIFY(!findItem(window->contentItem(), "overlayShape")->isVisible());
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void aiCutoutControls() {

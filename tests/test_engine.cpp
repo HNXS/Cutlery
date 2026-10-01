@@ -1465,6 +1465,122 @@ class EngineTest : public QObject {
         QVERIFY(count(image, true, true) + count(image, false, true) == 0);
         QVERIFY(count(image, true, false) + count(image, false, false) > 50);
     }
+    void blurAndMosaic() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // A fine black/white checkerboard: blurring turns it grey, pixelating makes flat blocks.
+        const auto board = dir.filePath("board.png");
+        QImage checker(320, 180, QImage::Format_RGB32);
+        for (int y = 0; y < 180; ++y)
+            for (int x = 0; x < 320; ++x)
+                checker.setPixelColor(x, y, ((x / 2 + y / 2) % 2) ? Qt::white : Qt::black);
+        QVERIFY(checker.save(board));
+        Project p;
+        p.width = 320;
+        p.height = 180;
+        p.fpsN = 30;
+        Asset a;
+        a.id = "board";
+        a.path = board;
+        a.kind = "image";
+        a.duration = 5;
+        a.width = 320;
+        a.height = 180;
+        p.assets = {a};
+        Clip bg;
+        bg.id = "bg";
+        bg.assetId = "board";
+        bg.duration = 60;
+        Clip area;
+        area.id = "area";
+        area.effect = "blur";
+        area.track = 1;
+        area.duration = 60;
+        area.effectWidth = 0.5;
+        area.effectHeight = 0.5;
+        p.clips = {bg, area};
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Project &project, qint64 frame) {
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 320, 180, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        // Spread of grey levels in a 16×16 patch around a point: high for the checkerboard.
+        auto spread = [](const QImage &image, int cx, int cy) {
+            int lo = 255, hi = 0;
+            for (int y = cy - 8; y < cy + 8; ++y)
+                for (int x = cx - 8; x < cx + 8; ++x) {
+                    const int v = qGray(image.pixel(x, y));
+                    lo = std::min(lo, v);
+                    hi = std::max(hi, v);
+                }
+            return hi - lo;
+        };
+        auto image = still(p, 10);
+        QVERIFY2(spread(image, 160, 90) < 40, qPrintable(QString::number(spread(image, 160, 90))));
+        QVERIFY(std::abs(qGray(image.pixel(160, 90)) - 128) < 30);
+        QVERIFY(spread(image, 20, 20) > 200); // outside the area
+        // Mosaic: flat blocks larger than the checker squares.
+        auto mosaic = p;
+        mosaic.clips[1].effect = "pixelate";
+        image = still(mosaic, 10);
+        int flat = 0;
+        for (int y = 60; y < 120; y += 4)
+            for (int x = 100; x < 220; x += 4)
+                flat += image.pixel(x, y) == image.pixel(x + 1, y) &&
+                        image.pixel(x, y) == image.pixel(x, y + 1);
+        QVERIFY2(flat > 400, qPrintable(QString::number(flat)));
+        QVERIFY(spread(image, 20, 20) > 200);
+        // The area follows keyframed position: from the centre to the right edge.
+        auto moving = p;
+        moving.clips[1].keyframes["x"] = {{0, 0, false}, {30, 0.25, false}};
+        image = still(moving, 0);
+        QVERIFY(spread(image, 160, 90) < 40 && spread(image, 300, 90) > 200);
+        image = still(moving, 30);
+        QVERIFY(spread(image, 300, 90) < 40 && spread(image, 100, 90) > 200);
+        // Outside its time, the area does nothing.
+        auto later = p;
+        later.clips[1].start = 30;
+        later.clips[1].duration = 30;
+        QVERIFY(spread(still(later, 10), 160, 90) > 200);
+        QVERIFY(spread(still(later, 40), 160, 90) < 40);
+        // Clip-wide blur of the picture itself.
+        auto soft = p;
+        soft.clips.removeLast();
+        soft.clips[0].blur = 0.5;
+        QVERIFY(spread(still(soft, 10), 20, 20) < 40);
+        // Model: saved, bounded, sized for the preview frame, never in transitions or SRT.
+        const auto loaded = Project::fromJson(mosaic.json(), {});
+        QCOMPARE(loaded.clips[1].effect, QString("pixelate"));
+        QCOMPARE(loaded.clips[1].effectWidth, 0.5);
+        QVERIFY(mosaic.json()["schemaVersion"].toInt() >= 9);
+        auto invalid = p;
+        invalid.clips[1].effect = "swirl";
+        QVERIFY_EXCEPTION_THROWN(invalid.validate(), std::runtime_error);
+        QCOMPARE(p.pictureSize(p.clips[1], 320, 180), QSizeF(160, 90));
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 30, 1);
+        editor.addEffect("pixelate");
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        const auto id = editor.project().clips.first().id;
+        QCOMPARE(editor.state()["selected"].toMap()["effect"].toString(), QString("pixelate"));
+        QVERIFY(std::abs(editor.clipBounds(id)["width"].toDouble() - 0.3) < 1e-9);
+        QVERIFY(!editor.exportSrt(QUrl::fromLocalFile(dir.filePath("none.srt"))));
+        editor.addEffect("swirl");
+        QVERIFY(editor.state()["error"].toString().contains("Unknown effect"));
+    }
     void waveformPeaksAndCache() {
         PeakAccumulator peaks(2);
         const auto pcm = QByteArray::fromHex("0000004000800000");

@@ -43,6 +43,12 @@ struct Clip {
     // space) starts on. "karaoke" colours the word being spoken in `highlightColor`; "word"
     // shows one word at a time. Without matching timing a caption renders plainly.
     QString captionStyle; // "", "karaoke", "word"
+    // Effect area clips (no media, no text) blur or pixelate whatever lower tracks show inside a
+    // rectangle of effectWidth × effectHeight canvas fractions at scale 1, centred at x/y.
+    QString effect; // "", "blur", "pixelate"
+    double effectStrength = 0.6, effectWidth = 0.3, effectHeight = 0.2;
+    // Gaussian blur of the clip's own picture, 0..1.
+    double blur = 0;
     QString highlightColor = "#ffd23f";
     QVector<qint64> wordStarts;
     // Word timing usable for the caption style: one start per word of the text.

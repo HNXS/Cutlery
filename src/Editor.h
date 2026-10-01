@@ -62,6 +62,8 @@ class Editor final : public QObject {
     Q_INVOKABLE void relink(const QString &assetId, const QUrl &);
     Q_INVOKABLE void addAsset(const QString &assetId, int track = 0);
     Q_INVOKABLE void addTitle();
+    // A blur ("blur") or mosaic ("pixelate") area over the lower tracks, at the playhead.
+    Q_INVOKABLE void addEffect(const QString &effect);
     Q_INVOKABLE void select(const QString &id);
     Q_INVOKABLE void seek(qint64 frame);
     Q_INVOKABLE void setClip(const QString &key, const QVariant &value);
