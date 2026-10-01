@@ -4,8 +4,8 @@ $ProgressPreference = 'SilentlyContinue'
 # ONNX Runtime with the DirectML provider (GPU inference on any DirectX 12 GPU, CPU fallback)
 # and the DirectML redistributable it requires. Immutable NuGet packages, pinned by hash.
 $packages = @(
-    @{ name='Microsoft.ML.OnnxRuntime.DirectML'; version='1.22.0'; sha256='PIN_ORT' },
-    @{ name='Microsoft.AI.DirectML'; version='1.15.4'; sha256='PIN_DML' }
+    @{ name='Microsoft.ML.OnnxRuntime.DirectML'; version='1.22.0'; sha256='29f9872d786236b79aa83f94482f3a17c14297e4833768d6d0ed4883ee732e60' },
+    @{ name='Microsoft.AI.DirectML'; version='1.15.4'; sha256='4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9' }
 )
 New-Item -ItemType Directory -Force $Destination | Out-Null
 $mismatch = @()
