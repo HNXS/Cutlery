@@ -32,7 +32,8 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
   - Drag the turquoise frame in the preview to move the clip; drag a corner to resize.
   - Shapes: rectangle, rounded corners or circle, with a coloured border and soft shadow.
   - Green/blue screen removal with automatic spill suppression.
-  - Offline AI background removal for speakers without a green screen. The model comes as a separate [AI pack](docs/AI.md); the analysis runs once in the background and is cached.
+  - Offline AI background removal for speakers without a green screen.
+- Offline AI upscaling (Real-ESRGAN) of low-resolution video clips to up to 4K. Both AI features use the GPU through DirectML when available, run in the background once per media file and need the separate [AI pack](docs/AI.md).
 - Static transforms, equal-edge crop, horizontal flip, opacity, brightness/contrast/saturation, clip fades.
 - Constant speed **0.25–4×**, reverse, volume/mute, stereo mixing with an output limiter.
 - Rasterized Unicode titles, manual captions, SRT import/export and subtitle burn-in.
@@ -43,7 +44,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 
 ## Boundaries of this alpha
 
-This is a CPU reference implementation. It does **not** yet implement the planned D3D11/WASAPI real-time engine, proxies, multilevel waveform pyramids, a keyframe graph editor, easing curves, masks, tracking, HDR colour management, hardware qualification, AI features beyond background removal, GPU-accelerated AI, transcription, an installer, or project-media collection. Heavy multi-layer timelines can drop frames during playback on the CPU renderer. Reversed clips decode their whole visible range before playing, so long reversed clips start slowly. The UI is not yet an accessibility-qualified release.
+This is a CPU reference implementation. It does **not** yet implement the planned D3D11/WASAPI real-time engine, proxies, multilevel waveform pyramids, a keyframe graph editor, easing curves, masks, tracking, HDR colour management, hardware qualification, AI features beyond background removal and upscaling, transcription, an installer, or project-media collection. Heavy multi-layer timelines can drop frames during playback on the CPU renderer. Reversed clips decode their whole visible range before playing, so long reversed clips start slowly. The UI is not yet an accessibility-qualified release.
 
 Only finite local media files are supported. Source audio/video remain together until you use **Detach audio**; detached clips can then be edited independently. Relinking or resynchronizing detached pairs is not implemented. Timing is rounded to sequence frames; SRT timing is quantized on import. Colour operations are simple SDR adjustments, not a colour-managed grading pipeline. Output filenames must be new; exports never overwrite an existing file. Temporary render folders live under `cache`; remove it while Cutlery is closed if space is needed.
 
