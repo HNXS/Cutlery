@@ -12,7 +12,7 @@ Keyboard bindings live in `data/shortcuts.json`. Edit them through Help → Keyb
 
 Current builds save schema 7, which adds transitions, keyframes, overlay styles and AI cutout; 0.4 and older cannot open it. Schemas 1–6 are read without changes. Version 0.3 and 0.4 save schema 3. Versions 0.1/0.2 cannot read schema 3; use Save As if you need to keep an old-version copy.
 
-The optional AI pack adds `models/` next to the executable (see [AI](AI.md)). AI background-removal results are kept in `data/mattes`; deleting them only means the analysis runs again.
+The optional AI pack adds `models/` next to the executable (see [AI](AI.md)). AI results (background mattes, upscaled copies) are kept in `data/ai`; deleting them only means the processing runs again. Upscaled copies are large: about 3.5 GB per minute at 4K.
 
 Close Cutlery before deleting `data/cache` to reclaim disk space. Playback no longer writes cache files; `play-*` and `still-*` folders are temporary and disposable, as are leftover 0.3 `playback-*.mp4` files. Preserve `data/recovery.cutlery` if you need recovery. A hard kill can leave `.cutlery-<id>.mp4`/`.webm` partial files in an export destination; these can be deleted after confirming no render is active.
 

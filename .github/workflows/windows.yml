@@ -54,12 +54,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
           $p = Start-Process build/bin/Release/Cutlery.exe -ArgumentList '--smoke-test' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw 'QML startup failed' }
-      - name: Check the real model on a test picture
+      - name: Check the real models on a test video
         run: |
-          ffmpeg -v error -f lavfi -i "color=c=0x406080:s=320x240:r=8:d=1" -c:v ffv1 build/blank.mkv
+          ffmpeg -v error -f lavfi -i "testsrc2=s=320x240:r=8:d=1" -c:v ffv1 build/test.mkv
           if ($LASTEXITCODE -ne 0) { throw 'Test video failed' }
-          build/bin/Release/cutlery-matte.exe --ffmpeg (Get-Command ffmpeg).Source --model "$env:MODELS_DIR/u2net_human_seg.onnx" --input build/blank.mkv --output build/blank-matte.mkv --size 320x240 --duration 1
-          if ($LASTEXITCODE -ne 0) { throw 'Model inference failed' }
+          $ff = (Get-Command ffmpeg).Source
+          build/bin/Release/cutlery-ai.exe matte --ffmpeg $ff --model "$env:MODELS_DIR/u2net_human_seg.onnx" --input build/test.mkv --output build/test-matte.mkv --size 320x240 --duration 1
+          if ($LASTEXITCODE -ne 0) { throw 'Matte inference failed' }
+          build/bin/Release/cutlery-ai.exe upscale --ffmpeg $ff --model "$env:MODELS_DIR/realesr-general-x4v3.onnx" --input build/test.mkv --output build/test-up.mov --source 320x240 --size 1280x960 --rate 8/1 --duration 0.5
+          if ($LASTEXITCODE -ne 0) { throw 'Upscale inference failed' }
+          # The same on the CPU provider, which every machine has.
+          build/bin/Release/cutlery-ai.exe upscale --ffmpeg $ff --model "$env:MODELS_DIR/realesr-general-x4v3.onnx" --input build/test.mkv --output build/test-up-cpu.mov --source 320x240 --size 1280x960 --rate 8/1 --duration 0.25 --cpu 1
+          if ($LASTEXITCODE -ne 0) { throw 'CPU upscale failed' }
+          ffprobe -v error -show_entries stream=width,height,codec_name,nb_frames -of compact build/test-up.mov
       - name: Package portable application
         run: |
           ./tools/Package-Windows.ps1 -QtRoot $env:QT_ROOT_DIR -FFmpegBin $env:FFMPEG_BIN -OnnxRuntime $env:ONNXRUNTIME_DIR -Models $env:MODELS_DIR
@@ -76,7 +83,7 @@ jobs:
           if ($p.ExitCode -ne 0) { throw 'Deployed application failed' }
           # The deployed worker starts with only the packaged DLLs.
           $dist = Split-Path $exe
-          & "$dist/cutlery-matte.exe" --ffmpeg "$dist/codecs/ffmpeg.exe" --model "$env:MODELS_DIR/u2net_human_seg.onnx" --input build/blank.mkv --output build/deployed-matte.mkv --size 320x240 --duration 1
+          & "$dist/cutlery-ai.exe" matte --ffmpeg "$dist/codecs/ffmpeg.exe" --model "$env:MODELS_DIR/u2net_human_seg.onnx" --input build/test.mkv --output build/deployed-matte.mkv --size 320x240 --duration 1
           if ($LASTEXITCODE -ne 0) { throw 'Deployed AI worker failed' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

@@ -3,7 +3,7 @@
 #include "MediaAnalysis.h"
 #include "Playback.h"
 #include "Thumbnails.h"
-#include "Mattes.h"
+#include "AiJobs.h"
 #include "Project.h"
 #include <QObject>
 #include <QProcess>
@@ -112,10 +112,10 @@ class Editor final : public QObject {
             result << QVariantMap{{"id", id}, {"label", label}};
         return result;
     }
-    // AI background removal: analyses the selected clip's media (all of its AI cutout clips'
-    // ranges) with the optional AI pack. The result is cached per media file.
-    Q_INVOKABLE void analyzeCutout();
-    Q_INVOKABLE void cancelCutout();
+    // Runs an AI task ("matte" for background removal, "upscale") on the selected clip's media,
+    // covering every clip of that media using it. Results are cached per media file.
+    Q_INVOKABLE void runAi(const QString &task);
+    Q_INVOKABLE void cancelAi();
     Q_INVOKABLE QVariantMap thumbnails(const QString &assetId) const {
         return m_thumbnails->strip(assetId);
     }
@@ -141,7 +141,7 @@ class Editor final : public QObject {
     FrameProvider *m_frames;
     MediaAnalysis *m_analysis;
     Thumbnails *m_thumbnails;
-    Mattes *m_mattes;
+    AiJobs *m_ai;
     EncoderResolver *m_encoders;
     Playback *m_playback;
     QTimer m_previewTimer, m_saveTimer, m_resumeTimer;
@@ -169,9 +169,12 @@ class Editor final : public QObject {
     void applyClipValue(Project &, const QString &key, const QVariant &value);
     void stopPlayback();
     QSize previewSize(int longSide) const;
-    // Source seconds the AI cutout needs for an asset: its cutout clips plus `extra`.
-    std::pair<double, double> cutoutSpan(const Asset &, const Clip *extra = nullptr) const;
-    void addMattes(RenderOptions &) const;
+    // Source seconds an AI task needs for an asset: the clips using it, plus `extra`.
+    std::pair<double, double> aiSpan(const QString &task, const Asset &,
+                                     const Clip *extra = nullptr) const;
+    bool aiCovered(const QString &task, const Asset &, const Clip &) const;
+    static int upscaleHeight(const Asset &);
+    void addAiMedia(RenderOptions &) const;
     void autosave();
 };
 } // namespace cutlery

@@ -18,8 +18,8 @@ The [187-row feature matrix](FEATURE_STATUS.md) is the detailed status record. T
 3. **Motion and transitions:** keyframe graph editor and easing presets, more transitions, masks, chroma key, broader effects and original presets.
 4. **Audio:** per-track gain and meters, pan, recording, crossfades, EQ/compressor, loudness analysis, noise reduction and beat tools.
 5. **Text and captions:** richer typography, title presets, text animation, automatic local transcription, word highlighting and transcript editing.
-6. **Colour and AI:** LUTs/curves/scopes, colour-managed HDR, tracking, stabilization, denoise/upscale. Person background removal works offline with the optional AI pack (CPU); open are GPU acceleration (DirectML), sharper hair edges, object segmentation, auto captions and eye contact.
-7. **Media and export:** collection/relink workflows, media search, broader codec qualification, hardware-encoder qualification on real GPUs, export queue/ranges, explicit bitrate/fps controls and AI upscaling.
+6. **Colour and AI:** LUTs/curves/scopes, colour-managed HDR, tracking, stabilization, denoise. Person background removal and AI upscaling work offline with the optional AI pack (DirectML GPU or CPU); open are sharper hair edges, object segmentation, image upscaling, auto captions and eye contact.
+7. **Media and export:** collection/relink workflows, media search, broader codec qualification, hardware-encoder qualification on real GPUs, export queue/ranges, explicit bitrate/fps controls.
 8. **Release qualification:** clean offline Windows testing, long sessions, high DPI/accessibility, crash/low-disk recovery, installer/signing and managed-device testing.
 
 Cloud accounts/storage/collaboration, mobile/browser applications, CapCut proprietary assets and exact proprietary model output remain outside the local Windows scope.

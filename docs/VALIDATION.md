@@ -1,5 +1,22 @@
 # Validation record
 
+## Windows portable build — 2026-10-01, AI upscale and DirectML (0.5 development)
+
+[GitHub Actions run 36862210410](https://github.com/HNXS/Cutlery/actions/runs/36862210410) completed successfully for commit `bd98b4ce9614e712ff27dc8972eb16203232b68d` on Windows Server 2022 with MSVC 2022, Qt 6.8.3, LGPL FFmpeg 8.1 and ONNX Runtime 1.22.0 with DirectML 1.15.4. Both NuGet packages are pinned by SHA-256. The Real-ESRGAN weights were converted to ONNX in CI by `tools/convert-realesrgan.py`. The run covered:
+
+- Compilation of `cutlery-ai` with the DirectML provider, both CTest suites and QML startup.
+- Engine test `aiCutout`: a stand-in upscaled copy replaces the clip's picture at the right source time. Both worker tasks run through `AiJobs` with stand-in ONNX models: queueing, a matte, and every frame of an upscale at twice the size.
+- Interface test `aiCutoutControls`: both inspector options run their task and report the result.
+- The real models through the built worker: a matte, a 320×240 → 1280×960 upscale, and the same upscale forced onto the CPU provider. The packaged worker also ran with `PATH` limited to System32.
+- The CI runner has no GPU. DirectML reported "Specified display adapter handle is invalid", and the worker fell back to the CPU as designed. **GPU inference has not been run on real hardware yet.**
+
+Downloads (expire 2026-10-31):
+
+- [Portable build](https://github.com/HNXS/Cutlery/actions/runs/36862210410/artifacts/11162916313): 147,544,195 bytes, archive SHA-256 `02f4b0839b5f025be6ba9af8e9c8cc50c0428612e022fce7840607600f1475fb`.
+- [AI pack](https://github.com/HNXS/Cutlery/actions/runs/36862210410/artifacts/11163275748): 167,930,616 bytes, archive SHA-256 `c3d3c9ef65f8c894410597af7b5740d29643a30db8c245bc570dee28e70cfe8c`.
+
+Locally (Linux, Qt 6.4, CPU) the converted model was checked against bicubic scaling on a test image and a test video, including 64-pixel tiles, with no visible seams. On 4 CPU cores a 640×360 frame takes about 2.9 s.
+
 ## Windows portable build — 2026-10-01, AI background removal (0.5 development)
 
 [GitHub Actions run 36850705437](https://github.com/HNXS/Cutlery/actions/runs/36850705437) completed successfully for commit `e5c9937b75690c420df51a3c803d06e3e3b069f0` on Windows Server 2022 with MSVC 2022, Qt 6.8.3, LGPL FFmpeg 8.1 and ONNX Runtime 1.22.0 (CPU). It covered compilation including `cutlery-matte`, both CTest suites, QML startup, packaging, and packaged-executable startup. The suites include:

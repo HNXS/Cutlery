@@ -1,14 +1,18 @@
 # Offline AI features
 
-Cutlery's AI features run on your computer without accounts, uploads or network access. The model files are a separate download, the **AI pack**, because they are large (about 170 MB) and optional.
+Cutlery's AI features run on your computer without accounts, uploads or network access. The model files are a separate download, the **AI pack**, because they are large (about 180 MB) and optional.
 
 ## Installing the AI pack
 
 1. Download `Cutlery-0.4.0-AI-pack` from the same build as `Cutlery-0.4.0-win64-portable`.
-2. Extract it into the Cutlery folder, so that `models/u2net_human_seg.onnx` sits next to `Cutlery.exe`.
+2. Extract it into the Cutlery folder, so that the `models` folder sits next to `Cutlery.exe`.
 3. Restart Cutlery.
 
-The application package already contains the worker `cutlery-matte.exe` and the ONNX Runtime library it uses. Without the AI pack, the AI options are disabled and say what is missing.
+The application package already contains the worker `cutlery-ai.exe` and the ONNX Runtime and DirectML libraries it uses. Without the AI pack, the AI options are disabled and say what is missing.
+
+## GPU or CPU
+
+The AI features run on the graphics card through DirectML when Windows offers a DirectX 12 GPU (NVIDIA, AMD or Intel, including integrated graphics). Otherwise they use the CPU. The progress line shows which one is working. On the CPU, upscaling is very slow; see below.
 
 ## Background removal (speaker cutout)
 
@@ -16,25 +20,43 @@ Select a video clip and turn on **Remove background (AI)** in the *Presenter ove
 
 - The first time, Cutlery analyses the clip's media in the background and shows the progress. You can keep editing while it runs; **Stop** cancels it.
 - The analysis finds people in 8 frames per second of video and smooths the result over time. Rendering blends between those frames, so the cutout follows normal speaker movement.
-- Results are cached per media file in `data/mattes`. Other clips from the same file reuse the analysis. When you trim a clip beyond the analysed range, the inspector offers **Analyse** again.
+- Results are cached per media file in `data/ai`. Other clips from the same file reuse the analysis. When you trim a clip beyond the analysed range, the inspector offers **Run** again.
 - The cutout combines with shapes, borders, shadows, keyframes and transitions. It takes the place of the green-screen key on that clip.
 
 ### Speed
 
-The analysis uses the CPU. On a 4-core laptop, one second of video takes about 5 seconds to analyse, so a 10-minute recording takes roughly 50 minutes. A desktop with more cores is faster. Only the parts of the media your clips use, plus one second either side, are analysed.
+On a 4-core CPU, one second of video takes about 5 seconds to analyse, so a 10-minute recording takes roughly 50 minutes. A GPU is much faster. Only the parts of the media your clips use, plus one second either side, are analysed.
 
 ### Limits
 
 - The model looks for people. Objects a person holds are often kept; other subjects (pets, products) are not.
 - Edges are soft. Fine hair and fast movement such as waving hands can lose detail or show a thin trace of the old background.
 - Variable-frame-rate phone recordings can drift by a frame against the matte.
-- GPU acceleration (DirectML) is not implemented yet.
+
+## AI upscaling (sharper low-resolution video)
+
+Select a video clip below 4K and turn on **Enhance resolution (AI)** under *Picture & sound*. Cutlery creates a copy of the clip's media at four times the resolution, at most 2160p (4K). It uses Real-ESRGAN, which restores edges and texture instead of just enlarging pixels. Export, preview and playback then use the sharper copy.
+
+- Use it for old or low-resolution footage (480p, 720p, phone clips) that you want to export at 1080p or 4K. It does not add anything to footage that is already sharp at the export size.
+- Every frame of the used range is processed, plus one second either side. Results are cached per media file in `data/ai`.
+- The copy is stored as ProRes 422 so no quality is lost before the final export. It needs about 0.9 GB per minute at 1080p and 3.5 GB per minute at 4K.
+
+### Speed
+
+Upscaling needs far more computation than background removal. On a 4-core CPU, a 360p frame takes about 3 seconds and a 720p frame about 11 seconds, so one minute of 720p video takes hours. With a GPU, expect seconds per second of video, depending on the card. Try a short clip first.
+
+### Limits
+
+- Real-ESRGAN invents plausible detail. Small text can come out as wrong letters, and faces can look smoothed. Check the result before you rely on it.
+- Video clips only; images are not upscaled yet.
 
 ## Model and licences
 
 | File | Model | Licence |
 |---|---|---|
 | `models/u2net_human_seg.onnx` | U²-Net trained for human segmentation (Qin et al., 2020), ONNX export published by the rembg project | Apache-2.0, [source](https://github.com/xuebinqin/U-2-Net) |
-| `onnxruntime.dll` (application package) | ONNX Runtime 1.22.0, CPU build | MIT, [source](https://github.com/microsoft/onnxruntime/tree/v1.22.0) |
+| `models/realesr-general-x4v3.onnx` | Real-ESRGAN realesr-general-x4v3 (Wang et al., 2021), converted from the published weights by `tools/convert-realesrgan.py` | BSD-3-Clause, [source](https://github.com/xinntao/Real-ESRGAN) |
+| `onnxruntime.dll` (application package) | ONNX Runtime 1.22.0 with the DirectML provider | MIT, [source](https://github.com/microsoft/onnxruntime/tree/v1.22.0) |
+| `DirectML.dll` (application package) | DirectML 1.15.4 redistributable | Microsoft DirectML licence (in `licenses/onnxruntime`) |
 
-`tools/Get-OnnxRuntime.ps1` and `tools/Get-Models.ps1` download both from pinned GitHub releases and verify their SHA-256 hashes.
+`tools/Get-OnnxRuntime.ps1` and `tools/Get-Models.ps1` download everything from pinned NuGet packages and GitHub releases and verify SHA-256 hashes.

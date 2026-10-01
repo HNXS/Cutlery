@@ -124,11 +124,11 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F118 | Stabilization and auto crop | Planned | Not implemented in this alpha. |
 | F119 | Rolling-shutter and lens correction | Planned | Not implemented in this alpha. |
 | F120 | Smart crop and automatic reframing | Planned | Not implemented in this alpha. |
-| F121 | Portrait background removal | Partial | U²-Net human segmentation (ONNX Runtime, CPU) in the separate cutlery-matte worker; 8 fps analysis with temporal smoothing, cached grayscale FFV1 matte per media file, interpolated and applied as alpha in preview, playback and export. Model ships in the optional AI pack. No GPU acceleration or hair refinement. |
+| F121 | Portrait background removal | Partial | U²-Net human segmentation (ONNX Runtime, DirectML GPU or CPU) in the separate cutlery-ai worker; 8 fps analysis with temporal smoothing, cached grayscale FFV1 matte per media file, interpolated and applied as alpha in preview, playback and export. Model ships in the optional AI pack. No hair refinement. |
 | F122 | Interactive object segmentation | Planned | Not implemented in this alpha. |
 | F123 | Portrait retouch and enhancement | Planned | Not implemented in this alpha. |
 | F124 | Temporal denoise and flicker reduction | Planned | Not implemented in this alpha. |
-| F125 | Image and video upscaling | Planned | Not implemented in this alpha. |
+| F125 | Image and video upscaling | Partial | Real-ESRGAN realesr-general-x4v3 (converted to ONNX by tools/convert-realesrgan.py) in the cutlery-ai worker; DirectML GPU inference with CPU fallback; every frame of the used range on overlapping tiles, Lanczos to 4x the source (at most 2160p), cached as ProRes 422 per media file and size; clips render from the copy. Video only; no images, denoise strength or face restoration. |
 | F126 | Optical flow and frame interpolation | Planned | Not implemented in this alpha. |
 | F127 | Deblur | Planned | Not implemented in this alpha. |
 | F128 | Video relighting | Planned | Not implemented in this alpha. |
