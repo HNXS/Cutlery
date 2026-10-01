@@ -42,7 +42,8 @@ QSize AiJobs::upscaleSize(const Asset &a, int height) {
     return {std::max(2, int(std::lround(height * aspect / 2)) * 2), std::max(2, height / 2 * 2)};
 }
 QString AiJobs::key(const QString &task, const Asset &a, const QString &variant) const {
-    return MediaAnalysis::fingerprint(a) + "-" + task + "-v1" +
+    // Version 2 transcripts have one cue per word.
+    return MediaAnalysis::fingerprint(a) + "-" + task + (task == "transcribe" ? "-v2" : "-v1") +
            (variant.isEmpty() ? QString() : "-" + variant);
 }
 MatteSource AiJobs::result(const QString &task, const Asset &a, const QString &variant) const {

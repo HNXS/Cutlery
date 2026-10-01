@@ -1,4 +1,5 @@
 #include "Project.h"
+#include <QRegularExpression>
 #include <QColor>
 #include <algorithm>
 #include <QDir>
@@ -92,6 +93,15 @@ void Clip::shiftKeyframes(qint64 delta) {
     for (auto &list : keyframes)
         for (auto &k : list)
             k.frame += delta;
+    for (auto &w : wordStarts)
+        w += delta;
+}
+QStringList captionWords(const QString &text) {
+    return text.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+}
+bool Clip::timedWords() const {
+    return assetId.isEmpty() && !wordStarts.isEmpty() &&
+           wordStarts.size() == captionWords(text).size();
 }
 void Clip::scaleKeyframes(double factor) {
     for (auto &list : keyframes) {
@@ -198,6 +208,14 @@ QJsonObject Project::json(const QString &base) const {
                       {"fontFamily", c.fontFamily},
                       {"textColor", c.textColor},
                       {"fontSize", c.fontSize}};
+        if (!c.captionStyle.isEmpty() || !c.wordStarts.isEmpty()) {
+            o["captionStyle"] = c.captionStyle;
+            o["highlightColor"] = c.highlightColor;
+            QJsonArray starts;
+            for (auto w : c.wordStarts)
+                starts.append(QString::number(w));
+            o["wordStarts"] = starts;
+        }
 #define PUT(k) o[#k] = c.k
         PUT(scale);
         PUT(x);
@@ -237,13 +255,13 @@ QJsonObject Project::json(const QString &base) const {
         o["transitionFrames"] = QString::number(c.transitionFrames);
         cc.append(o);
     }
-    return {{"format", "cutlery"}, {"schemaVersion", 7}, {"name", name},       {"width", width},
+    return {{"format", "cutlery"}, {"schemaVersion", 8}, {"name", name},       {"width", width},
             {"height", height},    {"fpsN", fpsN},       {"fpsD", fpsD},       {"tracks", tracks},
             {"assets", aa},        {"clips", cc},        {"trackSettings", tt}};
 }
 Project Project::fromJson(const QJsonObject &o, const QString &base) {
     require(o["format"] == "cutlery" &&
-                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 7),
+                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 8),
             "Unsupported project format/version. Original left unchanged.");
     require(o["assets"].isArray() && o["clips"].isArray(), "Missing project collections");
     Project p;
@@ -314,6 +332,10 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.fontFamily = j["fontFamily"].toString("Arial");
         c.textColor = j["textColor"].toString("#ffffff");
         c.fontSize = j["fontSize"].toInt(72);
+        c.captionStyle = j["captionStyle"].toString();
+        c.highlightColor = j["highlightColor"].toString("#ffd23f");
+        for (const auto &w : j["wordStarts"].toArray())
+            c.wordStarts.push_back(integer(w));
 #define GET(k, def) c.k = j[#k].toDouble(def)
         GET(scale, 1);
         GET(x, 0);
@@ -434,6 +456,11 @@ void Project::validate() const {
         require(bounded(c.fadeIn, 0, 3600) && bounded(c.fadeOut, 0, 3600) && c.fontSize >= 8 &&
                     c.fontSize <= 500 && c.text.size() <= 10000 && QColor(c.textColor).isValid(),
                 "Invalid text/fade value");
+        require((c.captionStyle.isEmpty() || c.captionStyle == "karaoke" ||
+                 c.captionStyle == "word") &&
+                    QColor(c.highlightColor).isValid() && c.wordStarts.size() <= 2000 &&
+                    std::is_sorted(c.wordStarts.begin(), c.wordStarts.end()),
+                "Invalid caption style");
         if (const auto *a = asset(c.assetId); a && a->kind != "image")
             require(c.sourceIn.seconds() +
                             frameTime(c.duration, fpsN, fpsD).seconds() * c.speed.seconds() <=
@@ -472,7 +499,28 @@ bool Project::split(const QString &id, qint64 frame) {
     b.fadeIn = 0;
     b.transition.clear();
     b.transitionFrames = 0;
+    const bool timed = c->timedWords();
     b.shiftKeyframes(-left);
+    if (timed) {
+        // A timed caption splits between its words: each half keeps the words it shows.
+        const auto words = captionWords(c->text);
+        QStringList before, after;
+        QVector<qint64> first, second;
+        for (int i = 0; i < words.size(); ++i)
+            if (c->wordStarts[i] < left) {
+                before << words[i];
+                first << c->wordStarts[i];
+            } else {
+                after << words[i];
+                second << b.wordStarts[i];
+            }
+        if (!before.isEmpty() && !after.isEmpty()) {
+            c->text = before.join(' ');
+            c->wordStarts = first;
+            b.text = after.join(' ');
+            b.wordStarts = second;
+        }
+    }
     clips.push_back(b);
     return true;
 }

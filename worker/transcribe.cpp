@@ -1,7 +1,7 @@
 // Task "transcribe": speech to subtitles for a range of a media file's audio with whisper.cpp.
 //
 // FFmpeg extracts the range as 16 kHz mono PCM; whisper-cli (a separate, pinned whisper.cpp
-// build) transcribes it into SRT with lines of at most 42 characters, optionally skipping
+// build) transcribes it into SRT with one cue per word, optionally skipping
 // non-speech with a Silero VAD model, which keeps Whisper from inventing text during silence and
 // music. Cue times start at zero for the first source time of the range.
 //
@@ -52,7 +52,9 @@ int worker::transcribe(const QHash<QString, QString> &o) {
     // Whisper scales with physical cores up to about eight; hyper-threads and more threads than
     // free cores only slow it. Machines with 8+ logical processors usually have two per core.
     const int logical = QThread::idealThreadCount();
-    QStringList w{"-m", model, "-f", wav, "-l", language, "-osrt", "-of", base, "-ml", "42",
+    // One cue per word ("-ml 1" with word splits): the editor groups words into caption lines
+    // and keeps each word's start for highlighting.
+    QStringList w{"-m", model, "-f", wav, "-l", language, "-osrt", "-of", base, "-ml", "1",
                   "-sow", "-pp", "-t",
                   QString::number(std::clamp(logical >= 8 ? logical / 2 : logical, 1, 8))};
     if (!vad.isEmpty() && QFileInfo(vad).isFile())

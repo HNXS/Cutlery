@@ -1066,6 +1066,54 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                     onClicked: editor.setClip("text", titleText.text)
                                 }
+                                // Captions with word timing (automatic captions) can highlight
+                                // the spoken word. Editing the words keeps the timing only while
+                                // the number of words stays the same.
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    visible: win.selection.timedWords === true || (win.selection.captionStyle || "") !== ""
+                                    spacing: 4
+                                    ComboBox {
+                                        objectName: "captionStyle"
+                                        Layout.fillWidth: true
+                                        readonly property var styles: ["", "karaoke", "word"]
+                                        model: ["Plain caption", "Karaoke: highlight the spoken word", "One word at a time"]
+                                        currentIndex: Math.max(0, styles.indexOf(win.selection.captionStyle || ""))
+                                        onActivated: editor.setClip("captionStyle", styles[currentIndex])
+                                    }
+                                    RowLayout {
+                                        visible: (win.selection.captionStyle || "") !== ""
+                                        Label {
+                                            text: "Highlight"
+                                            color: win.muted
+                                            Layout.fillWidth: true
+                                        }
+                                        Repeater {
+                                            model: ["#ffd23f", "#64d8bc", "#ff6fae", "#5fa8ff", "#ffffff"]
+                                            Rectangle {
+                                                required property string modelData
+                                                width: 20
+                                                height: 20
+                                                radius: 10
+                                                color: modelData
+                                                border.width: win.selection.highlightColor === modelData ? 3 : 1
+                                                border.color: win.selection.highlightColor === modelData ? win.mint : "#6481a0"
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    onClicked: editor.setClip("highlightColor", parent.modelData)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible: win.selection.timedWords !== true
+                                        wrapMode: Text.Wrap
+                                        font.pixelSize: 11
+                                        color: win.muted
+                                        text: "The word count changed, so this caption shows plainly. Generate captions again for word timing."
+                                    }
+                                }
                                 RowLayout {
                                     Label {
                                         text: "Font size"
@@ -1689,7 +1737,7 @@ ApplicationWindow {
                 text: "Generate"
                 enabled: captionDialog.missing === "" && captionDialog.state.running !== true
                 DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
-                onClicked: editor.generateCaptions(captionDialog.languages[captionLanguage.currentIndex].id)
+                onClicked: editor.generateCaptions(captionDialog.languages[captionLanguage.currentIndex].id, captionStyleChoice.styles[captionStyleChoice.currentIndex])
             }
             Button {
                 text: captionDialog.state.running === true ? "Stop" : "Close"
@@ -1719,6 +1767,17 @@ ApplicationWindow {
                 objectName: "captionLanguage"
                 Layout.fillWidth: true
                 model: captionDialog.languages.map(l => l.label)
+            }
+            Label {
+                text: "Style"
+                color: win.muted
+            }
+            ComboBox {
+                id: captionStyleChoice
+                objectName: "captionStyleChoice"
+                Layout.fillWidth: true
+                readonly property var styles: ["karaoke", "", "word"]
+                model: ["Karaoke: highlight the spoken word", "Plain captions", "One word at a time (big)"]
             }
             ProgressBar {
                 Layout.fillWidth: true

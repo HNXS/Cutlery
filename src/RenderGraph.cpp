@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QFont>
+#include <QFontMetrics>
 #include <QImage>
 #include <QPainter>
 #include <QHash>
@@ -121,6 +122,71 @@ static QString curve(const Clip &c, const QString &property, const QString &fram
     }
     return QString("if(lt(%1,%2),%3,%4)").arg(frame).arg(k.first().frame).arg(
         num(k.first().value), expr);
+}
+// Timed captions ("karaoke", "word"): one band-high variant per word, stacked vertically, so a
+// single looped image serves the whole caption and a per-frame crop picks the spoken word.
+struct CaptionSprite {
+    QImage image;
+    int band = 0, variants = 0;
+};
+static CaptionSprite captionSprite(const Clip &c, int width, int height, int projectHeight) {
+    const auto words = captionWords(c.text);
+    QFont font(c.fontFamily);
+    const bool single = c.captionStyle == "word";
+    font.setPixelSize(std::max(
+        8, qRound(c.fontSize * (single ? 1.5 : 1.) * double(height) / projectHeight)));
+    font.setBold(true);
+    const QFontMetrics metrics(font);
+    const int maxWidth = width * 13 / 15, lineHeight = metrics.height(),
+              space = metrics.horizontalAdvance(' ');
+    // Lines of word indexes, wrapped like the plain title.
+    QVector<QVector<int>> lines{{}};
+    int used = 0;
+    for (int i = 0; i < words.size(); ++i) {
+        const int w = metrics.horizontalAdvance(words[i]);
+        if (!lines.last().isEmpty() && used + space + w > maxWidth) {
+            lines.push_back({});
+            used = 0;
+        }
+        used += (lines.last().isEmpty() ? 0 : space) + w;
+        lines.last() << i;
+    }
+    CaptionSprite s;
+    s.variants = int(words.size());
+    s.band = (single ? 1 : int(lines.size())) * lineHeight + lineHeight / 2;
+    if (s.variants == 0 || qint64(s.band) * s.variants > 32000)
+        return {};
+    s.image = QImage(width, s.band * s.variants, QImage::Format_ARGB32_Premultiplied);
+    s.image.fill(Qt::transparent);
+    QPainter paint(&s.image);
+    paint.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
+    paint.setFont(font);
+    auto draw = [&](const QString &text, int x, int baseline, const QColor &color) {
+        paint.setPen(QColor(0, 0, 0, 210));
+        paint.drawText(x + 2, baseline + 3, text);
+        paint.setPen(color);
+        paint.drawText(x, baseline, text);
+    };
+    for (int v = 0; v < s.variants; ++v) {
+        const int top = v * s.band + lineHeight / 4;
+        if (single) {
+            const int w = metrics.horizontalAdvance(words[v]);
+            draw(words[v], (width - w) / 2, top + metrics.ascent(), QColor(c.highlightColor));
+            continue;
+        }
+        for (int l = 0; l < lines.size(); ++l) {
+            int lineWidth = 0;
+            for (int i : lines[l])
+                lineWidth += metrics.horizontalAdvance(words[i]) + (i == lines[l].first() ? 0 : space);
+            int x = (width - lineWidth) / 2;
+            for (int i : lines[l]) {
+                draw(words[i], x, top + l * lineHeight + metrics.ascent(),
+                     QColor(i == v ? c.highlightColor : c.textColor));
+                x += metrics.horizontalAdvance(words[i]) + space;
+            }
+        }
+    }
+    return s;
 }
 RenderPlan compileRender(const Project &p, const QString &work, int width, int height,
                          const RenderOptions &o) {
@@ -512,6 +578,43 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             // Inside one clip's own time: an ordinary clip, positioned on the canvas directly.
             auto &n = info[members.first()];
             const auto &c = *n.clip;
+            if (n.title && !c.captionStyle.isEmpty() && c.timedWords() && !animatedGeometry(c) &&
+                c.rotation == 0 && c.scale == 1 && n.vPre == 0) {
+                const auto sprite = captionSprite(c, width, height, p.height);
+                if (!sprite.image.isNull()) {
+                    const auto file = QDir(work).filePath(QString("caption-%1.png").arg(serial++));
+                    if (!sprite.image.save(file))
+                        throw std::runtime_error("Cannot write caption render asset");
+                    r.inputs << "-loop" << "1" << "-framerate" << fps << "-i" << file;
+                    const qint64 l0 = visibleStart - c.start, l1 = visibleEnd - c.start;
+                    // t is clip-local time; each word start adds one band to the crop offset.
+                    QStringList steps{"0"};
+                    for (int i = 1; i < c.wordStarts.size(); ++i)
+                        steps << QString("gte(t,%1)").arg(num((c.wordStarts[i] - 0.5) / (double(p.fpsN) / p.fpsD)));
+                    QString f = QString("[%1:v:0]trim=end_frame=%2,settb=%3/%4,setpts=N+%5,"
+                                        "crop=w=%6:h=%7:x=0:y='%7*(%8)',format=rgba")
+                                    .arg(input++)
+                                    .arg(l1 - l0)
+                                    .arg(p.fpsD)
+                                    .arg(p.fpsN)
+                                    .arg(l0)
+                                    .arg(width)
+                                    .arg(sprite.band)
+                                    .arg(steps.join('+'));
+                    if (c.opacity != 1)
+                        f += ",colorchannelmixer=aa=" + num(c.opacity);
+                    const double d = secs(c.duration);
+                    if (c.fadeIn > 0)
+                        f += QString(",fade=t=in:st=0:d=%1:alpha=1").arg(num(std::min(c.fadeIn, d)));
+                    if (c.fadeOut > 0) {
+                        const auto fd = std::min(c.fadeOut, d);
+                        f += QString(",fade=t=out:st=%1:d=%2:alpha=1").arg(num(d - fd), num(fd));
+                    }
+                    composite(f + ",setpts=PTS-STARTPTS", overlayPosition(c, l0),
+                              visibleStart - from, visibleEnd - visibleStart);
+                    continue;
+                }
+            }
             composite(videoChain(n, visibleStart - c.start, visibleEnd - c.start),
                       overlayPosition(c, from - c.start), visibleStart - from,
                       visibleEnd - visibleStart);

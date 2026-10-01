@@ -305,6 +305,9 @@ QVariantMap Editor::state() const {
                         {"transitionFrames", c.transitionFrames},
                         {"transitionLength", m_project.transitionLength(c)},
                         {"canTransition", m_project.previousAdjacent(c) != nullptr},
+                        {"captionStyle", c.captionStyle},
+                        {"highlightColor", c.highlightColor},
+                        {"timedWords", c.timedWords()},
                         {"hasAudio", m_project.asset(c.assetId) &&
                                          m_project.asset(c.assetId)->hasAudio}};
             // Animated values and keyframe state at the playhead for the inspector.
@@ -845,6 +848,10 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             c->text = v.toString();
         else if (key == "fontSize")
             c->fontSize = v.toInt();
+        else if (key == "captionStyle")
+            c->captionStyle = v.toString();
+        else if (key == "highlightColor")
+            c->highlightColor = v.toString();
         else if (key == "textColor")
             c->textColor = v.toString();
         else if (key == "transition") {
@@ -1158,10 +1165,13 @@ QStringList Editor::speakingAssets() const {
             ids << c.assetId;
     return ids;
 }
-void Editor::generateCaptions(const QString &language) {
+void Editor::generateCaptions(const QString &language, const QString &style) {
     static const QRegularExpression code("^(auto|[a-z]{2,3})$");
     if (!code.match(language).hasMatch())
         return fail("Unknown caption language");
+    if (!QStringList{"", "karaoke", "word"}.contains(style))
+        return fail("Unknown caption style");
+    m_captionStyle = style;
     if (!m_ai->available("transcribe"))
         return fail(m_ai->missing("transcribe") + " Download the AI pack next to Cutlery.exe.");
     m_captionLanguage = language;
@@ -1322,12 +1332,13 @@ void Editor::placeCaptions() {
         if (r.path.isEmpty())
             continue;
         try {
-            auto cues = parseSrt(readUtf8File(r.path));
-            for (auto &cue : cues) {
-                cue.start += r.start;
-                cue.end += r.start;
+            // One cue per word, grouped into caption lines with each word's start.
+            auto words = parseSrt(readUtf8File(r.path));
+            for (auto &w : words) {
+                w.start += r.start;
+                w.end += r.start;
             }
-            transcripts.insert(id, cues);
+            transcripts.insert(id, groupWords(words));
         } catch (const std::exception &e) {
             m_captionAssets.clear();
             return fail(QString("Cannot read the transcript: ") + e.what());
@@ -1349,7 +1360,7 @@ void Editor::placeCaptions() {
         p.clips.erase(std::remove_if(p.clips.begin(), p.clips.end(),
                                      [&](const Clip &c) { return c.track == track; }),
                       p.clips.end());
-        const auto captions = captionClips(p, transcripts, track);
+        const auto captions = captionClips(p, transcripts, track, m_captionStyle);
         count = int(captions.size());
         p.clips += captions;
     });

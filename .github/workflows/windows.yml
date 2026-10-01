@@ -55,7 +55,14 @@ jobs:
           QT_QUICK_BACKEND: software
         run: |
           ctest --test-dir build -C Release --output-on-failure
-          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+          if ($LASTEXITCODE -ne 0) {
+            # Show the failing checks directly; CTest's captured output can be empty here.
+            $env:QT_QPA_FONTDIR = "$env:WINDIR/Fonts"
+            build/bin/Release/cutlery_tests.exe -o build/engine.txt,txt -o -,txt | Out-Null
+            Write-Output "Engine tests exit code: $LASTEXITCODE"
+            Get-Content build/engine.txt | Select-String -NotMatch '^PASS'
+            throw 'Tests failed'
+          }
           $p = Start-Process build/bin/Release/Cutlery.exe -ArgumentList '--smoke-test' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw 'QML startup failed' }
       - name: Check the real models on a test video
@@ -91,7 +98,10 @@ jobs:
           if ($p.ExitCode -ne 0) { throw 'Transcription failed' }
           $text = Get-Content build/speech.srt -Raw
           Write-Output $text
-          if ($text -notmatch 'Cutlery|cutlery' -or $text -notmatch 'video editor' -or $text -notmatch 'computer') { throw 'Transcript does not match the spoken sentence' }
+          # One cue per word: check the words, and that each cue holds a single word.
+          foreach ($word in @('Cutlery', 'video', 'editor', 'computer')) { if ($text -notmatch $word) { throw "Transcript misses '$word'" } }
+          $long = ($text -split "`r?`n") | Where-Object { $_ -match '\S\s+\S' -and $_ -notmatch '-->' }
+          if ($long) { throw "Expected one word per cue: $long" }
       - name: Package portable application
         run: |
           ./tools/Package-Windows.ps1 -QtRoot $env:QT_ROOT_DIR -FFmpegBin $env:FFMPEG_BIN -OnnxRuntime $env:ONNXRUNTIME_DIR -Models $env:MODELS_DIR -Whisper $env:WHISPER_DIR

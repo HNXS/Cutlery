@@ -91,8 +91,8 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F085 | SRT import/export and TXT import | Partial | SRT roundtrip; no TXT. |
 | F086 | WebVTT and ASS/SSA interoperability | Planned | Not implemented in this alpha. |
 | F087 | Subtitle burn-in and sidecar export | Partial | Burn-in and SRT. |
-| F088 | Local transcription and automatic captions | Partial | whisper.cpp v1.9.4 (static AVX2 whisper-cli, built from the pinned commit) with Whisper large-v3-turbo q5_0 and Silero VAD, via the cutlery-ai transcribe task; language auto or chosen; transcripts cached per media file and language; cues mapped through each audible clip's trim, position and speed onto an 'AI captions' track, replaced on every run; lines of at most 42 characters. CPU only; no word-level timing or speaker labels. |
-| F089 | Word timing and karaoke highlights | Planned | Not implemented in this alpha. |
+| F088 | Local transcription and automatic captions | Partial | whisper.cpp v1.9.4 (static AVX2 whisper-cli, built from the pinned commit) with Whisper large-v3-turbo q5_0 and Silero VAD, via the cutlery-ai transcribe task; language auto or chosen; word-level transcripts cached per media file and language, grouped into lines of at most 42 characters; cues mapped through each audible clip's trim, position and speed onto an 'AI captions' track, replaced on every run. CPU only; no speaker labels. |
+| F089 | Word timing and karaoke highlights | Partial | Whisper word timestamps (one cue per word) grouped into lines; captions keep each word's start (schema 8). Styles: karaoke (spoken word in a highlight colour), one word at a time, plain; changeable per caption in the inspector. Rendered from one sprite per caption with a per-frame crop. No animation of sprite captions, no per-word styling beyond the highlight colour. |
 | F090 | Sentence segmentation and caption layout | Planned | Not implemented in this alpha. |
 | F091 | Transcript-based editing | Planned | Not implemented in this alpha. |
 | F092 | Filler-word detection | Planned | Not implemented in this alpha. |
