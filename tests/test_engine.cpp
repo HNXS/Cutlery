@@ -1445,13 +1445,15 @@ class EngineTest : public QObject {
                 }
             return n;
         };
+        // Mostly on one side: glyph edges may cross the middle by a pixel or two.
+        auto mostly = [](int here, int there) { return here > 50 && there * 20 < here; };
         auto image = still(r, 10); // first word
-        QVERIFY2(count(image, true, true) > 50 && count(image, false, true) == 0,
+        QVERIFY2(mostly(count(image, true, true), count(image, false, true)),
                  qPrintable(QString("%1 %2").arg(count(image, true, true)).arg(count(image, false, true))));
-        QVERIFY(count(image, false, false) > 50);
+        QVERIFY(mostly(count(image, false, false), count(image, true, false)));
         image = still(r, 40); // second word
-        QVERIFY(count(image, true, true) == 0 && count(image, false, true) > 50);
-        QVERIFY(count(image, true, false) > 50);
+        QVERIFY(mostly(count(image, false, true), count(image, true, true)));
+        QVERIFY(mostly(count(image, true, false), count(image, false, false)));
         // One word at a time: only the current word, in the highlight colour.
         r.clips[0].captionStyle = "word";
         image = still(r, 40);
