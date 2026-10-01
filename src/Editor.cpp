@@ -45,6 +45,22 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     m_analysis = new MediaAnalysis(m_data + "/cache/waveforms", executable("ffmpeg"), this);
     m_thumbnails = new Thumbnails(m_data + "/cache/thumbnails", executable("ffmpeg"), this);
     m_encoders = new EncoderResolver(executable("ffmpeg"), this);
+    QString worker = qEnvironmentVariable("CUTLERY_MATTE_WORKER"),
+            model = qEnvironmentVariable("CUTLERY_MATTE_MODEL");
+    if (worker.isEmpty()) {
+        worker = app + "/cutlery-matte";
+#ifdef Q_OS_WIN
+        worker += ".exe";
+#endif
+    }
+    if (model.isEmpty())
+        model = app + "/models/u2net_human_seg.onnx";
+    m_mattes = new Mattes(m_data + "/mattes", executable("ffmpeg"), worker, model, this);
+    connect(m_mattes, &Mattes::changed, this, [this] {
+        if (!m_mattes->busy())
+            m_previewTimer.start(); // a finished matte changes the picture
+        emit changed();
+    });
     connect(m_thumbnails, &Thumbnails::changed, this, [this] {
         emit thumbnailsChanged();
         emit changed();
@@ -312,7 +328,17 @@ QVariantMap Editor::state() const {
             PROP(keyColor);
             PROP(keySimilarity);
             PROP(keyBlend);
+            PROP(aiCutout);
 #undef PROP
+            if (const auto *a = m_project.asset(c.assetId); a && a->kind == "video") {
+                auto cutout = m_mattes->status(*a);
+                const auto [from, to] = cutoutSpan(*a, &c);
+                const auto m = m_mattes->matte(*a);
+                // The last analysed frame is held, so the end may fall short by a frame.
+                cutout["covered"] = !m.path.isEmpty() && m.start <= from + 1e-3 &&
+                                    m.end + 1 / Mattes::rate >= to;
+                selected["cutout"] = cutout;
+            }
         }
     return {{"name", m_project.name},
             {"path", m_path},
@@ -332,6 +358,8 @@ QVariantMap Editor::state() const {
             {"busy", m_busy},
             {"importing", m_importing},
             {"analyzing", m_analysis->busy() || m_thumbnails->busy()},
+            {"aiAvailable", m_mattes->available()},
+            {"aiMissing", m_mattes->missing()},
             {"progress", m_progress},
             {"previewUrl", m_previewUrl},
             {"playing", m_playback->active() || m_resumeTimer.isActive()},
@@ -824,6 +852,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(border, toDouble);
         FIELD(shadow, toDouble);
         FIELD(chromaKey, toBool);
+        FIELD(aiCutout, toBool);
         FIELD(keySimilarity, toDouble);
         FIELD(keyBlend, toDouble);
         FIELD(shape, toString);
@@ -981,6 +1010,7 @@ void Editor::requestPreview() {
         options.audio = false;
         options.from = m_playhead;
         options.to = m_playhead + 1;
+        addMattes(options);
         // Only the playhead frame is compiled, so the cost does not grow with its position.
         const auto plan = compileRender(m_project, work->path(), size.width(), size.height(),
                                         options);
@@ -1019,6 +1049,48 @@ void Editor::requestPreview() {
     } catch (const std::exception &e) {
         fail(e.what());
     }
+}
+std::pair<double, double> Editor::cutoutSpan(const Asset &a, const Clip *extra) const {
+    double from = 1e300, to = -1e300;
+    for (const auto &c : m_project.clips)
+        if (c.assetId == a.id && (c.aiCutout || (extra && c.id == extra->id))) {
+            // Transition handles and held frames reach up to a second beyond the trim.
+            const double in = c.sourceIn.seconds(),
+                         length = frameTime(c.duration, m_project.fpsN, m_project.fpsD).seconds() *
+                                  c.speed.seconds();
+            from = std::min(from, in - 1);
+            to = std::max(to, in + length + 1);
+        }
+    if (from > to)
+        return {0, 0};
+    return {std::clamp(from, 0., a.duration), std::clamp(to, 0., a.duration)};
+}
+void Editor::addMattes(RenderOptions &options) const {
+    for (const auto &c : m_project.clips)
+        if (c.aiCutout && !options.mattes.contains(c.assetId))
+            if (const auto *a = m_project.asset(c.assetId); a && a->kind == "video")
+                if (const auto m = m_mattes->matte(*a); !m.path.isEmpty())
+                    options.mattes.insert(a->id, m);
+}
+void Editor::analyzeCutout() {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || a->kind != "video")
+        return fail("AI background removal works on video clips");
+    if (!m_mattes->available())
+        return fail(m_mattes->missing() + " Download the AI pack next to Cutlery.exe.");
+    auto [from, to] = cutoutSpan(*a, c);
+    // Keep what an earlier analysis covered when it overlaps, so other clips stay cut out.
+    if (const auto m = m_mattes->matte(*a); !m.path.isEmpty() && m.start <= to && m.end >= from) {
+        if (m.start <= from + 1e-3 && m.end + 1 / Mattes::rate >= to)
+            return;
+        from = std::min(from, m.start);
+        to = std::max(to, m.end);
+    }
+    m_mattes->analyze(*a, from, to);
+}
+void Editor::cancelCutout() {
+    m_mattes->cancel();
 }
 QSize Editor::previewSize(int longSide) const {
     int w = longSide, h = qRound(double(longSide) * m_project.height / m_project.width / 2) * 2;
@@ -1059,6 +1131,7 @@ void Editor::play() {
         options.from = m_playhead;
         options.realtime = true;
         options.audio = false;
+        addMattes(options);
         request.video =
             compileRender(m_project, work->path(), size.width(), size.height(), options);
         options.audio = true;
@@ -1190,6 +1263,7 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
         RenderOptions options;
         options.highQuality = true;
         options.pixelFormat = encoder.pixelFormat;
+        addMattes(options);
         const auto plan =
             compileRender(m_project, work->path(), size.width(), size.height(), options);
         const auto graph = work->filePath("graph.txt");

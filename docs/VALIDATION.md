@@ -1,5 +1,20 @@
 # Validation record
 
+## Windows portable build — 2026-10-01, AI background removal (0.5 development)
+
+[GitHub Actions run 36850705437](https://github.com/HNXS/Cutlery/actions/runs/36850705437) completed successfully for commit `e5c9937b75690c420df51a3c803d06e3e3b069f0` on Windows Server 2022 with MSVC 2022, Qt 6.8.3, LGPL FFmpeg 8.1 and ONNX Runtime 1.22.0 (CPU). It covered compilation including `cutlery-matte`, both CTest suites, QML startup, packaging, and packaged-executable startup. The suites include:
+
+- `aiCutout` (engine): a generated matte applied through the renderer, checked for alignment between analysed frames, with offset ranges, flip and a circle shape. The worker runs end to end with a stand-in ONNX model, and the `Mattes` job manager is exercised.
+- `aiCutoutControls` (interface): the inspector checkbox starts the analysis, which finishes with the matte covering the clip.
+- The real U²-Net model ran on a test video through the built worker. The deployed worker also ran with `PATH` limited to System32, so the packaged `onnxruntime.dll` was loaded. Inference took about 1 s per analysed frame on the CI runner.
+
+Downloads (expire 2026-10-31):
+
+- [Portable build](https://github.com/HNXS/Cutlery/actions/runs/36850705437/artifacts/11156230322): 136,807,908 bytes, archive SHA-256 `73ae0be90d8305100583edc6993624b7408d1f69b8d4d8823fe2bc783a40ad02`.
+- [AI pack](https://github.com/HNXS/Cutlery/actions/runs/36850705437/artifacts/11156105821): 163,395,458 bytes, archive SHA-256 `ef760bcbdf52a7f4e573d6d970db9fde4232417679d490d5933426d6cc3eeeee`.
+
+Locally (Linux, Qt 6.4) the real model correctly cut out a drawn person figure. No photographic footage has been checked yet.
+
 ## Windows portable build — 2026-10-01, presenter overlays (0.5 development)
 
 [GitHub Actions run 36845035491](https://github.com/HNXS/Cutlery/actions/runs/36845035491) completed successfully for commit `493f4e12d88fedb24ff1a8c65b8b450510fec478` on Windows Server 2022 with MSVC 2022, Qt 6.8.3 and LGPL FFmpeg 8.1. It covered compilation, both CTest suites, QML startup, packaging, and packaged-executable startup. The suites include:

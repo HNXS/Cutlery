@@ -271,31 +271,39 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         const qint64 begin = std::min(l0, c0), padStart = std::max<qint64>(0, c0 - l0),
                      padStop = std::max<qint64>(0, l1 - c1) + 1;
         const double seek = c.sourceIn.seconds() + (c.reverse ? d - secs(c1) : secs(c0)) * s;
-        const int in = addInput(n, seek);
-        QString f = QString("[%1:v:0]trim=duration=%2,setpts=PTS-STARTPTS")
-                        .arg(in)
-                        .arg(num(secs(c1 - c0) * s));
-        if (c.reverse && !n.image)
-            f += ",reverse";
-        // Sampling 1/8 frame late resolves exact half-frame ties (2x speed, 60 fps sources) the
-        // same way regardless of where decoding started, so stills, playback and export agree.
-        f += ",setpts=PTS/" + num(s) + "+" + num(frame / 8) + "/TB,fps=" + fps;
-        f += QString(",trim=end_frame=%1,tpad=start=%2:stop=%3:start_mode=clone:stop_mode=clone")
-                 .arg(c1 - c0)
-                 .arg(padStart)
-                 .arg(padStop);
-        // Exact frame timestamps, clip-local and shifted by the handle so none are negative.
         const qint64 base = n.vPre;
-        f += QString(",trim=start_frame=%1:end_frame=%2,settb=%3/%4,setpts=N+%5")
-                 .arg(l0 - begin)
-                 .arg(l0 - begin + (l1 - l0))
-                 .arg(p.fpsD)
-                 .arg(p.fpsN)
-                 .arg(l0 + base);
-        if (c.crop > 0)
-            f += QString(",crop=iw*(1-2*%1):ih*(1-2*%1)").arg(num(c.crop));
-        if (c.shape == "circle")
-            f += ",crop='min(iw,ih)':'min(iw,ih)'";
+        // Source frames to clip-local frames: seek, speed, reverse, hold at the ends, then exact
+        // frame timestamps, clip-local and shifted by the handle so none are negative. The AI
+        // matte takes the same path so it stays frame-aligned with the picture.
+        // A matte arrives already aligned to the seek point and may end a little before the
+        // picture (its last analysed frame), which it holds.
+        auto timing = [&](const QString &source, bool reversible, bool matte = false) {
+            QString t = source + (matte ? "trim=start=0:duration=" : "trim=duration=") +
+                        num(secs(c1 - c0) * s) + (matte ? "" : ",setpts=PTS-STARTPTS");
+            if (c.reverse && reversible)
+                t += ",reverse";
+            // Sampling 1/8 frame late resolves exact half-frame ties (2x speed, 60 fps sources)
+            // the same way regardless of where decoding started, so stills, playback and export
+            // agree.
+            t += ",setpts=PTS/" + num(s) + "+" + num(frame / 8) + "/TB,fps=" + fps;
+            t += QString(",trim=end_frame=%1,tpad=start=%2:stop=%3:start_mode=clone:stop_mode=clone")
+                     .arg(c1 - c0)
+                     .arg(padStart)
+                     .arg(matte ? -1 : padStop);
+            t += QString(",trim=start_frame=%1:end_frame=%2,settb=%3/%4,setpts=N+%5")
+                     .arg(l0 - begin)
+                     .arg(l0 - begin + (l1 - l0))
+                     .arg(p.fpsD)
+                     .arg(p.fpsN)
+                     .arg(l0 + base);
+            if (c.crop > 0)
+                t += QString(",crop=iw*(1-2*%1):ih*(1-2*%1)").arg(num(c.crop));
+            if (c.shape == "circle")
+                t += ",crop='min(iw,ih)':'min(iw,ih)'";
+            return t;
+        };
+        const int in = addInput(n, seek);
+        QString f = timing(QString("[%1:v:0]").arg(in), !n.image);
         const bool moving = animatedGeometry(c);
         // Animated geometry first fits the canvas at scale 1 and is resized per frame below;
         // otherwise the clip is scaled once.
@@ -321,7 +329,32 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         }
         if (c.saturation != 1)
             f += ",hue=s=" + num(c.saturation);
-        if (c.chromaKey) {
+        const auto matte = c.aiCutout && !n.image && n.asset ? o.mattes.value(n.asset->id)
+                                                             : MatteSource{};
+        if (!matte.path.isEmpty()) {
+            // The matte (a few analysed frames per second) is interpolated to the project rate,
+            // timed, cropped and sized like the picture, then becomes its alpha channel.
+            // Decoding starts at the analysed frame at or before the seek point (every matte
+            // frame is a keyframe); the remainder is shifted out after interpolation.
+            const double offset = std::max(0., seek - matte.start);
+            const double key = std::floor(offset * matte.rate + 1e-6) / matte.rate;
+            r.inputs << "-protocol_whitelist" << "file,pipe" << "-ss"
+                     << num(std::max(0., key - 0.0005)) << "-i"
+                     << QFileInfo(matte.path).absoluteFilePath();
+            const auto id = QString::number(serial++);
+            nodes << f + QString("[pic%1]").arg(id);
+            nodes << timing(QString("[%1:v:0]format=gray,setpts=PTS-STARTPTS,"
+                                    "framerate=fps=%2:scene=100,setpts=PTS-%3/TB,")
+                                .arg(input++)
+                                .arg(fps, num(offset - key)),
+                            true, true) +
+                         QString(",scale=%1:%2,setsar=1%3,format=gray[matte%4]")
+                             .arg(w)
+                             .arg(h)
+                             .arg(c.flip ? ",hflip" : "")
+                             .arg(id);
+            f = QString("[pic%1][matte%1]alphamerge").arg(id);
+        } else if (c.chromaKey) {
             const QColor key(c.keyColor);
             f += QString(",colorkey=0x%1:%2:%3")
                      .arg(key.name().mid(1), num(c.keySimilarity), num(c.keyBlend));

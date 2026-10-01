@@ -231,17 +231,18 @@ QJsonObject Project::json(const QString &base) const {
         o["keyColor"] = c.keyColor;
         o["keySimilarity"] = c.keySimilarity;
         o["keyBlend"] = c.keyBlend;
+        o["aiCutout"] = c.aiCutout;
         o["transition"] = c.transition;
         o["transitionFrames"] = QString::number(c.transitionFrames);
         cc.append(o);
     }
-    return {{"format", "cutlery"}, {"schemaVersion", 6}, {"name", name},       {"width", width},
+    return {{"format", "cutlery"}, {"schemaVersion", 7}, {"name", name},       {"width", width},
             {"height", height},    {"fpsN", fpsN},       {"fpsD", fpsD},       {"tracks", tracks},
             {"assets", aa},        {"clips", cc},        {"trackSettings", tt}};
 }
 Project Project::fromJson(const QJsonObject &o, const QString &base) {
     require(o["format"] == "cutlery" &&
-                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 6),
+                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 7),
             "Unsupported project format/version. Original left unchanged.");
     require(o["assets"].isArray() && o["clips"].isArray(), "Missing project collections");
     Project p;
@@ -346,6 +347,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.keyColor = j["keyColor"].toString("#00ff00");
         c.keySimilarity = j["keySimilarity"].toDouble(0.25);
         c.keyBlend = j["keyBlend"].toDouble(0.08);
+        c.aiCutout = j["aiCutout"].toBool();
         c.transition = j["transition"].toString();
         if (j.contains("transitionFrames"))
             c.transitionFrames = integer(j["transitionFrames"]);
