@@ -1,5 +1,24 @@
 # Validation record
 
+## Windows portable build — 2026-10-01, karaoke captions (0.5 development)
+
+[GitHub Actions run 36927521399](https://github.com/HNXS/Cutlery/actions/runs/36927521399) completed successfully for commit `c9104b706b931458b8ffc50a96678659cbbc2542`, with the same toolchain as the automatic-captions build. New coverage:
+
+- **Engine test `karaokeCaptions`:**
+  - Word grouping: pauses, sentence ends, line length and lone punctuation.
+  - Placement with clip-local word starts; splitting a timed caption between its words; the plain fallback after a word-count change; the schema 8 round trip.
+  - Pixel checks on rendered frames: the karaoke highlight moves from the first word to the second; "one word at a time" shows only the current word; a caption whose word count changed renders plainly.
+- **Real Whisper model on synthesized speech:**
+  - One cue per word, with sensible starts: "Welcome" 0.13 s, "to" 0.75 s, "Cutlery," 0.88 s, "this" 2.32 s, "video" 2.57 s, "editor" 2.88 s, …
+  - An empty first cue from whisper.cpp is skipped when grouping.
+  - Transcription took 55 s on the 2-core runner.
+- Tests on Windows point the offscreen platform at `%WINDIR%/Fonts` (`QT_QPA_FONTDIR`). Without it, text in test renders used a tiny fallback font, so pixel checks on captions failed only on Windows. The application uses the normal Windows platform and system fonts.
+
+Downloads (expire 2026-10-31):
+
+- [Portable build](https://github.com/HNXS/Cutlery/actions/runs/36927521399/artifacts/11195410549): 148,489,604 bytes, archive SHA-256 `71d723affcd03eedca3626b3ba8ec3497481f128284e5e33d2a6326dc501e01e`.
+- [AI pack](https://github.com/HNXS/Cutlery/actions/runs/36927521399/artifacts/11194916737): 701,994,873 bytes, archive SHA-256 `72712465bfdd9548a2e53ebfe7fa3e08b1c705f71fc4c9e9b34c38d337fbb308`.
+
 ## Windows portable build — 2026-10-01, pause removal and loudness (0.5 development)
 
 [GitHub Actions run 36896811347](https://github.com/HNXS/Cutlery/actions/runs/36896811347) completed successfully for commit `4eb7315b14f7df539e23c5b43726a53620700cdd`, with the same toolchain as the automatic-captions build. New coverage:
