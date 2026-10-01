@@ -24,11 +24,12 @@ Get-ChildItem $ffRoot | Where-Object { $_.Name -ne 'bin' } | Copy-Item -Destinat
 Copy-Item "$root/docs/THIRD_PARTY.md","$root/docs/PORTABLE.md","$root/docs/SHORTCUTS.md","$root/docs/TIMELINE.md","$root/docs/ROADMAP.md","$root/docs/AI.md" "$OutputDir/docs"
 Copy-Item "$root/README.md" $OutputDir
 if ($OnnxRuntime) {
-    # The worker runs in its own process; onnxruntime.dll sits next to it so the copy Windows
-    # ships in System32 is never picked up.
-    Copy-Item "$BuildDir/bin/Release/cutlery-matte.exe","$OnnxRuntime/lib/onnxruntime.dll" $OutputDir
+    # The worker runs in its own process; onnxruntime.dll and DirectML.dll sit next to it so the
+    # older copies Windows ships in System32 are never picked up.
+    Copy-Item "$BuildDir/bin/Release/cutlery-ai.exe" $OutputDir
+    Copy-Item "$OnnxRuntime/lib/*.dll" $OutputDir
     New-Item -ItemType Directory -Force "$OutputDir/licenses/onnxruntime" | Out-Null
-    Copy-Item "$OnnxRuntime/LICENSE","$OnnxRuntime/ThirdPartyNotices.txt" "$OutputDir/licenses/onnxruntime"
+    Copy-Item "$OnnxRuntime/licenses/*" "$OutputDir/licenses/onnxruntime"
 }
 Copy-Item "$root/licenses/*" "$OutputDir/licenses" -Recurse -Force
 if (Test-Path "$QtRoot/sbom") { Copy-Item "$QtRoot/sbom" "$OutputDir/licenses/Qt-sbom" -Recurse -Force }
@@ -43,9 +44,10 @@ Get-ChildItem $OutputDir -File -Recurse | ForEach-Object { "{0}  {1}" -f (Get-Fi
 if ($Models) {
     # Separate download: models are large and optional. Unpack next to Cutlery.exe.
     New-Item -ItemType Directory -Force "$AiPackDir/models","$AiPackDir/licenses" | Out-Null
-    Copy-Item "$Models/u2net_human_seg.onnx" "$AiPackDir/models"
+    Copy-Item "$Models/u2net_human_seg.onnx","$Models/realesr-general-x4v3.onnx" "$AiPackDir/models"
     Copy-Item "$Models/manifest.json" "$AiPackDir/models/manifest.json"
     Copy-Item "$root/licenses/Apache-2.0.txt" "$AiPackDir/licenses/U-2-Net-Apache-2.0.txt"
+    Copy-Item "$root/licenses/Real-ESRGAN-BSD-3-Clause.txt" "$AiPackDir/licenses"
     Copy-Item "$root/docs/AI.md" "$AiPackDir/README-AI.md"
     Get-ChildItem $AiPackDir -File -Recurse | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(),$_.FullName.Substring((Resolve-Path $AiPackDir).Path.Length+1) } | Set-Content "$AiPackDir/SHA256SUMS.txt" -Encoding utf8
 }

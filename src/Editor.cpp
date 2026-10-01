@@ -45,22 +45,24 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     m_analysis = new MediaAnalysis(m_data + "/cache/waveforms", executable("ffmpeg"), this);
     m_thumbnails = new Thumbnails(m_data + "/cache/thumbnails", executable("ffmpeg"), this);
     m_encoders = new EncoderResolver(executable("ffmpeg"), this);
-    QString worker = qEnvironmentVariable("CUTLERY_MATTE_WORKER"),
-            model = qEnvironmentVariable("CUTLERY_MATTE_MODEL");
+    // Optional AI worker and AI-pack models; overridable for tests and development.
+    QString worker = qEnvironmentVariable("CUTLERY_AI_WORKER"),
+            models = qEnvironmentVariable("CUTLERY_AI_MODELS");
     if (worker.isEmpty()) {
-        worker = app + "/cutlery-matte";
+        worker = app + "/cutlery-ai";
 #ifdef Q_OS_WIN
         worker += ".exe";
 #endif
     }
-    if (model.isEmpty())
-        model = app + "/models/u2net_human_seg.onnx";
-    m_mattes = new Mattes(m_data + "/mattes", executable("ffmpeg"), worker, model, this);
-    connect(m_mattes, &Mattes::changed, this, [this] {
-        if (!m_mattes->busy())
-            m_previewTimer.start(); // a finished matte changes the picture
-        emit changed();
-    });
+    if (models.isEmpty())
+        models = app + "/models";
+    m_ai = new AiJobs(m_data + "/ai", executable("ffmpeg"), executable("ffprobe"), worker,
+                      {{"matte", models + "/u2net_human_seg.onnx"},
+                       {"upscale", models + "/realesr-general-x4v3.onnx"}},
+                      this);
+    connect(m_ai, &AiJobs::changed, this, &Editor::changed);
+    // A finished result changes the picture.
+    connect(m_ai, &AiJobs::finished, this, [this] { m_previewTimer.start(); });
     connect(m_thumbnails, &Thumbnails::changed, this, [this] {
         emit thumbnailsChanged();
         emit changed();
@@ -329,15 +331,16 @@ QVariantMap Editor::state() const {
             PROP(keySimilarity);
             PROP(keyBlend);
             PROP(aiCutout);
+            PROP(aiUpscale);
 #undef PROP
             if (const auto *a = m_project.asset(c.assetId); a && a->kind == "video") {
-                auto cutout = m_mattes->status(*a);
-                const auto [from, to] = cutoutSpan(*a, &c);
-                const auto m = m_mattes->matte(*a);
-                // The last analysed frame is held, so the end may fall short by a frame.
-                cutout["covered"] = !m.path.isEmpty() && m.start <= from + 1e-3 &&
-                                    m.end + 1 / Mattes::rate >= to;
-                selected["cutout"] = cutout;
+                for (const auto &[task, name] : {std::pair{"matte", "cutout"}, {"upscale", "upscale"}}) {
+                    auto info = m_ai->status(task, *a, upscaleHeight(*a));
+                    info["covered"] = aiCovered(task, *a, c);
+                    selected[name] = info;
+                }
+                // Already at least 4K: nothing to gain.
+                selected["upscaleHeight"] = upscaleHeight(*a);
             }
         }
     return {{"name", m_project.name},
@@ -358,8 +361,8 @@ QVariantMap Editor::state() const {
             {"busy", m_busy},
             {"importing", m_importing},
             {"analyzing", m_analysis->busy() || m_thumbnails->busy()},
-            {"aiAvailable", m_mattes->available()},
-            {"aiMissing", m_mattes->missing()},
+            {"aiMissing", QVariantMap{{"matte", m_ai->missing("matte")},
+                                      {"upscale", m_ai->missing("upscale")}}},
             {"progress", m_progress},
             {"previewUrl", m_previewUrl},
             {"playing", m_playback->active() || m_resumeTimer.isActive()},
@@ -853,6 +856,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(shadow, toDouble);
         FIELD(chromaKey, toBool);
         FIELD(aiCutout, toBool);
+        FIELD(aiUpscale, toBool);
         FIELD(keySimilarity, toDouble);
         FIELD(keyBlend, toDouble);
         FIELD(shape, toString);
@@ -1010,7 +1014,7 @@ void Editor::requestPreview() {
         options.audio = false;
         options.from = m_playhead;
         options.to = m_playhead + 1;
-        addMattes(options);
+        addAiMedia(options);
         // Only the playhead frame is compiled, so the cost does not grow with its position.
         const auto plan = compileRender(m_project, work->path(), size.width(), size.height(),
                                         options);
@@ -1050,10 +1054,14 @@ void Editor::requestPreview() {
         fail(e.what());
     }
 }
-std::pair<double, double> Editor::cutoutSpan(const Asset &a, const Clip *extra) const {
+static bool usesAi(const Clip &c, const QString &task) {
+    return task == "upscale" ? c.aiUpscale : c.aiCutout;
+}
+std::pair<double, double> Editor::aiSpan(const QString &task, const Asset &a,
+                                         const Clip *extra) const {
     double from = 1e300, to = -1e300;
     for (const auto &c : m_project.clips)
-        if (c.assetId == a.id && (c.aiCutout || (extra && c.id == extra->id))) {
+        if (c.assetId == a.id && (usesAi(c, task) || (extra && c.id == extra->id))) {
             // Transition handles and held frames reach up to a second beyond the trim.
             const double in = c.sourceIn.seconds(),
                          length = frameTime(c.duration, m_project.fpsN, m_project.fpsD).seconds() *
@@ -1065,32 +1073,52 @@ std::pair<double, double> Editor::cutoutSpan(const Asset &a, const Clip *extra) 
         return {0, 0};
     return {std::clamp(from, 0., a.duration), std::clamp(to, 0., a.duration)};
 }
-void Editor::addMattes(RenderOptions &options) const {
-    for (const auto &c : m_project.clips)
-        if (c.aiCutout && !options.mattes.contains(c.assetId))
-            if (const auto *a = m_project.asset(c.assetId); a && a->kind == "video")
-                if (const auto m = m_mattes->matte(*a); !m.path.isEmpty())
-                    options.mattes.insert(a->id, m);
+int Editor::upscaleHeight(const Asset &a) {
+    // Four times the source (the model's factor), at most 4K; 0 when the source is 4K already.
+    return a.height > 0 && a.height < 2160 ? std::min(4 * a.height, 2160) / 2 * 2 : 0;
 }
-void Editor::analyzeCutout() {
+bool Editor::aiCovered(const QString &task, const Asset &a, const Clip &c) const {
+    const auto r = m_ai->result(task, a, upscaleHeight(a));
+    const auto [from, to] = aiSpan(task, a, &c);
+    // A matte holds its last analysed frame, so its end may fall short by one.
+    const double slack = task == "matte" ? 1 / AiJobs::matteRate : 0.05;
+    return !r.path.isEmpty() && r.start <= from + 1e-3 && r.end + slack >= to;
+}
+void Editor::addAiMedia(RenderOptions &options) const {
+    for (const auto &c : m_project.clips)
+        if (const auto *a = m_project.asset(c.assetId); a && a->kind == "video") {
+            if (c.aiCutout && !options.mattes.contains(a->id))
+                if (const auto m = m_ai->result("matte", *a); !m.path.isEmpty())
+                    options.mattes.insert(a->id, m);
+            if (c.aiUpscale && upscaleHeight(*a) > 0 && !options.upscaled.contains(a->id))
+                if (const auto u = m_ai->result("upscale", *a, upscaleHeight(*a));
+                    !u.path.isEmpty())
+                    options.upscaled.insert(a->id, u);
+        }
+}
+void Editor::runAi(const QString &task) {
     const auto *c = m_project.clip(m_selected);
     const auto *a = c ? m_project.asset(c->assetId) : nullptr;
     if (!a || a->kind != "video")
-        return fail("AI background removal works on video clips");
-    if (!m_mattes->available())
-        return fail(m_mattes->missing() + " Download the AI pack next to Cutlery.exe.");
-    auto [from, to] = cutoutSpan(*a, c);
-    // Keep what an earlier analysis covered when it overlaps, so other clips stay cut out.
-    if (const auto m = m_mattes->matte(*a); !m.path.isEmpty() && m.start <= to && m.end >= from) {
-        if (m.start <= from + 1e-3 && m.end + 1 / Mattes::rate >= to)
-            return;
-        from = std::min(from, m.start);
-        to = std::max(to, m.end);
+        return fail("AI processing works on video clips");
+    if (!m_ai->available(task))
+        return fail(m_ai->missing(task) + " Download the AI pack next to Cutlery.exe.");
+    const int height = upscaleHeight(*a);
+    if (task == "upscale" && height == 0)
+        return fail("This video is already 4K or larger");
+    if (aiCovered(task, *a, *c))
+        return;
+    auto [from, to] = aiSpan(task, *a, c);
+    // Keep what an earlier result covered when it overlaps, so other clips keep it.
+    if (const auto r = m_ai->result(task, *a, height);
+        !r.path.isEmpty() && r.start <= to && r.end >= from) {
+        from = std::min(from, r.start);
+        to = std::max(to, r.end);
     }
-    m_mattes->analyze(*a, from, to);
+    m_ai->start(task, *a, from, to, task == "upscale" ? height : 0);
 }
-void Editor::cancelCutout() {
-    m_mattes->cancel();
+void Editor::cancelAi() {
+    m_ai->cancel();
 }
 QSize Editor::previewSize(int longSide) const {
     int w = longSide, h = qRound(double(longSide) * m_project.height / m_project.width / 2) * 2;
@@ -1131,7 +1159,7 @@ void Editor::play() {
         options.from = m_playhead;
         options.realtime = true;
         options.audio = false;
-        addMattes(options);
+        addAiMedia(options);
         request.video =
             compileRender(m_project, work->path(), size.width(), size.height(), options);
         options.audio = true;
@@ -1263,7 +1291,7 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
         RenderOptions options;
         options.highQuality = true;
         options.pixelFormat = encoder.pixelFormat;
-        addMattes(options);
+        addAiMedia(options);
         const auto plan =
             compileRender(m_project, work->path(), size.width(), size.height(), options);
         const auto graph = work->filePath("graph.txt");

@@ -302,7 +302,16 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                 t += ",crop='min(iw,ih)':'min(iw,ih)'";
             return t;
         };
-        const int in = addInput(n, seek);
+        int in = 0;
+        if (const auto up = c.aiUpscale && !n.image && n.asset ? o.upscaled.value(n.asset->id)
+                                                               : MatteSource{};
+            !up.path.isEmpty()) {
+            r.inputs << "-protocol_whitelist" << "file,pipe" << "-ss"
+                     << num(std::max(0., seek - up.start)) << "-i"
+                     << QFileInfo(up.path).absoluteFilePath();
+            in = input++;
+        } else
+            in = addInput(n, seek);
         QString f = timing(QString("[%1:v:0]").arg(in), !n.image);
         const bool moving = animatedGeometry(c);
         // Animated geometry first fits the canvas at scale 1 and is resized per frame below;

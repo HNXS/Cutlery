@@ -232,6 +232,7 @@ QJsonObject Project::json(const QString &base) const {
         o["keySimilarity"] = c.keySimilarity;
         o["keyBlend"] = c.keyBlend;
         o["aiCutout"] = c.aiCutout;
+        o["aiUpscale"] = c.aiUpscale;
         o["transition"] = c.transition;
         o["transitionFrames"] = QString::number(c.transitionFrames);
         cc.append(o);
@@ -348,6 +349,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.keySimilarity = j["keySimilarity"].toDouble(0.25);
         c.keyBlend = j["keyBlend"].toDouble(0.08);
         c.aiCutout = j["aiCutout"].toBool();
+        c.aiUpscale = j["aiUpscale"].toBool();
         c.transition = j["transition"].toString();
         if (j.contains("transitionFrames"))
             c.transitionFrames = integer(j["transitionFrames"]);

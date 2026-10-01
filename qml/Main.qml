@@ -184,6 +184,72 @@ ApplicationWindow {
             verticalAlignment: Text.AlignVCenter
         }
     }
+    // An AI processing option of a video clip: checkbox, progress, status and Run/Stop. The
+    // task runs in the background once per media file and is cached.
+    component AiOption: ColumnLayout {
+        id: ai
+        required property string task  // AiJobs task: "matte" or "upscale"
+        required property string flag  // clip property switching the result on
+        required property string infoKey // selection entry with the task status
+        required property string label
+        required property string runningText
+        required property string doneText
+        property string statusName: flag + "Status"
+        property string runName: flag + "Run"
+        readonly property var info: win.selection[infoKey] || ({})
+        readonly property bool working: info.status === "running" || info.status === "queued"
+        readonly property string missing: (win.s.aiMissing || {})[task] || ""
+        Layout.fillWidth: true
+        visible: win.selection[infoKey] !== undefined
+        spacing: 4
+        CheckBox {
+            objectName: ai.flag
+            text: ai.label
+            checked: win.selection[ai.flag] || false
+            enabled: ai.missing === "" || checked
+            onToggled: {
+                editor.setClip(ai.flag, checked)
+                if (checked && ai.info.covered !== true && !ai.working)
+                    editor.runAi(ai.task)
+            }
+        }
+        ProgressBar {
+            Layout.fillWidth: true
+            visible: ai.working
+            value: ai.info.progress || 0
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            visible: win.selection[ai.flag] === true || ai.working
+            Label {
+                objectName: ai.statusName
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                font.pixelSize: 11
+                color: ai.info.status === "failed" ? "#ec6f5a" : win.muted
+                text: ai.info.status === "queued" ? "Waiting for another AI job…"
+                    : ai.working ? ai.runningText + " " + Math.round((ai.info.progress || 0) * 100) + "%"
+                        + (ai.info.device === "gpu" ? " · GPU" : ai.info.device === "cpu" ? " · CPU (slow)" : "")
+                    : ai.info.status === "failed" ? "Failed: " + (ai.info.error || "")
+                    : ai.info.covered === true ? ai.doneText
+                    : ai.missing === "" ? "Not processed for this range yet"
+                    : ai.missing
+            }
+            Action {
+                objectName: ai.runName
+                visible: !ai.working && win.selection[ai.flag] === true && ai.info.covered !== true && ai.missing === ""
+                text: "Run"
+                padding: 6
+                onClicked: editor.runAi(ai.task)
+            }
+            Action {
+                visible: ai.working
+                text: "Stop"
+                padding: 6
+                onClicked: editor.cancelAi()
+            }
+        }
+    }
     component Caption: Label {
         color: win.muted
         font.pixelSize: 10
@@ -1117,60 +1183,15 @@ ApplicationWindow {
                                         }
                                     }
                                 }
-                                // AI background removal: analysis runs in the background once per
-                                // media file; the cutout applies wherever the matte covers the clip.
-                                ColumnLayout {
-                                    id: cutout
-                                    Layout.fillWidth: true
-                                    visible: win.selection.cutout !== undefined
-                                    spacing: 4
-                                    readonly property var info: win.selection.cutout || ({})
-                                    readonly property bool analyzing: info.status === "analyzing"
-                                    CheckBox {
-                                        objectName: "aiCutout"
-                                        text: "Remove background (AI)"
-                                        checked: win.selection.aiCutout || false
-                                        enabled: win.s.aiAvailable === true || checked
-                                        onToggled: {
-                                            editor.setClip("aiCutout", checked)
-                                            if (checked && cutout.info.covered !== true && !cutout.analyzing)
-                                                editor.analyzeCutout()
-                                        }
-                                    }
-                                    ProgressBar {
-                                        Layout.fillWidth: true
-                                        visible: cutout.analyzing
-                                        value: cutout.info.progress || 0
-                                    }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        visible: win.selection.aiCutout === true || cutout.analyzing
-                                        Label {
-                                            objectName: "cutoutStatus"
-                                            Layout.fillWidth: true
-                                            wrapMode: Text.Wrap
-                                            font.pixelSize: 11
-                                            color: cutout.info.status === "failed" ? "#ec6f5a" : win.muted
-                                            text: cutout.analyzing ? "Finding the speaker… " + Math.round((cutout.info.progress || 0) * 100) + "%"
-                                                : cutout.info.status === "failed" ? "Analysis failed: " + (cutout.info.error || "")
-                                                : cutout.info.covered === true ? "Speaker found ✓"
-                                                : win.s.aiAvailable === true ? "Not analysed for this range yet"
-                                                : (win.s.aiMissing || "AI pack not installed")
-                                        }
-                                        Action {
-                                            objectName: "cutoutAnalyze"
-                                            visible: !cutout.analyzing && win.selection.aiCutout === true && cutout.info.covered !== true && win.s.aiAvailable === true
-                                            text: "Analyse"
-                                            padding: 6
-                                            onClicked: editor.analyzeCutout()
-                                        }
-                                        Action {
-                                            visible: cutout.analyzing
-                                            text: "Stop"
-                                            padding: 6
-                                            onClicked: editor.cancelCutout()
-                                        }
-                                    }
+                                AiOption {
+                                    task: "matte"
+                                    flag: "aiCutout"
+                                    infoKey: "cutout"
+                                    label: "Remove background (AI)"
+                                    runningText: "Finding the speaker…"
+                                    doneText: "Speaker found ✓"
+                                    statusName: "cutoutStatus"
+                                    runName: "cutoutAnalyze"
                                 }
                                 CheckBox {
                                     objectName: "chromaKey"
@@ -1236,6 +1257,15 @@ ApplicationWindow {
                             }
                             Caption {
                                 text: "PICTURE & SOUND"
+                            }
+                            AiOption {
+                                task: "upscale"
+                                flag: "aiUpscale"
+                                infoKey: "upscale"
+                                visible: (win.selection.upscaleHeight || 0) > 0
+                                label: "Enhance resolution (AI, up to " + (win.selection.upscaleHeight || 0) + "p)"
+                                runningText: "Upscaling…"
+                                doneText: "Sharper picture ready ✓"
                             }
                             RowLayout {
                                 Layout.fillWidth: true

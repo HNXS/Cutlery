@@ -1,5 +1,5 @@
 #include "Editor.h"
-#include "Mattes.h"
+#include "AiJobs.h"
 #include "KeyboardShortcuts.h"
 #include "MediaAnalysis.h"
 #include "Project.h"
@@ -1024,34 +1024,86 @@ class EngineTest : public QObject {
         QVERIFY(Project::fromJson(p.json(dir.path()), dir.path()).clips[1].aiCutout);
         QVERIFY(p.json()["schemaVersion"].toInt() >= 7);
 
-#ifdef CUTLERY_MATTE_WORKER
-        // The worker with a stand-in model whose matte is the red channel: red left half,
-        // blue right half.
+        // AI upscale: the clip's picture comes from the upscaled copy, timed from its start.
+        // Stand-in copy: green for its first second, then yellow, at twice the size.
+        const auto upscaledFile = dir.filePath("upscaled.mov");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "color=c=green:s=320x180:r=30:d=1[a];color=c=yellow:s=320x180:r=30:d=2[b];"
+                     "[a][b]concat=n=2:v=1:a=0",
+                     "-c:v", "prores_ks", upscaledFile});
+        auto upscale = trimmed; // source 1.3 s at frame 15
+        upscale.clips[1].aiCutout = false;
+        upscale.clips[1].aiUpscale = true;
+        auto isGreen = [](QColor c) { return c.green() > 100 && c.red() < 60 && c.blue() < 60; };
+        auto isYellow = [](QColor c) { return c.green() > 200 && c.red() > 200 && c.blue() < 60; };
+        auto upscaled = [&](double start) {
+            RenderOptions options;
+            options.audio = false;
+            options.from = 15;
+            options.to = 16;
+            options.upscaled.insert("speaker", MatteSource{upscaledFile, start, start + 3, 30});
+            const auto plan = compileRender(upscale, dir.filePath("work"), 160, 90, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32).pixelColor(80, 45);
+        };
+        QVERIFY2(isYellow(upscaled(0)), qPrintable(upscaled(0).name()));
+        QVERIFY2(isGreen(upscaled(.5)), qPrintable(upscaled(.5).name()));
+        // Without an upscaled copy the source is used.
+        QVERIFY(isRed(still(upscale, 15, {}).pixelColor(80, 45)));
+        QVERIFY(Project::fromJson(upscale.json(dir.path()), dir.path()).clips[1].aiUpscale);
+
+#ifdef CUTLERY_AI_WORKER
+        // The worker with stand-in models on a red left half and a blue right half: the matte
+        // is the red channel; the upscale doubles the size by nearest neighbour.
         const auto halves = dir.filePath("halves.mkv");
         run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=160x90:r=30:d=2", "-vf",
                      "drawbox=x=0:y=0:w=80:h=90:c=red:t=fill", "-c:v", "ffv1", halves});
         video.path = halves;
         video.duration = 2;
-        Mattes mattes(dir.filePath("mattes"), ffmpeg, CUTLERY_MATTE_WORKER,
-                      CUTLERY_SOURCE_DIR "/tests/fixtures/red-matte.onnx");
-        QVERIFY2(mattes.available(), qPrintable(mattes.missing()));
-        QCOMPARE(mattes.status(video)["status"].toString(), QString("none"));
-        mattes.analyze(video, .5, 1.5);
-        QVERIFY(mattes.busy());
-        QTRY_VERIFY_WITH_TIMEOUT(!mattes.busy(), 60000);
-        QCOMPARE(mattes.status(video)["status"].toString(), QString("ready"));
-        const auto made = mattes.matte(video);
+        AiJobs jobs(dir.filePath("ai"), ffmpeg, Editor::executable("ffprobe"), CUTLERY_AI_WORKER,
+                    {{"matte", CUTLERY_SOURCE_DIR "/tests/fixtures/red-matte.onnx"},
+                     {"upscale", CUTLERY_SOURCE_DIR "/tests/fixtures/nearest-x2.onnx"}});
+        QVERIFY2(jobs.available("matte"), qPrintable(jobs.missing("matte")));
+        QCOMPARE(jobs.status("matte", video)["status"].toString(), QString("none"));
+        jobs.start("matte", video, .5, 1.5);
+        jobs.start("upscale", video, .5, 1.5, 180);
+        QVERIFY(jobs.busy());
+        QCOMPARE(jobs.status("upscale", video, 180)["status"].toString(), QString("queued"));
+        QTRY_VERIFY_WITH_TIMEOUT(!jobs.busy(), 60000);
+        QCOMPARE(jobs.status("matte", video)["status"].toString(), QString("ready"));
+        const auto made = jobs.result("matte", video);
         QCOMPARE(made.start, .5);
         QCOMPARE(made.end, 1.5);
-        const auto frames = run(ffmpeg, {"-v", "error", "-i", made.path, "-f", "rawvideo",
-                                         "-pix_fmt", "gray", "-"});
+        auto frames = run(ffmpeg, {"-v", "error", "-i", made.path, "-f", "rawvideo", "-pix_fmt",
+                                   "gray", "-"});
         QCOMPARE(frames.size(), qsizetype(160 * 90 * 8)); // 1 s at 8 fps, picture size
         QVERIFY(uchar(frames[45 * 160 + 20]) > 200);
         QVERIFY(uchar(frames[45 * 160 + 140]) < 50);
-        // A missing model reports the AI pack as unavailable instead of failing later.
-        Mattes none(dir.filePath("mattes"), ffmpeg, CUTLERY_MATTE_WORKER, dir.filePath("x.onnx"));
-        QVERIFY(!none.available());
-        QVERIFY(!none.missing().isEmpty());
+        QVERIFY2(jobs.status("upscale", video, 180)["status"].toString() == "ready",
+                 qPrintable(jobs.status("upscale", video, 180)["error"].toString()));
+        const auto sharp = jobs.result("upscale", video, 180);
+        QCOMPARE(sharp.rate, 30.);
+        frames = run(ffmpeg, {"-v", "error", "-i", sharp.path, "-f", "rawvideo", "-pix_fmt",
+                              "rgb24", "-"});
+        QCOMPARE(frames.size(), qsizetype(320 * 180 * 3 * 30)); // every frame, twice the size
+        const auto *px = reinterpret_cast<const uchar *>(frames.constData());
+        QVERIFY(isRed(QColor(px[(90 * 320 + 40) * 3], px[(90 * 320 + 40) * 3 + 1],
+                             px[(90 * 320 + 40) * 3 + 2])));
+        QVERIFY(isBlue(QColor(px[(90 * 320 + 280) * 3], px[(90 * 320 + 280) * 3 + 1],
+                              px[(90 * 320 + 280) * 3 + 2])));
+        // Results are per size; a missing model reports the AI pack as unavailable.
+        QCOMPARE(jobs.status("upscale", video, 360)["status"].toString(), QString("none"));
+        AiJobs none(dir.filePath("ai"), ffmpeg, Editor::executable("ffprobe"), CUTLERY_AI_WORKER,
+                    {{"matte", dir.filePath("x.onnx")}});
+        QVERIFY(!none.available("matte"));
+        QVERIFY(!none.available("upscale"));
+        QVERIFY(!none.missing("matte").isEmpty());
 #endif
     }
     void waveformPeaksAndCache() {

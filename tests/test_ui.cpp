@@ -471,16 +471,22 @@ class UiTest : public QObject {
                      {"-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=160x90:r=30:d=2", "-vf",
                       "drawbox=x=0:y=0:w=80:h=90:c=red:t=fill", "-c:v", "ffv1", video});
         QVERIFY(ffmpeg.waitForFinished(30000) && ffmpeg.exitCode() == 0);
-#ifdef CUTLERY_MATTE_WORKER
-        qputenv("CUTLERY_MATTE_WORKER", CUTLERY_MATTE_WORKER);
+        // The AI pack with stand-in models.
+        QDir().mkpath(dir.filePath("models"));
+        QFile::copy(CUTLERY_SOURCE_DIR "/tests/fixtures/red-matte.onnx",
+                    dir.filePath("models/u2net_human_seg.onnx"));
+        QFile::copy(CUTLERY_SOURCE_DIR "/tests/fixtures/nearest-x2.onnx",
+                    dir.filePath("models/realesr-general-x4v3.onnx"));
+#ifdef CUTLERY_AI_WORKER
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
 #else
-        qputenv("CUTLERY_MATTE_WORKER", dir.filePath("missing").toUtf8());
+        qputenv("CUTLERY_AI_WORKER", dir.filePath("missing").toUtf8());
 #endif
-        qputenv("CUTLERY_MATTE_MODEL", CUTLERY_SOURCE_DIR "/tests/fixtures/red-matte.onnx");
+        qputenv("CUTLERY_AI_MODELS", dir.filePath("models").toUtf8());
         auto *frames = new FrameProvider;
         Editor editor(frames);
-        qunsetenv("CUTLERY_MATTE_WORKER");
-        qunsetenv("CUTLERY_MATTE_MODEL");
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
         editor.configure(160, 90, 30, 1);
         editor.importMedia({QUrl::fromLocalFile(video)});
         QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
@@ -506,7 +512,7 @@ class UiTest : public QObject {
         QTest::qWait(100);
         auto *box = findItem(window->contentItem(), "aiCutout");
         QVERIFY(box && box->isVisible());
-#ifdef CUTLERY_MATTE_WORKER
+#ifdef CUTLERY_AI_WORKER
         QVERIFY(box->isEnabled());
         box->setProperty("checked", true);
         QVERIFY(QMetaObject::invokeMethod(box, "toggled"));
@@ -518,10 +524,22 @@ class UiTest : public QObject {
         QVERIFY(status);
         QTRY_COMPARE(status->property("text").toString(), QString("Speaker found ✓"));
         QVERIFY(!findItem(window->contentItem(), "cutoutAnalyze")->isVisible());
+        // AI upscale of the 90p clip, to 360p: the same flow.
+        auto *sharpen = findItem(window->contentItem(), "aiUpscale");
+        QVERIFY(sharpen && sharpen->isVisible() && sharpen->isEnabled());
+        sharpen->setProperty("checked", true);
+        QVERIFY(QMetaObject::invokeMethod(sharpen, "toggled"));
+        QVERIFY(editor.project().clips.first().aiUpscale);
+        QCOMPARE(editor.state()["selected"].toMap()["upscaleHeight"].toInt(), 360);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            editor.state()["selected"].toMap()["upscale"].toMap()["covered"].toBool(), 60000);
+        QTRY_COMPARE(findItem(window->contentItem(), "aiUpscaleStatus")->property("text").toString(),
+                     QString("Sharper picture ready ✓"));
 #else
         // Without the AI pack the option is off and explains why.
         QVERIFY(!box->isEnabled());
-        QVERIFY(!editor.state()["aiMissing"].toString().isEmpty());
+        QVERIFY(!editor.state()["aiMissing"].toMap()["matte"].toString().isEmpty());
+        QVERIFY(!findItem(window->contentItem(), "aiUpscale")->isEnabled());
 #endif
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }

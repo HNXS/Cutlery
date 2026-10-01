@@ -1,17 +1,38 @@
 param([string]$Destination = "$PSScriptRoot/../.deps/onnxruntime")
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-# Immutable upstream release + hash (MIT licence). CPU build; used only by cutlery-matte.
-$url = 'https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-win-x64-1.22.0.zip'
-$sha256 = '174c616efc0271194488642a72f1a514e01487da4dfe84c49296d66e40ebe0da'
+# ONNX Runtime with the DirectML provider (GPU inference on any DirectX 12 GPU, CPU fallback)
+# and the DirectML redistributable it requires. Immutable NuGet packages, pinned by hash.
+$packages = @(
+    @{ name='Microsoft.ML.OnnxRuntime.DirectML'; version='1.22.0'; sha256='PIN_ORT' },
+    @{ name='Microsoft.AI.DirectML'; version='1.15.4'; sha256='PIN_DML' }
+)
 New-Item -ItemType Directory -Force $Destination | Out-Null
-$archive = Join-Path $Destination 'upstream.zip'
-Invoke-WebRequest -Uri $url -OutFile $archive
-if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sha256) { throw 'ONNX Runtime archive checksum mismatch' }
-Expand-Archive -Path $archive -DestinationPath "$Destination/unpacked" -Force
-$root = (Get-ChildItem "$Destination/unpacked" -Directory | Select-Object -First 1).FullName
-foreach ($file in @('include/onnxruntime_cxx_api.h','lib/onnxruntime.dll','lib/onnxruntime.lib','LICENSE','ThirdPartyNotices.txt')) {
+$mismatch = @()
+foreach ($p in $packages) {
+    $archive = Join-Path $Destination "$($p.name).$($p.version).zip"
+    Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/$($p.name)/$($p.version)" -OutFile $archive
+    $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($hash -ne $p.sha256) { $mismatch += "$($p.name) $($p.version): got $hash" }
+}
+if ($mismatch) { throw "Checksum mismatch: $($mismatch -join '; ')" }
+foreach ($p in $packages) {
+    Expand-Archive -Path (Join-Path $Destination "$($p.name).$($p.version).zip") -DestinationPath "$Destination/$($p.name)" -Force
+}
+# Lay the packages out like an ONNX Runtime release: include/, lib/, licence files.
+$ort = "$Destination/Microsoft.ML.OnnxRuntime.DirectML"
+$dml = "$Destination/Microsoft.AI.DirectML"
+$root = "$Destination/runtime"
+New-Item -ItemType Directory -Force "$root/include","$root/lib","$root/licenses" | Out-Null
+Copy-Item "$ort/build/native/include/*" "$root/include" -Recurse -Force
+Copy-Item "$ort/runtimes/win-x64/native/onnxruntime.dll","$ort/runtimes/win-x64/native/onnxruntime.lib" "$root/lib"
+Copy-Item "$dml/bin/x64-win/DirectML.dll" "$root/lib"
+Copy-Item "$ort/LICENSE" "$root/licenses/onnxruntime-LICENSE.txt"
+Copy-Item "$ort/ThirdPartyNotices.txt" "$root/licenses/onnxruntime-ThirdPartyNotices.txt"
+Get-ChildItem $dml -File | Where-Object { $_.Name -match 'LICENSE|ThirdParty' } | ForEach-Object { Copy-Item $_.FullName "$root/licenses/DirectML-$($_.Name)" }
+foreach ($file in @('include/onnxruntime_cxx_api.h','include/dml_provider_factory.h','lib/onnxruntime.dll','lib/onnxruntime.lib','lib/DirectML.dll')) {
     if (!(Test-Path "$root/$file")) { throw "ONNX Runtime file missing: $file" }
 }
-@{ url=$url; sha256=$sha256; version='1.22.0'; license='MIT'; source='https://github.com/microsoft/onnxruntime/tree/v1.22.0' } | ConvertTo-Json | Set-Content "$Destination/manifest.json" -Encoding utf8
-Write-Output $root
+if (!(Get-ChildItem "$root/licenses" -Filter 'DirectML-*')) { throw 'DirectML licence missing' }
+@{ packages=$packages; license='MIT (ONNX Runtime); Microsoft DirectML redistributable licence'; source='https://github.com/microsoft/onnxruntime/tree/v1.22.0' } | ConvertTo-Json -Depth 3 | Set-Content "$root/manifest.json" -Encoding utf8
+Write-Output (Resolve-Path $root).Path

@@ -14,8 +14,9 @@ struct RenderPlan {
 // A range of timeline frames to compile. Only clips overlapping [from, to) are decoded, and each
 // input seeks directly to its first needed source time, so the cost of a preview depends on the
 // window length rather than on the playhead position.
-// An analysed person matte of a video asset: grayscale video at `rate` frames per second whose
-// time zero is source time `start`, covering source seconds [start, end).
+// Media derived from a video asset by the AI worker, e.g. a person matte (grayscale video at
+// `rate` frames per second). Its time zero is source time `start`; it covers source seconds
+// [start, end).
 struct MatteSource {
     QString path;
     double start = 0, end = 0, rate = 8;
@@ -31,6 +32,9 @@ struct RenderOptions {
     QString pixelFormat = "yuv420p";
     // Mattes by asset id, used by clips with AI cutout.
     QHash<QString, MatteSource> mattes;
+    // AI-upscaled pictures by asset id, used instead of the source by clips with AI upscale.
+    // Same timing as the source from time `start` (`rate` is unused).
+    QHash<QString, MatteSource> upscaled;
 };
 struct Encoder;
 // The same compiler handles preview stills, live playback and final export.
