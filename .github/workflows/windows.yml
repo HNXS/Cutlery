@@ -72,12 +72,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'CPU upscale failed' }
           ffprobe -v error -show_entries stream=width,height,codec_name,nb_frames -of compact build/test-up.mov
       - name: Check speech recognition on synthesized speech
+        timeout-minutes: 20
         run: |
           # Windows text-to-speech says a known sentence; the captions must contain its words.
-          powershell -NoProfile -Command "Add-Type -AssemblyName System.Speech; `$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; `$s.Rate = -1; `$s.SetOutputToWaveFile('build/speech.wav'); `$s.Speak('Welcome to Cutlery. This video editor works on your own computer.'); `$s.Dispose()"
-          if ($LASTEXITCODE -ne 0 -or !(Test-Path build/speech.wav)) { Write-Warning 'No text-to-speech voice on this runner; skipping the speech check'; exit 0 }
-          build/bin/Release/cutlery-ai.exe transcribe --ffmpeg (Get-Command ffmpeg).Source --whisper "$env:WHISPER_DIR/whisper-cli.exe" --model "$env:MODELS_DIR/ggml-large-v3-turbo-q5_0.bin" --vad "$env:WHISPER_DIR/ggml-silero-v6.2.0.bin" --input build/speech.wav --output build/speech.srt --language en
-          if ($LASTEXITCODE -ne 0) { throw 'Transcription failed' }
+          $tts = Start-Job { param($out) Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.Rate = -1; $s.SetOutputToWaveFile($out); $s.Speak('Welcome to Cutlery. This video editor works on your own computer.'); $s.Dispose() } -ArgumentList (Join-Path $PWD 'build/speech.wav') -PSVersion 5.1
+          if (!(Wait-Job $tts -Timeout 120)) { Stop-Job $tts; Write-Warning 'Text-to-speech timed out; skipping the speech check'; exit 0 }
+          Receive-Job $tts
+          if (!(Test-Path build/speech.wav) -or (Get-Item build/speech.wav).Length -lt 10000) { Write-Warning 'No text-to-speech voice on this runner; skipping the speech check'; exit 0 }
+          ffprobe -v error -show_entries format=duration -of csv=p=0 build/speech.wav
+          $watch = [Diagnostics.Stopwatch]::StartNew()
+          $p = Start-Process build/bin/Release/cutlery-ai.exe -NoNewWindow -PassThru -RedirectStandardOutput build/speech-out.txt -RedirectStandardError build/speech-err.txt -ArgumentList @('transcribe', '--ffmpeg', (Get-Command ffmpeg).Source, '--whisper', "$env:WHISPER_DIR/whisper-cli.exe", '--model', "$env:MODELS_DIR/ggml-large-v3-turbo-q5_0.bin", '--vad', "$env:WHISPER_DIR/ggml-silero-v6.2.0.bin", '--input', 'build/speech.wav', '--output', 'build/speech.srt', '--language', 'en')
+          $done = $p.WaitForExit(900000)
+          Write-Output "Transcription took $($watch.Elapsed.TotalSeconds) s"
+          Get-Content build/speech-out.txt -Tail 5
+          Get-Content build/speech-err.txt -Tail 15
+          if (!$done) { $p.Kill(); throw 'Transcription timed out' }
+          if ($p.ExitCode -ne 0) { throw 'Transcription failed' }
           $text = Get-Content build/speech.srt -Raw
           Write-Output $text
           if ($text -notmatch 'Cutlery|cutlery' -or $text -notmatch 'video editor' -or $text -notmatch 'computer') { throw 'Transcript does not match the spoken sentence' }
