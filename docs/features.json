@@ -2196,8 +2196,8 @@
     "status": "Planned",
     "acceptance": "DE/EN test corpus meets documented WER and timing thresholds",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "whisper.cpp v1.9.4 (static AVX2 whisper-cli, built from the pinned commit) with Whisper large-v3-turbo q5_0 and Silero VAD, via the cutlery-ai transcribe task; language auto or chosen; transcripts cached per media file and language; cues mapped through each audible clip's trim, position and speed onto an 'AI captions' track, replaced on every run; lines of at most 42 characters. CPU only; no word-level timing or speaker labels."
   },
   {
     "id": "F089",

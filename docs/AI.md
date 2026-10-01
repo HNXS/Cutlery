@@ -1,6 +1,6 @@
 # Offline AI features
 
-Cutlery's AI features run on your computer without accounts, uploads or network access. The model files are a separate download, the **AI pack**, because they are large (about 180 MB) and optional.
+Cutlery's AI features run on your computer without accounts, uploads or network access. The model files are a separate download, the **AI pack**, because they are large (about 720 MB) and optional.
 
 ## Installing the AI pack
 
@@ -8,7 +8,7 @@ Cutlery's AI features run on your computer without accounts, uploads or network 
 2. Extract it into the Cutlery folder, so that the `models` folder sits next to `Cutlery.exe`.
 3. Restart Cutlery.
 
-The application package already contains the worker `cutlery-ai.exe` and the ONNX Runtime and DirectML libraries it uses. Without the AI pack, the AI options are disabled and say what is missing.
+The application package already contains the worker `cutlery-ai.exe`, the ONNX Runtime and DirectML libraries it uses, and `whisper-cli.exe` for speech recognition. Without the AI pack, the AI options are disabled and say what is missing.
 
 ## GPU or CPU
 
@@ -50,13 +50,34 @@ Upscaling needs far more computation than background removal. On a 4-core CPU, a
 - Real-ESRGAN invents plausible detail. Small text can come out as wrong letters, and faces can look smoothed. Check the result before you rely on it.
 - Video clips only; images are not upscaled yet.
 
+## Automatic captions
+
+Choose **Captions → Generate captions (AI)…**, pick the spoken language (or *Detect automatically*) and click **Generate**.
+
+- Cutlery transcribes the media of every audible clip: clips that are not muted, on tracks you can hear. It shows each caption exactly where its words play on the timeline, following trims and speed changes.
+- The captions go on a new track, **AI captions**. Running it again replaces that track, so edit the captions after the last run, or rename the track to keep a version.
+- Each media file is transcribed once per language and cached in `data/ai`. Later runs after edits are almost instant.
+- A voice detector skips silence and music first. Without it, Whisper tends to invent sentences in quiet passages.
+- Captions are limited to about 42 characters per line, which suits video.
+- Export them with **Captions → Export titles/captions as SRT…** to upload to YouTube, or style them like any other title.
+
+### Speed and limits
+
+- Speech recognition uses the CPU and needs a processor with AVX2 (Intel from 2013, AMD from 2015). On a typical 8-core PC, expect about a third to a half of the speaking time: roughly 3 to 5 minutes for 10 minutes of speech.
+- Reversed clips are not captioned. When the same speech plays on two tracks, it is captioned once.
+- Names, brands and technical terms can come out wrong. Read the captions before publishing.
+- There is no word-by-word highlighting or speaker labelling yet.
+
 ## Model and licences
 
 | File | Model | Licence |
 |---|---|---|
 | `models/u2net_human_seg.onnx` | U²-Net trained for human segmentation (Qin et al., 2020), ONNX export published by the rembg project | Apache-2.0, [source](https://github.com/xuebinqin/U-2-Net) |
 | `models/realesr-general-x4v3.onnx` | Real-ESRGAN realesr-general-x4v3 (Wang et al., 2021), converted from the published weights by `tools/convert-realesrgan.py` | BSD-3-Clause, [source](https://github.com/xinntao/Real-ESRGAN) |
+| `models/ggml-large-v3-turbo-q5_0.bin` | OpenAI Whisper large-v3-turbo, 5-bit, in whisper.cpp's format | MIT, [source](https://github.com/openai/whisper) |
+| `models/ggml-silero-v6.2.0.bin` | Silero VAD 6.2.0 voice detector, converted by whisper.cpp | MIT, [source](https://github.com/snakers4/silero-vad) |
+| `whisper-cli.exe` (application package) | whisper.cpp v1.9.4, built from the pinned commit | MIT, [source](https://github.com/ggml-org/whisper.cpp/tree/v1.9.4) |
 | `onnxruntime.dll` (application package) | ONNX Runtime 1.22.0 with the DirectML provider | MIT, [source](https://github.com/microsoft/onnxruntime/tree/v1.22.0) |
 | `DirectML.dll` (application package) | DirectML 1.15.4 redistributable | Microsoft DirectML licence (in `licenses/onnxruntime`) |
 
-`tools/Get-OnnxRuntime.ps1` and `tools/Get-Models.ps1` download everything from pinned NuGet packages and GitHub releases and verify SHA-256 hashes.
+`tools/Get-OnnxRuntime.ps1`, `tools/Get-Whisper.ps1` and `tools/Get-Models.ps1` download everything from pinned NuGet packages and GitHub releases and verify SHA-256 hashes.

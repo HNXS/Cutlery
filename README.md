@@ -37,6 +37,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - Static transforms, equal-edge crop, horizontal flip, opacity, brightness/contrast/saturation, clip fades.
 - Constant speed **0.25–4×**, reverse, volume/mute, stereo mixing with an output limiter.
 - Rasterized Unicode titles, manual captions, SRT import/export and subtitle burn-in.
+- Automatic captions: **Captions → Generate captions (AI)** transcribes all audible clips offline with whisper.cpp and places the captions on their own track (needs the [AI pack](docs/AI.md)).
 - Live playback that starts in a fraction of a second, audio-clocked with frame skipping when the CPU falls behind; preview frames that render only the playhead frame; export progress and cancellation.
 - Export presets and controls: H.264, HEVC and AV1 in MP4, VP9 in WebM, ProRes 422 HQ in MOV, legacy MPEG-4; four quality levels; project size up to 4K. Cutlery tries NVIDIA NVENC, AMD AMF, Intel Quick Sync, then Windows Media Foundation, and uses the first that passes a short test encode. AV1 (SVT-AV1), VP9 and ProRes also work in software. Exports use Lanczos scaling, and higher resolutions re-render each source at that size.
 - Original Cutlery app icon embedded in the Windows executable and used by the app window/taskbar.
@@ -44,7 +45,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 
 ## Boundaries of this alpha
 
-This is a CPU reference implementation. It does **not** yet implement the planned D3D11/WASAPI real-time engine, proxies, multilevel waveform pyramids, a keyframe graph editor, easing curves, masks, tracking, HDR colour management, hardware qualification, AI features beyond background removal and upscaling, transcription, an installer, or project-media collection. Heavy multi-layer timelines can drop frames during playback on the CPU renderer. Reversed clips decode their whole visible range before playing, so long reversed clips start slowly. The UI is not yet an accessibility-qualified release.
+This is a CPU reference implementation. It does **not** yet implement the planned D3D11/WASAPI real-time engine, proxies, multilevel waveform pyramids, a keyframe graph editor, easing curves, masks, tracking, HDR colour management, hardware qualification, AI features beyond background removal, upscaling and captions, an installer, or project-media collection. Heavy multi-layer timelines can drop frames during playback on the CPU renderer. Reversed clips decode their whole visible range before playing, so long reversed clips start slowly. The UI is not yet an accessibility-qualified release.
 
 Only finite local media files are supported. Source audio/video remain together until you use **Detach audio**; detached clips can then be edited independently. Relinking or resynchronizing detached pairs is not implemented. Timing is rounded to sequence frames; SRT timing is quantized on import. Colour operations are simple SDR adjustments, not a colour-managed grading pipeline. Output filenames must be new; exports never overwrite an existing file. Temporary render folders live under `cache`; remove it while Cutlery is closed if space is needed.
 
