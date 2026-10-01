@@ -27,15 +27,45 @@ QVector<Cue> parseSrt(QString text) {
     }
     return cues;
 }
+QVector<Cue> groupWords(const QVector<Cue> &words, int maxChars, double pause) {
+    QVector<Cue> lines;
+    static const QRegularExpression sentenceEnd("[.!?…]$");
+    for (const auto &w : words) {
+        const auto text = w.text.simplified();
+        if (text.isEmpty())
+            continue;
+        // Punctuation on its own joins the previous word.
+        static const QRegularExpression punctuation("^[,.;:!?…%)\\]»\"']+$");
+        if (!lines.isEmpty() && punctuation.match(text).hasMatch()) {
+            lines.last().text += text;
+            lines.last().end = std::max(lines.last().end, w.end);
+            continue;
+        }
+        const bool breakHere =
+            lines.isEmpty() || w.start - lines.last().end > pause ||
+            lines.last().text.size() + 1 + text.size() > maxChars ||
+            (sentenceEnd.match(lines.last().text).hasMatch() &&
+             lines.last().wordStarts.size() >= 2);
+        if (breakHere)
+            lines.push_back({w.start, w.end, text, {w.start}});
+        else {
+            lines.last().text += ' ' + text;
+            lines.last().end = std::max(lines.last().end, w.end);
+            lines.last().wordStarts << w.start;
+        }
+    }
+    return lines;
+}
 bool speaks(const Project &p, const Clip &c) {
     const auto *a = p.asset(c.assetId);
     return a && a->hasAudio && !c.muted && p.audioEnabled(c.track) && c.volume > 0;
 }
 QVector<Clip> captionClips(const Project &p, const QHash<QString, QVector<Cue>> &transcripts,
-                           int track) {
+                           int track, const QString &style) {
     struct Placed {
         double start, end;
         QString text;
+        QVector<double> words; // timeline seconds
     };
     QVector<Placed> placed;
     auto clips = p.clips;
@@ -58,8 +88,11 @@ QVector<Clip> captionClips(const Project &p, const QHash<QString, QVector<Cue>> 
             const bool duplicate = std::any_of(placed.begin(), placed.end(), [&](const Placed &x) {
                 return std::min(x.end, t1) - std::max(x.start, t0) > 0.5 * (t1 - t0);
             });
+            QVector<double> words;
+            for (double w : cue.wordStarts)
+                words << std::clamp(start + (w - in) / s, t0, t1);
             if (!duplicate && t1 > t0)
-                placed.push_back({t0, t1, cue.text});
+                placed.push_back({t0, t1, cue.text, words});
         }
     }
     std::sort(placed.begin(), placed.end(),
@@ -79,6 +112,11 @@ QVector<Clip> captionClips(const Project &p, const QHash<QString, QVector<Cue>> 
         c.text = placed[i].text;
         c.fontSize = 48;
         c.y = .32;
+        c.captionStyle = style;
+        if (placed[i].words.size() == captionWords(c.text).size())
+            for (double w : placed[i].words)
+                c.wordStarts << std::clamp<qint64>(qRound64(w * fps) - c.start, 0,
+                                                   std::max<qint64>(0, last - c.start - 1));
         if (c.duration > 0)
             result.push_back(c);
     }

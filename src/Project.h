@@ -39,6 +39,14 @@ struct Clip {
     double fadeIn = 0, fadeOut = 0;
     QString text, fontFamily = "Arial", textColor = "#ffffff";
     int fontSize = 72;
+    // Captions with word timing: the clip-local frame each word of `text` (split at white
+    // space) starts on. "karaoke" colours the word being spoken in `highlightColor`; "word"
+    // shows one word at a time. Without matching timing a caption renders plainly.
+    QString captionStyle; // "", "karaoke", "word"
+    QString highlightColor = "#ffd23f";
+    QVector<qint64> wordStarts;
+    // Word timing usable for the caption style: one start per word of the text.
+    bool timedWords() const;
     // Transition from the clip that ends exactly where this one starts on the same track. It is
     // centred on the cut; both clips extend into the other's time using source handles or a held
     // frame, so the timeline length does not change.
@@ -73,6 +81,8 @@ struct Clip {
     void scaleKeyframes(double factor);
 };
 const QStringList &animatableProperties();
+// Words of a caption text, as used with Clip::wordStarts.
+QStringList captionWords(const QString &text);
 // Supported transitions: FFmpeg xfade names paired with display labels.
 const QVector<QPair<QString, QString>> &transitionTypes();
 struct Project {

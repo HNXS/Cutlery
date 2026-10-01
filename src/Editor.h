@@ -124,7 +124,8 @@ class Editor final : public QObject {
     Q_INVOKABLE void removePauses();
     // Automatic captions: transcribes every audible clip's media (language "auto", "de", "en",
     // ...) and puts the captions on the "AI captions" track, replacing earlier ones.
-    Q_INVOKABLE void generateCaptions(const QString &language);
+    // `style`: "" plain lines, "karaoke" (spoken word highlighted), "word" (one word at a time).
+    Q_INVOKABLE void generateCaptions(const QString &language, const QString &style = {});
     static constexpr auto captionTrackName = "AI captions";
     Q_INVOKABLE QVariantMap thumbnails(const QString &assetId) const {
         return m_thumbnails->strip(assetId);
@@ -202,7 +203,7 @@ class Editor final : public QObject {
     QStringList speakingAssets() const;
     void placeCaptions();
     QVariantMap captionState() const;
-    QString m_captionLanguage = "auto";
+    QString m_captionLanguage = "auto", m_captionStyle;
     QStringList m_captionAssets; // media of a running caption request
     static int upscaleHeight(const Asset &);
     void addAiMedia(RenderOptions &) const;

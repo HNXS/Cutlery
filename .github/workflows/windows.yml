@@ -91,7 +91,10 @@ jobs:
           if ($p.ExitCode -ne 0) { throw 'Transcription failed' }
           $text = Get-Content build/speech.srt -Raw
           Write-Output $text
-          if ($text -notmatch 'Cutlery|cutlery' -or $text -notmatch 'video editor' -or $text -notmatch 'computer') { throw 'Transcript does not match the spoken sentence' }
+          # One cue per word: check the words, and that each cue holds a single word.
+          foreach ($word in @('Cutlery', 'video', 'editor', 'computer')) { if ($text -notmatch $word) { throw "Transcript misses '$word'" } }
+          $long = ($text -split "`r?`n") | Where-Object { $_ -match '\S\s+\S' -and $_ -notmatch '-->' }
+          if ($long) { throw "Expected one word per cue: $long" }
       - name: Package portable application
         run: |
           ./tools/Package-Windows.ps1 -QtRoot $env:QT_ROOT_DIR -FFmpegBin $env:FFMPEG_BIN -OnnxRuntime $env:ONNXRUNTIME_DIR -Models $env:MODELS_DIR -Whisper $env:WHISPER_DIR

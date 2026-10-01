@@ -1343,6 +1343,126 @@ class EngineTest : public QObject {
                           {{"format", "mpeg4"}, {"loudness", -2}});
         QVERIFY(editor.state()["error"].toString().contains("LUFS"));
     }
+    void karaokeCaptions() {
+        // Words into lines: pauses, sentence ends, length, and punctuation tokens.
+        const QVector<Cue> words{{0.0, 0.3, " Hello"},  {0.35, 0.6, " world"}, {0.6, 0.62, "."},
+                                 {0.7, 0.9, " This"},   {0.95, 1.2, " is"},    {1.25, 1.5, " fine"},
+                                 {2.5, 2.8, " Later"}};
+        const auto lines = groupWords(words);
+        QCOMPARE(lines.size(), 3);
+        QCOMPARE(lines[0].text, QString("Hello world."));
+        QCOMPARE(lines[0].wordStarts, (QVector<double>{0.0, 0.35}));
+        QCOMPARE(lines[1].text, QString("This is fine"));
+        QCOMPARE(lines[2].text, QString("Later")); // after a 1 s pause
+        QCOMPARE(groupWords({{0, 1, "aaaa"}, {1, 2, "bbbb"}, {2, 3, "cccc"}}, 9).size(), 2);
+
+        // Placement keeps word timing in clip-local frames.
+        Project p;
+        p.width = 320;
+        p.height = 180;
+        p.fpsN = 30;
+        Asset a;
+        a.id = "talk";
+        a.kind = "video";
+        a.hasAudio = true;
+        a.duration = 60;
+        p.assets = {a};
+        Clip talk;
+        talk.id = "talk";
+        talk.assetId = "talk";
+        talk.start = 30;
+        talk.duration = 300;
+        p.clips = {talk};
+        auto clips = captionClips(p, {{"talk", lines}}, 1, "karaoke");
+        QCOMPARE(clips.size(), 3);
+        QCOMPARE(clips[1].start, qint64(30 + 21));
+        QCOMPARE(clips[1].wordStarts, (QVector<qint64>{0, 8, 17}));
+        QCOMPARE(clips[1].captionStyle, QString("karaoke"));
+        QVERIFY(clips[1].timedWords());
+        // Splitting a timed caption gives each half its own words.
+        Project split = p;
+        split.clips = {clips[1]};
+        QVERIFY(split.split(clips[1].id, clips[1].start + 10));
+        QCOMPARE(split.clips[0].text, QString("This is"));
+        QCOMPARE(split.clips[1].text, QString("fine"));
+        QCOMPARE(split.clips[1].wordStarts, QVector<qint64>{7});
+        // Editing the text to another word count drops back to a plain caption.
+        auto edited = clips[1];
+        edited.text = "Something else entirely here";
+        QVERIFY(!edited.timedWords());
+        // Saved and loaded.
+        Project saved = p;
+        saved.clips << clips[1];
+        const auto loaded = Project::fromJson(saved.json(), {});
+        QCOMPARE(loaded.clips[1].wordStarts, clips[1].wordStarts);
+        QCOMPARE(loaded.clips[1].captionStyle, QString("karaoke"));
+        QVERIFY(saved.json()["schemaVersion"].toInt() >= 8);
+
+        // Rendering: the highlight follows the spoken word.
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        Project r;
+        r.width = 320;
+        r.height = 180;
+        r.fpsN = 30;
+        Clip caption;
+        caption.id = "caption";
+        caption.duration = 60;
+        caption.text = "WWW MMM"; // one line at this size
+        caption.fontSize = 40;
+        caption.y = 0;
+        caption.captionStyle = "karaoke";
+        caption.highlightColor = "#ffd23f";
+        caption.textColor = "#ffffff";
+        caption.wordStarts = {0, 30};
+        r.clips = {caption};
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Project &project, qint64 frame) {
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 320, 180, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        // Yellow pixels (highlight) and white pixels (other words) on each half.
+        auto count = [](const QImage &image, bool left, bool yellow) {
+            int n = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = left ? 0 : image.width() / 2; x < (left ? image.width() / 2 : image.width()); ++x) {
+                    const QColor c = image.pixelColor(x, y);
+                    if (yellow ? (c.red() > 200 && c.green() > 170 && c.blue() < 120)
+                               : (c.red() > 220 && c.green() > 220 && c.blue() > 220))
+                        ++n;
+                }
+            return n;
+        };
+        auto image = still(r, 10); // first word
+        QVERIFY2(count(image, true, true) > 50 && count(image, false, true) == 0,
+                 qPrintable(QString("%1 %2").arg(count(image, true, true)).arg(count(image, false, true))));
+        QVERIFY(count(image, false, false) > 50);
+        image = still(r, 40); // second word
+        QVERIFY(count(image, true, true) == 0 && count(image, false, true) > 50);
+        QVERIFY(count(image, true, false) > 50);
+        // One word at a time: only the current word, in the highlight colour.
+        r.clips[0].captionStyle = "word";
+        image = still(r, 40);
+        QVERIFY(count(image, true, false) + count(image, false, false) == 0);
+        QVERIFY(count(image, true, true) + count(image, false, true) > 50);
+        // Without matching timing the caption renders plainly (white only).
+        r.clips[0].text = "WW MM KK";
+        image = still(r, 40);
+        QVERIFY(count(image, true, true) + count(image, false, true) == 0);
+        QVERIFY(count(image, true, false) + count(image, false, false) > 50);
+    }
     void waveformPeaksAndCache() {
         PeakAccumulator peaks(2);
         const auto pcm = QByteArray::fromHex("0000004000800000");

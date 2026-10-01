@@ -8,15 +8,20 @@ namespace cutlery {
 struct Cue {
     double start = 0, end = 0;
     QString text;
+    QVector<double> wordStarts; // per word of `text`, when known
 };
+// Caption lines from one-word cues: at most `maxChars` characters, broken at pauses longer than
+// `pause` seconds and after sentence ends. Each line keeps its words' start times.
+QVector<Cue> groupWords(const QVector<Cue> &words, int maxChars = 42, double pause = 0.6);
 // SubRip (SRT) cues in file order. Throws on malformed timing; an empty text yields no cues.
 QVector<Cue> parseSrt(QString text);
 // Caption clips for spoken words: each audible clip shows the cues of its media's transcript
 // (`transcripts`: cues in source seconds by asset id) that fall inside its trim, moved and
 // stretched by its position and speed. Reversed and muted clips are skipped, as are cues that
-// mostly overlap one already placed (the same speech on two tracks). Clips go to `track`.
+// mostly overlap one already placed (the same speech on two tracks). Clips go to `track` with
+// `style` ("", "karaoke", "word") and their words' timing when the cues have it.
 QVector<Clip> captionClips(const Project &, const QHash<QString, QVector<Cue>> &transcripts,
-                           int track);
+                           int track, const QString &style = {});
 // Clips that play audible sound from a media file, which automatic captions transcribe.
 bool speaks(const Project &, const Clip &);
 } // namespace cutlery

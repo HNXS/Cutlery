@@ -52,13 +52,20 @@ Upscaling needs far more computation than background removal. On a 4-core CPU, a
 
 ## Automatic captions
 
-Choose **Captions → Generate captions (AI)…**, pick the spoken language (or *Detect automatically*) and click **Generate**.
+Choose **Captions → Generate captions (AI)…**, pick the spoken language (or *Detect automatically*) and a style, then click **Generate**.
+
+- **Karaoke** shows each line and colours the word being spoken. This is the default.
+- **Plain** shows lines as ordinary captions.
+- **One word at a time** shows each word large on its own, as in short-form videos.
+
+You can change the style and highlight colour of any caption later in the inspector.
 
 - Cutlery transcribes the media of every audible clip: clips that are not muted, on tracks you can hear. It shows each caption exactly where its words play on the timeline, following trims and speed changes.
 - The captions go on a new track, **AI captions**. Running it again replaces that track, so edit the captions after the last run, or rename the track to keep a version.
 - Each media file is transcribed once per language and cached in `data/ai`. Later runs after edits are almost instant.
 - A voice detector skips silence and music first. Without it, Whisper tends to invent sentences in quiet passages.
-- Captions are limited to about 42 characters per line, which suits video.
+- Whisper times every word. Cutlery groups the words into lines of at most 42 characters, starting a new line after a sentence or a pause of more than 0.6 s, and keeps each word's start for highlighting.
+- If you edit a caption's text and keep the same number of words, the timing stays. If you change the word count, the caption shows plainly; generate the captions again to get timing back. Splitting a caption gives each half its own words.
 - Export them with **Captions → Export titles/captions as SRT…** to upload to YouTube, or style them like any other title.
 
 ### Speed and limits
@@ -66,7 +73,9 @@ Choose **Captions → Generate captions (AI)…**, pick the spoken language (or 
 - Speech recognition uses the CPU and needs a processor with AVX2 (Intel from 2013, AMD from 2015). Whisper works through the audio in 30-second blocks. On a 2-core CI machine, one block took about 70 seconds, so 10 minutes of speech would take about 25 minutes there. A modern 8-core PC should be roughly four times faster: about 6 minutes for 10 minutes of speech. Silence and music skipped by the voice detector cost almost nothing.
 - Reversed clips are not captioned. When the same speech plays on two tracks, it is captioned once.
 - Names, brands and technical terms can come out wrong. Read the captions before publishing.
-- There is no word-by-word highlighting or speaker labelling yet.
+- Word times are accurate to about a tenth of a second. Highlights can lead or trail fast speech slightly.
+- Karaoke captions cannot be animated, rotated or scaled; they keep their position and fades. Turn the style to *Plain caption* to animate one.
+- There is no speaker labelling yet.
 
 ## Model and licences
 
