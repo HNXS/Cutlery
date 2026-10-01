@@ -49,9 +49,12 @@ int worker::transcribe(const QHash<QString, QString> &o) {
     progress(2, 100);
 
     QProcess speech;
+    // Whisper scales with physical cores up to about eight; hyper-threads and more threads than
+    // free cores only slow it. Machines with 8+ logical processors usually have two per core.
+    const int logical = QThread::idealThreadCount();
     QStringList w{"-m", model, "-f", wav, "-l", language, "-osrt", "-of", base, "-ml", "42",
                   "-sow", "-pp", "-t",
-                  QString::number(std::clamp(QThread::idealThreadCount(), 1, 8))};
+                  QString::number(std::clamp(logical >= 8 ? logical / 2 : logical, 1, 8))};
     if (!vad.isEmpty() && QFileInfo(vad).isFile())
         w << "--vad" << "-vm" << vad;
     speech.start(whisper, w);

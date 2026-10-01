@@ -34,7 +34,7 @@ if ($OnnxRuntime) {
     Copy-Item "$OnnxRuntime/licenses/*" "$OutputDir/licenses/onnxruntime"
 }
 if ($Whisper) {
-    Copy-Item "$Whisper/whisper-cli.exe" $OutputDir
+    Copy-Item "$Whisper/whisper-cli.exe","$Whisper/vcomp140.dll" $OutputDir
     Copy-Item "$Whisper/whisper.cpp-LICENSE.txt" "$OutputDir/licenses"
 }
 Copy-Item "$root/licenses/*" "$OutputDir/licenses" -Recurse -Force
