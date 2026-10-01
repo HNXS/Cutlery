@@ -30,7 +30,11 @@ ApplicationWindow {
     property color muted: "#8c9aa8"
     property real pixelsPerSecond: 48
     property int targetTrack: 0
-    property string exportProfile: "mpeg4"
+    property var exportChoice: ({
+            format: "h264",
+            quality: "high",
+            height: 0
+        })
     property string pendingAction: ""
     property bool allowClose: false
     property var libraryGesture: null
@@ -1199,9 +1203,10 @@ ApplicationWindow {
         id: exportDialog
         title: "Export — choose a new filename"
         fileMode: FileDialog.SaveFile
-        defaultSuffix: win.exportProfile === "webm" ? "webm" : "mp4"
-        nameFilters: win.exportProfile === "webm" ? ["WebM (*.webm)"] : ["MP4 (*.mp4)"]
-        onAccepted: editor.exportVideo(selectedFile, win.exportProfile)
+        readonly property string extension: editor.exportPreview(win.exportChoice).extension || "mp4"
+        defaultSuffix: extension
+        nameFilters: [extension.toUpperCase() + " (*." + extension + ")"]
+        onAccepted: editor.exportWith(selectedFile, win.exportChoice)
     }
     FileDialog {
         id: relinkDialog
@@ -1273,32 +1278,110 @@ ApplicationWindow {
     }
     Dialog {
         id: exportSettings
+        objectName: "exportSettings"
         anchors.centerIn: parent
         title: "Export video"
         modal: true
-        width: 460
+        width: 480
         standardButtons: Dialog.Ok | Dialog.Cancel
-        ColumnLayout {
+        readonly property var formats: [
+            { id: "h264", label: "H.264 · MP4 (plays everywhere)" },
+            { id: "hevc", label: "HEVC / H.265 · MP4 (smaller files)" },
+            { id: "av1", label: "AV1 · MP4 (smallest, modern devices)" },
+            { id: "vp9", label: "VP9 · WebM (web)" },
+            { id: "prores", label: "ProRes 422 HQ · MOV (editing master, large)" },
+            { id: "mpeg4", label: "MPEG-4 Part 2 · MP4 (legacy, always available)" }
+        ]
+        readonly property var qualities: [
+            { id: "max", label: "Maximum" },
+            { id: "high", label: "High" },
+            { id: "balanced", label: "Balanced" },
+            { id: "small", label: "Small file" }
+        ]
+        readonly property var heights: [0, 720, 1080, 1440, 2160]
+        // Presets fill the fields below; any manual change makes the choice "Custom".
+        readonly property var presets: [
+            { label: "Custom", settings: null },
+            { label: "YouTube (best quality, 4K upload)", settings: { format: "h264", quality: "max", height: 2160 } },
+            { label: "Share quickly (small H.264 1080p)", settings: { format: "h264", quality: "small", height: 1080 } },
+            { label: "Archive (AV1, maximum quality)", settings: { format: "av1", quality: "max", height: 0 } },
+            { label: "Editing master (ProRes 422 HQ)", settings: { format: "prores", quality: "max", height: 0 } }
+        ]
+        property var current: ({ format: "h264", quality: "high", height: 0 })
+        readonly property var preview: editor.exportPreview(current)
+        function apply(settings) {
+            current = settings;
+            exportFormat.currentIndex = formats.findIndex(f => f.id === settings.format);
+            exportQuality.currentIndex = qualities.findIndex(q => q.id === settings.quality);
+            exportHeight.currentIndex = Math.max(0, heights.indexOf(settings.height));
+        }
+        function changed() {
+            current = {
+                format: formats[exportFormat.currentIndex].id,
+                quality: qualities[exportQuality.currentIndex].id,
+                height: heights[exportHeight.currentIndex]
+            };
+            const match = presets.findIndex(p => p.settings && p.settings.format === current.format && p.settings.quality === current.quality && p.settings.height === current.height);
+            exportPreset.currentIndex = Math.max(0, match);
+        }
+        onAboutToShow: apply(win.exportChoice)
+        GridLayout {
             anchors.fill: parent
-            spacing: 12
+            columns: 2
+            columnSpacing: 12
+            rowSpacing: 10
             Label {
-                text: win.s.width + " × " + win.s.height + " · " + win.s.fps.toFixed(2) + " fps · " + (win.s.duration / win.s.fps).toFixed(2) + " seconds"
-            }
-            ComboBox {
-                id: codec
-                Layout.fillWidth: true
-                model: ["MP4 · MPEG-4 + AAC (portable default)", "WebM · VP9 + Opus", "MP4 · H.264 via Windows Media Foundation"]
-                currentIndex: 0
-            }
-            Label {
-                text: "H.264 requires an available Windows encoder. This alpha exports SDR video and stereo audio. It renders an immutable snapshot of your current timeline."
-                wrapMode: Text.Wrap
-                Layout.fillWidth: true
+                Layout.columnSpan: 2
+                text: "Project " + win.s.width + " × " + win.s.height + " · " + win.s.fps.toFixed(2) + " fps · " + (win.s.duration / win.s.fps).toFixed(2) + " s"
                 color: win.muted
+            }
+            Label { text: "Preset" }
+            ComboBox {
+                id: exportPreset
+                objectName: "exportPreset"
+                Layout.fillWidth: true
+                model: exportSettings.presets
+                textRole: "label"
+                onActivated: if (exportSettings.presets[currentIndex].settings)
+                    exportSettings.apply(exportSettings.presets[currentIndex].settings)
+            }
+            Label { text: "Format" }
+            ComboBox {
+                id: exportFormat
+                objectName: "exportFormat"
+                Layout.fillWidth: true
+                model: exportSettings.formats
+                textRole: "label"
+                onActivated: exportSettings.changed()
+            }
+            Label { text: "Quality" }
+            ComboBox {
+                id: exportQuality
+                objectName: "exportQuality"
+                Layout.fillWidth: true
+                model: exportSettings.qualities
+                textRole: "label"
+                onActivated: exportSettings.changed()
+            }
+            Label { text: "Resolution" }
+            ComboBox {
+                id: exportHeight
+                objectName: "exportHeight"
+                Layout.fillWidth: true
+                model: exportSettings.heights.map(h => h === 0 ? "Project (" + win.s.width + " × " + win.s.height + ")" : h === 2160 ? "4K (2160p)" : h + "p")
+                onActivated: exportSettings.changed()
+            }
+            Label {
+                Layout.columnSpan: 2
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: win.muted
+                font.pixelSize: 11
+                text: "Output " + (exportSettings.preview.width || 0) + " × " + (exportSettings.preview.height || 0) + " · ." + (exportSettings.preview.extension || "mp4") + ". Cutlery uses your graphics card's encoder (NVIDIA, AMD or Intel) when available, otherwise Windows' encoder; AV1, VP9 and ProRes also work in software. Higher resolutions re-render each source at that size with sharp Lanczos scaling, so 4K sources stay 4K."
             }
         }
         onAccepted: {
-            win.exportProfile = ["mpeg4", "webm", "h264"][codec.currentIndex];
+            win.exportChoice = current;
             exportDialog.open();
         }
     }

@@ -14,7 +14,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 4. Add titles, edit their text and click **Apply text**. Import SRT to create editable, burned-in captions.
 5. Adjust crop, position, scale, rotation, opacity, colour, speed, reverse, volume and fades. Changes are nondestructive.
 6. Click **Play** or press **Space** with the timeline focused. Playback starts immediately from the playhead; nothing is rendered in advance. Space pauses/resumes. Editing while playing applies the change and keeps playing. Previews, playback and exported files use the same composition compiler.
-7. Save a `.cutlery` project. **Export video** writes a new MP4 or WebM. Keep your source media; the project references those files.
+7. Save a `.cutlery` project. **Export video** writes a new MP4, WebM or MOV. Pick a preset such as "YouTube (best quality, 4K upload)", or choose format, quality and resolution yourself. Keep your source media; the project references those files.
 
 ## What works
 
@@ -31,7 +31,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - Constant speed **0.25–4×**, reverse, volume/mute, stereo mixing with an output limiter.
 - Rasterized Unicode titles, manual captions, SRT import/export and subtitle burn-in.
 - Live playback that starts in a fraction of a second, audio-clocked with frame skipping when the CPU falls behind; preview frames that render only the playhead frame; export progress and cancellation.
-- MP4 MPEG-4/AAC default; WebM VP9/Opus; optional Windows Media Foundation H.264/AAC (availability depends on the machine).
+- Export presets and controls: H.264, HEVC and AV1 in MP4, VP9 in WebM, ProRes 422 HQ in MOV, legacy MPEG-4; four quality levels; project size up to 4K. Cutlery tries NVIDIA NVENC, AMD AMF, Intel Quick Sync, then Windows Media Foundation, and uses the first that passes a short test encode. AV1 (SVT-AV1), VP9 and ProRes also work in software. Exports use Lanczos scaling, and higher resolutions re-render each source at that size.
 - Original Cutlery app icon embedded in the Windows executable and used by the app window/taskbar.
 - Windows portable packaging, pinned codec download with checksum, dependency notices, and render regression tests.
 

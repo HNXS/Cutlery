@@ -44,6 +44,7 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     m_recovery = m_data + "/recovery.cutlery";
     m_analysis = new MediaAnalysis(m_data + "/cache/waveforms", executable("ffmpeg"), this);
     m_thumbnails = new Thumbnails(m_data + "/cache/thumbnails", executable("ffmpeg"), this);
+    m_encoders = new EncoderResolver(executable("ffmpeg"), this);
     connect(m_thumbnails, &Thumbnails::changed, this, [this] {
         emit thumbnailsChanged();
         emit changed();
@@ -1033,31 +1034,94 @@ void Editor::stopPlayback() {
     emit playbackChanged();
 }
 void Editor::exportVideo(const QUrl &url, const QString &profile) {
-    try {
-        if (!m_busy)
-            startRender(localPath(url), profile);
-    } catch (const std::exception &e) {
-        fail(e.what());
-    }
-}
-void Editor::startRender(const QString &output, const QString &profile) {
-    if (QFileInfo::exists(output)) {
-        fail("That output file already exists. Choose a new filename.");
-        return;
-    }
     if (profile != "mpeg4" && profile != "webm" && profile != "h264") {
         fail("Unknown export profile");
         return;
     }
+    exportWith(url, {{"format", profile == "webm" ? "vp9" : profile}, {"quality", "balanced"}});
+}
+static ExportSettings exportSettings(const QVariantMap &m) {
+    ExportSettings s;
+    s.format = m.value("format", s.format).toString();
+    s.quality = m.value("quality", s.quality).toString();
+    s.height = m.value("height", 0).toInt();
+    if (!exportFormats().contains(s.format))
+        throw std::runtime_error("Unknown export format");
+    if (!QStringList{"max", "high", "balanced", "small"}.contains(s.quality))
+        throw std::runtime_error("Unknown export quality");
+    if (s.height != 0 && (s.height < 144 || s.height > 4320))
+        throw std::runtime_error("Export height must be between 144 and 4320 pixels");
+    return s;
+}
+QVariantMap Editor::exportPreview(const QVariantMap &settings) const {
+    try {
+        const auto s = exportSettings(settings);
+        const auto size = exportSize(m_project, s.height);
+        return {{"width", size.width()},
+                {"height", size.height()},
+                {"extension", formatExtension(s.format)}};
+    } catch (const std::exception &) {
+        return {};
+    }
+}
+void Editor::exportWith(const QUrl &url, const QVariantMap &settings) {
+    if (m_busy)
+        return;
+    try {
+        const auto output = localPath(url);
+        const auto s = exportSettings(settings);
+        if (QFileInfo::exists(output))
+            throw std::runtime_error("That output file already exists. Choose a new filename.");
+        if (QFileInfo(output).suffix().compare(formatExtension(s.format), Qt::CaseInsensitive))
+            throw std::runtime_error(
+                ("Use a ." + formatExtension(s.format) + " filename for this format").toStdString());
+        if (m_project.clips.empty())
+            throw std::runtime_error("The timeline is empty");
+        const auto size = exportSize(m_project, s.height);
+        const double fps = double(m_project.fpsN) / m_project.fpsD;
+        m_resumeTimer.stop();
+        stopPlayback();
+        m_busy = true;
+        m_cancelled = false;
+        m_progress = 0;
+        m_status = "Choosing an encoder…";
+        emit changed();
+        // Hardware encoders are tried first; each is proven with a short test encode.
+        m_encoders->resolve(encoderCandidates(s, size, fps), size, fps,
+                            [this, output, size, format = s.format](const Encoder *e) {
+                                if (m_cancelled || !m_busy) {
+                                    m_busy = false;
+                                    emit changed();
+                                    return;
+                                }
+                                if (!e) {
+                                    m_busy = false;
+                                    m_status = "Export failed";
+                                    fail("No " + format.toUpper() +
+                                         " encoder works on this computer. Choose AV1, VP9 or "
+                                         "ProRes, which always work.");
+                                    return;
+                                }
+                                startRender(output, size, *e);
+                            });
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
+void Editor::startRender(const QString &output, QSize size, const Encoder &encoder) {
     try {
         auto work = std::make_shared<QTemporaryDir>(m_data + "/cache/render-XXXXXX");
         if (!work->isValid())
             throw std::runtime_error("Cannot create render folder");
-        const auto plan = compileRender(m_project, work->path(), m_project.width, m_project.height);
+        RenderOptions options;
+        options.highQuality = true;
+        options.pixelFormat = encoder.pixelFormat;
+        const auto plan =
+            compileRender(m_project, work->path(), size.width(), size.height(), options);
         const auto graph = work->filePath("graph.txt");
         writeGraph(graph, plan.graph);
-        const QString temp = QFileInfo(output).absolutePath() + "/.cutlery-" + newId() + "." +
-                             (profile == "webm" ? "webm" : "mp4");
+        const QString temp =
+            QFileInfo(output).absolutePath() + "/.cutlery-" + newId() + "." + encoder.extension;
         m_resumeTimer.stop();
         stopPlayback();
         auto *process = new QProcess(this);
@@ -1068,7 +1132,7 @@ void Editor::startRender(const QString &output, const QString &profile) {
         m_thumbnails->setPaused(true);
         m_cancelled = false;
         m_progress = 0;
-        m_status = "Exporting…";
+        m_status = "Exporting with " + encoder.label + "…";
         if (m_preview) {
             m_preview->disconnect(this);
             m_preview->kill();
@@ -1095,7 +1159,8 @@ void Editor::startRender(const QString &output, const QString &profile) {
                     }
                     emit changed();
                 });
-        auto complete = [this, process, work, output, temp, log](bool success) {
+        auto complete = [this, process, work, output, temp, log,
+                         label = encoder.label](bool success) {
             *log += process->readAllStandardError();
             m_job = nullptr;
             m_jobTemp.clear();
@@ -1114,7 +1179,7 @@ void Editor::startRender(const QString &output, const QString &profile) {
                      "filename.");
             } else {
                 m_progress = 1;
-                m_status = "Export saved: " + output;
+                m_status = "Export saved (" + label + "): " + output;
             }
             m_analysis->setPaused(false);
             m_thumbnails->setPaused(false);
@@ -1129,13 +1194,23 @@ void Editor::startRender(const QString &output, const QString &profile) {
             if (e == QProcess::FailedToStart)
                 complete(false);
         });
-        process->start(executable("ffmpeg"), renderArguments(plan, graph, temp, profile));
+        process->start(executable("ffmpeg"), exportArguments(plan, graph, temp, encoder));
         emit changed();
     } catch (const std::exception &e) {
+        m_busy = false;
+        m_analysis->setPaused(false);
+        m_thumbnails->setPaused(false);
         fail(e.what());
     }
 }
 void Editor::cancelJob() {
+    if (m_encoders->busy()) {
+        m_encoders->cancel();
+        m_cancelled = true;
+        m_busy = false;
+        m_status = "Export cancelled";
+        emit changed();
+    }
     if (m_job) {
         m_cancelled = true;
         m_job->kill();

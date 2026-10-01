@@ -19,7 +19,7 @@ The [187-row feature matrix](FEATURE_STATUS.md) is the detailed status record. T
 4. **Audio:** per-track gain and meters, pan, recording, crossfades, EQ/compressor, loudness analysis, noise reduction and beat tools.
 5. **Text and captions:** richer typography, title presets, text animation, automatic local transcription, word highlighting and transcript editing.
 6. **Colour and AI:** LUTs/curves/scopes, colour-managed HDR, tracking, stabilization, background removal, denoise/upscale, and optional offline model packs.
-7. **Media and export:** collection/relink workflows, media search, broader codec qualification, hardware encoders, export queue/ranges and more quality controls.
+7. **Media and export:** collection/relink workflows, media search, broader codec qualification, hardware-encoder qualification on real GPUs, export queue/ranges, explicit bitrate/fps controls and AI upscaling.
 8. **Release qualification:** clean offline Windows testing, long sessions, high DPI/accessibility, crash/low-disk recovery, installer/signing and managed-device testing.
 
 Cloud accounts/storage/collaboration, mobile/browser applications, CapCut proprietary assets and exact proprietary model output remain outside the local Windows scope.

@@ -1,4 +1,5 @@
 #pragma once
+#include "ExportProfiles.h"
 #include "MediaAnalysis.h"
 #include "Playback.h"
 #include "Thumbnails.h"
@@ -84,7 +85,12 @@ class Editor final : public QObject {
     qint64 playbackFrame() const {
         return m_playback->active() ? m_playback->frame() : m_playhead;
     }
+    // Legacy profiles: "mpeg4", "webm", "h264".
     Q_INVOKABLE void exportVideo(const QUrl &, const QString &profile);
+    // settings: {format, quality, height}; see ExportSettings.
+    Q_INVOKABLE void exportWith(const QUrl &, const QVariantMap &settings);
+    // Output size and file extension for export settings, for the export dialog.
+    Q_INVOKABLE QVariantMap exportPreview(const QVariantMap &settings) const;
     Q_INVOKABLE void cancelJob();
     Q_INVOKABLE void importSrt(const QUrl &);
     Q_INVOKABLE bool exportSrt(const QUrl &);
@@ -123,6 +129,7 @@ class Editor final : public QObject {
     FrameProvider *m_frames;
     MediaAnalysis *m_analysis;
     Thumbnails *m_thumbnails;
+    EncoderResolver *m_encoders;
     Playback *m_playback;
     QTimer m_previewTimer, m_saveTimer, m_resumeTimer;
     QProcess *m_preview = nullptr, *m_job = nullptr, *m_probe = nullptr;
@@ -145,7 +152,7 @@ class Editor final : public QObject {
     void probeNext();
     void probeFile(const QUrl &, const QString &replaceId, std::shared_ptr<DropBatch> drop = {});
     static QString insert(Project &, const QString &assetId, int track, qint64 frame);
-    void startRender(const QString &output, const QString &profile);
+    void startRender(const QString &output, QSize size, const Encoder &encoder);
     void stopPlayback();
     QSize previewSize(int longSide) const;
     void autosave();
