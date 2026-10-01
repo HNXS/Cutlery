@@ -1,5 +1,24 @@
 # Validation record
 
+## Windows portable build — 2026-10-01, blur and mosaic (0.5 development)
+
+[GitHub Actions run 36929907077](https://github.com/HNXS/Cutlery/actions/runs/36929907077) completed successfully for commit `7f67b2047e175c92de8aebac32705f18ac99a0fb`, with the same toolchain as the karaoke-captions build. New coverage:
+
+- **Engine test `blurAndMosaic`**, on a fine checkerboard:
+  - A blur area turns its rectangle grey while the surroundings stay sharp.
+  - A mosaic area produces flat blocks.
+  - A keyframed area moves from the centre to the right edge.
+  - Outside its clip time an area has no effect.
+  - The clip-wide blur softens the whole picture.
+  - Model checks: schema 9 round trip, validation, preview size, `addEffect`, exclusion from SRT export.
+- **Interface:** "+ Mosaic area" creates and selects an area, the effect section switches it to blur, and presenter controls stay hidden for areas.
+- `Get-FFmpeg.ps1` now also requires `gblur`, `pixelize` and `split`.
+
+Downloads (expire 2026-10-31):
+
+- [Portable build](https://github.com/HNXS/Cutlery/actions/runs/36929907077/artifacts/11195807816): 148,494,268 bytes, archive SHA-256 `a9621cedbd54b018966bbe97b6ab2b5bb37feffcba073d718c135199ef4c28fc`.
+- [AI pack](https://github.com/HNXS/Cutlery/actions/runs/36929907077/artifacts/11196220307): 701,994,875 bytes, archive SHA-256 `7957c963773a698324e6a03bc1487bc7cc9db2f2bf46c011a24719a9e187cb96`.
+
 ## Windows portable build — 2026-10-01, karaoke captions (0.5 development)
 
 [GitHub Actions run 36927521399](https://github.com/HNXS/Cutlery/actions/runs/36927521399) completed successfully for commit `c9104b706b931458b8ffc50a96678659cbbc2542`, with the same toolchain as the automatic-captions build. New coverage:
