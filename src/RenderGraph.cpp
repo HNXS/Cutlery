@@ -14,8 +14,6 @@ namespace cutlery {
 static QString num(double v) {
     return QString::number(v, 'f', 9);
 }
-// Transparent margin around perspective-drawn clips.
-constexpr int border = 2;
 static bool animatedGeometry(const Clip &c) {
     return c.keyframes.contains("scale") || c.keyframes.contains("x") ||
            c.keyframes.contains("y") || c.keyframes.contains("rotation");
@@ -213,8 +211,8 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         if (c.crop > 0)
             f += QString(",crop=iw*(1-2*%1):ih*(1-2*%1)").arg(num(c.crop));
         const bool moving = animatedGeometry(c);
-        // Animated geometry is drawn by perspective on a fixed canvas-sized frame, because filter
-        // links cannot change size per frame; otherwise the clip is scaled once.
+        // Animated geometry first fits the canvas at scale 1 and is resized per frame below;
+        // otherwise the clip is scaled once.
         int w = moving ? width : std::max(2, int(width * c.scale) / 2 * 2),
             h = moving ? height : std::max(2, int(height * c.scale) / 2 * 2);
         f += QString(",scale=%1:%2:force_original_aspect_ratio=decrease,setsar=1,format=rgba")
@@ -229,34 +227,8 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         }
         if (c.saturation != 1)
             f += ",hue=s=" + num(c.saturation);
-        if (moving) {
-            // A transparent border keeps perspective's edge clamping invisible.
-            f += QString(",pad=%1:%2:(ow-iw)/2:(oh-ih)/2:color=black@0")
-                     .arg(width + 2 * border)
-                     .arg(height + 2 * border);
-            // Clip-local frame of each output frame; perspective counts its input frames.
-            const auto frameVar = QString("(%1+in)").arg(l0);
-            const auto scaleExpr = curve(c, "scale", frameVar),
-                       angle = "(" + curve(c, "rotation", frameVar) + ")*PI/180";
-            const double cx = width / 2. + border, cy = height / 2. + border;
-            const auto px = QString("%1+%2*(%3)").arg(num(cx)).arg(width).arg(
-                                curve(c, "x", frameVar)),
-                       py = QString("%1+%2*(%3)").arg(num(cy)).arg(height).arg(
-                           curve(c, "y", frameVar));
-            QStringList corners;
-            const double dx[] = {-cx, cx, -cx, cx}, dy[] = {-cy, -cy, cy, cy};
-            for (int i = 0; i < 4; ++i) {
-                corners << QString("x%1='%2+(%3)*(%4*cos(%6)-(%5)*sin(%6))'")
-                               .arg(i)
-                               .arg(px, scaleExpr, num(dx[i]), num(dy[i]), angle);
-                corners << QString("y%1='%2+(%3)*(%4*sin(%6)+(%5)*cos(%6))'")
-                               .arg(i)
-                               .arg(py, scaleExpr, num(dx[i]), num(dy[i]), angle);
-            }
-            f += ",perspective=sense=destination:eval=frame:interpolation=linear:" +
-                 corners.join(":");
-        } else if (c.rotation != 0)
-            f += QString(",rotate=%1*PI/180:ow=rotw(%1*PI/180):oh=roth(%1*PI/180):c=none")
+        if (!moving && c.rotation != 0)
+            f += QString(",rotate=%1*PI/180:ow=rotw(%1*PI/180):oh=roth(%1*PI/180):c=black@0")
                      .arg(num(c.rotation));
         if (c.keyframes.contains("opacity")) {
             // Opacity changes per frame through runtime commands, one per run of equal values.
@@ -284,11 +256,28 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             const auto fd = std::min(c.fadeOut, d);
             f += QString(",fade=t=out:st=%1:d=%2:alpha=1").arg(num(k + d - fd), num(fd));
         }
+        if (moving) {
+            // Animated geometry: rotate within a square that fits any angle, then resize per
+            // frame. Overlay positions the changing frame (see overlayPosition). All three are
+            // LGPL filters evaluated per frame from the clip-local frame t*fps - base.
+            const auto local = QString("(t*%1/%2-%3)").arg(p.fpsN).arg(p.fpsD).arg(base);
+            if (c.rotation != 0 || c.keyframes.contains("rotation"))
+                f += QString(",rotate=a='(%1)*PI/180':ow='hypot(iw,ih)':oh=ow:c=black@0")
+                         .arg(curve(c, "rotation", local));
+            const auto size = curve(c, "scale", local);
+            f += QString(",scale=w='max(2,trunc(iw*(%1)/2)*2)':h='max(2,trunc(ih*(%1)/2)*2)':"
+                         "eval=frame")
+                     .arg(size);
+        }
         return f + ",setpts=PTS-STARTPTS";
     };
-    auto overlayPosition = [&](const Clip &c) {
-        if (animatedGeometry(c))
-            return QString("x=-%1:y=-%1").arg(border);
+    // `offset` is the clip-local frame shown at overlay time zero, for animated positions.
+    auto overlayPosition = [&](const Clip &c, qint64 offset) {
+        if (animatedGeometry(c)) {
+            const auto local = QString("(t*%1/%2+%3)").arg(p.fpsN).arg(p.fpsD).arg(offset);
+            return QString("x='(W-w)/2+(%1)*W':y='(H-h)/2+(%2)*H'")
+                .arg(curve(c, "x", local), curve(c, "y", local));
+        }
         return QString("x=(W-w)/2+%1*W:y=(H-h)/2+%2*H").arg(num(c.x), num(c.y));
     };
     // Composites a zero-based stream onto the picture for window frames [place, place + length).
@@ -343,7 +332,8 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             auto &n = info[members.first()];
             const auto &c = *n.clip;
             composite(videoChain(n, visibleStart - c.start, visibleEnd - c.start),
-                      overlayPosition(c), visibleStart - from, visibleEnd - visibleStart);
+                      overlayPosition(c, from - c.start), visibleStart - from,
+                      visibleEnd - visibleStart);
             continue;
         }
         // Each member is placed on its own transparent canvas and joined with xfade.
@@ -363,7 +353,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             nodes << videoChain(n, r0 - c.start, r1 - c.start) + QString("[m%1]").arg(id);
             nodes << QString("[cv%1][m%1]overlay=%2:eof_action=pass:format=auto,settb=%3/%4,"
                              "setpts=PTS-STARTPTS[mc%1]")
-                         .arg(id, overlayPosition(c))
+                         .arg(id, overlayPosition(c, r0 - c.start))
                          .arg(p.fpsD)
                          .arg(p.fpsN);
             if (g == 0) {
