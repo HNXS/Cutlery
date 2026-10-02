@@ -903,6 +903,32 @@ ApplicationWindow {
                             font.family: "Consolas"
                             color: win.mint
                         }
+                        // Peak meter for the left and right channel, −60 to 0 dBFS.
+                        Column {
+                            objectName: "levelMeter"
+                            Layout.alignment: Qt.AlignVCenter
+                            spacing: 2
+                            ToolTip.visible: meterHover.hovered
+                            ToolTip.text: "Peak level while playing. Keep the loudest parts in the yellow; red means close to clipping. Measure the whole mix in the export dialog."
+                            HoverHandler { id: meterHover }
+                            Repeater {
+                                model: 2
+                                Rectangle {
+                                    required property int index
+                                    readonly property real db: editor.levels.length > index ? editor.levels[index] : -90
+                                    width: 90
+                                    height: 5
+                                    radius: 2
+                                    color: "#26302d"
+                                    Rectangle {
+                                        height: parent.height
+                                        radius: 2
+                                        width: parent.width * Math.max(0, Math.min(1, (parent.db + 60) / 60))
+                                        color: parent.db > -1 ? "#e5534b" : parent.db > -9 ? "#e3b341" : win.mint
+                                    }
+                                }
+                            }
+                        }
                     }
                     Label {
                         Layout.alignment: Qt.AlignHCenter
@@ -2094,6 +2120,28 @@ ApplicationWindow {
                 onActivated: exportSettings.changed()
                 ToolTip.visible: hovered
                 ToolTip.text: "Measures the whole mix first and sets one gain, so the video plays as loud as others on the platform. Peaks are limited 1 dB below full scale."
+            }
+            Action {
+                objectName: "measureLoudness"
+                text: win.s.loudness && win.s.loudness.status === "measuring" ? "Measuring…" : "Measure mix"
+                enabled: win.s.duration > 0 && !(win.s.loudness && win.s.loudness.status === "measuring")
+                onClicked: editor.analyzeLoudness()
+            }
+            Label {
+                objectName: "loudnessResult"
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                font.pixelSize: 11
+                readonly property var l: win.s.loudness || ({})
+                readonly property int target: exportSettings.loudnessTargets[exportLoudness.currentIndex].value
+                color: l.status === "failed" ? "#e5534b" : win.muted
+                text: l.status === "measuring" ? "Measuring the whole mix…"
+                    : l.status === "failed" ? "The mix could not be measured."
+                    : l.status === "ready" || l.status === "stale"
+                        ? l.integrated.toFixed(1) + " LUFS · true peak " + l.peak.toFixed(1) + " dBTP"
+                          + (target !== 0 ? " · export changes it by " + ((target - l.integrated) >= 0 ? "+" : "") + (target - l.integrated).toFixed(1) + " dB" : "")
+                          + (l.status === "stale" ? " (before your last edit)" : "")
+                    : "Integrated loudness of the whole mix, as platforms measure it."
             }
             Label {
                 Layout.columnSpan: 2

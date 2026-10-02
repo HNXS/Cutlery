@@ -116,6 +116,21 @@ void Playback::readVideo() {
     }
     m_videoPending.remove(0, used);
 }
+std::pair<double, double> pcmPeaks(const char *data, qsizetype bytes, bool floatSamples) {
+    double peak[2] = {0, 0};
+    if (floatSamples) {
+        const auto *s = reinterpret_cast<const float *>(data);
+        for (qsizetype i = 0; i + 1 < bytes / qsizetype(sizeof(float)); i += 2)
+            for (int c = 0; c < 2; ++c)
+                peak[c] = std::max(peak[c], double(std::abs(s[i + c])));
+    } else {
+        const auto *s = reinterpret_cast<const qint16 *>(data);
+        for (qsizetype i = 0; i + 1 < bytes / qsizetype(sizeof(qint16)); i += 2)
+            for (int c = 0; c < 2; ++c)
+                peak[c] = std::max(peak[c], std::abs(double(s[i + c])) / 32768.);
+    }
+    return {std::min(1., peak[0]), std::min(1., peak[1])};
+}
 void Playback::readAudio() {
     if (m_audio)
         m_audioPending += m_audio->readAllStandardOutput();
@@ -182,8 +197,19 @@ void Playback::tick() {
         n -= n % m_audioFrameBytes;
         if (n > 0) {
             const auto written = m_outputDevice->write(m_audioPending.constData(), n);
-            if (written > 0)
+            if (written > 0) {
+                // Meter what goes to the device: hold peaks, fall back about 20 dB/s.
+                const auto [l, r] = pcmPeaks(m_audioPending.constData(), written, m_floatAudio);
+                const double fall =
+                    m_levelClock.isValid() ? m_levelClock.restart() / 1000.0 * 20 : 0;
+                if (!m_levelClock.isValid())
+                    m_levelClock.start();
+                const double now[2] = {l, r};
+                for (int c = 0; c < 2; ++c)
+                    m_levels[c] = std::max(now[c] > 0 ? 20 * std::log10(now[c]) : -90.,
+                                           std::max(-90., m_levels[c] - fall));
                 m_audioPending.remove(0, written);
+            }
         }
         // The device clock stops when sound runs out; continue on the wall clock after the end.
         const bool drained = m_output->state() == QAudio::IdleState ||
@@ -259,6 +285,8 @@ void Playback::release() {
     m_frames.clear();
     m_videoPending.clear();
     m_audioPending.clear();
+    m_levels[0] = m_levels[1] = -90;
+    m_levelClock.invalidate();
     m_request.work.reset();
     m_active = false;
     m_clockStarted = false;

@@ -40,6 +40,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - Constant speed **0.25–4×**, reverse, volume/mute, stereo mixing with an output limiter.
 - **Remove pauses…** (inspector) finds the quiet moments in a clip's sound and cuts them out in one undoable step, keeping a little room around speech; detached audio is cut alongside.
 - Loudness normalisation on export: Cutlery measures the whole mix (EBU R128) and sets one gain for YouTube/streaming (−14 LUFS), podcasts (−16) or TV (−23), with peaks limited below full scale.
+- Level meters: left/right peak meters during playback, and a whole-mix loudness measurement (LUFS, true peak) in the export dialog.
 - Rasterized Unicode titles, manual captions, SRT import/export and subtitle burn-in.
 - Automatic captions: **Captions → Generate captions (AI)** transcribes all audible clips offline with whisper.cpp and places the captions on their own track (needs the [AI pack](docs/AI.md)). Styles: karaoke (the spoken word is highlighted), plain, or one word at a time.
 - Live playback that starts in a fraction of a second, audio-clocked with frame skipping when the CPU falls behind; preview frames that render only the playhead frame; export progress and cancellation.

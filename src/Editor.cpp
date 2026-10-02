@@ -118,7 +118,7 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
 Editor::~Editor() {
     if (m_dirty)
         autosave();
-    for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess})
+    for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess})
         if (p) {
             p->disconnect(this);
             p->kill();
@@ -392,6 +392,13 @@ QVariantMap Editor::state() const {
                                       {"transcribe", m_ai->missing("transcribe")}}},
             {"captions", captionState()},
             {"pauses", pauseState()},
+            {"loudness", [this] {
+                 auto l = m_mixLoudness;
+                 // A measurement describes the mix it was made on.
+                 if (l.value("status") == "ready" && l.value("revision").toLongLong() != m_revision)
+                     l["status"] = "stale";
+                 return l;
+             }()},
             {"progress", m_progress},
             {"previewUrl", m_previewUrl},
             {"playing", m_playback->active() || m_resumeTimer.isActive()},
@@ -1600,6 +1607,57 @@ void Editor::exportWith(const QUrl &url, const QVariantMap &settings) {
                                 else
                                     startRender(output, size, *e);
                             });
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
+void Editor::analyzeLoudness() {
+    if (m_loudnessProcess || m_project.clips.empty())
+        return;
+    try {
+        auto work = std::make_shared<QTemporaryDir>(m_data + "/cache/loudness-XXXXXX");
+        if (!work->isValid())
+            throw std::runtime_error("Cannot create a work folder");
+        RenderOptions options;
+        options.video = false;
+        options.measureLoudness = true;
+        const auto plan = compileRender(m_project, work->path(), 320, 180, options);
+        const auto graph = work->filePath("measure.txt");
+        writeGraph(graph, plan.graph);
+        auto *p = new QProcess(this);
+        m_loudnessProcess = p;
+        const auto revision = m_revision;
+        m_mixLoudness = {{"status", "measuring"}};
+        auto log = std::make_shared<QByteArray>();
+        connect(p, &QProcess::readyReadStandardError, this, [p, log] {
+            *log += p->readAllStandardError();
+            if (log->size() > 64000)
+                *log = log->right(32000);
+        });
+        auto complete = [this, p, log, work, revision](bool success) {
+            *log += p->readAllStandardError();
+            p->deleteLater();
+            m_loudnessProcess = nullptr;
+            const auto text = QString::fromUtf8(*log);
+            const double integrated = parseIntegratedLoudness(text), peak = parseTruePeak(text);
+            if (!success || std::isnan(integrated))
+                m_mixLoudness = {{"status", "failed"}};
+            else
+                m_mixLoudness = {{"status", "ready"},
+                                 {"integrated", std::isinf(integrated) ? -70. : integrated},
+                                 {"peak", std::isnan(peak) || std::isinf(peak) ? -90. : peak},
+                                 {"revision", revision}};
+            emit changed();
+        };
+        connect(p, &QProcess::finished, this, [complete](int code, QProcess::ExitStatus status) {
+            complete(code == 0 && status == QProcess::NormalExit);
+        });
+        connect(p, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+            if (e == QProcess::FailedToStart)
+                complete(false);
+        });
+        p->start(executable("ffmpeg"), measureArguments(plan, graph));
+        emit changed();
     } catch (const std::exception &e) {
         fail(e.what());
     }

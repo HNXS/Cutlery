@@ -30,6 +30,7 @@
 ### Sound
 - **Remove pauses:** finds quiet moments in a clip and cuts them out in one undoable step, including detached audio.
 - **Loudness normalisation on export:** −14 LUFS (YouTube and streaming), −16 (podcasts) or −23 (EBU R128), with a peak limiter.
+- **Level meters:** left and right peak meters next to the playback clock; **Measure mix** in the export dialog shows the integrated loudness, true peak and the gain the export will apply.
 
 ### Export
 - **Formats:** H.264, HEVC, AV1, VP9 and ProRes 422 HQ, with four quality levels and up to 4K.
@@ -43,6 +44,6 @@
 - **Unverified on real hardware:** GPU inference and hardware encoders are verified on CI without a GPU (fallback paths only).
 - **Speed:** CPU upscaling is slow (hours per minute of 720p video).
 - **Captions:** speech recognition runs on the CPU and needs AVX2.
-- **Not yet available:** loudness meters in the editor, masks other than rectangles, face tracking, and an installer.
+- **Not yet available:** masks other than rectangles, face tracking, and an installer.
 
 See [what remains](ROADMAP.md) and the [feature status](FEATURE_STATUS.md).

@@ -64,6 +64,8 @@ QStringList exportArguments(const RenderPlan &, const QString &graphFile, const 
 // (signed 16-bit, or 32-bit float when the audio device requires it).
 // Integrated loudness (LUFS) from an EBU R128 meter summary in FFmpeg's log; NaN when absent.
 double parseIntegratedLoudness(const QString &log);
+// True peak (dBTP) from the same summary; NaN when absent.
+double parseTruePeak(const QString &log);
 // Audio-only measuring pass for a plan compiled with `measureLoudness`.
 QStringList measureArguments(const RenderPlan &, const QString &graphFile);
 QStringList streamArguments(const RenderPlan &, const QString &graphFile, bool video,

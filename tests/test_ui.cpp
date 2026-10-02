@@ -385,6 +385,10 @@ class UiTest : public QObject {
         QCOMPARE(preset->property("currentIndex").toInt(), 0);
         choose("exportFormat", 4);
         QCOMPARE(dialog->property("preview").toMap()["extension"].toString(), QString("mov"));
+        auto *result = findItem(window->contentItem(), "loudnessResult");
+        QVERIFY(result && findItem(window->contentItem(), "measureLoudness"));
+        QVERIFY(result->property("text").toString().contains("Integrated loudness"));
+        QVERIFY(findItem(window->contentItem(), "levelMeter"));
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void presenterControls() {
