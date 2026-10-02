@@ -148,13 +148,14 @@ jobs:
           name: Cutlery-0.5.0-win64-portable
           path: dist/Cutlery-0.5.0-win64-portable/
           if-no-files-found: error
-          retention-days: 30
+          # Each run stores about 870 MB; short retention keeps the repository's artifact quota.
+          retention-days: 14
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Cutlery-0.5.0-AI-pack
           path: dist/Cutlery-0.5.0-AI-pack/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
