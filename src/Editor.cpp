@@ -351,6 +351,8 @@ QVariantMap Editor::state() const {
                                         m_project.asset(c.assetId)->kind != "audio"},
                         {"video", !c.audioOnly && m_project.asset(c.assetId) &&
                                       m_project.asset(c.assetId)->kind == "video"},
+                        {"variableRate", m_project.asset(c.assetId) &&
+                                             m_project.asset(c.assetId)->variableRate},
                         {"locked", m_project.trackSettings[c.track].locked},
                         {"canDetach", !c.audioOnly && m_project.asset(c.assetId) &&
                                           m_project.asset(c.assetId)->kind == "video" &&
@@ -487,6 +489,7 @@ QVariantMap Editor::state() const {
             {"pauses", pauseState()},
             {"scenes", m_scenes},
             {"collect", m_collect},
+            {"conform", m_conform},
             {"markers", [this] {
                  QVariantList list;
                  for (const auto &m : m_project.markers)
@@ -778,6 +781,15 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                     if (type == "video" && a.width == 0) {
                         a.width = s["width"].toInt();
                         a.height = s["height"].toInt();
+                        auto rate = [&](const char *key) {
+                            const auto parts = s[key].toString().split('/');
+                            return parts.size() == 2 && parts[1].toDouble() > 0
+                                       ? parts[0].toDouble() / parts[1].toDouble()
+                                       : 0.;
+                        };
+                        const double nominal = rate("r_frame_rate"), average = rate("avg_frame_rate");
+                        a.frameRate = average > 0 ? average : nominal;
+                        a.variableRate = isVariableRate(nominal, average);
                         // Phones store portrait video as rotated landscape; FFmpeg decodes
                         // it upright, so report the upright size.
                         int rotation = s["tags"].toObject()["rotate"].toString().toInt();
@@ -797,8 +809,11 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                 const bool still =
                     QStringList{"png", "jpg", "jpeg", "bmp", "webp", "tif", "tiff"}.contains(ext);
                 a.kind = still ? "image" : (a.width > 0 ? "video" : "audio");
-                if (still)
+                if (still) {
                     a.duration = 5;
+                    a.frameRate = 0;
+                    a.variableRate = false;
+                }
                 if ((a.width == 0 && !a.hasAudio) || a.duration <= 0)
                     throw std::runtime_error("No supported finite video/audio stream found");
                 QString addedClip, dropWarning;
@@ -1532,6 +1547,84 @@ void Editor::collectProject(const QUrl &folderUrl) {
     } catch (const std::exception &e) {
         fail(e.what());
     }
+}
+void Editor::conformFrameRate() {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || a->kind != "video")
+        return fail("Select a video clip to convert");
+    if (m_job || m_probe || m_busy)
+        return fail("Wait for the current job to finish");
+    if (!QFileInfo(a->path).isFile())
+        return fail("The media file is missing");
+    const double rate = standardRate(a->frameRate > 0 ? a->frameRate
+                                                      : double(m_project.fpsN) / m_project.fpsD);
+    QDir().mkpath(m_data + "/conformed");
+    const auto output = m_data + "/conformed/" + QFileInfo(a->path).completeBaseName() + "-" +
+                        MediaAnalysis::fingerprint(*a).left(8) + "-cfr.mov";
+    const auto temp = output + ".part.mov";
+    const auto assetId = a->id;
+    auto *process = new QProcess(this);
+    m_job = process;
+    m_busy = true;
+    m_cancelled = false;
+    m_progress = 0;
+    m_conform = {{"status", "converting"}, {"progress", 0.}, {"assetId", assetId}};
+    m_status = "Converting to a constant frame rate…";
+    auto pending = std::make_shared<QByteArray>();
+    auto log = std::make_shared<QByteArray>();
+    connect(process, &QProcess::readyReadStandardError, this, [process, log] {
+        *log += process->readAllStandardError();
+        if (log->size() > 16000)
+            *log = log->right(8000);
+    });
+    connect(process, &QProcess::readyReadStandardOutput, this,
+            [this, process, pending, duration = a->duration] {
+                *pending += process->readAllStandardOutput();
+                int i;
+                while ((i = pending->indexOf('\n')) >= 0) {
+                    const auto line = pending->left(i);
+                    pending->remove(0, i + 1);
+                    if (line.startsWith("out_time_us=") && duration > 0) {
+                        m_progress = std::clamp(line.mid(12).toDouble() / 1e6 / duration, 0., 1.);
+                        m_conform["progress"] = m_progress;
+                    }
+                }
+                emit changed();
+            });
+    auto complete = [this, process, temp, output, assetId, log](bool success) {
+        m_job = nullptr;
+        m_busy = false;
+        process->deleteLater();
+        if (m_cancelled || !success || !QFile::rename(temp, output)) {
+            QFile::remove(temp);
+            m_conform = {{"status", m_cancelled ? "cancelled" : "failed"}, {"assetId", assetId}};
+            if (!m_cancelled)
+                fail("Conversion failed. " + QString::fromUtf8(*log).right(1000));
+            emit changed();
+            return;
+        }
+        m_conform = {{"status", "done"}, {"progress", 1.}, {"assetId", assetId}};
+        // Relinking probes the new file; the clips keep their trims.
+        probeFile(QUrl::fromLocalFile(output), assetId);
+        emit changed();
+    };
+    connect(process, &QProcess::finished, this, [complete](int code, QProcess::ExitStatus status) {
+        complete(code == 0 && status == QProcess::NormalExit);
+    });
+    connect(process, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart)
+            complete(false);
+    });
+    QFile::remove(output);
+    QStringList args{"-hide_banner", "-nostdin", "-y",      "-loglevel", "error",
+                     "-i",           a->path,    "-map",    "0:v:0",     "-map",
+                     "0:a:0?",       "-fps_mode", "cfr",    "-r",        QString::number(rate, 'f', 6),
+                     "-c:v",         "prores_ks", "-profile:v", "2",     "-pix_fmt",
+                     "yuv422p10le",  "-c:a",     "pcm_s16le", "-ar",     "48000",
+                     "-progress",    "pipe:1",   temp};
+    process->start(executable("ffmpeg"), args);
+    emit changed();
 }
 void Editor::copy() {
     const auto *c = m_project.clip(m_selected);

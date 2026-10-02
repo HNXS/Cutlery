@@ -1898,6 +1898,56 @@ class EngineTest : public QObject {
         editor.collectProject(QUrl::fromLocalFile(dir.filePath("Again")));
         QVERIFY(editor.state()["error"].toString().contains("Missing media"));
     }
+    void variableFrameRate() {
+        QVERIFY(isVariableRate(30, 68. / 3));
+        QVERIFY(!isVariableRate(30, 29.9));
+        QVERIFY(!isVariableRate(30, 0));
+        QCOMPARE(standardRate(29.8), 30000. / 1001);
+        QCOMPARE(standardRate(25.3), 25.);
+        QCOMPARE(standardRate(12), 12.);
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // 1.5 s at 30 fps, then 1.5 s at 15 fps.
+        const auto source = dir.filePath("phone.mp4");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=30:d=3", "-f",
+                     "lavfi", "-i", "sine=d=3", "-vf",
+                     "setpts='if(lt(N,45),N/30,1.5+(N-45)/15)/TB'", "-fps_mode", "vfr", "-c:v",
+                     "mpeg4", "-c:a", "aac", "-shortest", source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        const auto asset = editor.project().assets.first();
+        QVERIFY(asset.variableRate);
+        QVERIFY2(std::abs(asset.frameRate - 68. / 3) < 0.5, qPrintable(QString::number(asset.frameRate)));
+        editor.addAsset(asset.id);
+        const auto clip = editor.project().clips.first();
+        editor.select(clip.id);
+        QVERIFY(editor.state()["selected"].toMap()["variableRate"].toBool());
+        QVERIFY(Project::fromJson(editor.project().json(), {}).assets.first().variableRate);
+        editor.conformFrameRate();
+        QCOMPARE(editor.state()["conform"].toMap()["status"].toString(), QString("converting"));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            editor.project().assets.first().path.endsWith("-cfr.mov") && !editor.state()["busy"].toBool(),
+            60000);
+        QCOMPARE(editor.state()["conform"].toMap()["status"].toString(), QString("done"));
+        const auto conformed = editor.project().assets.first();
+        QCOMPARE(conformed.id, asset.id);
+        QVERIFY(!conformed.variableRate);
+        QVERIFY(conformed.hasAudio);
+        QVERIFY(std::abs(conformed.duration - asset.duration) < 0.1);
+        QCOMPARE(editor.project().clips.first().duration, clip.duration);
+        QVERIFY(QFileInfo::exists(source)); // the original stays
+        // Stills are never variable-rate.
+        QImage image(64, 64, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(dir.filePath("still.png")));
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("still.png"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        QCOMPARE(editor.project().assets.last().frameRate, 0.);
+    }
     void smoothSlowMotion() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

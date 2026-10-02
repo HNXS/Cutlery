@@ -1777,6 +1777,29 @@ ApplicationWindow {
                                 text: "Remove pauses…"
                                 onClicked: pauseDialog.open()
                             }
+                            // Phone and screen recordings often have a variable frame rate.
+                            ColumnLayout {
+                                objectName: "variableRate"
+                                Layout.fillWidth: true
+                                visible: win.selection.variableRate === true
+                                Label {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    font.pixelSize: 11
+                                    color: "#ffd479"
+                                    text: "Variable frame rate (typical of phone and screen recordings). Cutlery plays it by timestamps; if picture and sound drift, convert it."
+                                }
+                                Action {
+                                    objectName: "conformFrameRate"
+                                    Layout.fillWidth: true
+                                    readonly property bool converting: (win.s.conform || {}).status === "converting"
+                                    enabled: !win.s.busy && win.selection.locked !== true
+                                    text: converting ? "Converting… " + Math.round(100 * (win.s.conform.progress || 0)) + "%" : "Convert to constant frame rate"
+                                    onClicked: editor.conformFrameRate()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Makes an editing copy (ProRes) with evenly spaced frames in Cutlery's data folder and switches the media to it. The original stays untouched."
+                                }
+                            }
                             Action {
                                 objectName: "splitScenes"
                                 Layout.fillWidth: true

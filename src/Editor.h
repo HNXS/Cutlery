@@ -112,6 +112,10 @@ class Editor final : public QObject {
     // into an empty folder (media/, luts/, fonts/ and <folder name>.cutlery), in the background.
     // State "collect": {status: copying|done|failed, progress 0..1, path, error}.
     Q_INVOKABLE void collectProject(const QUrl &folder);
+    // Re-encodes the selected clip's variable-frame-rate video to a constant rate (ProRes 422 and
+    // PCM in the data folder's conformed/) and relinks the media to it. State "conform":
+    // {status: converting|done|failed, progress, assetId}.
+    Q_INVOKABLE void conformFrameRate();
     // Clipboard for clips within the session, also across projects (the media comes along).
     Q_INVOKABLE void copy();
     // Inserts the copied clip at the playhead on its track.
@@ -219,6 +223,7 @@ class Editor final : public QObject {
     QHash<QString, QString> m_fontFiles; // family → file, for fonts added in Cutlery
     QThread *m_collectThread = nullptr;
     QVariantMap m_collect;
+    QVariantMap m_conform;
     // The track nearest `home` with room for [start, start + length), or a new one on top.
     static int freeTrack(Project &, int home, qint64 start, qint64 length);
     QMediaCaptureSession *m_voiceSession = nullptr;

@@ -135,6 +135,15 @@ void Clip::scaleKeyframes(double factor) {
         list = scaled;
     }
 }
+bool isVariableRate(double nominal, double average) {
+    return nominal > 0 && average > 0 && std::abs(nominal - average) / nominal > 0.01;
+}
+double standardRate(double rate) {
+    for (double r : {24000. / 1001, 24., 25., 30000. / 1001, 30., 48., 50., 60000. / 1001, 60.})
+        if (std::abs(rate - r) / r < 0.04)
+            return r;
+    return rate;
+}
 const QStringList &graphicKinds() {
     static const QStringList kinds{"rectangle", "ellipse", "arrow", "line", "bubble"};
     return kinds;
@@ -208,14 +217,14 @@ QJsonObject Project::json(const QString &base) const {
         auto path = a.path;
         if (!base.isEmpty())
             path = QDir(base).relativeFilePath(path);
-        aa.append(QJsonObject{{"id", a.id},
-                              {"path", path},
-                              {"name", a.name},
-                              {"kind", a.kind},
-                              {"duration", a.duration},
-                              {"width", a.width},
-                              {"height", a.height},
-                              {"audio", a.hasAudio}});
+        QJsonObject o{{"id", a.id},          {"path", path},           {"name", a.name},
+                      {"kind", a.kind},      {"duration", a.duration}, {"width", a.width},
+                      {"height", a.height},  {"audio", a.hasAudio}};
+        if (a.frameRate > 0)
+            o["frameRate"] = a.frameRate;
+        if (a.variableRate)
+            o["variableRate"] = true;
+        aa.append(o);
     }
     for (const auto &c : clips) {
         QJsonObject o{{"id", c.id},
@@ -409,6 +418,8 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         a.width = j["width"].toInt();
         a.height = j["height"].toInt();
         a.hasAudio = j["audio"].toBool();
+        a.frameRate = j["frameRate"].toDouble(0);
+        a.variableRate = j["variableRate"].toBool(false);
         p.assets.push_back(a);
     }
     for (auto v : o["clips"].toArray()) {

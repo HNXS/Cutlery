@@ -155,7 +155,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F149 | PNG, JPEG, WebP, BMP, TIFF and GIF | Partial | Still images; animated formats not qualified. |
 | F150 | HEIF/HEIC import | Planned | Not implemented in this alpha. |
 | F151 | Numbered image sequences | Planned | Not implemented in this alpha. |
-| F152 | Variable frame rate and timestamp repair | Planned | Not implemented in this alpha. |
+| F152 | Variable frame rate and timestamp repair | Partial | Import detects variable frame rate (nominal and average rates differ by more than 1 %) and the inspector flags it. Playback and export already place frames by timestamp. "Convert to constant frame rate" makes a ProRes 422 + PCM editing copy at the nearest standard rate in the data folder and relinks the media, keeping clip trims. No automatic conversion on import; no repair of broken timestamps beyond the re-encode. |
 | F153 | MP4/H.264/AAC export | Implemented (alpha) | H.264 via NVENC, AMF, Quick Sync or Media Foundation, whichever passes a probe; no software H.264 encoder in the LGPL build. |
 | F154 | MOV and mezzanine/alpha workflow | Partial | ProRes 422 HQ/422/LT MOV export with PCM audio; no alpha-channel export. |
 | F155 | WebM VP9/Opus software export | Implemented (alpha) | VP9/Opus export profile (integration coverage to expand). |

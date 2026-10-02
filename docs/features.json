@@ -3796,8 +3796,8 @@
     "status": "Planned",
     "acceptance": "Phone and screen capture sync stays within specified one-hour limit",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Import detects variable frame rate (nominal and average rates differ by more than 1 %) and the inspector flags it. Playback and export already place frames by timestamp. \"Convert to constant frame rate\" makes a ProRes 422 + PCM editing copy at the nearest standard rate in the data folder and relinks the media, keeping clip trims. No automatic conversion on import; no repair of broken timestamps beyond the re-encode."
   },
   {
     "id": "F153",

@@ -19,7 +19,15 @@ struct Asset {
     double duration = 0;
     int width = 0, height = 0;
     bool hasAudio = false;
+    // Video only: the average frame rate, and whether frames arrive at irregular intervals
+    // (variable frame rate, typical of phone and screen recordings).
+    double frameRate = 0;
+    bool variableRate = false;
 };
+// Variable frame rate: the nominal and average rates of a stream differ by more than 1 %.
+bool isVariableRate(double nominal, double average);
+// A standard frame rate close to `rate` (23.976 … 60), or `rate` itself when none is near.
+double standardRate(double rate);
 // A property value at a clip-local frame. Smooth keyframes ease in and out towards the next one;
 // others interpolate linearly.
 struct Keyframe {
