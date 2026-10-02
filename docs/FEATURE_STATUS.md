@@ -68,15 +68,15 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F062 | Multitrack mixing and channel layouts | Partial | 48 kHz stereo only. |
 | F063 | 5.1 and configurable audio routing | Planned | Not implemented in this alpha. |
 | F064 | Voice-over and audio recording | Partial | "● Voice-over" in the transport row records the default microphone to WAV (Qt Multimedia) in the data folder's recordings/ while the timeline plays from the playhead; stopping adds the recording at that frame on the lowest free non-magnetic track (or a new one). No input-device choice, level display during recording, count-in or punch-in; checked on CI only for the no-microphone path. |
-| F065 | EQ, compressor, limiter and noise gate | Partial | Fixed output limiter only. |
+| F065 | EQ, compressor, limiter and noise gate | Implemented (alpha) | Per clip: three-band EQ (bass shelf 100 Hz, presence 2.5 kHz, treble shelf 8 kHz, ±12 dB), low cut (highpass up to 300 Hz), compressor with make-up gain, noise gate and de-esser (FFmpeg filters), and six original presets (Clear voice, Warm podcast voice, Noisy room, Phone call, Music punch, Natural). The export limiter stays on the mix. No per-track effects or visual EQ curve. |
 | F066 | Reverb and delay | Planned | Not implemented in this alpha. |
 | F067 | Loudness measurement and normalization | Partial | Export option: two-pass loudness normalisation. FFmpeg's EBU R128 meter measures the whole mix, then one gain reaches the target (-14 YouTube/streaming, -16 podcast, -23 EBU R128) and a peak limiter holds peaks about 1.5 dB below full scale. In the editor, left/right peak meters follow playback and the export dialog measures the whole mix (integrated LUFS, true peak, gain to the target). No true-peak limiting, loudness-range display or per-clip normalisation. |
 | F068 | Pitch shift and tempo preservation | Partial | Speed with pitch preservation; no independent pitch. |
 | F069 | Silence detection and removal | Partial | Remove pauses on a clip: FFmpeg silencedetect with an adjustable threshold and minimum length, 0.12 s kept around speech, preview of count and total length, then one undoable ripple edit on the clip's track and on its detached audio. Other tracks keep their timing. |
 | F070 | Beat detection and markers | Planned | Not implemented in this alpha. |
 | F071 | Beat-synchronized edits | Planned | Not implemented in this alpha. |
-| F072 | Classical noise reduction | Planned | Not implemented in this alpha. |
-| F073 | Speech denoise and enhancement | Planned | Not implemented in this alpha. |
+| F072 | Classical noise reduction | Partial | Per-clip noise reduction with FFmpeg afftdn (spectral subtraction, 6–30 dB), part of the sound tools; reduces steady hiss and hum. No noise print or learning from a selected noise-only range. |
+| F073 | Speech denoise and enhancement | Partial | Speech clean-up through the sound presets: low cut, noise reduction, gate, presence EQ, de-esser and compression ("Clear voice", "Noisy room"). No AI speech enhancement. |
 | F074 | Vocal isolation and music separation | Planned | Not implemented in this alpha. |
 | F075 | Dereverb | Planned | Not implemented in this alpha. |
 | F076 | Voice changer | Planned | Not implemented in this alpha. |

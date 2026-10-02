@@ -84,6 +84,11 @@ struct Clip {
     // Colour: warmer/cooler, magenta/green, gentle saturation of muted colours, and lifted or
     // lowered shadows and highlights, each −1..1 with 0 unchanged.
     double temperature = 0, tint = 0, vibrance = 0, shadows = 0, highlights = 0;
+    // Sound: three-band EQ in dB (−12..12; low shelf 100 Hz, peak 2.5 kHz, high shelf 8 kHz), a
+    // low cut in Hz (0 off, up to 300), and 0..1 amounts of compression, noise gate, noise
+    // reduction and de-essing.
+    double eqLow = 0, eqMid = 0, eqHigh = 0, lowCut = 0;
+    double compressor = 0, gate = 0, denoise = 0, deess = 0;
     // Look: 0..1, 0 off.
     double sharpen = 0, glow = 0, vignette = 0, grain = 0;
     // A 3D LUT file (.cube or .3dl) mixed in at lutStrength (0..1). Missing files are skipped.

@@ -1621,8 +1621,8 @@
     "status": "Planned",
     "acceptance": "Frequency, dynamics and impulse fixtures match declared response",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Fixed output limiter only."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Per clip: three-band EQ (bass shelf 100 Hz, presence 2.5 kHz, treble shelf 8 kHz, ±12 dB), low cut (highpass up to 300 Hz), compressor with make-up gain, noise gate and de-esser (FFmpeg filters), and six original presets (Clear voice, Warm podcast voice, Noisy room, Phone call, Music punch, Natural). The export limiter stays on the mix. No per-track effects or visual EQ curve."
   },
   {
     "id": "F066",
@@ -1796,8 +1796,8 @@
     "status": "Planned",
     "acceptance": "Noise fixture improves floor while preserving user-controlled original mix",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Per-clip noise reduction with FFmpeg afftdn (spectral subtraction, 6–30 dB), part of the sound tools; reduces steady hiss and hum. No noise print or learning from a selected noise-only range."
   },
   {
     "id": "F073",
@@ -1821,8 +1821,8 @@
     "status": "Planned",
     "acceptance": "Speech corpus meets review threshold and analysis delay is compensated",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Speech clean-up through the sound presets: low cut, noise reduction, gate, presence EQ, de-esser and compression (\"Clear voice\", \"Noisy room\"). No AI speech enhancement."
   },
   {
     "id": "F074",

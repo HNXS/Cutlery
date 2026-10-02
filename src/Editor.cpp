@@ -416,6 +416,14 @@ QVariantMap Editor::state() const {
             PROP(vignette);
             PROP(grain);
             PROP(lutStrength);
+            PROP(eqLow);
+            PROP(eqMid);
+            PROP(eqHigh);
+            PROP(lowCut);
+            PROP(compressor);
+            PROP(gate);
+            PROP(denoise);
+            PROP(deess);
             PROP(slowMotion);
             PROP(fontFamily);
             PROP(graphic);
@@ -1127,6 +1135,14 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(vignette, toDouble);
         FIELD(grain, toDouble);
         FIELD(lutStrength, toDouble);
+        FIELD(eqLow, toDouble);
+        FIELD(eqMid, toDouble);
+        FIELD(eqHigh, toDouble);
+        FIELD(lowCut, toDouble);
+        FIELD(compressor, toDouble);
+        FIELD(gate, toDouble);
+        FIELD(denoise, toDouble);
+        FIELD(deess, toDouble);
         FIELD(slowMotion, toString);
         FIELD(bold, toBool);
         FIELD(italic, toBool);
@@ -1808,6 +1824,14 @@ void Editor::pasteAttributes(const QString &group) {
         c->crop = from.crop;
         c->flip = from.flip;
         c->volume = from.volume;
+        c->eqLow = from.eqLow;
+        c->eqMid = from.eqMid;
+        c->eqHigh = from.eqHigh;
+        c->lowCut = from.lowCut;
+        c->compressor = from.compressor;
+        c->gate = from.gate;
+        c->denoise = from.denoise;
+        c->deess = from.deess;
         c->fadeIn = from.fadeIn;
         c->fadeOut = from.fadeOut;
         // Keyframes keep their clip-relative frames; those past the end of a shorter clip stay

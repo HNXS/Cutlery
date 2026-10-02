@@ -2087,6 +2087,147 @@ class EngineTest : public QObject {
         editor.importImageSequence(QUrl::fromLocalFile(dir.filePath("none_0001.png")), 12);
         QVERIFY(editor.state()["error"].toString().contains("frame number"));
     }
+    void soundTools() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // 2 s: a 60 Hz hum, a 1 kHz tone and a 10 kHz tone, then 2 s of faint noise and a quiet
+        // 1 kHz tone, so dynamics can be compared.
+        const auto source = dir.filePath("sound.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "sine=f=60:d=4,volume=2[a];sine=f=1000:d=4,volume=2[b];"
+                     "sine=f=10000:d=4,volume=2[c];anoisesrc=d=4:a=0.003:c=white[n];"
+                     "[a][b][c][n]amix=inputs=4:normalize=0,"
+                     "volume='if(lt(t,2),1,0.05)':eval=frame",
+                     "-ar", "48000", "-ac", "2", source});
+        Project p;
+        p.width = 160;
+        p.height = 90;
+        Asset a;
+        a.id = "s";
+        a.path = source;
+        a.kind = "audio";
+        a.duration = 4;
+        a.hasAudio = true;
+        p.assets = {a};
+        Clip c;
+        c.id = "c";
+        c.assetId = "s";
+        c.duration = 120;
+        p.clips = {c};
+        const auto graph = dir.filePath("graph.txt");
+        // The rendered mix as a WAV file.
+        auto render = [&](const Clip &clip, const QString &name) {
+            auto project = p;
+            project.clips[0] = clip;
+            RenderOptions options;
+            options.video = false;
+            const auto plan = compileRender(project, dir.filePath("work"), 160, 90, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            const auto out = dir.filePath(name + ".wav");
+            QStringList args{"-v", "error", "-y"};
+            args += plan.inputs;
+            args << "-filter_complex_script" << graph << "-map" << "[aout]" << out;
+            run(ffmpeg, args);
+            return out;
+        };
+        // Mean level in dB of a band and time range of a file.
+        auto level = [&](const QString &file, const QString &band, double from, double to) {
+            QProcess p;
+            p.start(ffmpeg, {"-hide_banner", "-nostats", "-ss", QString::number(from), "-t",
+                             QString::number(to - from), "-i", file, "-af",
+                             band + (band.isEmpty() ? "" : ",") + "volumedetect", "-f", "null",
+                             "-"});
+            p.waitForFinished(30000);
+            const auto m = QRegularExpression("mean_volume: (-?[0-9.]+) dB")
+                               .match(QString::fromUtf8(p.readAllStandardError()));
+            return m.hasMatch() ? m.captured(1).toDouble() : -999.;
+        };
+        const auto plain = render(c, "plain");
+        const double hum = level(plain, "lowpass=f=120", 0.3, 1.8),
+                     tone = level(plain, "bandpass=f=1000:w=200", 0.3, 1.8),
+                     hiss = level(plain, "highpass=f=7000", 0.3, 1.8);
+        QVERIFY(hum > -30 && tone > -30 && hiss > -30);
+        {
+            auto x = c;
+            x.lowCut = 200;
+            const auto f = render(x, "lowcut");
+            QVERIFY2(level(f, "lowpass=f=120", 0.3, 1.8) < hum - 10, "low cut removes the hum");
+            QVERIFY(std::abs(level(f, "bandpass=f=1000:w=200", 0.3, 1.8) - tone) < 1.5);
+        }
+        {
+            auto x = c;
+            x.eqLow = 12;
+            x.eqHigh = -12;
+            const auto f = render(x, "eq");
+            QVERIFY2(level(f, "lowpass=f=120", 0.3, 1.8) > hum + 6, "bass boost");
+            QVERIFY2(level(f, "highpass=f=7000", 0.3, 1.8) < hiss - 6, "treble cut");
+            // The presence band, on a 2.5 kHz tone.
+            const auto presence = dir.filePath("presence.wav");
+            run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "sine=f=2500:d=4,volume=2", "-ar",
+                         "48000", "-ac", "2", presence});
+            const auto original = p.assets[0].path;
+            p.assets[0].path = presence;
+            x = c;
+            x.eqMid = 9;
+            QVERIFY2(level(render(x, "mid"), "", 0.3, 1.8) > level(render(c, "flat"), "", 0.3, 1.8) + 6,
+                     "presence boost");
+            p.assets[0].path = original;
+        }
+        {
+            // Compression narrows the gap between the loud and the quiet half.
+            auto x = c;
+            x.compressor = 1;
+            const auto f = render(x, "comp");
+            const double before = level(plain, "", 0.3, 1.8) - level(plain, "", 2.3, 3.8),
+                         after = level(f, "", 0.3, 1.8) - level(f, "", 2.3, 3.8);
+            QVERIFY2(after < before - 5, qPrintable(QString("%1 → %2").arg(before).arg(after)));
+        }
+        {
+            // A strong gate pushes the quiet half down further.
+            auto x = c;
+            x.gate = 1;
+            const auto f = render(x, "gate");
+            QVERIFY2(level(f, "", 2.3, 3.8) < level(plain, "", 2.3, 3.8) - 6, "gate");
+            QVERIFY(std::abs(level(f, "", 0.3, 1.8) - level(plain, "", 0.3, 1.8)) < 2);
+        }
+        {
+            // Noise reduction lowers steady hiss.
+            const auto hissy = dir.filePath("hiss-source.wav");
+            run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "anoisesrc=d=4:a=0.006:c=white", "-ar",
+                         "48000", "-ac", "2", hissy});
+            const auto original = p.assets[0].path;
+            p.assets[0].path = hissy;
+            auto x = c;
+            x.denoise = 1;
+            const double noisy = level(render(c, "hiss"), "", 1, 3.5),
+                         cleaned = level(render(x, "denoise"), "", 1, 3.5);
+            QVERIFY2(cleaned < noisy - 6, qPrintable(QString("%1 → %2").arg(noisy).arg(cleaned)));
+            p.assets[0].path = original;
+            x.deess = 1;
+            render(x, "deess"); // renders
+        }
+        // Stored only when set; validated.
+        auto x = c;
+        x.compressor = 0.5;
+        x.eqHigh = -3;
+        p.clips = {x};
+        auto json = p.json();
+        QVERIFY(!json["clips"].toArray()[0].toObject().contains("gate"));
+        const auto back = Project::fromJson(json, {}).clips[0];
+        QCOMPARE(back.compressor, 0.5);
+        QCOMPARE(back.eqHigh, -3.);
+        auto clips = json["clips"].toArray();
+        auto o = clips[0].toObject();
+        o["eqLow"] = 20;
+        clips[0] = o;
+        json["clips"] = clips;
+        QVERIFY_EXCEPTION_THROWN(Project::fromJson(json, {}), std::runtime_error);
+    }
     void smoothSlowMotion() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
