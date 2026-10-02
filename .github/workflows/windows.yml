@@ -39,6 +39,10 @@ jobs:
           "ONNXRUNTIME_DIR=$ort" | Out-File $env:GITHUB_ENV -Append
           $models = ./tools/Get-Models.ps1
           "MODELS_DIR=$models" | Out-File $env:GITHUB_ENV -Append
+      - name: Fetch and verify recorded sound effects
+        run: |
+          $sounds = ./tools/Get-Sounds.ps1
+          "SOUNDS_DIR=$sounds" | Out-File $env:GITHUB_ENV -Append
       - name: Restore speech recognition build
         id: whisper-cache
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
@@ -65,6 +69,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           QT_QUICK_BACKEND: software
         run: |
+          $env:CUTLERY_TEST_SOUNDS = $env:SOUNDS_DIR
           ctest --test-dir build -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) {
             # Show the failing checks directly; CTest's captured output can be empty here.
@@ -122,7 +127,7 @@ jobs:
           if ($long) { throw "Expected one word per cue: $long" }
       - name: Package portable application
         run: |
-          ./tools/Package-Windows.ps1 -QtRoot $env:QT_ROOT_DIR -FFmpegBin $env:FFMPEG_BIN -OnnxRuntime $env:ONNXRUNTIME_DIR -Models $env:MODELS_DIR -Whisper $env:WHISPER_DIR
+          ./tools/Package-Windows.ps1 -QtRoot $env:QT_ROOT_DIR -FFmpegBin $env:FFMPEG_BIN -OnnxRuntime $env:ONNXRUNTIME_DIR -Models $env:MODELS_DIR -Whisper $env:WHISPER_DIR -Sounds $env:SOUNDS_DIR
       - name: Smoke-test deployed executable
         env:
           QT_QUICK_BACKEND: software
@@ -134,6 +139,7 @@ jobs:
           $exe = Resolve-Path dist/Cutlery-0.5.0-win64-portable/Cutlery.exe
           $p = Start-Process $exe -ArgumentList '--smoke-test' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw 'Deployed application failed' }
+          if ((Get-Content "$(Split-Path $exe)/sounds/sounds.json" -Raw | ConvertFrom-Json).Count -lt 6) { throw 'Sound effects missing from the package' }
           # The deployed worker starts with only the packaged DLLs.
           $dist = Split-Path $exe
           & "$dist/cutlery-ai.exe" matte --ffmpeg "$dist/codecs/ffmpeg.exe" --model "$env:MODELS_DIR/u2net_human_seg.onnx" --input build/test.mkv --output build/deployed-matte.mkv --size 320x240 --duration 1

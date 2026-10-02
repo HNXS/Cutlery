@@ -1423,6 +1423,118 @@ void Editor::stopVoiceOver() {
     pause();
     m_voiceRecorder->stop();
 }
+QVector<Sound> Editor::soundList() const {
+    const auto pack = qEnvironmentVariableIsSet("CUTLERY_SOUNDS_DIR")
+                          ? qEnvironmentVariable("CUTLERY_SOUNDS_DIR")
+                          : QCoreApplication::applicationDirPath() + "/sounds";
+    return soundLibrary(m_data + "/sounds", pack);
+}
+QVariantList Editor::sounds() const {
+    QVariantList list;
+    for (const auto &s : soundList())
+        list << QVariantMap{{"id", s.id},           {"name", s.name},       {"category", s.category},
+                            {"seconds", s.seconds}, {"licence", s.licence}, {"source", s.source},
+                            {"builtIn", s.builtIn}, {"peak", s.peak}};
+    return list;
+}
+QUrl Editor::soundFile(const QString &id) {
+    try {
+        for (const auto &s : soundList())
+            if (s.id == id) {
+                ensureSoundFile(s);
+                return QUrl::fromLocalFile(s.path);
+            }
+        throw std::runtime_error("No such sound");
+    } catch (const std::exception &e) {
+        fail(e.what());
+        return {};
+    }
+}
+bool Editor::placeSound(Project &p, const Sound &s, qint64 frame) {
+    const auto path = QDir::cleanPath(s.path);
+    const Asset *asset = nullptr;
+    for (const auto &a : p.assets)
+        if (QDir::cleanPath(a.path) == path)
+            asset = &a;
+    if (!asset) {
+        Asset a;
+        a.id = newId();
+        a.path = path;
+        a.name = s.name;
+        a.kind = "audio";
+        a.duration = s.seconds;
+        a.hasAudio = true;
+        p.assets.push_back(a);
+        asset = &p.assets.back();
+    }
+    frame = std::max<qint64>(0, frame);
+    for (const auto &c : p.clips)
+        if (c.assetId == asset->id && c.start == frame)
+            return false;
+    Clip c;
+    c.id = newId();
+    c.assetId = asset->id;
+    c.name = s.name;
+    c.start = frame;
+    c.duration = std::max<qint64>(1, qint64(std::floor(s.seconds * p.fpsN / p.fpsD + 1e-6)));
+    c.track = freeTrack(p, 0, c.start, c.duration);
+    p.requireEditable(c.track);
+    p.clips.push_back(c);
+    return true;
+}
+void Editor::addSound(const QString &id) {
+    try {
+        const auto list = soundList();
+        const auto it = std::find_if(list.begin(), list.end(), [&](const Sound &s) { return s.id == id; });
+        if (it == list.end())
+            throw std::runtime_error("No such sound");
+        ensureSoundFile(*it);
+        QString added;
+        if (mutate([&](Project &p) {
+                if (!placeSound(p, *it, m_playhead))
+                    throw std::runtime_error("This sound starts at the playhead already");
+                added = p.clips.back().id;
+            })) {
+            select(added);
+            m_status = "Added " + it->name;
+            emit changed();
+        }
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
+void Editor::addSoundAtTransitions(const QString &id) {
+    try {
+        const auto list = soundList();
+        const auto it = std::find_if(list.begin(), list.end(), [&](const Sound &s) { return s.id == id; });
+        if (it == list.end())
+            throw std::runtime_error("No such sound");
+        ensureSoundFile(*it);
+        const double fps = double(m_project.fpsN) / m_project.fpsD;
+        // Loudest at the cut.
+        const auto lead = qRound64(it->peak * fps);
+        int added = 0;
+        mutate([&](Project &p) {
+            QVector<qint64> cuts;
+            for (const auto &c : p.clips)
+                if (p.transitionLength(c) > 0 && !cuts.contains(c.start))
+                    cuts << c.start;
+            if (cuts.isEmpty())
+                throw std::runtime_error("No transitions: add a transition between two clips first");
+            std::sort(cuts.begin(), cuts.end());
+            for (const auto cut : cuts)
+                added += placeSound(p, *it, cut - lead);
+            if (!added)
+                throw std::runtime_error("Every transition has this sound already");
+        });
+        if (!added)
+            return;
+        m_status = QString("Added %1 at %2 transition%3").arg(it->name).arg(added).arg(added == 1 ? "" : "s");
+        emit changed();
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
 int Editor::freeTrack(Project &p, int home, qint64 start, qint64 length) {
     auto fits = [&](int track) {
         if (track < 0 || track >= p.tracks || p.trackSettings[track].locked)

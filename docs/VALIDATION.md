@@ -1,5 +1,21 @@
 # Validation record
 
+## Windows portable build — 2026-10-02, sound effects library (0.6 development)
+
+[GitHub Actions run 37077970890](https://github.com/HNXS/Cutlery/actions/runs/37077970890) on commit `a9f20b637f5f7a885b2dba0b90d25b7a7a8fff48`: every build, test and check step passed. The artifact uploads failed: the older builds had been deleted, but GitHub recalculates the storage quota only every 6–12 hours.
+
+What passed:
+
+- **Sound pack:** `Get-Sounds.ps1` downloaded the six recorded sounds from their pinned commits, and their SHA-256 checksums matched.
+- **Engine tests:**
+  - `recordedSoundPack`: each recorded sound decodes at its stated length; each one except the typing has its loudest moment where stated; every licence is CC0; a recorded whoosh lands on a transition with its loudest moment at the cut.
+  - `soundEffects`: built-in synthesis, WAV files, placement in the editor and the rendered mix.
+  - `beatDetection`: now with seeded noise.
+- **Interface:** the sound dialog lists the sounds and adds one; `dragDropAndMagnet` passes with the new Sounds button.
+- **Packaging:** the deployed folder contains `sounds/sounds.json` with the six recorded sounds.
+
+Not verified: how the sounds sound on Windows speakers; listening in the dialog on Windows.
+
 ## Windows portable build — 2026-10-02, effects, beat markers, WebVTT/ASS, scopes (0.6 development)
 
 [GitHub Actions run 37076300232](https://github.com/HNXS/Cutlery/actions/runs/37076300232) on commit `24c0f93d78e2d7fc95d0a3bfdbb4be3016241164`: every build, test and check step passed; the artifact uploads failed because the artifact storage was still full of older builds. Those older builds were deleted afterwards (the newest 0.5.0 portable build and AI pack were kept), so later runs upload again.

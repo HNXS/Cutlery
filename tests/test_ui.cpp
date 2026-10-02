@@ -589,6 +589,23 @@ class UiTest : public QObject {
             window->grabWindow().save(qEnvironmentVariable("CUTLERY_SCOPE_SHOT"));
         QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "toggleScopes"), "clicked"));
         QTRY_VERIFY(!scopes->isVisible());
+        // Sound effects: the library lists Cutlery's sounds with their licence; Add puts one at
+        // the playhead.
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "openSounds"), "clicked"));
+        QObject *addClick = nullptr;
+        // The list's rows are items under the popup overlay.
+        auto *soundList = window->findChild<QQuickItem *>("soundList");
+        QTRY_VERIFY(soundList && soundList->property("count").toInt() >= 7);
+        QTRY_VERIFY((addClick = findItem(soundList, "addSound-click")));
+        QVERIFY(findItem(soundList, "listen-click"));
+        const auto before = editor.project().clips.size();
+        QVERIFY(QMetaObject::invokeMethod(addClick, "clicked"));
+        QCOMPARE(editor.project().clips.size(), before + 1);
+        QCOMPARE(editor.project().clips.back().name, QString("Mouse click"));
+        QTRY_VERIFY(!window->findChild<QQuickItem *>("soundDialog") ||
+                    !window->findChild<QQuickItem *>("soundDialog")->isVisible());
+        editor.undo();
+        editor.select(id);
         // Style effects: a picture has the effect choice, but no motion blur or stabilizing.
         QVERIFY(findItem(window->contentItem(), "effectsSection")->isVisible());
         QVERIFY(!findItem(window->contentItem(), "stabilize")->isVisible());

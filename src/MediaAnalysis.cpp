@@ -157,7 +157,7 @@ QVector<double> detectBeats(const QVector<float> &samples, int rate, double *bpm
     auto sorted = strength;
     std::nth_element(sorted.begin(), sorted.begin() + sorted.size() / 2, sorted.end());
     const double typical = sorted.empty() ? 0 : sorted[sorted.size() / 2];
-    auto weak = [&](size_t i) { return strength[i] < std::max(0.5, 0.2 * typical); };
+    auto weak = [&](size_t i) { return strength[i] < std::max(0.5, 0.35 * typical); };
     size_t from = 0, to = chain.size();
     while (from < to && weak(from))
         ++from;

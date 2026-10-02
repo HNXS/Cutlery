@@ -54,6 +54,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - **Colour and look** (inspector): temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with adjustable strength; one-click looks (Warm, Cool, Cinematic, Vintage, Black & white, Punchy, Dreamy).
 - **Effects** (inspector): camera shake, glitch, VHS and old film with a strength; motion blur; stabilizing for shaky footage.
 - **Scopes:** histogram, waveform and vectorscope over the viewer.
+- **Sound effects:** mouse clicks, keyboard typing and whooshes to listen to and add at the playhead; a whoosh on every transition in one click. Cutlery's own sounds plus recorded CC0 sounds in the portable build.
 - **Lower thirds and title cards** (library panel): name and role on a plate or beside an accent line, sliding in from the left, or a large centred heading. First text line = name/heading, further lines = role/subtitle; accent colour selectable.
 - **Blur and mosaic areas** (library panel): a rectangle on an upper track blurs or pixelates whatever the tracks below show, e.g. private data in a screen recording or a face. Drag it in the preview; keyframe its position to follow movement.
 - Constant speed **0.25–4×**, reverse, volume/mute, stereo mixing with an output limiter.

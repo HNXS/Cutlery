@@ -41,7 +41,7 @@ ApplicationWindow {
     property var libraryGesture: null
     property bool textEditing: activeFocusItem && typeof activeFocusItem.cursorPosition === "number"
     property bool showScopes: false
-    property bool shortcutsBlocked: openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || srtOpen.visible || srtSave.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
+    property bool shortcutsBlocked: openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
         enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
@@ -713,10 +713,22 @@ ApplicationWindow {
                         }
                     }
                     Rule {}
-                    Action {
-                        text: "+ Add title"
+                    RowLayout {
                         Layout.fillWidth: true
-                        onClicked: editor.addTitle()
+                        Action {
+                            text: "+ Add title"
+                            Layout.fillWidth: true
+                            onClicked: editor.addTitle()
+                        }
+                        // Sound effects: clicks, typing and swooshes for tutorials and screen videos.
+                        Action {
+                            objectName: "openSounds"
+                            text: "♪ Sounds…"
+                            Layout.fillWidth: true
+                            onClicked: soundDialog.open()
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Sound effects: mouse clicks, keyboard typing and whooshes, free to use"
+                        }
                     }
                     RowLayout {
                         Layout.fillWidth: true
@@ -2641,6 +2653,140 @@ ApplicationWindow {
         onAccepted: editor.exportSrt(selectedFile)
     }
     // Remove pauses: silence detection on the selected clip's sound, then one ripple edit.
+    // The sound effects library: listen, add at the playhead, or a swoosh on every transition.
+    Dialog {
+        id: soundDialog
+        objectName: "soundDialog"
+        anchors.centerIn: parent
+        title: "Sound effects"
+        modal: true
+        width: 460
+        property string playing: ""
+        onOpened: {
+            soundModel.clear();
+            for (const sound of editor.sounds())
+                soundModel.append({ soundId: sound.id, name: sound.name, category: sound.category, seconds: sound.seconds, licence: sound.licence, source: sound.source, builtIn: sound.builtIn });
+        }
+        ListModel {
+            id: soundModel
+        }
+        onClosed: {
+            if (player)
+                player.stop();
+            playing = "";
+        }
+        // Created on the first listen, so the audio system starts only when needed.
+        property var player: null
+        Component {
+            id: soundPlayerComponent
+            MediaPlayer {
+                audioOutput: AudioOutput {}
+                onPlaybackStateChanged: if (playbackState === MediaPlayer.StoppedState)
+                    soundDialog.playing = ""
+            }
+        }
+        footer: DialogButtonBox {
+            Button {
+                text: "Close"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                onClicked: soundDialog.close()
+            }
+        }
+        ListView {
+            id: soundList
+            objectName: "soundList"
+            implicitHeight: 360
+            width: parent.width
+            clip: true
+            model: soundModel
+            section.property: "category"
+            section.delegate: Caption {
+                required property string section
+                text: section.toUpperCase()
+                topPadding: 8
+            }
+            delegate: RowLayout {
+                id: soundRow
+                required property string soundId
+                required property string category
+                required property string name
+                required property double seconds
+                required property string licence
+                required property string source
+                required property bool builtIn
+                width: soundList.width
+                spacing: 6
+                Action {
+                    objectName: "listen-" + soundRow.soundId
+                    text: soundDialog.playing === soundRow.soundId ? "■" : "▶"
+                    padding: 6
+                    onClicked: {
+                        if (soundDialog.player)
+                            soundDialog.player.stop();
+                        if (soundDialog.playing === soundRow.soundId) {
+                            soundDialog.playing = "";
+                            return;
+                        }
+                        const url = editor.soundFile(soundRow.soundId);
+                        if (url.toString().length > 0) {
+                            if (!soundDialog.player)
+                                soundDialog.player = soundPlayerComponent.createObject(soundDialog);
+                            soundDialog.player.source = url;
+                            soundDialog.playing = soundRow.soundId;
+                            soundDialog.player.play();
+                        }
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Listen"
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 0
+                    Label {
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        text: soundRow.name + "  ·  " + Number(soundRow.seconds).toFixed(1) + " s"
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        text: soundRow.licence + (soundRow.builtIn ? "" : " · " + soundRow.source)
+                        color: win.muted
+                        font.pixelSize: 10
+                        ToolTip.visible: licenceHover.hovered && truncated
+                        ToolTip.text: text
+                        HoverHandler { id: licenceHover }
+                    }
+                }
+                // Whooshes go onto every transition at once, e.g. where the full-screen video
+                // changes to the presenter layout.
+                Action {
+                    objectName: "transitionSound-" + soundRow.soundId
+                    visible: soundRow.category === "Transitions"
+                    text: "⇄ All"
+                    padding: 8
+                    onClicked: {
+                        editor.addSoundAtTransitions(soundRow.soundId);
+                        if (!win.s.error)
+                            soundDialog.close();
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Adds this sound at every transition between two clips, loudest at the cut"
+                }
+                Action {
+                    objectName: "addSound-" + soundRow.soundId
+                    text: "Add"
+                    padding: 8
+                    onClicked: {
+                        editor.addSound(soundRow.soundId);
+                        soundDialog.close();
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Adds the sound at the playhead"
+                }
+            }
+        }
+    }
     Dialog {
         id: pauseDialog
         objectName: "pauseDialog"
