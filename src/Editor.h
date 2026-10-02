@@ -11,6 +11,7 @@
 #include <QElapsedTimer>
 #include <QTimer>
 class QAudioInput;
+class QThread;
 class QMediaCaptureSession;
 class QMediaRecorder;
 #include <optional>
@@ -107,6 +108,10 @@ class Editor final : public QObject {
     Q_INVOKABLE QStringList fontFamilies() const;
     // Copies a font file into the data folder's fonts/ and returns its family ("" on failure).
     Q_INVOKABLE QString addFont(const QUrl &file);
+    // Copies the project with all its media, LUTs and the fonts added in Cutlery that it uses
+    // into an empty folder (media/, luts/, fonts/ and <folder name>.cutlery), in the background.
+    // State "collect": {status: copying|done|failed, progress 0..1, path, error}.
+    Q_INVOKABLE void collectProject(const QUrl &folder);
     // Clipboard for clips within the session, also across projects (the media comes along).
     Q_INVOKABLE void copy();
     // Inserts the copied clip at the playhead on its track.
@@ -210,6 +215,10 @@ class Editor final : public QObject {
     QVariantMap m_mixLoudness; // last analyzeLoudness() result
     qint64 m_exportFrom = 0, m_exportTo = -1; // frame range of the running export
     std::optional<Clip> m_clipboard;
+    void loadFonts(const QString &folder);
+    QHash<QString, QString> m_fontFiles; // family → file, for fonts added in Cutlery
+    QThread *m_collectThread = nullptr;
+    QVariantMap m_collect;
     // The track nearest `home` with room for [start, start + length), or a new one on top.
     static int freeTrack(Project &, int home, qint64 start, qint64 length);
     QMediaCaptureSession *m_voiceSession = nullptr;

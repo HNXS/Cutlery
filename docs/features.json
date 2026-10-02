@@ -146,8 +146,8 @@
     "status": "Planned",
     "acceptance": "Open collected project on second PC with network disconnected",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Project → \"Collect project and media…\" copies every media file, LUT and font added in Cutlery that the project uses into an empty folder (media/, luts/, fonts/ with clashing names numbered) and saves <folder>.cutlery there with relative paths, in the background with progress. Opening a project loads the fonts beside it. Refuses projects with missing media; no trimming of unused source ranges."
   },
   {
     "id": "F007",

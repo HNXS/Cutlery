@@ -1818,6 +1818,86 @@ class EngineTest : public QObject {
         QCOMPARE(editor.project().inPoint, qint64(-1));
         QVERIFY(!editor.project().json().contains("inPoint"));
     }
+    void collectProject() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Two media files with the same name in different folders, and a LUT.
+        QVERIFY(QDir(dir.path()).mkpath("a") && QDir(dir.path()).mkpath("b"));
+        for (const auto &[folder, colour] : {std::pair{QString("a"), QColor(Qt::red)},
+                                             std::pair{QString("b"), QColor(Qt::blue)}}) {
+            QImage image(160, 90, QImage::Format_RGB32);
+            image.fill(colour);
+            QVERIFY(image.save(dir.filePath(folder + "/shot.png")));
+        }
+        const auto lut = dir.filePath("look.cube");
+        {
+            QFile f(lut);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n");
+        }
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("a/shot.png")),
+                            QUrl::fromLocalFile(dir.filePath("b/shot.png"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        editor.addAsset(editor.project().assets[0].id);
+        editor.addAsset(editor.project().assets[1].id, 1);
+        editor.select(editor.project().clips.first().id);
+        editor.setClip("lut", QUrl::fromLocalFile(lut));
+        // A title in a font added to Cutlery takes the font file along.
+        QString fontFile;
+        for (const auto &folder : {qEnvironmentVariable("WINDIR") + "/Fonts",
+                                   QString("/usr/share/fonts/truetype/dejavu")})
+            for (const auto &f : QDir(folder).entryInfoList({"*.ttf"}, QDir::Files))
+                if (fontFile.isEmpty())
+                    fontFile = f.absoluteFilePath();
+        QString family;
+        if (!fontFile.isEmpty()) {
+            QVERIFY(QFile::copy(fontFile, dir.filePath("Collect Font.ttf")));
+            family = editor.addFont(QUrl::fromLocalFile(dir.filePath("Collect Font.ttf")));
+            QVERIFY(!family.isEmpty());
+            editor.addTitle();
+            editor.setClip("fontFamily", family);
+        }
+        // Only into an empty folder.
+        editor.collectProject(QUrl::fromLocalFile(dir.path()));
+        QVERIFY(editor.state()["error"].toString().contains("empty"));
+        editor.clearError();
+        const auto target = dir.filePath("Archive");
+        editor.collectProject(QUrl::fromLocalFile(target));
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["collect"].toMap()["status"].toString(),
+                                  QString("done"), 30000);
+        QCOMPARE(editor.state()["collect"].toMap()["path"].toString(),
+                 target + "/Archive.cutlery");
+        QVERIFY(QFileInfo::exists(target + "/media/shot.png"));
+        QVERIFY(QFileInfo::exists(target + "/media/shot-2.png"));
+        QVERIFY(QFileInfo::exists(target + "/luts/look.cube"));
+        if (!family.isEmpty()) {
+            QVERIFY(QFileInfo::exists(target + "/fonts/Collect Font.ttf"));
+            QFile::remove(editor.state()["dataPath"].toString() + "/fonts/Collect Font.ttf");
+        }
+        // The copy works on its own: the originals can go away.
+        QVERIFY(QDir(dir.filePath("a")).removeRecursively());
+        QVERIFY(QDir(dir.filePath("b")).removeRecursively());
+        QVERIFY(QFile::remove(lut));
+        const auto collected = loadProject(target + "/Archive.cutlery");
+        QCOMPARE(collected.assets.size(), 2);
+        for (const auto &a : collected.assets)
+            QVERIFY2(QFileInfo(a.path).isFile() && a.path.startsWith(target), qPrintable(a.path));
+        QVERIFY(QImage(collected.assets[0].path).pixelColor(1, 1) !=
+                QImage(collected.assets[1].path).pixelColor(1, 1));
+        QCOMPARE(collected.clips.first().lut, target + "/luts/look.cube");
+        QFile file(target + "/Archive.cutlery");
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto text = QString::fromUtf8(file.readAll());
+        QVERIFY2(text.contains("\"media/shot.png\"") && !text.contains(dir.path()),
+                 "Paths in a collected project are relative");
+        // Missing media stops collecting.
+        editor.collectProject(QUrl::fromLocalFile(dir.filePath("Again")));
+        QVERIFY(editor.state()["error"].toString().contains("Missing media"));
+    }
     void smoothSlowMotion() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

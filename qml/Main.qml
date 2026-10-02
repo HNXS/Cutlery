@@ -303,6 +303,12 @@ ApplicationWindow {
                 text: "Save As…"
                 onTriggered: saveDialog.open()
             }
+            MenuItem {
+                objectName: "collectProject"
+                text: (win.s.collect || {}).status === "copying" ? "Collecting… " + Math.round(100 * (win.s.collect.progress || 0)) + "%" : "Collect project and media…"
+                enabled: (win.s.collect || {}).status !== "copying"
+                onTriggered: collectDialog.open()
+            }
             MenuSeparator {}
             MenuItem {
                 text: "Project settings…"
@@ -2245,6 +2251,13 @@ ApplicationWindow {
         id: relinkDialog
         title: "Choose replacement media"
         onAccepted: editor.relink(win.selection.assetId, selectedFile)
+    }
+    // Collect: copies the project and everything it uses into a new folder, e.g. to archive it or
+    // move it to another computer.
+    FolderDialog {
+        id: collectDialog
+        title: "Collect project into an empty folder"
+        onAccepted: editor.collectProject(selectedFolder)
     }
     FileDialog {
         id: fontFileDialog

@@ -6,6 +6,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFontDatabase>
+#include <QThread>
 #include <QAudioInput>
 #include <QMediaCaptureSession>
 #include <QMediaDevices>
@@ -122,9 +123,18 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     if (executable("ffmpeg").isEmpty() || executable("ffprobe").isEmpty())
         m_error = "FFmpeg/ffprobe not found. Use the portable package, or add both tools to PATH.";
     // Fonts added in Cutlery live in the data folder, so they travel with a portable install.
-    for (const auto &file : QDir(m_data + "/fonts").entryInfoList({"*.ttf", "*.otf", "*.ttc"},
-                                                                 QDir::Files))
-        QFontDatabase::addApplicationFont(file.absoluteFilePath());
+    loadFonts(m_data + "/fonts");
+}
+void Editor::loadFonts(const QString &folder) {
+    for (const auto &file : QDir(folder).entryInfoList({"*.ttf", "*.otf", "*.ttc"}, QDir::Files)) {
+        const auto path = file.absoluteFilePath();
+        if (std::any_of(m_fontFiles.begin(), m_fontFiles.end(),
+                        [&](const QString &f) { return QFileInfo(f) == file; }))
+            continue;
+        for (const auto &family :
+             QFontDatabase::applicationFontFamilies(QFontDatabase::addApplicationFont(path)))
+            m_fontFiles.insert(family, path);
+    }
 }
 QStringList Editor::fontFamilies() const {
     return QFontDatabase::families();
@@ -147,6 +157,8 @@ QString Editor::addFont(const QUrl &url) {
             QFile::remove(target);
             throw std::runtime_error("This file is not a usable font");
         }
+        for (const auto &family : families)
+            m_fontFiles.insert(family, target);
         m_status = "Added font " + families.first();
         emit changed();
         return families.first();
@@ -158,6 +170,12 @@ QString Editor::addFont(const QUrl &url) {
 Editor::~Editor() {
     if (m_dirty)
         autosave();
+    if (m_collectThread) {
+        m_collectThread->disconnect(this);
+        m_collectThread->requestInterruption();
+        m_collectThread->wait();
+        delete m_collectThread;
+    }
     for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess, m_sceneProcess})
         if (p) {
             p->disconnect(this);
@@ -468,6 +486,7 @@ QVariantMap Editor::state() const {
             {"captions", captionState()},
             {"pauses", pauseState()},
             {"scenes", m_scenes},
+            {"collect", m_collect},
             {"markers", [this] {
                  QVariantList list;
                  for (const auto &m : m_project.markers)
@@ -590,6 +609,8 @@ bool Editor::openProject(const QUrl &url) {
         stopPlayback();
         m_previewUrl.clear();
         m_status = "Opened " + QFileInfo(path).fileName();
+        // A collected project carries the fonts it uses.
+        loadFonts(QFileInfo(path).dir().filePath("fonts"));
         m_previewTimer.start();
         m_analysis->setAssets(m_project.assets);
         m_thumbnails->setAssets(m_project.assets);
@@ -1411,6 +1432,106 @@ void Editor::setOutPoint() {
 }
 void Editor::clearInOut() {
     mutate([](Project &p) { p.inPoint = p.outPoint = -1; });
+}
+void Editor::collectProject(const QUrl &folderUrl) {
+    if (m_collectThread)
+        return;
+    try {
+        const auto folder = QDir::cleanPath(localPath(folderUrl));
+        const QDir dir(folder);
+        if (dir.exists() && !dir.isEmpty())
+            throw std::runtime_error("Choose an empty or new folder");
+        struct Copy {
+            QString from, to;
+        };
+        auto copies = std::make_shared<QVector<Copy>>();
+        QSet<QString> taken;
+        QHash<QString, QString> mapped; // source → target, so shared files are copied once
+        auto target = [&](const QString &from, const QString &sub) {
+            const auto key = QFileInfo(from).absoluteFilePath();
+            if (mapped.contains(key))
+                return mapped[key];
+            const QFileInfo info(from);
+            QString name = info.fileName();
+            for (int i = 2; taken.contains(sub + "/" + name.toLower()); ++i)
+                name = info.completeBaseName() + QString("-%1.").arg(i) + info.suffix();
+            taken.insert(sub + "/" + name.toLower());
+            const auto to = folder + "/" + sub + "/" + name;
+            copies->push_back({key, to});
+            mapped[key] = to;
+            return to;
+        };
+        auto project = m_project;
+        for (auto &a : project.assets) {
+            if (!QFileInfo(a.path).isFile())
+                throw std::runtime_error(("Missing media: " + a.name +
+                                          ". Relink it before collecting the project.")
+                                             .toStdString());
+            a.path = target(a.path, "media");
+        }
+        QSet<QString> families;
+        for (auto &c : project.clips) {
+            if (!c.lut.isEmpty() && QFileInfo(c.lut).isFile())
+                c.lut = target(c.lut, "luts");
+            if (c.assetId.isEmpty())
+                families.insert(c.fontFamily);
+        }
+        for (const auto &family : families)
+            if (m_fontFiles.contains(family))
+                target(m_fontFiles[family], "fonts");
+        project.name = dir.dirName();
+        const auto file = folder + "/" + project.name + ".cutlery";
+        qint64 total = 0;
+        for (const auto &c : *copies)
+            total += QFileInfo(c.from).size();
+        m_collect = {{"status", "copying"}, {"progress", 0.}, {"path", file}};
+        m_collectThread = QThread::create([this, copies, project, file, total] {
+            qint64 done = 0;
+            QString error;
+            try {
+                for (const auto &c : *copies) {
+                    if (QThread::currentThread()->isInterruptionRequested())
+                        throw std::runtime_error("Cancelled");
+                    QDir().mkpath(QFileInfo(c.to).absolutePath());
+                    if (!QFile::copy(c.from, c.to))
+                        throw std::runtime_error(
+                            ("Cannot copy " + QFileInfo(c.from).fileName()).toStdString());
+                    done += QFileInfo(c.to).size();
+                    const double progress = total > 0 ? double(done) / total : 1.;
+                    QMetaObject::invokeMethod(this, [this, progress] {
+                        m_collect["progress"] = progress;
+                        emit changed();
+                    });
+                }
+                QDir().mkpath(QFileInfo(file).absolutePath());
+                saveProject(project, file);
+            } catch (const std::exception &e) {
+                error = QString::fromUtf8(e.what());
+            }
+            QMetaObject::invokeMethod(this, [this, error, count = copies->size()] {
+                if (error.isEmpty()) {
+                    m_collect["status"] = "done";
+                    m_collect["progress"] = 1.;
+                    m_status = QString("Project collected with %1 file%2")
+                                   .arg(count)
+                                   .arg(count == 1 ? "" : "s");
+                } else {
+                    m_collect["status"] = "failed";
+                    m_collect["error"] = error;
+                    fail("Collecting failed: " + error);
+                }
+                emit changed();
+            });
+        });
+        connect(m_collectThread, &QThread::finished, this, [this] {
+            m_collectThread->deleteLater();
+            m_collectThread = nullptr;
+        });
+        m_collectThread->start();
+        emit changed();
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
 }
 void Editor::copy() {
     const auto *c = m_project.clip(m_selected);

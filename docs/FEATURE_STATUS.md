@@ -9,7 +9,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F003 | Drag/drop and background media analysis | Partial | Library-to-track and local file drops, async probing and waveform analysis, partial-error reporting; no directory recursion or cancellable import queue. |
 | F004 | Nondestructive media references | Implemented (alpha) | Relative project references; originals never edited. |
 | F005 | Missing-media relink and replace | Partial | Validated source relinking; no batch relink. |
-| F006 | Collect Project and portable media bundle | Planned | Not implemented in this alpha. |
+| F006 | Collect Project and portable media bundle | Implemented (alpha) | Project → "Collect project and media…" copies every media file, LUT and font added in Cutlery that the project uses into an empty folder (media/, luts/, fonts/ with clashing names numbered) and saves <folder>.cutlery there with relative paths, in the background with progress. Opening a project loads the fonts beside it. Refuses projects with missing media; no trimming of unused source ranges. |
 | F007 | Project schema migrations | Implemented (alpha) | Reads schema 1/2 without moving clips; writes schema 3 with stable track IDs and snapping/magnetic modes. Older versions cannot read new saves. |
 | F008 | Atomic save, autosave and rolling backup | Partial | Atomic save and one recovery file; no rolling backups. |
 | F009 | Undo/redo and deep edit history | Partial | 60 whole-project snapshots; no deep history persistence. |
