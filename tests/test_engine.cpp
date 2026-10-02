@@ -1948,6 +1948,47 @@ class EngineTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
         QCOMPARE(editor.project().assets.last().frameRate, 0.);
     }
+    void imageSequences() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Frames 7–18 of a half-transparent animation in a folder with a % sign, plus unrelated
+        // files and a gap after 18.
+        const auto folder = dir.filePath("100% render");
+        QVERIFY(QDir().mkpath(folder));
+        for (int i = 7; i <= 18; ++i) {
+            QImage frame(161, 90, QImage::Format_ARGB32);
+            frame.fill(Qt::transparent);
+            for (int y = 0; y < 90; ++y)
+                for (int x = 0; x < 80; ++x)
+                    frame.setPixelColor(x, y, QColor(255, 0, 0));
+            QVERIFY(frame.save(folder + QString("/shot_%1.png").arg(i, 4, 10, QChar('0'))));
+        }
+        QVERIFY(QImage(8, 8, QImage::Format_RGB32).save(folder + "/shot_0020.png"));
+        QVERIFY(QImage(8, 8, QImage::Format_RGB32).save(folder + "/other_0001.png"));
+        const auto info = Editor::imageSequence(folder + "/shot_0010.png");
+        QCOMPARE(info["start"].toLongLong(), qint64(7));
+        QCOMPARE(info["count"].toLongLong(), qint64(12));
+        QCOMPARE(info["pattern"].toString(), dir.filePath("100%% render") + "/shot_%04d.png");
+        QVERIFY(Editor::imageSequence(folder + "/other_0001.png").isEmpty()); // a single frame
+        QVERIFY(Editor::imageSequence(dir.filePath("plain.png")).isEmpty());
+
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importImageSequence(QUrl::fromLocalFile(folder + "/shot_0012.png"), 12);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 30000);
+        const auto a = editor.project().assets.first();
+        QCOMPARE(a.kind, QString("video"));
+        QVERIFY2(std::abs(a.duration - 1) < 0.05, qPrintable(QString::number(a.duration)));
+        QCOMPARE(a.width, 160); // even size for ProRes
+        // Transparency survives: the right half of a frame has no alpha.
+        const auto probe = QString::fromUtf8(run(Editor::executable("ffprobe"),
+            {"-v", "error", "-show_entries", "stream=pix_fmt,nb_frames", "-of", "compact", a.path}));
+        QVERIFY2(probe.contains("yuva444p") && probe.contains("nb_frames=12"), qPrintable(probe));
+        editor.importImageSequence(QUrl::fromLocalFile(dir.filePath("none_0001.png")), 12);
+        QVERIFY(editor.state()["error"].toString().contains("frame number"));
+    }
     void smoothSlowMotion() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

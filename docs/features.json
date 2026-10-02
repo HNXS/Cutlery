@@ -3771,8 +3771,8 @@
     "status": "Planned",
     "acceptance": "Missing-number sequence prompts for policy; exact frame count exported",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Project → \"Import image sequence…\": pick any frame of a numbered sequence (shot_0001.png …; PNG, JPEG, TIFF, BMP, WebP, EXR, DPX); the contiguous run around it is found, and FFmpeg turns it at a chosen frame rate into a ProRes 4444 video with alpha in the data folder's sequences/, which is imported as a normal clip. No live link to the image files; no image-sequence export."
   },
   {
     "id": "F152",

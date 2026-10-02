@@ -304,6 +304,10 @@ ApplicationWindow {
                 onTriggered: saveDialog.open()
             }
             MenuItem {
+                text: "Import image sequence…"
+                onTriggered: sequenceFile.open()
+            }
+            MenuItem {
                 objectName: "collectProject"
                 text: (win.s.collect || {}).status === "copying" ? "Collecting… " + Math.round(100 * (win.s.collect.progress || 0)) + "%" : "Collect project and media…"
                 enabled: (win.s.collect || {}).status !== "copying"
@@ -2281,6 +2285,49 @@ ApplicationWindow {
         id: collectDialog
         title: "Collect project into an empty folder"
         onAccepted: editor.collectProject(selectedFolder)
+    }
+    FileDialog {
+        id: sequenceFile
+        title: "Choose any image of the numbered sequence"
+        nameFilters: ["Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.exr *.dpx)"]
+        onAccepted: {
+            sequenceDialog.file = selectedFile;
+            sequenceDialog.info = editor.imageSequenceAt(selectedFile);
+            sequenceDialog.open();
+        }
+    }
+    Dialog {
+        id: sequenceDialog
+        objectName: "sequenceDialog"
+        property url file
+        property var info: ({})
+        anchors.centerIn: parent
+        title: "Import image sequence"
+        modal: true
+        width: 380
+        standardButtons: info.count ? Dialog.Ok | Dialog.Cancel : Dialog.Close
+        ColumnLayout {
+            width: parent.width
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: sequenceDialog.info.count ? sequenceDialog.info.count + " images, numbered from " + sequenceDialog.info.start + ". They become one video clip (transparency is kept)." : "This image is not part of a numbered sequence (e.g. shot_0001.png, shot_0002.png …)."
+            }
+            RowLayout {
+                visible: !!sequenceDialog.info.count
+                Label { text: "Frames per second" }
+                SpinBox {
+                    id: sequenceRate
+                    objectName: "sequenceRate"
+                    from: 1
+                    to: 120
+                    editable: true
+                    value: Math.round(win.s.fps || 30)
+                }
+            }
+        }
+        onAccepted: if (info.count)
+            editor.importImageSequence(file, sequenceRate.value)
     }
     FileDialog {
         id: fontFileDialog

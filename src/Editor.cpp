@@ -1626,6 +1626,118 @@ void Editor::conformFrameRate() {
     process->start(executable("ffmpeg"), args);
     emit changed();
 }
+QVariantMap Editor::imageSequence(const QString &file) {
+    const QFileInfo info(file);
+    static const QRegularExpression numbered("^(.*?)(\\d+)\\.(png|jpe?g|tiff?|bmp|webp|exr|dpx)$",
+                                             QRegularExpression::CaseInsensitiveOption);
+    const auto m = numbered.match(info.fileName());
+    if (!m.hasMatch())
+        return {};
+    const auto prefix = m.captured(1), digits = m.captured(2), ext = m.captured(3);
+    // Siblings with the same prefix, digit count and extension, numbered without gaps from the
+    // chosen file's number down and up.
+    QSet<qint64> numbers;
+    const QRegularExpression sibling("^" + QRegularExpression::escape(prefix) + "(\\d{" +
+                                         QString::number(digits.size()) + "})\\." +
+                                         QRegularExpression::escape(ext) + "$",
+                                     QRegularExpression::CaseInsensitiveOption);
+    for (const auto &name : info.dir().entryList(QDir::Files)) {
+        const auto s = sibling.match(name);
+        if (s.hasMatch())
+            numbers.insert(s.captured(1).toLongLong());
+    }
+    qint64 start = digits.toLongLong(), end = start;
+    while (numbers.contains(start - 1))
+        --start;
+    while (numbers.contains(end + 1))
+        ++end;
+    if (end - start + 1 < 2)
+        return {};
+    // FFmpeg's image2 pattern: a literal % in the folder or name is written %%.
+    auto literal = info.dir().filePath(prefix);
+    literal.replace("%", "%%");
+    return {{"pattern", literal + "%0" + QString::number(digits.size()) + "d." + ext},
+            {"start", start},
+            {"count", end - start + 1},
+            {"name", prefix.isEmpty() ? info.dir().dirName() : prefix}};
+}
+void Editor::importImageSequence(const QUrl &firstImage, double fps) {
+    if (m_job || m_busy)
+        return fail("Wait for the current job to finish");
+    QString path;
+    try {
+        path = localPath(firstImage);
+    } catch (const std::exception &e) {
+        return fail(e.what());
+    }
+    const auto sequence = imageSequence(path);
+    if (sequence.isEmpty())
+        return fail("Choose an image whose name ends in a frame number, e.g. shot_0001.png, with "
+                    "the following frames beside it");
+    if (!std::isfinite(fps) || fps < 1 || fps > 120)
+        return fail("Choose a frame rate of 1–120 fps");
+    QDir().mkpath(m_data + "/sequences");
+    auto name = sequence["name"].toString();
+    name.remove(QRegularExpression("[^A-Za-z0-9_-]+$"));
+    const auto output = m_data + "/sequences/" + (name.isEmpty() ? "sequence" : name) + "-" +
+                        newId().left(8) + ".mov";
+    const auto temp = output + ".part.mov";
+    const auto count = sequence["count"].toLongLong();
+    auto *process = new QProcess(this);
+    m_job = process;
+    m_busy = true;
+    m_cancelled = false;
+    m_progress = 0;
+    m_status = QString("Importing %1 images…").arg(count);
+    auto pending = std::make_shared<QByteArray>();
+    auto log = std::make_shared<QByteArray>();
+    connect(process, &QProcess::readyReadStandardError, this, [process, log] {
+        *log += process->readAllStandardError();
+        if (log->size() > 16000)
+            *log = log->right(8000);
+    });
+    connect(process, &QProcess::readyReadStandardOutput, this, [this, process, pending, count] {
+        *pending += process->readAllStandardOutput();
+        int i;
+        while ((i = pending->indexOf('\n')) >= 0) {
+            const auto line = pending->left(i);
+            pending->remove(0, i + 1);
+            if (line.startsWith("frame="))
+                m_progress = std::clamp(line.mid(6).toDouble() / count, 0., 1.);
+        }
+        emit changed();
+    });
+    auto complete = [this, process, temp, output, log](bool success) {
+        m_job = nullptr;
+        m_busy = false;
+        process->deleteLater();
+        if (m_cancelled || !success || !QFile::rename(temp, output)) {
+            QFile::remove(temp);
+            if (!m_cancelled)
+                fail("Image sequence import failed. " + QString::fromUtf8(*log).right(1000));
+            emit changed();
+            return;
+        }
+        importMedia({QUrl::fromLocalFile(output)});
+    };
+    connect(process, &QProcess::finished, this, [complete](int code, QProcess::ExitStatus status) {
+        complete(code == 0 && status == QProcess::NormalExit);
+    });
+    connect(process, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart)
+            complete(false);
+    });
+    // ProRes 4444 keeps transparency (e.g. rendered animations) and edits smoothly; even sizes
+    // are required by the codec's chroma layout.
+    process->start(executable("ffmpeg"),
+                   {"-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-framerate",
+                    QString::number(fps, 'f', 6), "-start_number",
+                    QString::number(sequence["start"].toLongLong()), "-f", "image2", "-i",
+                    sequence["pattern"].toString(), "-frames:v", QString::number(count), "-vf",
+                    "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "prores_ks", "-profile:v", "4",
+                    "-pix_fmt", "yuva444p10le", "-progress", "pipe:1", temp});
+    emit changed();
+}
 void Editor::copy() {
     const auto *c = m_project.clip(m_selected);
     if (!c)

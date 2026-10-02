@@ -5,6 +5,7 @@
 Projects are saved as schema 11; 0.5 cannot open them.
 
 - **Colour and look:** temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with a strength slider; eight one-click looks.
+- **Image sequences:** numbered frames (e.g. rendered animations) import as one clip, transparency included.
 - **Variable frame rate:** phone and screen recordings with irregular frame timing are flagged, and can be converted to a constant-rate editing copy.
 - **Collect project:** copies the project with all media, LUTs and added fonts into one folder, ready to archive or move.
 - **Markers and in/out:** markers (M) with names and colours; in and out points (I, O) and export of just that range.

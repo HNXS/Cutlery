@@ -116,6 +116,15 @@ class Editor final : public QObject {
     // PCM in the data folder's conformed/) and relinks the media to it. State "conform":
     // {status: converting|done|failed, progress, assetId}.
     Q_INVOKABLE void conformFrameRate();
+    // Imports the numbered image sequence that `firstImage` belongs to (e.g. shot_0001.png …)
+    // at `fps`: FFmpeg turns it into a ProRes 4444 video (alpha kept) in the data folder's
+    // sequences/, which is then imported like any video.
+    Q_INVOKABLE void importImageSequence(const QUrl &firstImage, double fps);
+    // The sequence `file` belongs to: {pattern (FFmpeg %0Nd), start, count}; empty if none.
+    static QVariantMap imageSequence(const QString &file);
+    Q_INVOKABLE QVariantMap imageSequenceAt(const QUrl &file) const {
+        return file.isLocalFile() ? imageSequence(file.toLocalFile()) : QVariantMap{};
+    }
     // Clipboard for clips within the session, also across projects (the media comes along).
     Q_INVOKABLE void copy();
     // Inserts the copied clip at the playhead on its track.

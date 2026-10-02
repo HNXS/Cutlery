@@ -35,6 +35,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
   - Offline AI background removal for speakers without a green screen.
 - Offline AI upscaling (Real-ESRGAN) of low-resolution video clips to up to 4K. Both AI features use the GPU through DirectML when available, run in the background once per media file and need the separate [AI pack](docs/AI.md).
 - Static transforms, equal-edge crop, horizontal flip, opacity, brightness/contrast/saturation, blur, clip fades.
+- **Image sequences** (Project menu): numbered frames import as one video clip at a chosen frame rate, with transparency.
 - **Variable frame rate** (phone/screen recordings) is detected on import; "Convert to constant frame rate" makes an even editing copy.
 - **Collect project and media** (Project menu): one folder with the project, its media, LUTs and added fonts, for archiving or moving to another PC.
 - **Markers and in/out:** M adds a marker (double-click to rename), Ctrl+Left/Right jump between them; I and O set a range the export dialog can export alone.

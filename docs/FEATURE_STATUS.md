@@ -154,7 +154,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F148 | WAV, MP3, AAC, FLAC, OGG, Opus and M4A | Partial | FFmpeg-based audio import; limited corpus. |
 | F149 | PNG, JPEG, WebP, BMP, TIFF and GIF | Partial | Still images; animated formats not qualified. |
 | F150 | HEIF/HEIC import | Planned | Not implemented in this alpha. |
-| F151 | Numbered image sequences | Planned | Not implemented in this alpha. |
+| F151 | Numbered image sequences | Partial | Project → "Import image sequence…": pick any frame of a numbered sequence (shot_0001.png …; PNG, JPEG, TIFF, BMP, WebP, EXR, DPX); the contiguous run around it is found, and FFmpeg turns it at a chosen frame rate into a ProRes 4444 video with alpha in the data folder's sequences/, which is imported as a normal clip. No live link to the image files; no image-sequence export. |
 | F152 | Variable frame rate and timestamp repair | Partial | Import detects variable frame rate (nominal and average rates differ by more than 1 %) and the inspector flags it. Playback and export already place frames by timestamp. "Convert to constant frame rate" makes a ProRes 422 + PCM editing copy at the nearest standard rate in the data folder and relinks the media, keeping clip trims. No automatic conversion on import; no repair of broken timestamps beyond the re-encode. |
 | F153 | MP4/H.264/AAC export | Implemented (alpha) | H.264 via NVENC, AMF, Quick Sync or Media Foundation, whichever passes a probe; no software H.264 encoder in the LGPL build. |
 | F154 | MOV and mezzanine/alpha workflow | Partial | ProRes 422 HQ/422/LT MOV export with PCM audio; no alpha-channel export. |
