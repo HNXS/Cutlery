@@ -4,7 +4,7 @@ Cutlery's AI features run on your computer without accounts, uploads or network 
 
 ## Installing the AI pack
 
-1. Download `Cutlery-0.4.0-AI-pack` from the same build as `Cutlery-0.4.0-win64-portable`.
+1. Download `Cutlery-0.5.0-AI-pack` from the same build as `Cutlery-0.5.0-win64-portable`.
 2. Extract it into the Cutlery folder, so that the `models` folder sits next to `Cutlery.exe`.
 3. Restart Cutlery.
 

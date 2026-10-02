@@ -1,4 +1,4 @@
-# What remains after 0.4
+# What remains after 0.5
 
 The [187-row feature matrix](FEATURE_STATUS.md) is the detailed status record. The [original blueprint](BLUEPRINT.md) remains the product/engineering scope. Existing code paths are alpha implementations, not production qualification or full CapCut parity.
 

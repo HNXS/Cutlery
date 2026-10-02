@@ -16,7 +16,7 @@ ctest --test-dir build -C Release --output-on-failure
 ./tools/Package-Windows.ps1 -QtRoot C:/Qt/6.8.3/msvc2022_64 -FFmpegBin $ff
 ```
 
-The package goes to `dist/Cutlery-0.4.0-win64-portable`. Copy the entire directory. Do not copy only the EXE. The GitHub Actions workflow repeats the build, tests, QML startup, deployment and a deployed-executable startup check without SDK paths.
+The package goes to `dist/Cutlery-0.5.0-win64-portable`. Copy the entire directory. Do not copy only the EXE. The GitHub Actions workflow repeats the build, tests, QML startup, deployment and a deployed-executable startup check without SDK paths.
 
 ## Linux (development verification only)
 

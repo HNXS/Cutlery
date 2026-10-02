@@ -1,4 +1,4 @@
-# Feature status — 0.4.0 alpha
+# Feature status — 0.5.0 alpha
 
 The original 187 rows remain the design scope, not a claim of completion. “Implemented (alpha)” means a present code path, not production qualification. Partial rows list their actual boundary. Acceptance criteria in `features.json` remain the original future gates.
 

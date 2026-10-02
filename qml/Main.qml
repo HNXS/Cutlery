@@ -1709,7 +1709,7 @@ ApplicationWindow {
                     implicitHeight: 25
                 }
                 Label {
-                    text: "0.4.0 ALPHA"
+                    text: "0.5.0 ALPHA"
                     font.pixelSize: 9
                     font.letterSpacing: 1
                     color: win.mint
@@ -2181,7 +2181,7 @@ ApplicationWindow {
     Dialog {
         id: about
         anchors.centerIn: parent
-        title: "Cutlery · 0.4.0 alpha"
+        title: "Cutlery · 0.5.0 alpha"
         modal: true
         width: 490
         standardButtons: Dialog.Ok
