@@ -1493,6 +1493,53 @@ class EngineTest : public QObject {
         QVERIFY(count(image, true, true) + count(image, false, true) == 0);
         QVERIFY(count(image, true, false) + count(image, false, false) > 50);
     }
+    void sceneDetection() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Three shots of 1 s (red, green, blue) with sound, and a 0.2 s white flash in the last.
+        const auto source = dir.filePath("shots.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "color=red:s=160x90:r=30:d=1[a];color=lime:s=160x90:r=30:d=1[b];"
+                     "color=blue:s=160x90:r=30:d=0.4[c];color=white:s=160x90:r=30:d=0.2[d];"
+                     "color=blue:s=160x90:r=30:d=0.4[e];[a][b][c][d][e]concat=n=5:v=1:a=0",
+                     "-f", "lavfi", "-i", "sine=d=3", "-c:v", "ffv1", "-c:a", "pcm_s16le",
+                     "-shortest", source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto id = editor.project().clips.first().id;
+        editor.select(id);
+        editor.detachAudio();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        editor.select(id);
+        QVERIFY(editor.state()["selected"].toMap()["video"].toBool());
+        editor.splitAtScenes(0.5);
+        QCOMPARE(editor.state()["scenes"].toMap()["status"].toString(), QString("finding"));
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["scenes"].toMap()["status"].toString(),
+                                  QString("done"), 30000);
+        QCOMPARE(editor.state()["scenes"].toMap()["count"].toInt(), 2);
+        // Video and detached audio are both cut at 1 s and 2 s; the flash is too short to split.
+        QCOMPARE(editor.project().clips.size(), size_t(6));
+        QVector<qint64> videoStarts, audioStarts;
+        for (const auto &c : editor.project().clips)
+            (c.audioOnly ? audioStarts : videoStarts) << c.start;
+        std::sort(videoStarts.begin(), videoStarts.end());
+        std::sort(audioStarts.begin(), audioStarts.end());
+        QCOMPARE(videoStarts, (QVector<qint64>{0, 30, 60}));
+        QCOMPARE(audioStarts, videoStarts);
+        QCOMPARE(editor.project().clip(id)->duration, qint64(30));
+        QCOMPARE(editor.project().clip(id)->start, qint64(0));
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        // Titles have no shots.
+        editor.addTitle();
+        editor.splitAtScenes();
+        QVERIFY(editor.state()["error"].toString().contains("video clip"));
+    }
     void clipboardAndAudioExport() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

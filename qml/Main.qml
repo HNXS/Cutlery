@@ -1486,6 +1486,17 @@ ApplicationWindow {
                                 text: "Remove pauses…"
                                 onClicked: pauseDialog.open()
                             }
+                            Action {
+                                objectName: "splitScenes"
+                                Layout.fillWidth: true
+                                visible: win.selection.video === true && win.selection.reverse !== true
+                                readonly property bool finding: (win.s.scenes || {}).status === "finding"
+                                enabled: win.selection.locked !== true && !finding
+                                text: finding ? "Finding scene changes…" : "Split at scene changes"
+                                onClicked: editor.splitAtScenes(0.5)
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Cuts the clip into its shots, e.g. a long recording or a downloaded video. Undo restores it."
+                            }
                             AiOption {
                                 task: "upscale"
                                 flag: "aiUpscale"

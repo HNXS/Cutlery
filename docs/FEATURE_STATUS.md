@@ -134,7 +134,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F128 | Video relighting | Planned | Not implemented in this alpha. |
 | F129 | Object/text/people removal and inpainting | Planned | Not implemented in this alpha. |
 | F130 | Image merge and photo editing | Planned | Not implemented in this alpha. |
-| F131 | Automatic scene detection | Planned | Not implemented in this alpha. |
+| F131 | Automatic scene detection | Partial | "Split at scene changes" on a video clip: FFmpeg scdet on a 320-pixel copy of the clip's source range finds shot changes; the clip and its detached audio are split there in one undo step, ignoring shots under 0.5 s. Fixed sensitivity in the UI; no review list before splitting. |
 | F132 | Long video to shorts and highlight proposals | Planned | Not implemented in this alpha. |
 | F133 | Intelligent proxy generation | Planned | Not implemented in this alpha. |
 | F134 | Local AI image generator | Planned | Not implemented in this alpha. |

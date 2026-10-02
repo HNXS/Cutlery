@@ -3271,8 +3271,8 @@
     "status": "Planned",
     "acceptance": "Labeled hard-cut corpus precision/recall >=0.95 target",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "\"Split at scene changes\" on a video clip: FFmpeg scdet on a 320-pixel copy of the clip's source range finds shot changes; the clip and its detached audio are split there in one undo step, ignoring shots under 0.5 s. Fixed sensitivity in the UI; no review list before splitting."
   },
   {
     "id": "F132",

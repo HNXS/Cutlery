@@ -142,6 +142,9 @@ class Editor final : public QObject {
     // clip's track and on tracks with its detached audio. One undo step.
     Q_INVOKABLE void findPauses(double thresholdDb, double minPause);
     Q_INVOKABLE void removePauses();
+    // Finds the shot changes in the selected video clip and splits it there, with any detached
+    // audio, in one undo step. Sensitivity 0..1: higher finds subtler cuts.
+    Q_INVOKABLE void splitAtScenes(double sensitivity = 0.5);
     // Automatic captions: transcribes every audible clip's media (language "auto", "de", "en",
     // ...) and puts the captions on the "AI captions" track, replacing earlier ones.
     // `style`: "" plain lines, "karaoke" (spoken word highlighted), "word" (one word at a time).
@@ -189,6 +192,8 @@ class Editor final : public QObject {
         qint64 revision = -1;
     } m_pauses;
     QProcess *m_pauseProcess = nullptr;
+    QProcess *m_sceneProcess = nullptr;
+    QVariantMap m_scenes; // splitAtScenes(): status finding|done|failed, count
     QVariantMap pauseState() const;
     struct DropBatch {
         QString trackId;

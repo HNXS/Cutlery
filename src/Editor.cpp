@@ -118,7 +118,7 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
 Editor::~Editor() {
     if (m_dirty)
         autosave();
-    for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess})
+    for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess, m_sceneProcess})
         if (p) {
             p->disconnect(this);
             p->kill();
@@ -291,6 +291,8 @@ QVariantMap Editor::state() const {
                         {"audioOnly", c.audioOnly},
                         {"picture", !c.audioOnly && m_project.asset(c.assetId) &&
                                         m_project.asset(c.assetId)->kind != "audio"},
+                        {"video", !c.audioOnly && m_project.asset(c.assetId) &&
+                                      m_project.asset(c.assetId)->kind == "video"},
                         {"locked", m_project.trackSettings[c.track].locked},
                         {"canDetach", !c.audioOnly && m_project.asset(c.assetId) &&
                                           m_project.asset(c.assetId)->kind == "video" &&
@@ -407,6 +409,7 @@ QVariantMap Editor::state() const {
                                       {"transcribe", m_ai->missing("transcribe")}}},
             {"captions", captionState()},
             {"pauses", pauseState()},
+            {"scenes", m_scenes},
             {"loudness", [this] {
                  auto l = m_mixLoudness;
                  // A measurement describes the mix it was made on.
@@ -1479,6 +1482,78 @@ void Editor::findPauses(double thresholdDb, double minPause) {
                   .arg(thresholdDb, 0, 'f', 1)
                   .arg(minPause, 0, 'f', 3),
               "-f", "null", "-"});
+    emit changed();
+}
+void Editor::splitAtScenes(double sensitivity) {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || a->kind != "video" || c->audioOnly)
+        return fail("Select a video clip to split at scene changes");
+    if (c->reverse)
+        return fail("Reversed clips cannot be split at scene changes");
+    if (m_sceneProcess)
+        return;
+    const double speed = c->speed.seconds(), in = c->sourceIn.seconds(),
+                 fps = double(m_project.fpsN) / m_project.fpsD,
+                 length = c->duration / fps * speed;
+    // FFmpeg's scene score (0–100) above which a frame starts a new shot.
+    const double threshold = 25 - 20 * std::clamp(sensitivity, 0., 1.);
+    m_scenes = {{"status", "finding"}};
+    auto *p = new QProcess(this);
+    m_sceneProcess = p;
+    auto log = std::make_shared<QByteArray>();
+    connect(p, &QProcess::readyReadStandardError, this,
+            [p, log] { *log += p->readAllStandardError(); });
+    auto complete = [this, p, log, id = c->id, revision = m_revision, start = c->start,
+                     frames = c->duration, speed, fps](bool success) {
+        *log += p->readAllStandardError();
+        p->deleteLater();
+        m_sceneProcess = nullptr;
+        if (!success) {
+            m_scenes = {{"status", "failed"}};
+            emit changed();
+            return;
+        }
+        if (revision != m_revision) {
+            m_scenes = {};
+            return fail("The clip changed while scenes were found; try again");
+        }
+        // "lavfi.scd.time: T" in seconds from the start of the analysed range. Shots shorter
+        // than half a second are not split off (flashes, fast pans).
+        static const QRegularExpression mark("lavfi\\.scd\\.time: (-?[0-9.]+)");
+        const qint64 shortest = std::max<qint64>(1, qRound64(0.5 * fps));
+        QVector<qint64> cuts;
+        for (auto it = mark.globalMatch(QString::fromUtf8(*log)); it.hasNext();) {
+            const auto local = qRound64(it.next().captured(1).toDouble() / speed * fps);
+            if (local >= shortest && local <= frames - shortest &&
+                (cuts.isEmpty() || local - cuts.last() >= shortest))
+                cuts << local;
+        }
+        if (!cuts.isEmpty())
+            mutate([&](Project &project) {
+                const auto linked = project.linkedClips(id);
+                // From the end, so the original keeps its id as the first shot.
+                for (auto it = cuts.rbegin(); it != cuts.rend(); ++it)
+                    for (const auto &clipId : QStringList{id} + linked)
+                        project.split(clipId, start + *it);
+            });
+        m_scenes = {{"status", "done"}, {"count", cuts.size()}};
+        m_status = cuts.isEmpty() ? QString("No scene changes found")
+                                  : QString("Split into %1 shots").arg(cuts.size() + 1);
+        emit changed();
+    };
+    connect(p, &QProcess::finished, this, [complete](int code, QProcess::ExitStatus status) {
+        complete(code == 0 && status == QProcess::NormalExit);
+    });
+    connect(p, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart)
+            complete(false);
+    });
+    p->start(executable("ffmpeg"),
+             {"-hide_banner", "-nostdin", "-nostats", "-ss", QString::number(in, 'f', 6), "-t",
+              QString::number(length, 'f', 6), "-i", a->path, "-map", "0:v:0", "-an", "-sn",
+              "-vf", QString("scale=320:-2,scdet=threshold=%1").arg(threshold, 0, 'f', 1), "-f",
+              "null", "-"});
     emit changed();
 }
 void Editor::removePauses() {
