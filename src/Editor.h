@@ -6,6 +6,7 @@
 #include "AiJobs.h"
 #include "Project.h"
 #include "Scopes.h"
+#include "SoundLibrary.h"
 #include <QObject>
 #include <QProcess>
 #include <QQuickImageProvider>
@@ -216,6 +217,15 @@ class Editor final : public QObject {
     // `every`-th one (1, 2 or 4), asynchronously (state "beats": status finding|done|failed,
     // count, bpm). Existing markers stay; one undo step.
     Q_INVOKABLE void markBeats(int every = 1);
+    // Sound effects: Cutlery's own (clicks, typing, swooshes) and those of an installed pack.
+    // Each entry: id, name, category, seconds, licence, source, builtIn.
+    Q_INVOKABLE QVariantList sounds() const;
+    // The sound's file, written first for built-in sounds; empty on failure.
+    Q_INVOKABLE QUrl soundFile(const QString &id);
+    // Adds the sound at the playhead on the first track with room (or a new one). One undo step.
+    Q_INVOKABLE void addSound(const QString &id);
+    // Adds the sound at every transition, loudest at the cut, skipping cuts that have it already.
+    Q_INVOKABLE void addSoundAtTransitions(const QString &id);
     // Automatic captions: transcribes every audible clip's media (language "auto", "de", "en",
     // ...) and puts the captions on the "AI captions" track, replacing earlier ones.
     // `style`: "" plain lines, "karaoke" (spoken word highlighted), "word" (one word at a time).
@@ -269,6 +279,9 @@ class Editor final : public QObject {
     const Clip *videoBelow(const Clip &c) const;
     // The track nearest `home` with room for [start, start + length), or a new one on top.
     static int freeTrack(Project &, int home, qint64 start, qint64 length);
+    QVector<Sound> soundList() const;
+    // Places the sound's clip with its start at `frame`; returns false when one is there already.
+    bool placeSound(Project &, const Sound &, qint64 frame);
     QMediaCaptureSession *m_voiceSession = nullptr;
     QAudioInput *m_voiceInput = nullptr;
     QMediaRecorder *m_voiceRecorder = nullptr;

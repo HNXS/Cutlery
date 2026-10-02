@@ -6,6 +6,7 @@
 #include "Project.h"
 #include "RenderGraph.h"
 #include "Scopes.h"
+#include "SoundLibrary.h"
 #include "Thumbnails.h"
 #include <QJsonArray>
 #include <QPainter>
@@ -266,6 +267,164 @@ class EngineTest : public QObject {
         frames.live = grey;
         QCOMPARE(frames.requestImage("scope/vectorscope/live/2", &size, {}), renderScope(grey, "vectorscope"));
         QCOMPARE(frames.requestImage("7", &size, {}), picture);
+    }
+    void soundEffects() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        constexpr int rate = 48000;
+        // Mean absolute level of a channel (0 left, 1 right) between two times.
+        auto level = [](const QVector<float> &x, int channel, double from, double to) {
+            double sum = 0;
+            qsizetype n = 0;
+            for (qsizetype i = qsizetype(from * rate); i < qsizetype(to * rate) && 2 * i + 1 < x.size(); ++i, ++n)
+                sum += std::abs(x[2 * i + channel]);
+            return n ? sum / n : 0.;
+        };
+        // Times where the sound jumps from quiet to loud (key and button hits).
+        auto hits = [&](const QVector<float> &x) {
+            QVector<double> times;
+            const double window = 0.004;
+            double before = 0;
+            for (double t = 0; t + window < x.size() / 2. / rate; t += window) {
+                const double now = level(x, 0, t, t + window) + level(x, 1, t, t + window);
+                if (now > 0.05 && now > 4 * before && (times.isEmpty() || t - times.last() > 0.03))
+                    times << t;
+                before = now;
+            }
+            return times;
+        };
+        const auto library = soundLibrary(dir.filePath("generated"), {});
+        QStringList ids;
+        for (const auto &s : library) {
+            QVERIFY(s.builtIn && !s.name.isEmpty() && !s.licence.isEmpty());
+            ids << s.id;
+            const auto samples = synthesizeSound(s.id, rate);
+            QCOMPARE(samples.size(), qsizetype(std::round(s.seconds * rate)) * 2);
+            float peak = 0;
+            for (const auto v : samples)
+                peak = std::max(peak, std::abs(v));
+            QVERIFY2(std::abs(peak - 0.7f) < 0.01f, qPrintable(s.id));
+            QCOMPARE(synthesizeSound(s.id, rate), samples); // the same every time
+        }
+        QCOMPARE(ids, (QStringList{"click", "double-click", "typing-short", "typing", "typing-long",
+                                   "swoosh", "swoosh-slow"}));
+        QVERIFY(synthesizeSound("nope").isEmpty());
+        // A click: the press at the start, a softer release, then silence.
+        const auto click = synthesizeSound("click", rate);
+        const auto clickHits = hits(click);
+        QVERIFY2(clickHits.size() == 2 && clickHits[0] < 0.01 && std::abs(clickHits[1] - 0.09) < 0.015,
+                 qPrintable(QString::number(clickHits.size())));
+        QVERIFY(level(click, 0, 0.2, 0.25) < 0.001);
+        const auto doubled = hits(synthesizeSound("double-click", rate));
+        QCOMPARE(doubled.size(), 4);
+        QVERIFY(std::abs(doubled[2] - doubled[0] - 0.16) < 0.01);
+        // Typing: between about 4 and 12 key presses a second (each press has a release).
+        const auto typing = hits(synthesizeSound("typing", rate));
+        QVERIFY2(typing.size() >= 2 * 5 * 3 && typing.size() <= 2 * 5 * 12, qPrintable(QString::number(typing.size())));
+        // A swoosh rises and falls, moves from left to right, and is brighter in the middle.
+        const auto swoosh = synthesizeSound("swoosh", rate);
+        QVERIFY(level(swoosh, 0, 0.2, 0.3) > 3 * level(swoosh, 0, 0, 0.02));
+        QVERIFY(level(swoosh, 0, 0.6, 0.7) < level(swoosh, 0, 0.2, 0.3) / 3);
+        QVERIFY(level(swoosh, 0, 0.05, 0.15) > 1.5 * level(swoosh, 1, 0.05, 0.15));
+        QVERIFY(level(swoosh, 1, 0.5, 0.6) > 1.5 * level(swoosh, 0, 0.5, 0.6));
+
+        // Files: written once as WAV that FFmpeg reads at the right length.
+        auto sound = library[0];
+        ensureSoundFile(sound);
+        QVERIFY(QFileInfo(sound.path).size() > 1000);
+        const auto modified = QFileInfo(sound.path).lastModified();
+        ensureSoundFile(sound);
+        QCOMPARE(QFileInfo(sound.path).lastModified(), modified);
+        const auto pcm = run(ffmpeg, {"-v", "error", "-i", sound.path, "-f", "f32le", "-ac", "2", "-ar", "48000", "pipe:1"});
+        QCOMPARE(pcm.size(), click.size() * 4);
+
+        // A recorded pack: entries need an id, name, licence and a plain file name that exists.
+        const auto pack = dir.filePath("pack");
+        QVERIFY(QDir().mkpath(pack));
+        QVERIFY(QFile::copy(sound.path, pack + "/rec.wav"));
+        {
+            QFile f(pack + "/sounds.json");
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(R"([{"id":"rec","file":"rec.wav","name":"Recorded click","category":"Clicks","seconds":0.25,"licence":"CC0 1.0","source":"Test"},
+                        {"id":"gone","file":"gone.wav","name":"Missing","licence":"CC0 1.0"},
+                        {"id":"up","file":"../rec.wav","name":"Outside","licence":"CC0 1.0"},
+                        {"id":"free","file":"rec.wav","name":"No licence"}])");
+        }
+        const auto withPack = soundLibrary(dir.filePath("generated"), pack);
+        QCOMPARE(withPack.size(), library.size() + 1);
+        QCOMPARE(withPack.last().id, QString("pack:rec"));
+        QCOMPARE(withPack.last().licence, QString("CC0 1.0"));
+        QVERIFY(!withPack.last().builtIn);
+
+        // In the editor: at the playhead on a free track, once; and a swoosh at each transition.
+        qputenv("CUTLERY_SOUNDS_DIR", pack.toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        QCOMPARE(editor.sounds().size(), library.size() + 1);
+        QImage still(160, 90, QImage::Format_RGB32);
+        still.fill(Qt::darkGreen);
+        QVERIFY(still.save(dir.filePath("still.png")));
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("still.png"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        const auto image = editor.project().assets.first().id;
+        editor.addAsset(image);
+        editor.addAsset(image);
+        editor.addAsset(image);
+        QCOMPARE(editor.project().clips.size(), size_t(3));
+        editor.seek(30);
+        editor.addSound("click");
+        const auto added = editor.project().clips.back();
+        QCOMPARE(added.start, 30);
+        QCOMPARE(added.duration, 7); // 0.25 s
+        QVERIFY(added.track != 0); // track 0 is taken by the pictures
+        QCOMPARE(editor.project().asset(added.assetId)->kind, QString("audio"));
+        QVERIFY(editor.soundFile("click").isLocalFile());
+        editor.addSound("click");
+        QVERIFY(editor.state()["error"].toString().contains("already"));
+        editor.clearError();
+        editor.addSound("pack:rec");
+        QCOMPARE(editor.project().assets.size(), size_t(3));
+        editor.undo();
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), size_t(3));
+        editor.addSoundAtTransitions("swoosh");
+        QVERIFY(editor.state()["error"].toString().contains("No transitions"));
+        editor.clearError();
+        const auto second = editor.project().clips[1], third = editor.project().clips[2];
+        editor.select(second.id);
+        editor.setClip("transition", "fade");
+        editor.select(third.id);
+        editor.setClip("transition", "fade");
+        editor.addSoundAtTransitions("swoosh");
+        QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+        QCOMPARE(editor.project().clips.size(), size_t(5));
+        const qint64 lead = qRound64(0.32 * 0.7 * 30);
+        QCOMPARE(editor.project().clips[3].start, second.start - lead);
+        QCOMPARE(editor.project().clips[4].start, third.start - lead);
+        editor.addSoundAtTransitions("swoosh");
+        QVERIFY(editor.state()["error"].toString().contains("already"));
+        editor.clearError();
+        // The swoosh is heard in the rendered mix.
+        RenderOptions options;
+        options.video = false;
+        const auto plan = compileRender(editor.project(), dir.filePath("work"), 160, 90, options);
+        const auto graph = dir.filePath("graph.txt");
+        {
+            QFile g(graph);
+            QVERIFY(g.open(QIODevice::WriteOnly));
+            g.write(plan.graph.toUtf8());
+        }
+        QStringList args{"-v", "error"};
+        args += plan.inputs;
+        args << "-filter_complex_script" << graph << "-map" << "[aout]" << "-f" << "f32le" << "-ac" << "2" << "-ar" << "48000" << "pipe:1";
+        const auto mixed = run(ffmpeg, args);
+        QVector<float> mix(mixed.size() / 4);
+        std::memcpy(mix.data(), mixed.constData(), size_t(mix.size()) * 4);
+        const double cut = second.start / 30.;
+        QVERIFY(level(mix, 0, cut - 0.05, cut + 0.05) > 20 * std::max(1e-5, level(mix, 0, 0.5, 1)));
+        qunsetenv("CUTLERY_SOUNDS_DIR");
     }
     void remoteReferencesRejected() {
         QTemporaryDir dir;
