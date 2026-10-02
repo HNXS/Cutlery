@@ -713,10 +713,22 @@ ApplicationWindow {
                         }
                     }
                     Rule {}
-                    Action {
-                        text: "+ Add title"
+                    RowLayout {
                         Layout.fillWidth: true
-                        onClicked: editor.addTitle()
+                        Action {
+                            text: "+ Add title"
+                            Layout.fillWidth: true
+                            onClicked: editor.addTitle()
+                        }
+                        // Sound effects: clicks, typing and swooshes for tutorials and screen videos.
+                        Action {
+                            objectName: "openSounds"
+                            text: "♪ Sounds…"
+                            Layout.fillWidth: true
+                            onClicked: soundDialog.open()
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Sound effects: mouse clicks, keyboard typing and whooshes, free to use"
+                        }
                     }
                     RowLayout {
                         Layout.fillWidth: true
@@ -792,15 +804,6 @@ ApplicationWindow {
                                 }
                             }
                         }
-                    }
-                    // Sound effects: clicks, typing and swooshes for tutorials and screen videos.
-                    Action {
-                        objectName: "openSounds"
-                        text: "♪ Sound effects…"
-                        Layout.fillWidth: true
-                        onClicked: soundDialog.open()
-                        ToolTip.visible: hovered
-                        ToolTip.text: "Mouse clicks, keyboard typing and swooshes, free to use"
                     }
                     Caption {
                         text: "LOCAL FILES. YOUR STORY."

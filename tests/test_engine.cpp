@@ -3004,7 +3004,7 @@ class EngineTest : public QObject {
                                  .arg(first + period / 2)
                                  .arg(period);
             run(ffmpeg, {"-v", "error", "-y", "-f", "lavfi", "-i",
-                         QString("aevalsrc='0.8*%1+%2':s=44100:d=%3[a];anoisesrc=a=0.02:d=%3:r=44100[n];"
+                         QString("aevalsrc='0.8*%1+%2':s=44100:d=%3[a];anoisesrc=a=0.02:d=%3:r=44100:seed=7[n];"
                                  "[a][n]amix=inputs=2:normalize=0")
                              .arg(kick, hat)
                              .arg(seconds),
