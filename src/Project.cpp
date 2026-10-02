@@ -210,6 +210,10 @@ QJsonObject Project::json(const QString &base) const {
                       {"fontFamily", c.fontFamily},
                       {"textColor", c.textColor},
                       {"fontSize", c.fontSize}};
+        if (!c.titleStyle.isEmpty()) {
+            o["titleStyle"] = c.titleStyle;
+            o["accentColor"] = c.accentColor;
+        }
         if (!c.effect.isEmpty()) {
             o["effect"] = c.effect;
             o["effectStrength"] = c.effectStrength;
@@ -265,13 +269,13 @@ QJsonObject Project::json(const QString &base) const {
         o["transitionFrames"] = QString::number(c.transitionFrames);
         cc.append(o);
     }
-    return {{"format", "cutlery"}, {"schemaVersion", 9}, {"name", name},       {"width", width},
+    return {{"format", "cutlery"}, {"schemaVersion", 10}, {"name", name},       {"width", width},
             {"height", height},    {"fpsN", fpsN},       {"fpsD", fpsD},       {"tracks", tracks},
             {"assets", aa},        {"clips", cc},        {"trackSettings", tt}};
 }
 Project Project::fromJson(const QJsonObject &o, const QString &base) {
     require(o["format"] == "cutlery" &&
-                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 9),
+                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 10),
             "Unsupported project format/version. Original left unchanged.");
     require(o["assets"].isArray() && o["clips"].isArray(), "Missing project collections");
     Project p;
@@ -342,6 +346,8 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.fontFamily = j["fontFamily"].toString("Arial");
         c.textColor = j["textColor"].toString("#ffffff");
         c.fontSize = j["fontSize"].toInt(72);
+        c.titleStyle = j["titleStyle"].toString();
+        c.accentColor = j["accentColor"].toString("#64d8bc");
         c.effect = j["effect"].toString();
         c.effectStrength = j["effectStrength"].toDouble(0.6);
         c.effectWidth = j["effectWidth"].toDouble(0.3);
@@ -481,6 +487,10 @@ void Project::validate() const {
                     bounded(c.effectStrength, 0, 1) && bounded(c.effectWidth, 0.02, 1) &&
                     bounded(c.effectHeight, 0.02, 1) && bounded(c.blur, 0, 1),
                 "Invalid blur or mosaic setting");
+        require(QStringList{"", "lowerThird", "lowerThirdLine", "titleCard"}.contains(
+                    c.titleStyle) &&
+                    QColor(c.accentColor).isValid(),
+                "Invalid title style");
         if (const auto *a = asset(c.assetId); a && a->kind != "image")
             require(c.sourceIn.seconds() +
                             frameTime(c.duration, fpsN, fpsD).seconds() * c.speed.seconds() <=

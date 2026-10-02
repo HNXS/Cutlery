@@ -683,6 +683,25 @@ ApplicationWindow {
                     RowLayout {
                         Layout.fillWidth: true
                         Action {
+                            objectName: "addLowerThird"
+                            text: "+ Lower third"
+                            Layout.fillWidth: true
+                            onClicked: editor.addTitleTemplate("lowerThird")
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Name and role in the lower left; slides in, fades out"
+                        }
+                        Action {
+                            objectName: "addTitleCard"
+                            text: "+ Title card"
+                            Layout.fillWidth: true
+                            onClicked: editor.addTitleTemplate("titleCard")
+                            ToolTip.visible: hovered
+                            ToolTip.text: "A large centred heading with a subtitle, e.g. for chapters"
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Action {
                             objectName: "addBlurArea"
                             text: "+ Blur area"
                             Layout.fillWidth: true
@@ -1133,6 +1152,49 @@ ApplicationWindow {
                                     text: "Apply text"
                                     Layout.fillWidth: true
                                     onClicked: editor.setClip("text", titleText.text)
+                                }
+                                // Title templates: the first line is the name or heading, the
+                                // next lines the role or subtitle.
+                                ComboBox {
+                                    objectName: "titleStyle"
+                                    Layout.fillWidth: true
+                                    visible: (win.selection.captionStyle || "") === ""
+                                    readonly property var styles: ["", "lowerThird", "lowerThirdLine", "titleCard"]
+                                    model: ["Plain title", "Lower third (plate)", "Lower third (line)", "Title card"]
+                                    currentIndex: Math.max(0, styles.indexOf(win.selection.titleStyle || ""))
+                                    onActivated: editor.setClip("titleStyle", styles[currentIndex])
+                                }
+                                RowLayout {
+                                    visible: (win.selection.titleStyle || "") !== ""
+                                    Label {
+                                        text: "Accent"
+                                        color: win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    Repeater {
+                                        model: ["#64d8bc", "#ffd23f", "#ec6f5a", "#5fa8ff", "#c38bff", "#ffffff"]
+                                        Rectangle {
+                                            required property string modelData
+                                            width: 20
+                                            height: 20
+                                            radius: 10
+                                            color: modelData
+                                            border.width: win.selection.accentColor === modelData ? 3 : 1
+                                            border.color: win.selection.accentColor === modelData ? win.mint : "#6481a0"
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: editor.setClip("accentColor", parent.modelData)
+                                            }
+                                        }
+                                    }
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: (win.selection.titleStyle || "") !== ""
+                                    wrapMode: Text.Wrap
+                                    font.pixelSize: 11
+                                    color: win.muted
+                                    text: "First line: name or heading. Next lines: role or subtitle. Fade in/out sets how it appears; lower thirds also slide in."
                                 }
                                 // Captions with word timing (automatic captions) can highlight
                                 // the spoken word. Editing the words keeps the timing only while

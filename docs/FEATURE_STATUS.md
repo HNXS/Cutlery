@@ -86,7 +86,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F080 | Size, weight, spacing, kerning and alignment | Partial | Size, fixed bold/center/wrap; no typography editor. |
 | F081 | Outline, shadow, glow and text background | Partial | Fixed shadow only. |
 | F082 | Text transforms and per-character animation | Planned | Not implemented in this alpha. |
-| F083 | Original titles, lower thirds and presets | Planned | Not implemented in this alpha. |
+| F083 | Original titles, lower thirds and presets | Partial | Original title templates: lower third with plate, lower third with accent line (both slide in from the left and fade), and title card; name/role from the text lines, accent colour, scale and position from the preview frame. Three templates, no preset library, no per-template animation choice. |
 | F084 | Manual captions and subtitle track | Partial | Editable title clips used as captions. |
 | F085 | SRT import/export and TXT import | Partial | SRT roundtrip; no TXT. |
 | F086 | WebVTT and ASS/SSA interoperability | Planned | Not implemented in this alpha. |
