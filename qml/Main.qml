@@ -54,6 +54,11 @@ ApplicationWindow {
         editor.seek(frame);
         timelinePanel.reveal(s.playhead);
     }
+    // The key combination bound to a command, for tooltips.
+    function shortcut(command) {
+        const b = shortcutSettings.bindings.find(b => b.id === command);
+        return b && b.sequence ? b.sequence : "no shortcut";
+    }
     function shortcutEnabled(command) {
         if ((libraryGesture && libraryGesture.dragging) || timelinePanel.draggingClip)
             return false;
@@ -89,6 +94,12 @@ ApplicationWindow {
             editor.split();
         else if (id === "duplicate" && editable)
             editor.duplicate();
+        else if (id === "copy" && s.selectedId.length > 0)
+            editor.copy();
+        else if (id === "paste" && s.clipboard)
+            editor.paste();
+        else if (id === "pasteAttributes" && editable && s.clipboard)
+            editor.pasteAttributes("all");
         else if (id === "delete" && editable)
             editor.remove(false);
         else if (id === "rippleDelete" && editable)
@@ -1806,6 +1817,35 @@ ApplicationWindow {
                                     onToggled: editor.setClip("hidden", checked)
                                 }
                             }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Action {
+                                    objectName: "copyClip"
+                                    text: "Copy"
+                                    padding: 6
+                                    onClicked: editor.copy()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Copy this clip (" + win.shortcut("copy") + "); paste it at the playhead with " + win.shortcut("paste")
+                                }
+                                Action {
+                                    objectName: "pasteLook"
+                                    text: "Paste look"
+                                    padding: 6
+                                    enabled: !!win.s.clipboard && win.selection.locked !== true
+                                    onClicked: editor.pasteAttributes("look")
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Colour, effects and LUT from " + (win.s.clipboard || "the copied clip")
+                                }
+                                Action {
+                                    objectName: "pasteAttributes"
+                                    text: "Paste all"
+                                    padding: 6
+                                    enabled: !!win.s.clipboard && win.selection.locked !== true
+                                    onClicked: editor.pasteAttributes("all")
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Look, position and size, keyframes, shape, keying, volume and fades from " + (win.s.clipboard || "the copied clip") + " (" + win.shortcut("pasteAttributes") + ")"
+                                }
+                            }
                             Action {
                                 text: "Detach audio to new track"
                                 visible: win.selection.canDetach || false
@@ -2159,7 +2199,10 @@ ApplicationWindow {
             { id: "av1", label: "AV1 · MP4 (smallest, modern devices)" },
             { id: "vp9", label: "VP9 · WebM (web)" },
             { id: "prores", label: "ProRes 422 HQ · MOV (editing master, large)" },
-            { id: "mpeg4", label: "MPEG-4 Part 2 · MP4 (legacy, always available)" }
+            { id: "mpeg4", label: "MPEG-4 Part 2 · MP4 (legacy, always available)" },
+            { id: "mp3", label: "Audio only · MP3" },
+            { id: "m4a", label: "Audio only · AAC (M4A)" },
+            { id: "wav", label: "Audio only · WAV (uncompressed)" }
         ]
         readonly property var qualities: [
             { id: "max", label: "Maximum" },
@@ -2246,6 +2289,7 @@ ApplicationWindow {
                 objectName: "exportHeight"
                 Layout.fillWidth: true
                 model: exportSettings.heights.map(h => h === 0 ? "Project (" + win.s.width + " × " + win.s.height + ")" : h === 2160 ? "4K (2160p)" : h + "p")
+                enabled: !exportSettings.preview.audio
                 onActivated: exportSettings.changed()
             }
             Label { text: "Loudness" }
@@ -2287,7 +2331,7 @@ ApplicationWindow {
                 wrapMode: Text.Wrap
                 color: win.muted
                 font.pixelSize: 11
-                text: "Output " + (exportSettings.preview.width || 0) + " × " + (exportSettings.preview.height || 0) + " · ." + (exportSettings.preview.extension || "mp4") + ". Cutlery uses your graphics card's encoder (NVIDIA, AMD or Intel) when available, otherwise Windows' encoder; AV1, VP9 and ProRes also work in software. Higher resolutions re-render each source at that size with sharp Lanczos scaling, so 4K sources stay 4K."
+                text: exportSettings.preview.audio ? "Output: the timeline's sound only, 48 kHz stereo · ." + exportSettings.preview.extension + (exportSettings.preview.extension === "wav" ? " (24-bit at Maximum quality, otherwise 16-bit)" : "") + "." : "Output " + (exportSettings.preview.width || 0) + " × " + (exportSettings.preview.height || 0) + " · ." + (exportSettings.preview.extension || "mp4") + ". Cutlery uses your graphics card's encoder (NVIDIA, AMD or Intel) when available, otherwise Windows' encoder; AV1, VP9 and ProRes also work in software. Higher resolutions re-render each source at that size with sharp Lanczos scaling, so 4K sources stay 4K."
             }
         }
         onAccepted: {

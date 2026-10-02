@@ -5,6 +5,8 @@
 Projects are saved as schema 11; 0.5 cannot open them.
 
 - **Colour and look:** temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with a strength slider; eight one-click looks.
+- **Copy and paste:** clips (Ctrl+C / Ctrl+V, also into another project) and their attributes: "Paste look" or "Paste all" (Ctrl+Alt+V) onto the selected clip.
+- **Audio-only export:** the mix as MP3, AAC (M4A) or WAV, with loudness normalisation.
 - **Faster captions:** speech recognition uses the graphics card through Vulkan (NVIDIA, AMD, Intel) and falls back to the CPU. Any x64 processor works; AVX2 is no longer required.
 
 ## 0.5.0 alpha

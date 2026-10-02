@@ -340,7 +340,7 @@ class EngineTest : public QObject {
         QTemporaryDir dir;
         const auto path = dir.filePath("shortcuts.json");
         KeyboardShortcuts keys(path);
-        QCOMPARE(keys.bindings().size(), 30);
+        QCOMPARE(keys.bindings().size(), 33);
         QVERIFY(!keys.assign("play", "Ctrl+B"));
         QVERIFY(keys.error().contains("Already assigned"));
         QVERIFY(!keys.assign("play", "Ctrl+NotARealKey"));
@@ -349,10 +349,10 @@ class EngineTest : public QObject {
         KeyboardShortcuts loaded(path);
         QCOMPARE(loaded.bindings(), keys.bindings());
         QVERIFY(loaded.reset());
-        QCOMPARE(loaded.bindings()[16].toMap()["sequence"].toString(), QString("Space"));
+        QCOMPARE(loaded.bindings()[19].toMap()["sequence"].toString(), QString("Space"));
         KeyboardShortcuts failed(dir.path());
         QVERIFY(!failed.assign("play", "Ctrl+J"));
-        QCOMPARE(failed.bindings()[16].toMap()["sequence"].toString(), QString("Space"));
+        QCOMPARE(failed.bindings()[19].toMap()["sequence"].toString(), QString("Space"));
     }
     void thumbnailStrips() {
         const auto ffmpeg = Editor::executable("ffmpeg");
@@ -1492,6 +1492,89 @@ class EngineTest : public QObject {
         image = still(r, 40);
         QVERIFY(count(image, true, true) + count(image, false, true) == 0);
         QVERIFY(count(image, true, false) + count(image, false, false) > 50);
+    }
+    void clipboardAndAudioExport() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("clip.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=30:d=2", "-f",
+                     "lavfi", "-i", "sine=f=440:d=2", "-c:v", "ffv1", "-c:a", "pcm_s16le",
+                     "-shortest", source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto first = editor.project().clips.first().id;
+        editor.select(first);
+        editor.setClipValues({{"temperature", 0.4}, {"vignette", 0.3}, {"scale", 0.5},
+                              {"volume", 0.5}});
+
+        // Copy and paste at the playhead: a new clip with the same settings.
+        QVERIFY(editor.state()["clipboard"].toString().isEmpty());
+        editor.copy();
+        QCOMPARE(editor.state()["clipboard"].toString(), editor.project().clips.first().name);
+        // The playhead is inside the original, so the copy goes to the next track up.
+        editor.seek(30);
+        editor.paste();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        const auto pasted = editor.project().clips.last();
+        QVERIFY(pasted.id != first);
+        QCOMPARE(pasted.start, qint64(30));
+        QCOMPARE(pasted.track, 1);
+        QCOMPARE(pasted.temperature, 0.4);
+        QCOMPARE(editor.state()["selectedId"].toString(), pasted.id);
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+
+        // Attributes onto another clip: "look" leaves position and volume alone.
+        editor.addTitle();
+        const auto title = editor.project().clips.last().id;
+        editor.select(title);
+        editor.pasteAttributes("look");
+        auto *t = editor.project().clip(title);
+        QCOMPARE(t->temperature, 0.4);
+        QCOMPARE(t->vignette, 0.3);
+        QCOMPARE(t->scale, 1.);
+        editor.pasteAttributes("all");
+        t = editor.project().clip(title);
+        QCOMPARE(t->scale, 0.5);
+        QCOMPARE(t->volume, 0.5);
+        editor.undo();
+        QCOMPARE(editor.project().clip(title)->scale, 1.);
+
+        // Into a new project: the media comes along.
+        editor.newProject();
+        QVERIFY(editor.project().assets.empty());
+        editor.paste();
+        QCOMPARE(editor.project().assets.size(), size_t(1));
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        QCOMPARE(editor.project().clips.first().vignette, 0.3);
+
+        // Audio-only export in three formats: no video stream, the timeline's length.
+        for (const auto &format : {QString("mp3"), QString("m4a"), QString("wav")}) {
+            const auto out = dir.filePath("sound." + format);
+            editor.exportWith(QUrl::fromLocalFile(out), {{"format", format}, {"quality", "max"}});
+            QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+            QVERIFY2(QFileInfo::exists(out), qPrintable(editor.state()["error"].toString()));
+            const auto probe =
+                QString::fromUtf8(run(Editor::executable("ffprobe"),
+                                      {"-v", "error", "-show_entries",
+                                       "stream=codec_type,codec_name,sample_rate,channels:format="
+                                       "duration",
+                                       "-of", "compact", out}));
+            QVERIFY2(!probe.contains("codec_type=video") && probe.contains("codec_type=audio") &&
+                         probe.contains("sample_rate=48000") && probe.contains("channels=2"),
+                     qPrintable(probe));
+            const auto duration = QRegularExpression("duration=([0-9.]+)").match(probe);
+            QVERIFY2(std::abs(duration.captured(1).toDouble() - 2) < 0.1, qPrintable(probe));
+        }
+        QCOMPARE(editor.exportPreview({{"format", "wav"}})["audio"].toBool(), true);
+        QCOMPARE(editor.exportPreview({{"format", "h264"}})["audio"].toBool(), false);
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("wrong.mp4")), {{"format", "mp3"}});
+        QVERIFY(editor.state()["error"].toString().contains(".mp3"));
     }
     void colourAndLook() {
         QCOMPARE(filterPath("C:/a b/it's,[x];y=z.cube"),

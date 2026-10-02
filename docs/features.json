@@ -721,8 +721,8 @@
     "status": "Planned",
     "acceptance": "Paste animation on a different-duration clip follows declared time policy",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Copy (Ctrl+C) and paste at the playhead (Ctrl+V) within the session and across projects (the media comes along); the copy goes to its own track when free there, otherwise the nearest free track or a new one. Paste look (colour, effects, LUT) or paste all attributes (Ctrl+Alt+V: also transform, keyframes, shape, keying, volume, fades) onto the selected clip, in one undo step. No system-clipboard exchange or multi-clip selection."
   },
   {
     "id": "F030",
@@ -3921,8 +3921,8 @@
     "status": "Planned",
     "acceptance": "WAV and PNG results match corresponding timeline render",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Audio-only export of the timeline mix: MP3 (LAME VBR), AAC in M4A, or WAV (24-bit at Maximum quality, else 16-bit), 48 kHz stereo, with the same loudness normalisation as video. No image-sequence export."
   },
   {
     "id": "F158",

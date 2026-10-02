@@ -9,7 +9,8 @@
 namespace cutlery {
 // What the user asks for: a delivery format, a quality level and an output height.
 struct ExportSettings {
-    QString format = "h264"; // h264, hevc, av1, vp9, prores, mpeg4
+    // Video: h264, hevc, av1, vp9, prores, mpeg4. Audio only: mp3, m4a (AAC), wav.
+    QString format = "h264";
     QString quality = "high"; // max, high, balanced, small
     int height = 0;           // 0: project size
     // Target integrated loudness in LUFS (-14 YouTube/streaming, -16 podcasts, -23 EBU R128 TV);
@@ -23,9 +24,11 @@ struct Encoder {
     QStringList videoArguments, audioArguments;
     QString pixelFormat = "yuv420p", extension = "mp4";
     bool probe = false;
+    bool audioOnly = false; // no video stream; videoArguments and pixelFormat are unused
 };
 const QStringList &exportFormats();
 QString formatExtension(const QString &format);
+bool audioFormat(const QString &format);
 QSize exportSize(const Project &, int height);
 QVector<Encoder> encoderCandidates(const ExportSettings &, QSize size, double fps);
 

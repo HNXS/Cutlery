@@ -385,6 +385,11 @@ class UiTest : public QObject {
         QCOMPARE(preset->property("currentIndex").toInt(), 0);
         choose("exportFormat", 4);
         QCOMPARE(dialog->property("preview").toMap()["extension"].toString(), QString("mov"));
+        choose("exportFormat", 6); // MP3: audio only, no resolution
+        QCOMPARE(dialog->property("preview").toMap()["extension"].toString(), QString("mp3"));
+        QTRY_VERIFY(!findItem(window->contentItem(), "exportHeight")->isEnabled());
+        choose("exportFormat", 0);
+        QTRY_VERIFY(findItem(window->contentItem(), "exportHeight")->isEnabled());
         auto *result = findItem(window->contentItem(), "loudnessResult");
         QVERIFY(result && findItem(window->contentItem(), "measureLoudness"));
         QVERIFY(result->property("text").toString().contains("Integrated loudness"));
@@ -559,10 +564,17 @@ class UiTest : public QObject {
         editor.clearError();
         editor.setClip("lut", "");
         QVERIFY(clip().lut.isEmpty());
+        // Copy the look and paste it onto a title.
+        editor.setClip("temperature", 0.5);
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "copyClip"), "clicked"));
         // Titles have no picture to grade.
         editor.addTitle();
         editor.select(editor.project().clips.last().id);
         QTRY_VERIFY(!section->isVisible());
+        auto *pasteLook = findItem(window->contentItem(), "pasteLook");
+        QTRY_VERIFY(pasteLook && pasteLook->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(pasteLook, "clicked"));
+        QCOMPARE(editor.project().clips.back().temperature, 0.5);
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void aiCutoutControls() {

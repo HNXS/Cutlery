@@ -9,6 +9,7 @@
 #include <QProcess>
 #include <QQuickImageProvider>
 #include <QTimer>
+#include <optional>
 #include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
@@ -86,6 +87,13 @@ class Editor final : public QObject {
     Q_INVOKABLE qint64 adjacentKeyframe(bool forward) const;
     Q_INVOKABLE void remove(bool ripple = false);
     Q_INVOKABLE void duplicate();
+    // Clipboard for clips within the session, also across projects (the media comes along).
+    Q_INVOKABLE void copy();
+    // Inserts the copied clip at the playhead on its track.
+    Q_INVOKABLE void paste();
+    // Applies the copied clip's settings to the selected clip: "look" (colour, effects, LUT) or
+    // "all" (also transform, keyframes, shape and border, keying, volume and fades).
+    Q_INVOKABLE void pasteAttributes(const QString &group = "all");
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE void configure(int width, int height, int fpsN, int fpsD);
@@ -172,6 +180,8 @@ class Editor final : public QObject {
     QString m_jobTemp;
     QVariantMap m_loudness; // measurement of the running export, when normalising
     QVariantMap m_mixLoudness; // last analyzeLoudness() result
+    std::optional<Clip> m_clipboard;
+    std::optional<Asset> m_clipboardAsset;
     QProcess *m_loudnessProcess = nullptr;
     struct Pauses {
         QString clipId, status; // status: idle, finding, ready, failed

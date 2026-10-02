@@ -6,10 +6,16 @@
 
 namespace cutlery {
 const QStringList &exportFormats() {
-    static const QStringList formats{"h264", "hevc", "av1", "vp9", "prores", "mpeg4"};
+    static const QStringList formats{"h264", "hevc",   "av1", "vp9", "prores",
+                                     "mpeg4", "mp3", "m4a", "wav"};
     return formats;
 }
+bool audioFormat(const QString &format) {
+    return format == "mp3" || format == "m4a" || format == "wav";
+}
 QString formatExtension(const QString &format) {
+    if (audioFormat(format))
+        return format;
     if (format == "vp9")
         return "webm";
     if (format == "prores")
@@ -47,6 +53,25 @@ QVector<Encoder> encoderCandidates(const ExportSettings &s, QSize size, double f
         e.probe = probe;
         c << e;
     };
+    if (audioFormat(s.format)) {
+        Encoder e;
+        e.audioOnly = true;
+        e.extension = s.format;
+        if (s.format == "mp3") {
+            e.name = "libmp3lame";
+            e.label = "MP3 (LAME)";
+            e.audioArguments = {"-c:a", "libmp3lame", "-q:a", pick({0, 2, 4, 6})};
+        } else if (s.format == "m4a") {
+            e.name = "aac";
+            e.label = "AAC";
+            e.audioArguments = aac;
+        } else {
+            e.name = "pcm";
+            e.label = "WAV (uncompressed)";
+            e.audioArguments = {"-c:a", q == 0 ? "pcm_s24le" : "pcm_s16le"};
+        }
+        return {e};
+    }
     if (s.format == "h264" || s.format == "hevc") {
         const bool h264 = s.format == "h264";
         const QString codec = h264 ? "h264" : "hevc";

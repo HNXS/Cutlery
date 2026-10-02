@@ -32,7 +32,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F026 | Split, trim, delete and duplicate | Implemented (alpha) | Split, drag-edge/source-aware trims, inspector trims, delete and duplicate; each committed edit is undoable. |
 | F027 | Ripple trim, roll, slip and slide | Partial | Magnetic track trims ripple subsequent clips; no roll, slip, slide or linked-pair propagation. |
 | F028 | Nested sequences and compound clips | Planned | Not implemented in this alpha. |
-| F029 | Copy/paste clips and selected attributes | Planned | Not implemented in this alpha. |
+| F029 | Copy/paste clips and selected attributes | Implemented (alpha) | Copy (Ctrl+C) and paste at the playhead (Ctrl+V) within the session and across projects (the media comes along); the copy goes to its own track when free there, otherwise the nearest free track or a new one. Paste look (colour, effects, LUT) or paste all attributes (Ctrl+Alt+V: also transform, keyframes, shape, keying, volume, fades) onto the selected clip, in one undo step. No system-clipboard exchange or multi-clip selection. |
 | F030 | Markers, in/out and timeline navigation | Partial | Frame and previous/next edit navigation; start/end shortcuts. No markers or in/out ranges. |
 | F031 | Timeline zoom and frame-accurate seeking | Partial | Timeline zoom/fit; seeking renders only the playhead frame, so latency no longer grows with position (about 0.1 s for 1080p H.264 on a 4-core development container). Not qualified on the hardware profiles. |
 | F032 | JKL shuttle and reverse audition | Planned | Not implemented in this alpha. |
@@ -160,7 +160,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F154 | MOV and mezzanine/alpha workflow | Partial | ProRes 422 HQ/422/LT MOV export with PCM audio; no alpha-channel export. |
 | F155 | WebM VP9/Opus software export | Implemented (alpha) | VP9/Opus export profile (integration coverage to expand). |
 | F156 | HEVC and AV1 hardware/software export | Implemented (alpha) | HEVC via hardware or Media Foundation; AV1 via hardware or SVT-AV1 software. |
-| F157 | Audio-only and image-sequence export | Planned | Not implemented in this alpha. |
+| F157 | Audio-only and image-sequence export | Partial | Audio-only export of the timeline mix: MP3 (LAME VBR), AAC in M4A, or WAV (24-bit at Maximum quality, else 16-bit), 48 kHz stereo, with the same loudness normalisation as video. No image-sequence export. |
 | F158 | Resolution, fps, quality, bitrate and format controls | Partial | Presets plus format, four quality levels and output height (720p–4K); no explicit bitrate or fps override. |
 | F159 | Hardware encoder selection and CPU fallback | Implemented (alpha) | Candidates are probed with a short test encode at the real size and arguments, cached per session. Software formats always remain available. Not qualified on real NVIDIA/AMD/Intel hardware yet. |
 | F160 | Queue, range export, progress and cancellation | Partial | One full-sequence job with progress/cancel; no queue/range. |

@@ -986,12 +986,17 @@ QStringList exportArguments(const RenderPlan &r, const QString &graph, const QSt
                             const Encoder &e) {
     QStringList a{"-hide_banner", "-nostdin", "-y", "-loglevel", "error"};
     a += r.inputs;
-    a << "-filter_complex_script" << graph << "-map" << "[vout]" << "-map" << "[aout]"
-      << "-frames:v" << QString::number(r.frames) << "-t" << num(r.duration);
-    a += e.videoArguments;
-    a << "-pix_fmt" << e.pixelFormat;
+    a << "-filter_complex_script" << graph;
+    if (e.audioOnly)
+        a << "-map" << "[aout]" << "-t" << num(r.duration) << "-vn";
+    else {
+        a << "-map" << "[vout]" << "-map" << "[aout]" << "-frames:v" << QString::number(r.frames)
+          << "-t" << num(r.duration);
+        a += e.videoArguments;
+        a << "-pix_fmt" << e.pixelFormat;
+    }
     a += e.audioArguments;
-    if (e.extension != "webm")
+    if (QStringList{"mp4", "mov", "m4a"}.contains(e.extension))
         a << "-movflags" << "+faststart";
     a << "-progress" << "pipe:1" << output;
     return a;

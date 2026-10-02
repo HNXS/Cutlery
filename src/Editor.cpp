@@ -415,6 +415,7 @@ QVariantMap Editor::state() const {
                  return l;
              }()},
             {"progress", m_progress},
+            {"clipboard", m_clipboard ? m_clipboard->name : QString()},
             {"previewUrl", m_previewUrl},
             {"playing", m_playback->active() || m_resumeTimer.isActive()},
             {"canUndo", !m_undo.empty()},
@@ -1119,6 +1120,108 @@ void Editor::duplicate() {
     });
     select(id);
 }
+void Editor::copy() {
+    const auto *c = m_project.clip(m_selected);
+    if (!c)
+        return;
+    m_clipboard = *c;
+    const auto *a = m_project.asset(c->assetId);
+    m_clipboardAsset = a ? std::optional<Asset>(*a) : std::nullopt;
+    m_status = "Copied " + c->name;
+    emit changed();
+}
+void Editor::paste() {
+    if (!m_clipboard)
+        return;
+    const auto id = newId();
+    mutate([&](Project &p) {
+        auto copy = *m_clipboard;
+        copy.id = id;
+        copy.transition.clear();
+        copy.transitionFrames = 0;
+        if (m_clipboardAsset && !p.asset(m_clipboardAsset->id))
+            p.assets.push_back(*m_clipboardAsset);
+        // Timing is in frames: a clip from a project with another frame rate keeps its length.
+        // The clip goes to its own track when that is free at the playhead (magnetic tracks make
+        // room), otherwise to the nearest free track above or below, or to a new track on top.
+        copy.start = m_playhead;
+        auto fits = [&](int track) {
+            if (track < 0 || track >= p.tracks || p.trackSettings[track].locked)
+                return false;
+            if (p.trackSettings[track].magnetic)
+                return true;
+            return std::none_of(p.clips.begin(), p.clips.end(), [&](const Clip &o) {
+                return o.track == track && o.start < copy.start + copy.duration &&
+                       copy.start < o.start + o.duration;
+            });
+        };
+        const int home = std::min(copy.track, p.tracks - 1);
+        int track = -1;
+        for (int d = 0; d < p.tracks && track < 0; ++d)
+            for (int t : {home + d, home - d})
+                if (track < 0 && fits(t))
+                    track = t;
+        if (track < 0) {
+            p.addTrack();
+            track = p.tracks - 1;
+        }
+        copy.track = track;
+        p.clips.push_back(copy);
+        p.move(copy.id, copy.track, copy.start);
+    });
+    select(id);
+}
+void Editor::pasteAttributes(const QString &group) {
+    if (!m_clipboard || (group != "look" && group != "all"))
+        return;
+    mutate([&](Project &p) {
+        auto *c = p.clip(m_selected);
+        if (!c)
+            return;
+        p.requireEditable(c->track);
+        const auto &from = *m_clipboard;
+        c->brightness = from.brightness;
+        c->contrast = from.contrast;
+        c->saturation = from.saturation;
+        c->blur = from.blur;
+        c->temperature = from.temperature;
+        c->tint = from.tint;
+        c->vibrance = from.vibrance;
+        c->shadows = from.shadows;
+        c->highlights = from.highlights;
+        c->sharpen = from.sharpen;
+        c->glow = from.glow;
+        c->vignette = from.vignette;
+        c->grain = from.grain;
+        c->lut = from.lut;
+        c->lutStrength = from.lutStrength;
+        if (group == "look")
+            return;
+        c->scale = from.scale;
+        c->x = from.x;
+        c->y = from.y;
+        c->rotation = from.rotation;
+        c->opacity = from.opacity;
+        c->crop = from.crop;
+        c->flip = from.flip;
+        c->volume = from.volume;
+        c->fadeIn = from.fadeIn;
+        c->fadeOut = from.fadeOut;
+        // Keyframes keep their clip-relative frames; those past the end of a shorter clip stay
+        // and hold the value from the last one inside.
+        c->keyframes = from.keyframes;
+        c->shape = from.shape;
+        c->radius = from.radius;
+        c->border = from.border;
+        c->borderColor = from.borderColor;
+        c->shadow = from.shadow;
+        c->chromaKey = from.chromaKey;
+        c->keyColor = from.keyColor;
+        c->keySimilarity = from.keySimilarity;
+        c->keyBlend = from.keyBlend;
+        c->aiCutout = from.aiCutout;
+    });
+}
 void Editor::configure(int w, int h, int n, int d) {
     mutate([&](Project &p) {
         if (!p.clips.empty() && (p.fpsN != n || p.fpsD != d))
@@ -1595,7 +1698,8 @@ QVariantMap Editor::exportPreview(const QVariantMap &settings) const {
         const auto size = exportSize(m_project, s.height);
         return {{"width", size.width()},
                 {"height", size.height()},
-                {"extension", formatExtension(s.format)}};
+                {"extension", formatExtension(s.format)},
+                {"audio", audioFormat(s.format)}};
     } catch (const std::exception &) {
         return {};
     }
@@ -1778,6 +1882,7 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
         RenderOptions options;
         options.highQuality = true;
         options.pixelFormat = encoder.pixelFormat;
+        options.video = !encoder.audioOnly;
         if (gainDb != 0 || m_loudness.contains("target")) {
             // Normalised exports keep peaks about 1 dB below full scale, as streaming services
             // expect; the limiter works on samples, so leave some room for true peaks.
