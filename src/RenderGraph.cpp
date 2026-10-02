@@ -696,7 +696,9 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             QStringList commands;
             const double step = 0.1;
             const auto seed = qHash(c.id);
-            for (int i = 0; i * step < secs(c.duration); ++i) {
+            // Only the bursts in the rendered part of the clip.
+            const int firstStep = std::max(0, int(secs(l0) / step) - 2);
+            for (int i = firstStep; i * step < std::min(secs(c.duration), secs(l1) + step); ++i) {
                 const auto h = qHash(i, seed);
                 if (h % 100 >= quint32(15 + 35 * fxk))
                     continue;

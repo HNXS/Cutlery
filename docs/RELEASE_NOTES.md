@@ -4,6 +4,11 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Effects:** camera shake, glitch, VHS and old film with a strength slider; motion blur; stabilizing for shaky hand-held footage.
+- **Reverb and echo** per clip in the sound tools.
+- **Beat markers:** "Mark the beats" finds the beats of a music clip and puts a marker on every beat, every 2nd or every 4th; clips snap to markers.
+- **WebVTT and ASS captions:** import and export besides SRT.
+- **Scopes:** histogram, waveform and vectorscope over the viewer, live while playing.
 - **Eye contact (AI pack):** turns a presenter's eyes toward the camera when they read from a script beside the lens. It redraws only the eyes, by up to 15 %, eases off for blinks and turned heads, and leaves people who already look into the camera alone.
 - **JKL shuttle:** L plays at 1×, 2× and 4×, J scrubs backward, K stops.
 - **Follow a face (AI pack):** a blur or mosaic area follows a face in the video below and is sized to cover it.
