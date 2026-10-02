@@ -54,6 +54,16 @@ struct Clip {
     double effectStrength = 0.6, effectWidth = 0.3, effectHeight = 0.2;
     // Gaussian blur of the clip's own picture, 0..1.
     double blur = 0;
+    // Colour: warmer/cooler, magenta/green, gentle saturation of muted colours, and lifted or
+    // lowered shadows and highlights, each −1..1 with 0 unchanged.
+    double temperature = 0, tint = 0, vibrance = 0, shadows = 0, highlights = 0;
+    // Look: 0..1, 0 off.
+    double sharpen = 0, glow = 0, vignette = 0, grain = 0;
+    // A 3D LUT file (.cube or .3dl) mixed in at lutStrength (0..1). Missing files are skipped.
+    QString lut;
+    double lutStrength = 1;
+    // The look settings above (for copy and paste of attributes).
+    static const QStringList &lookProperties();
     QString highlightColor = "#ffd23f";
     QVector<qint64> wordStarts;
     // Word timing usable for the caption style: one start per word of the text.

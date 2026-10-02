@@ -496,6 +496,75 @@ class UiTest : public QObject {
         QCOMPARE(editor.project().clip(lower.id)->titleStyle, QString("titleCard"));
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void lookControls() {
+        QTemporaryDir dir;
+        QImage picture(160, 90, QImage::Format_RGB32);
+        picture.fill(Qt::gray);
+        const auto path = dir.filePath("grey.png");
+        QVERIFY(picture.save(path));
+        const auto lut = dir.filePath("look.cube");
+        {
+            QFile f(lut);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n");
+        }
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(path)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto id = editor.project().clips.first().id;
+        editor.select(id);
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        auto *section = findItem(window->contentItem(), "lookSection");
+        QTRY_VERIFY(section && section->isVisible());
+        auto *preset = findItem(window->contentItem(), "lookPreset");
+        QVERIFY(preset);
+        auto clip = [&] { return *editor.project().clip(id); };
+        QVERIFY(QMetaObject::invokeMethod(preset, "activated", Q_ARG(int, 5))); // Vintage
+        QCOMPARE(clip().temperature, .3);
+        QCOMPARE(clip().grain, .4);
+        QCOMPARE(clip().saturation, .75);
+        QCOMPARE(preset->property("currentIndex").toInt(), 0);
+        editor.undo();
+        QCOMPARE(clip().grain, 0.);
+        auto *vignette = findItem(window->contentItem(), "look-vignette");
+        QVERIFY(vignette);
+        vignette->setProperty("value", 0.5);
+        QVERIFY(QMetaObject::invokeMethod(vignette, "moved"));
+        QCOMPARE(clip().vignette, .5);
+        editor.setClip("lut", QUrl::fromLocalFile(lut));
+        QCOMPARE(clip().lut, QDir::cleanPath(lut));
+        QTRY_COMPARE(findItem(window->contentItem(), "lutName")->property("text").toString(),
+                     QString("LUT: look"));
+        QTRY_VERIFY(findItem(window->contentItem(), "lutStrength")->isVisible());
+        editor.setClip("lut", dir.filePath("keys.json"));
+        QVERIFY(editor.state()["error"].toString().contains(".cube"));
+        QCOMPARE(clip().lut, QDir::cleanPath(lut));
+        editor.clearError();
+        editor.setClip("lut", "");
+        QVERIFY(clip().lut.isEmpty());
+        // Titles have no picture to grade.
+        editor.addTitle();
+        editor.select(editor.project().clips.last().id);
+        QTRY_VERIFY(!section->isVisible());
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void aiCutoutControls() {
         QTemporaryDir dir;
         const auto video = dir.filePath("speaker.mkv");

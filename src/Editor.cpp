@@ -289,6 +289,8 @@ QVariantMap Editor::state() const {
             selected = {{"id", c.id},
                         {"assetId", c.assetId},
                         {"audioOnly", c.audioOnly},
+                        {"picture", !c.audioOnly && m_project.asset(c.assetId) &&
+                                        m_project.asset(c.assetId)->kind != "audio"},
                         {"locked", m_project.trackSettings[c.track].locked},
                         {"canDetach", !c.audioOnly && m_project.asset(c.assetId) &&
                                           m_project.asset(c.assetId)->kind == "video" &&
@@ -341,6 +343,19 @@ QVariantMap Editor::state() const {
             PROP(contrast);
             PROP(saturation);
             PROP(crop);
+            PROP(temperature);
+            PROP(tint);
+            PROP(vibrance);
+            PROP(shadows);
+            PROP(highlights);
+            PROP(sharpen);
+            PROP(glow);
+            PROP(vignette);
+            PROP(grain);
+            PROP(lutStrength);
+            selected["lut"] = c.lut;
+            selected["lutName"] = QFileInfo(c.lut).completeBaseName();
+            selected["lutMissing"] = !c.lut.isEmpty() && !QFileInfo(c.lut).isFile();
             PROP(fadeIn);
             PROP(fadeOut);
             PROP(reverse);
@@ -911,6 +926,19 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             c->effectStrength = v.toDouble();
         else if (key == "blur")
             c->blur = v.toDouble();
+        else if (key == "lut") {
+            // A file URL or path; empty removes the LUT.
+            const auto path = v.typeId() == QMetaType::QUrl
+                                  ? v.toUrl().toLocalFile()
+                                  : v.toString();
+            const QFileInfo info(path);
+            if (!path.isEmpty() &&
+                (!info.isFile() || !QStringList{"cube", "3dl"}.contains(info.suffix().toLower())))
+                throw std::runtime_error("Choose a .cube or .3dl LUT file");
+            if (info.size() > 64 * 1024 * 1024)
+                throw std::runtime_error("The LUT file is too large");
+            c->lut = path.isEmpty() ? QString() : QDir::cleanPath(info.absoluteFilePath());
+        }
         else if (key == "captionStyle")
             c->captionStyle = v.toString();
         else if (key == "highlightColor")
@@ -935,6 +963,16 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(contrast, toDouble);
         FIELD(saturation, toDouble);
         FIELD(crop, toDouble);
+        FIELD(temperature, toDouble);
+        FIELD(tint, toDouble);
+        FIELD(vibrance, toDouble);
+        FIELD(shadows, toDouble);
+        FIELD(highlights, toDouble);
+        FIELD(sharpen, toDouble);
+        FIELD(glow, toDouble);
+        FIELD(vignette, toDouble);
+        FIELD(grain, toDouble);
+        FIELD(lutStrength, toDouble);
         FIELD(fadeIn, toDouble);
         FIELD(fadeOut, toDouble);
         FIELD(reverse, toBool);

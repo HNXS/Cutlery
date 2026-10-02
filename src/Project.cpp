@@ -60,6 +60,25 @@ static std::pair<double, double> propertyRange(const QString &p) {
         return {0, 1};
     return {0, 4}; // volume
 }
+namespace {
+// Colour and look values stored only when not 0.
+const QVector<QPair<QString, double Clip::*>> &lookFields() {
+    static const QVector<QPair<QString, double Clip::*>> fields{
+        {"temperature", &Clip::temperature}, {"tint", &Clip::tint},
+        {"vibrance", &Clip::vibrance},       {"shadows", &Clip::shadows},
+        {"highlights", &Clip::highlights},   {"sharpen", &Clip::sharpen},
+        {"glow", &Clip::glow},               {"vignette", &Clip::vignette},
+        {"grain", &Clip::grain}};
+    return fields;
+}
+} // namespace
+const QStringList &Clip::lookProperties() {
+    static const QStringList names{"brightness", "contrast",   "saturation", "blur",
+                                   "temperature", "tint",      "vibrance",   "shadows",
+                                   "highlights", "sharpen",    "glow",       "vignette",
+                                   "grain",      "lut",        "lutStrength"};
+    return names;
+}
 double Clip::staticValue(const QString &p) const {
     if (p == "scale")
         return scale;
@@ -222,6 +241,13 @@ QJsonObject Project::json(const QString &base) const {
         }
         if (c.blur > 0)
             o["blur"] = c.blur;
+        for (const auto &[k, field] : lookFields())
+            if (c.*field != 0)
+                o[k] = c.*field;
+        if (!c.lut.isEmpty()) {
+            o["lut"] = base.isEmpty() ? c.lut : QDir(base).relativeFilePath(c.lut);
+            o["lutStrength"] = c.lutStrength;
+        }
         if (!c.captionStyle.isEmpty() || !c.wordStarts.isEmpty()) {
             o["captionStyle"] = c.captionStyle;
             o["highlightColor"] = c.highlightColor;
@@ -269,13 +295,13 @@ QJsonObject Project::json(const QString &base) const {
         o["transitionFrames"] = QString::number(c.transitionFrames);
         cc.append(o);
     }
-    return {{"format", "cutlery"}, {"schemaVersion", 10}, {"name", name},       {"width", width},
+    return {{"format", "cutlery"}, {"schemaVersion", 11}, {"name", name},       {"width", width},
             {"height", height},    {"fpsN", fpsN},       {"fpsD", fpsD},       {"tracks", tracks},
             {"assets", aa},        {"clips", cc},        {"trackSettings", tt}};
 }
 Project Project::fromJson(const QJsonObject &o, const QString &base) {
     require(o["format"] == "cutlery" &&
-                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 10),
+                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 11),
             "Unsupported project format/version. Original left unchanged.");
     require(o["assets"].isArray() && o["clips"].isArray(), "Missing project collections");
     Project p;
@@ -353,6 +379,13 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.effectWidth = j["effectWidth"].toDouble(0.3);
         c.effectHeight = j["effectHeight"].toDouble(0.2);
         c.blur = j["blur"].toDouble(0);
+        for (const auto &[k, field] : lookFields())
+            c.*field = j[k].toDouble(0);
+        c.lut = j["lut"].toString();
+        if (!c.lut.isEmpty())
+            c.lut = QDir::cleanPath(QDir::isRelativePath(c.lut) ? QDir(base).absoluteFilePath(c.lut)
+                                                                : c.lut);
+        c.lutStrength = j["lutStrength"].toDouble(1);
         c.captionStyle = j["captionStyle"].toString();
         c.highlightColor = j["highlightColor"].toString("#ffd23f");
         for (const auto &w : j["wordStarts"].toArray())
@@ -487,6 +520,12 @@ void Project::validate() const {
                     bounded(c.effectStrength, 0, 1) && bounded(c.effectWidth, 0.02, 1) &&
                     bounded(c.effectHeight, 0.02, 1) && bounded(c.blur, 0, 1),
                 "Invalid blur or mosaic setting");
+        require(bounded(c.temperature, -1, 1) && bounded(c.tint, -1, 1) &&
+                    bounded(c.vibrance, -1, 1) && bounded(c.shadows, -1, 1) &&
+                    bounded(c.highlights, -1, 1) && bounded(c.sharpen, 0, 1) &&
+                    bounded(c.glow, 0, 1) && bounded(c.vignette, 0, 1) && bounded(c.grain, 0, 1) &&
+                    bounded(c.lutStrength, 0, 1) && c.lut.size() <= 4096,
+                "Invalid colour or look setting");
         require(QStringList{"", "lowerThird", "lowerThirdLine", "titleCard"}.contains(
                     c.titleStyle) &&
                     QColor(c.accentColor).isValid(),

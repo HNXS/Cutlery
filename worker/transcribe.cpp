@@ -5,6 +5,9 @@
 // non-speech with a Silero VAD model, which keeps Whisper from inventing text during silence and
 // music. Cue times start at zero for the first source time of the range.
 //
+// whisper-cli uses a GPU through Vulkan when the build and driver allow it, and retries on the
+// CPU if the GPU run fails.
+//
 //   cutlery-ai transcribe --ffmpeg F --whisper W --model M --input IN --output OUT.srt
 //                         [--vad V] [--start S] [--duration D] [--language auto|de|en|...]
 #include "common.h"
@@ -48,7 +51,6 @@ int worker::transcribe(const QHash<QString, QString> &o) {
         return fail("cannot extract the audio");
     progress(2, 100);
 
-    QProcess speech;
     // Whisper scales with physical cores up to about eight; hyper-threads and more threads than
     // free cores only slow it. Machines with 8+ logical processors usually have two per core.
     const int logical = QThread::idealThreadCount();
@@ -59,30 +61,58 @@ int worker::transcribe(const QHash<QString, QString> &o) {
                   QString::number(std::clamp(logical >= 8 ? logical / 2 : logical, 1, 8))};
     if (!vad.isEmpty() && QFileInfo(vad).isFile())
         w << "--vad" << "-vm" << vad;
-    speech.start(whisper, w);
-    if (!speech.waitForStarted())
-        return fail("cannot start whisper-cli");
     std::printf("device cpu\n");
     std::fflush(stdout);
-    // whisper-cli reports "progress = N%" on stderr; keep the tail for error messages.
-    static const QRegularExpression percent("progress\\s*=\\s*(\\d+)%");
+    // whisper-cli reports the GPU it uses and "progress = N%" on stderr; keep the tail for error
+    // messages. Returns whether it succeeded and whether it ran on the GPU.
+    static const QRegularExpression percent("progress\\s*=\\s*(\\d+)%"),
+        gpu("whisper_backend_init_gpu: using (.+) backend");
     QByteArray log;
-    int last = 2;
-    while (speech.state() != QProcess::NotRunning) {
-        speech.waitForReadyRead(1000);
-        log += speech.readAllStandardError();
-        speech.readAllStandardOutput();
-        for (auto it = percent.globalMatch(QString::fromUtf8(log)); it.hasNext();) {
-            const int p = std::clamp(2 + it.next().captured(1).toInt() * 97 / 100, 2, 99);
-            if (p > last)
-                progress(last = p, 100);
+    bool started = false;
+    auto run = [&](const QStringList &args, bool &onGpu) {
+        QProcess speech;
+        QFile::remove(base + ".srt");
+        log.clear();
+        onGpu = false;
+        speech.start(whisper, args);
+        if (!speech.waitForStarted())
+            return false;
+        started = true;
+        int last = 2;
+        QString text;
+        while (speech.state() != QProcess::NotRunning) {
+            speech.waitForReadyRead(1000);
+            log += speech.readAllStandardError();
+            speech.readAllStandardOutput();
+            text = QString::fromUtf8(log);
+            if (!onGpu && gpu.match(text).hasMatch()) {
+                onGpu = true;
+                std::printf("device gpu\n");
+                std::fflush(stdout);
+            }
+            for (auto it = percent.globalMatch(text); it.hasNext();) {
+                const int p = std::clamp(2 + it.next().captured(1).toInt() * 97 / 100, 2, 99);
+                if (p > last)
+                    progress(last = p, 100);
+            }
+            if (log.size() > 8192)
+                log = log.right(4096);
         }
-        if (log.size() > 8192)
-            log = log.right(4096);
+        speech.waitForFinished(-1);
+        log += speech.readAllStandardError();
+        return speech.exitStatus() == QProcess::NormalExit && speech.exitCode() == 0;
+    };
+    bool onGpu = false;
+    bool ok = run(w, onGpu);
+    if (!ok && onGpu) {
+        // A GPU driver can fail where the CPU works: try again without the GPU.
+        std::printf("device cpu\n");
+        std::fflush(stdout);
+        ok = run(QStringList(w) << "-ng", onGpu);
     }
-    speech.waitForFinished(-1);
-    log += speech.readAllStandardError();
-    if (speech.exitStatus() != QProcess::NormalExit || speech.exitCode() != 0) {
+    if (!ok) {
+        if (!started)
+            return fail("cannot start whisper-cli");
         const auto lines = QString::fromUtf8(log).trimmed().split('\n');
         return fail("whisper-cli failed: " + lines.mid(std::max<qsizetype>(0, lines.size() - 2))
                                                   .join(' '));

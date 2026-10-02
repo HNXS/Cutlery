@@ -1196,8 +1196,8 @@
     "status": "Planned",
     "acceptance": "Seeded render repeats; glow handles alpha and HDR limits",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Per clip: contrast-adaptive sharpening, glow (screened soft copy), vignette and moving luma film grain, 0..1 each; alpha is preserved for overlays and cutouts."
   },
   {
     "id": "F049",
@@ -2197,7 +2197,7 @@
     "acceptance": "DE/EN test corpus meets documented WER and timing thresholds",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Partial",
-    "alphaNotes": "whisper.cpp v1.9.4 (static AVX2 whisper-cli, built from the pinned commit) with Whisper large-v3-turbo q5_0 and Silero VAD, via the cutlery-ai transcribe task; language auto or chosen; word-level transcripts cached per media file and language, grouped into lines of at most 42 characters; cues mapped through each audible clip's trim, position and speed onto an 'AI captions' track, replaced on every run. CPU only; no speaker labels."
+    "alphaNotes": "whisper.cpp v1.9.4 (whisper-cli with Vulkan GPU and per-CPU-level backends, built from the pinned commit) with Whisper large-v3-turbo q5_0 and Silero VAD, via the cutlery-ai transcribe task; language auto or chosen; word-level transcripts cached per media file and language, grouped into lines of at most 42 characters; cues mapped through each audible clip's trim, position and speed onto an 'AI captions' track, replaced on every run. GPU through Vulkan with CPU fallback (GPU unverified on CI, which has none); no speaker labels."
   },
   {
     "id": "F089",
@@ -2596,8 +2596,8 @@
     "status": "Planned",
     "acceptance": "Highlights/shadows/whites/blacks/fade follow endpoint fixtures",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Per clip: temperature (light colour temperature with lightness kept), tint (green–magenta), vibrance, and shadows/highlights through a master curve, each −1..1, plus the existing brightness, contrast and saturation. Not keyframable; no exposure/whites/blacks split or auto white balance."
   },
   {
     "id": "F105",
@@ -2671,8 +2671,8 @@
     "status": "Planned",
     "acceptance": "Identity LUT exact; invalid sizes rejected; strength interpolates as specified",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": ".cube and .3dl 3D LUTs per clip (tetrahedral interpolation) with a strength mix; missing files are skipped and flagged. Eight original one-click looks built from the colour and look controls; no bundled LUT files or LUT browser."
   },
   {
     "id": "F108",

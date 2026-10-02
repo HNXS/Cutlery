@@ -1650,6 +1650,138 @@ ApplicationWindow {
                                     }
                                 }
                             }
+                            // Colour and look of the clip's picture.
+                            ColumnLayout {
+                                objectName: "lookSection"
+                                visible: win.selection.picture === true
+                                Layout.fillWidth: true
+                                spacing: 6
+                                Rule {}
+                                Caption { text: "COLOUR & LOOK" }
+                                ComboBox {
+                                    id: lookPreset
+                                    objectName: "lookPreset"
+                                    Layout.fillWidth: true
+                                    enabled: win.selection.locked !== true
+                                    readonly property var looks: [
+                                        { label: "Apply a look…", values: null },
+                                        { label: "Natural (reset)", values: {} },
+                                        { label: "Warm", values: { temperature: .35, vibrance: .2 } },
+                                        { label: "Cool", values: { temperature: -.35, vibrance: .1 } },
+                                        { label: "Cinematic", values: { temperature: .1, contrast: 1.15, highlights: -.25, vibrance: .15, vignette: .35 } },
+                                        { label: "Vintage", values: { temperature: .3, saturation: .75, shadows: .35, highlights: -.15, grain: .4, vignette: .4 } },
+                                        { label: "Black & white", values: { saturation: 0, contrast: 1.2, grain: .2 } },
+                                        { label: "Punchy", values: { contrast: 1.15, vibrance: .5, sharpen: .3 } },
+                                        { label: "Dreamy", values: { glow: .5, highlights: .15, contrast: .9, temperature: .1 } }
+                                    ]
+                                    model: looks.map(l => l.label)
+                                    onActivated: index => {
+                                        const look = looks[index].values;
+                                        if (look) {
+                                            // Every look setting at once, in one undo step; the LUT stays.
+                                            const values = { brightness: 0, contrast: 1, saturation: 1, temperature: 0, tint: 0, vibrance: 0, shadows: 0, highlights: 0, sharpen: 0, glow: 0, vignette: 0, grain: 0 };
+                                            for (const k in look)
+                                                values[k] = look[k];
+                                            editor.setClipValues(values);
+                                        }
+                                        currentIndex = 0;
+                                    }
+                                }
+                                Repeater {
+                                    model: [
+                                        { key: "temperature", name: "Temperature", lo: -1, hi: 1, tip: "Warmer (right) or cooler (left) light" },
+                                        { key: "tint", name: "Tint", lo: -1, hi: 1, tip: "Magenta (right) or green (left)" },
+                                        { key: "vibrance", name: "Vibrance", lo: -1, hi: 1, tip: "Saturates muted colours more than strong ones; skin stays natural" },
+                                        { key: "shadows", name: "Shadows", lo: -1, hi: 1, tip: "Lift or deepen the dark parts" },
+                                        { key: "highlights", name: "Highlights", lo: -1, hi: 1, tip: "Recover or brighten the bright parts" },
+                                        { key: "sharpen", name: "Sharpen", lo: 0, hi: 1, tip: "Contrast-adaptive sharpening" },
+                                        { key: "glow", name: "Glow", lo: 0, hi: 1, tip: "A soft glow around bright areas" },
+                                        { key: "vignette", name: "Vignette", lo: 0, hi: 1, tip: "Darker corners draw the eye to the centre" },
+                                        { key: "grain", name: "Film grain", lo: 0, hi: 1, tip: "Moving grain like film" }
+                                    ]
+                                    ColumnLayout {
+                                        id: lookRow
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        spacing: 0
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Label {
+                                                text: lookRow.modelData.name
+                                                color: Number(win.selection[lookRow.modelData.key] || 0) !== 0 ? win.mint : win.muted
+                                                Layout.fillWidth: true
+                                            }
+                                            Label {
+                                                text: Number(win.selection[lookRow.modelData.key] || 0).toFixed(2)
+                                                font.pixelSize: 10
+                                            }
+                                        }
+                                        Slider {
+                                            objectName: "look-" + lookRow.modelData.key
+                                            Layout.fillWidth: true
+                                            from: lookRow.modelData.lo
+                                            to: lookRow.modelData.hi
+                                            stepSize: .01
+                                            value: Number(win.selection[lookRow.modelData.key] || 0)
+                                            enabled: win.selection.locked !== true
+                                            onPressedChanged: if (!pressed)
+                                                editor.setClip(lookRow.modelData.key, value)
+                                            onMoved: if (!pressed)
+                                                editor.setClip(lookRow.modelData.key, value)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: lookRow.modelData.tip + ". Double-click to reset."
+                                            TapHandler {
+                                                acceptedButtons: Qt.LeftButton
+                                                onDoubleTapped: editor.setClip(lookRow.modelData.key, 0)
+                                            }
+                                        }
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label {
+                                        objectName: "lutName"
+                                        Layout.fillWidth: true
+                                        elide: Text.ElideMiddle
+                                        color: win.selection.lutMissing ? "#e5534b" : win.selection.lut ? win.mint : win.muted
+                                        text: !win.selection.lut ? "No LUT" : win.selection.lutMissing ? "LUT missing: " + win.selection.lutName : "LUT: " + win.selection.lutName
+                                    }
+                                    Action {
+                                        objectName: "chooseLut"
+                                        text: win.selection.lut ? "Change…" : "Load LUT…"
+                                        padding: 6
+                                        enabled: win.selection.locked !== true
+                                        onClicked: lutDialog.open()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "A 3D colour lookup table (.cube or .3dl), e.g. a camera log conversion or a film look"
+                                    }
+                                    Action {
+                                        text: "✕"
+                                        padding: 6
+                                        visible: !!win.selection.lut
+                                        onClicked: editor.setClip("lut", "")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Remove the LUT"
+                                    }
+                                }
+                                RowLayout {
+                                    visible: !!win.selection.lut
+                                    Layout.fillWidth: true
+                                    Label { text: "LUT strength"; color: win.muted }
+                                    Slider {
+                                        objectName: "lutStrength"
+                                        Layout.fillWidth: true
+                                        from: 0
+                                        to: 1
+                                        stepSize: .01
+                                        value: win.selection.lutStrength ?? 1
+                                        onPressedChanged: if (!pressed)
+                                            editor.setClip("lutStrength", value)
+                                        onMoved: if (!pressed)
+                                            editor.setClip("lutStrength", value)
+                                    }
+                                }
+                            }
                             RowLayout {
                                 CheckBox {
                                     text: "Reverse"
@@ -1777,6 +1909,12 @@ ApplicationWindow {
         id: relinkDialog
         title: "Choose replacement media"
         onAccepted: editor.relink(win.selection.assetId, selectedFile)
+    }
+    FileDialog {
+        id: lutDialog
+        title: "Choose a LUT"
+        nameFilters: ["3D LUTs (*.cube *.3dl)", "All files (*)"]
+        onAccepted: editor.setClip("lut", selectedFile)
     }
     FileDialog {
         id: srtOpen

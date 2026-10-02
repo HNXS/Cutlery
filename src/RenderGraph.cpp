@@ -15,6 +15,20 @@
 #include <stdexcept>
 
 namespace cutlery {
+// A file path as a filter option value inside a filter graph: escaped for the option parser,
+// then for the graph parser, so any character in a path is safe.
+QString filterPath(const QString &path) {
+    auto escape = [](const QString &s, const QString &special) {
+        QString out;
+        for (const auto ch : s) {
+            if (special.contains(ch) || ch == '\\' || ch == '\'')
+                out += '\\';
+            out += ch;
+        }
+        return out;
+    };
+    return escape(escape(QDir::fromNativeSeparators(path), ":="), ",;[]");
+}
 static QString num(double v) {
     return QString::number(v, 'f', 9);
 }
@@ -480,8 +494,52 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         }
         if (c.saturation != 1)
             f += ",hue=s=" + num(c.saturation);
+        // Colour: light colour temperature with lightness kept, a green–magenta balance, and
+        // vibrance, which saturates muted colours more than saturated ones.
+        if (c.temperature != 0)
+            f += QString(",colortemperature=temperature=%1:pl=1")
+                     .arg(num(c.temperature > 0 ? 6500 - 3500 * c.temperature
+                                                : 6500 - 6500 * c.temperature));
+        if (c.tint > 0)
+            f += ",colorchannelmixer=gg=" + num(1 - 0.2 * c.tint);
+        else if (c.tint < 0)
+            f += QString(",colorchannelmixer=rr=%1:bb=%1").arg(num(1 + 0.2 * c.tint));
+        if (c.vibrance != 0)
+            f += ",vibrance=intensity=" + num(c.vibrance);
+        if (c.shadows != 0 || c.highlights != 0)
+            f += QString(",curves=m='0/0 0.25/%1 0.75/%2 1/1'")
+                     .arg(num(0.25 + 0.12 * c.shadows), num(0.75 + 0.12 * c.highlights));
+        // Branches for filters that mix with the picture or would drop its alpha channel.
+        auto branch = [&](const QString &a, const QString &b, const QString &join) {
+            const auto id = QString::number(serial++);
+            nodes << f + QString(",split[lka%1][lkb%1]").arg(id);
+            nodes << QString("[lka%1]%2[lkc%1]").arg(id, a);
+            nodes << QString("[lkb%1]%2[lkd%1]").arg(id, b);
+            f = QString("[lkc%1][lkd%1]%2").arg(id, join);
+        };
+        if (!c.lut.isEmpty() && c.lutStrength > 0 && QFileInfo(c.lut).isFile()) {
+            const auto lut = "lut3d=file=" + filterPath(c.lut) + ":interp=tetrahedral";
+            if (c.lutStrength >= 1)
+                f += "," + lut;
+            else
+                branch(lut, "null", "blend=all_mode=normal:all_opacity=" + num(c.lutStrength));
+        }
         if (c.blur > 0)
             f += ",gblur=sigma=" + num(c.blur * 30 * w / 1920.0 + 0.5);
+        if (c.sharpen > 0)
+            f += ",cas=strength=" + num(c.sharpen);
+        if (c.glow > 0)
+            // Screen a soft copy over the picture; alpha stays the original's.
+            branch("null", "gblur=sigma=" + num(std::max(1., 18. * w / 1920)),
+                   QString("blend=c0_mode=screen:c1_mode=screen:c2_mode=screen:c0_opacity=%1:"
+                           "c1_opacity=%1:c2_opacity=%1,format=rgba")
+                       .arg(num(0.8 * c.glow)));
+        if (c.vignette > 0)
+            branch("vignette=angle=" + num(c.vignette * 1.1) + ":eval=init", "alphaextract",
+                   "alphamerge,format=rgba");
+        if (c.grain > 0)
+            // Luma grain that changes every frame, on a format that keeps alpha.
+            f += QString(",format=yuva444p,noise=c0s=%1:c0f=t,format=rgba").arg(num(4 + 26 * c.grain));
         const auto matte = c.aiCutout && !n.image && n.asset ? o.mattes.value(n.asset->id)
                                                              : MatteSource{};
         if (!matte.path.isEmpty()) {

@@ -1493,6 +1493,152 @@ class EngineTest : public QObject {
         QVERIFY(count(image, true, true) + count(image, false, true) == 0);
         QVERIFY(count(image, true, false) + count(image, false, false) > 50);
     }
+    void colourAndLook() {
+        QCOMPARE(filterPath("C:/a b/it's,[x];y=z.cube"),
+                 QString("C\\\\:/a b/it\\\\\\'s\\,\\[x\\]\\;y\\\\=z.cube"));
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        auto image = [&](const QString &name, QColor colour, bool hole = false) {
+            QImage i(320, 180, QImage::Format_ARGB32);
+            i.fill(colour);
+            if (hole) // a transparent left half
+                for (int y = 0; y < 180; ++y)
+                    for (int x = 0; x < 160; ++x)
+                        i.setPixelColor(x, y, Qt::transparent);
+            const auto path = dir.filePath(name);
+            if (!i.save(path))
+                throw std::runtime_error("Cannot save test image");
+            return path;
+        };
+        Project p;
+        p.width = 320;
+        p.height = 180;
+        for (const auto &[id, path] :
+             {std::pair{QString("grey"), image("grey.png", QColor(128, 128, 128))},
+              std::pair{QString("red"), image("red.png", QColor(200, 0, 0))},
+              std::pair{QString("cut"), image("cut.png", QColor(128, 128, 128), true)}}) {
+            Asset a;
+            a.id = id;
+            a.path = path;
+            a.kind = "image";
+            a.duration = 5;
+            a.width = 320;
+            a.height = 180;
+            p.assets << a;
+        }
+        Clip clip;
+        clip.id = "c";
+        clip.assetId = "grey";
+        clip.duration = 30;
+        p.clips = {clip};
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Clip &c) {
+            auto project = p;
+            project.clips[project.clips.size() - 1] = c;
+            RenderOptions options;
+            options.audio = false;
+            options.from = 5;
+            options.to = 6;
+            const auto plan = compileRender(project, dir.filePath("work"), 320, 180, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return out.convertToFormat(QImage::Format_RGB32);
+        };
+        auto at = [](const QImage &i, int x = 160, int y = 90) { return QColor(i.pixel(x, y)); };
+        auto with = [&](auto change) {
+            auto c = clip;
+            change(c);
+            return still(c);
+        };
+        const auto plain = at(still(clip));
+        QVERIFY(std::abs(plain.red() - 128) < 6 && std::abs(plain.blue() - 128) < 6);
+        auto warm = at(with([](Clip &c) { c.temperature = 1; }));
+        QVERIFY2(warm.red() > warm.blue() + 20, qPrintable(warm.name()));
+        auto cool = at(with([](Clip &c) { c.temperature = -1; }));
+        QVERIFY2(cool.blue() > cool.red() + 20, qPrintable(cool.name()));
+        auto magenta = at(with([](Clip &c) { c.tint = 1; }));
+        QVERIFY2(magenta.green() < magenta.red() - 15, qPrintable(magenta.name()));
+        auto green = at(with([](Clip &c) { c.tint = -1; }));
+        QVERIFY2(green.green() > green.red() + 15, qPrintable(green.name()));
+        auto lifted = at(with([](Clip &c) { c.shadows = 1; }));
+        QVERIFY2(lifted.red() > plain.red() + 8, qPrintable(lifted.name()));
+        auto lowered = at(with([](Clip &c) { c.highlights = -1; }));
+        QVERIFY2(lowered.red() < plain.red() - 8, qPrintable(lowered.name()));
+        auto glowing = at(with([](Clip &c) { c.glow = 1; }));
+        QVERIFY2(glowing.red() > plain.red() + 30, qPrintable(glowing.name()));
+        const auto vignette = with([](Clip &c) { c.vignette = 1; });
+        QVERIFY(qGray(vignette.pixel(2, 2)) < qGray(vignette.pixel(160, 90)) - 40);
+        const auto grain = with([](Clip &c) { c.grain = 1; });
+        int lo = 255, hi = 0;
+        for (int x = 100; x < 220; ++x) {
+            lo = std::min(lo, qGray(grain.pixel(x, 90)));
+            hi = std::max(hi, qGray(grain.pixel(x, 90)));
+        }
+        QVERIFY2(hi - lo > 20, qPrintable(QString::number(hi - lo)));
+        auto sharp = at(with([](Clip &c) { c.sharpen = 1; }));
+        QVERIFY(std::abs(sharp.red() - plain.red()) < 6); // a flat picture stays flat
+        // A LUT that maps everything to blue, from a folder with awkward characters.
+        QVERIFY(QDir(dir.path()).mkpath("odd dir;it's,[x]"));
+        const auto lutPath = dir.filePath("odd dir;it's,[x]/blue.cube");
+        {
+            QFile lut(lutPath);
+            QVERIFY(lut.open(QIODevice::WriteOnly));
+            lut.write("TITLE \"blue\"\nLUT_3D_SIZE 2\n");
+            for (int i = 0; i < 8; ++i)
+                lut.write("0 0 1\n");
+        }
+        auto blue = at(with([&](Clip &c) { c.lut = lutPath; }));
+        QVERIFY2(blue.blue() > 240 && blue.red() < 15, qPrintable(blue.name()));
+        auto half = at(with([&](Clip &c) {
+            c.lut = lutPath;
+            c.lutStrength = 0.5;
+        }));
+        QVERIFY2(std::abs(half.blue() - 191) < 12 && std::abs(half.red() - 64) < 12,
+                 qPrintable(half.name()));
+        auto missing = at(with([&](Clip &c) { c.lut = dir.filePath("gone.cube"); }));
+        QVERIFY(std::abs(missing.red() - plain.red()) < 6);
+        // Alpha survives every look filter: the red clip below shows through the hole.
+        Clip below = clip;
+        below.id = "below";
+        below.assetId = "red";
+        p.clips = {below, clip};
+        p.clips[1].track = 1;
+        auto cutout = p.clips[1];
+        cutout.assetId = "cut";
+        cutout.vignette = cutout.grain = cutout.glow = cutout.sharpen = 1;
+        cutout.temperature = cutout.vibrance = cutout.shadows = 0.5;
+        cutout.lut = lutPath;
+        cutout.lutStrength = 0.5;
+        const auto layered = still(cutout);
+        const auto hole = at(layered, 80, 90);
+        QVERIFY2(hole.red() > 150 && hole.blue() < 60, qPrintable(hole.name()));
+        QVERIFY(at(layered, 240, 90).blue() > 120);
+
+        // Saved with the project: values only when set, the LUT relative to the project.
+        p.clips[1] = cutout;
+        const auto json = p.json(dir.path());
+        QCOMPARE(json["schemaVersion"].toInt(), 11);
+        const auto saved = json["clips"].toArray()[1].toObject();
+        QCOMPARE(saved["lut"].toString(), QString("odd dir;it's,[x]/blue.cube"));
+        QVERIFY(!json["clips"].toArray()[0].toObject().contains("vignette"));
+        const auto loaded = Project::fromJson(json, dir.path());
+        QCOMPARE(loaded.clips[1].lut, QDir::cleanPath(lutPath));
+        QCOMPARE(loaded.clips[1].grain, 1.);
+        QCOMPARE(loaded.clips[1].temperature, 0.5);
+        auto bad = json;
+        auto clips = bad["clips"].toArray();
+        auto first = clips[0].toObject();
+        first["tint"] = 2;
+        clips[0] = first;
+        bad["clips"] = clips;
+        QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, dir.path()), std::runtime_error);
+    }
     void blurAndMosaic() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

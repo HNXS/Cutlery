@@ -51,7 +51,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F045 | Background replacement and canvas | Planned | Not implemented in this alpha. |
 | F046 | Adjustment layers and filter ordering | Planned | Not implemented in this alpha. |
 | F047 | Blur variants, mosaic and pixelation | Partial | Gaussian blur of a clip's picture (inspector slider), and blur or mosaic (pixelate) areas: rectangles on an upper track that affect everything below, placed and resized in the preview, position keyframable, strength 0–100 %. Rectangles only; no ellipse/feathered shape, animated size or face tracking. |
-| F048 | Glow, grain, vignette and sharpen | Planned | Not implemented in this alpha. |
+| F048 | Glow, grain, vignette and sharpen | Implemented (alpha) | Per clip: contrast-adaptive sharpening, glow (screened soft copy), vignette and moving luma film grain, 0..1 each; alpha is preserved for overlays and cutouts. |
 | F049 | Glitch, shake, VHS, retro and film effects | Planned | Not implemented in this alpha. |
 | F050 | Distortion, edge, lens and stylize effects | Planned | Not implemented in this alpha. |
 | F051 | Motion blur | Planned | Not implemented in this alpha. |
@@ -91,7 +91,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F085 | SRT import/export and TXT import | Partial | SRT roundtrip; no TXT. |
 | F086 | WebVTT and ASS/SSA interoperability | Planned | Not implemented in this alpha. |
 | F087 | Subtitle burn-in and sidecar export | Partial | Burn-in and SRT. |
-| F088 | Local transcription and automatic captions | Partial | whisper.cpp v1.9.4 (static AVX2 whisper-cli, built from the pinned commit) with Whisper large-v3-turbo q5_0 and Silero VAD, via the cutlery-ai transcribe task; language auto or chosen; word-level transcripts cached per media file and language, grouped into lines of at most 42 characters; cues mapped through each audible clip's trim, position and speed onto an 'AI captions' track, replaced on every run. CPU only; no speaker labels. |
+| F088 | Local transcription and automatic captions | Partial | whisper.cpp v1.9.4 (whisper-cli with Vulkan GPU and per-CPU-level backends, built from the pinned commit) with Whisper large-v3-turbo q5_0 and Silero VAD, via the cutlery-ai transcribe task; language auto or chosen; word-level transcripts cached per media file and language, grouped into lines of at most 42 characters; cues mapped through each audible clip's trim, position and speed onto an 'AI captions' track, replaced on every run. GPU through Vulkan with CPU fallback (GPU unverified on CI, which has none); no speaker labels. |
 | F089 | Word timing and karaoke highlights | Partial | Whisper word timestamps (one cue per word) grouped into lines; captions keep each word's start (schema 8). Styles: karaoke (spoken word in a highlight colour), one word at a time, plain; changeable per caption in the inspector. Rendered from one sprite per caption with a per-frame crop. No animation of sprite captions, no per-word styling beyond the highlight colour. |
 | F090 | Sentence segmentation and caption layout | Planned | Not implemented in this alpha. |
 | F091 | Transcript-based editing | Planned | Not implemented in this alpha. |
@@ -107,10 +107,10 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F101 | Stock music and sound effects import | Partial | User audio file import only. |
 | F102 | Commercial-use rights metadata | Planned | Not implemented in this alpha. |
 | F103 | Exposure, brightness, contrast and saturation | Partial | Brightness/contrast/saturation; no exposure model. |
-| F104 | Temperature, tint, vibrance and tonal controls | Planned | Not implemented in this alpha. |
+| F104 | Temperature, tint, vibrance and tonal controls | Partial | Per clip: temperature (light colour temperature with lightness kept), tint (green–magenta), vibrance, and shadows/highlights through a master curve, each −1..1, plus the existing brightness, contrast and saturation. Not keyframable; no exposure/whites/blacks split or auto white balance. |
 | F105 | HSL, RGB curves and master curves | Planned | Not implemented in this alpha. |
 | F106 | Color wheels and automatic adjustment | Planned | Not implemented in this alpha. |
-| F107 | LUT import, intensity and original presets | Planned | Not implemented in this alpha. |
+| F107 | LUT import, intensity and original presets | Partial | .cube and .3dl 3D LUTs per clip (tetrahedral interpolation) with a strength mix; missing files are skipped and flagged. Eight original one-click looks built from the colour and look controls; no bundled LUT files or LUT browser. |
 | F108 | Histogram, waveform and vectorscope | Planned | Not implemented in this alpha. |
 | F109 | Rec.709, sRGB and range conversions | Planned | Not implemented in this alpha. |
 | F110 | HDR input and SDR tone mapping | Planned | Not implemented in this alpha. |
