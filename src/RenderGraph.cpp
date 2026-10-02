@@ -1084,7 +1084,12 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         nodes << a;
         audioLabels << "[a" + id + "]";
     }
-    const QString pace = o.realtime ? ",realtime" : "";
+    const QString pace = !o.realtime ? QString()
+                         : o.rate != 1 ? ",realtime=speed=" + num(o.rate)
+                                       : QString(",realtime");
+    QString tempo;
+    for (double r = o.rate; r > 1.0001; r /= 2)
+        tempo += ",atempo=" + num(std::min(2., r));
     if (o.video)
         nodes << QString("[%1]trim=end_frame=%2,setpts=PTS-STARTPTS,format=%3%4[vout]")
                      .arg(visual)
@@ -1099,11 +1104,12 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                       ? QString(",ebur128=peak=true:framelog=quiet")
                       : QString(",alimiter=limit=%1:level=0:latency=1").arg(num(o.limit));
         nodes << audioLabels.join("") +
-                     QString("amix=inputs=%1:duration=longest:normalize=0%2,atrim=end_sample=%3%4"
+                     QString("amix=inputs=%1:duration=longest:normalize=0%2,atrim=end_sample=%3%4%5"
                              "[aout]")
                          .arg(audioLabels.size())
                          .arg(master)
                          .arg(qRound64(r.duration * 48000))
+                         .arg(tempo)
                          .arg(o.realtime ? ",arealtime" : "");
     }
     r.graph = nodes.join(";\n");

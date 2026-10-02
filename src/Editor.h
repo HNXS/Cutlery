@@ -41,6 +41,7 @@ class Editor final : public QObject {
     // Live playback position; separate from `state` so the viewer clock updates cheaply.
     Q_PROPERTY(bool playing READ playing NOTIFY playbackChanged)
     Q_PROPERTY(qint64 playbackFrame READ playbackFrame NOTIFY playbackChanged)
+    Q_PROPERTY(double playbackRate READ playbackRate NOTIFY playbackChanged)
     // Playback level meter: [left, right] in dBFS.
     Q_PROPERTY(QVariantList levels READ levels NOTIFY playbackChanged)
   public:
@@ -148,6 +149,13 @@ class Editor final : public QObject {
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();
     Q_INVOKABLE void togglePlayback();
+    // JKL shuttle: L plays forward and doubles the speed up to 4× on each press; J scrubs
+    // backward the same way; K (pause) stops both.
+    Q_INVOKABLE void shuttle(bool forward);
+    // Shuttle speed: 1, 2 or 4 forward, negative while scrubbing backward.
+    double playbackRate() const {
+        return m_reverseTimer.isActive() ? -m_shuttleRate : m_playRate;
+    }
     Q_INVOKABLE void setVideoSink(QObject *sink);
     QVariantList levels() const {
         const auto [l, r] = m_playback->levels();
@@ -239,6 +247,8 @@ class Editor final : public QObject {
     QVariantMap m_collect;
     QVariantMap m_conform;
     QVariantMap m_follow;
+    double m_playRate = 1, m_shuttleRate = 1;
+    QTimer m_reverseTimer;
     void applyFollowFace();
     // The video clip under `c` at its start: the highest lower track with a video playing then.
     const Clip *videoBelow(const Clip &c) const;

@@ -121,6 +121,16 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     m_resumeTimer.setSingleShot(true);
     m_resumeTimer.setInterval(150);
     connect(&m_resumeTimer, &QTimer::timeout, this, &Editor::play);
+    // Backward shuttle: ten steps a second.
+    m_reverseTimer.setInterval(100);
+    connect(&m_reverseTimer, &QTimer::timeout, this, [this] {
+        const auto step = std::max<qint64>(
+            1, qRound64(m_shuttleRate * m_project.fpsN / m_project.fpsD / 10));
+        seek(std::max<qint64>(0, m_playhead - step));
+        if (m_playhead == 0)
+            pause();
+        emit playbackChanged();
+    });
     m_saveTimer.setSingleShot(true);
     m_saveTimer.setInterval(800);
     connect(&m_saveTimer, &QTimer::timeout, this, &Editor::autosave);
@@ -2449,6 +2459,7 @@ void Editor::setVideoSink(QObject *sink) {
 }
 void Editor::play() {
     m_resumeTimer.stop();
+    m_reverseTimer.stop();
     if (m_project.clips.empty() || m_busy || m_playback->active())
         return;
     if (m_preview) {
@@ -2470,9 +2481,11 @@ void Editor::play() {
         request.fpsD = m_project.fpsD;
         request.from = m_playhead;
         request.work = work;
+        request.rate = m_playRate;
         RenderOptions options;
         options.from = m_playhead;
         options.realtime = true;
+        options.rate = m_playRate;
         options.audio = false;
         addAiMedia(options);
         request.video =
@@ -2498,6 +2511,12 @@ void Editor::play() {
 void Editor::pause() {
     const bool resuming = m_resumeTimer.isActive();
     m_resumeTimer.stop();
+    if (m_reverseTimer.isActive()) {
+        m_reverseTimer.stop();
+        m_status = "Ready";
+        emit playbackChanged();
+        emit changed();
+    }
     if (!m_playback->active() && !resuming)
         return;
     if (m_playback->active())
@@ -2508,10 +2527,37 @@ void Editor::pause() {
     emit changed();
 }
 void Editor::togglePlayback() {
-    if (m_playback->active() || m_resumeTimer.isActive())
+    if (m_playback->active() || m_resumeTimer.isActive() || m_reverseTimer.isActive())
         pause();
-    else
+    else {
+        m_playRate = 1;
         play();
+    }
+}
+void Editor::shuttle(bool forward) {
+    if (forward) {
+        const bool playing = m_playback->active();
+        if (m_reverseTimer.isActive())
+            pause();
+        const double next = playing ? std::min(4., m_playRate * 2) : 1;
+        if (playing && next == m_playRate)
+            return;
+        if (playing) {
+            m_playhead = m_playback->frame();
+            stopPlayback();
+        }
+        m_playRate = next;
+        play();
+        return;
+    }
+    // Backward: step the playhead back, faster on each press; previews follow.
+    if (m_playback->active())
+        pause();
+    m_shuttleRate = m_reverseTimer.isActive() ? std::min(4., m_shuttleRate * 2) : 1;
+    m_reverseTimer.start();
+    m_status = QString("Scrubbing back %1×").arg(m_shuttleRate);
+    emit playbackChanged();
+    emit changed();
 }
 void Editor::stopPlayback() {
     if (!m_playback->active())

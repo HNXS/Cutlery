@@ -340,7 +340,7 @@ class EngineTest : public QObject {
         QTemporaryDir dir;
         const auto path = dir.filePath("shortcuts.json");
         KeyboardShortcuts keys(path);
-        QCOMPARE(keys.bindings().size(), 39);
+        QCOMPARE(keys.bindings().size(), 41);
         QVERIFY(!keys.assign("play", "Ctrl+B"));
         QVERIFY(keys.error().contains("Already assigned"));
         QVERIFY(!keys.assign("play", "Ctrl+NotARealKey"));
@@ -2283,6 +2283,67 @@ class EngineTest : public QObject {
         clips[0] = o;
         json["clips"] = clips;
         QVERIFY_EXCEPTION_THROWN(Project::fromJson(json, {}), std::runtime_error);
+    }
+    void shuttlePlayback() {
+        // Faster playback paces real time faster and keeps sound in step without pitch change.
+        QTemporaryDir dir;
+        {
+            QFile silence(dir.filePath("sound.wav"));
+            QVERIFY(silence.open(QIODevice::WriteOnly)); // only the graph is compiled
+        }
+        Project p;
+        p.width = 160;
+        p.height = 90;
+        Asset a;
+        a.id = "s";
+        a.path = dir.filePath("sound.wav");
+        a.kind = "audio";
+        a.duration = 10;
+        a.hasAudio = true;
+        p.assets = {a};
+        Clip c;
+        c.id = "c";
+        c.assetId = "s";
+        c.duration = 90;
+        p.clips = {c};
+        RenderOptions o;
+        o.realtime = true;
+        o.rate = 4;
+        o.video = false;
+        auto graph = compileRender(p, dir.path(), 160, 90, o).graph;
+        QVERIFY2(graph.contains("atempo=2.000000000,atempo=2.000000000,arealtime"), qPrintable(graph));
+        o.video = true;
+        o.audio = false;
+        graph = compileRender(p, dir.path(), 160, 90, o).graph;
+        QVERIFY2(graph.contains("realtime=speed=4.000000000"), qPrintable(graph));
+        o.rate = 1;
+        graph = compileRender(p, dir.path(), 160, 90, o).graph;
+        QVERIFY(graph.contains(",realtime[vout]") && !graph.contains("speed="));
+
+        // Backward shuttle steps the playhead back ten times a second, faster on each press.
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.addTitle();
+        editor.setClip("duration", 300);
+        editor.seek(250);
+        editor.shuttle(false);
+        QCOMPARE(editor.playbackRate(), -1.);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.state()["playhead"].toLongLong() <= 244, 2000);
+        editor.shuttle(false);
+        QCOMPARE(editor.playbackRate(), -2.);
+        const auto before = editor.state()["playhead"].toLongLong();
+        QTRY_VERIFY_WITH_TIMEOUT(editor.state()["playhead"].toLongLong() <= before - 12, 2000);
+        editor.pause();
+        QCOMPARE(editor.playbackRate(), 1.);
+        const auto stopped = editor.state()["playhead"].toLongLong();
+        QTest::qWait(300);
+        QCOMPARE(editor.state()["playhead"].toLongLong(), stopped);
+        // It stops at the start.
+        editor.seek(3);
+        editor.shuttle(false);
+        QTRY_COMPARE_WITH_TIMEOUT(editor.playbackRate(), 1., 2000);
+        QCOMPARE(editor.state()["playhead"].toLongLong(), qint64(0));
     }
     void smoothSlowMotion() {
         const auto ffmpeg = Editor::executable("ffmpeg");

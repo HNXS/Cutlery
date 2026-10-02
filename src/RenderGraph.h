@@ -29,6 +29,9 @@ struct RenderOptions {
     // Pace output to wall-clock speed. Live playback reads frames from a pipe; pacing bounds the
     // amount of decoded media waiting in memory.
     bool realtime = false;
+    // Live playback speed (1, 2 or 4): real-time pacing runs this much faster, and the sound is
+    // sped up without changing its pitch.
+    double rate = 1;
     // Export: high-quality (Lanczos, accurate) scaling and the encoder's pixel format.
     bool highQuality = false;
     QString pixelFormat = "yuv420p";

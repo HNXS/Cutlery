@@ -796,8 +796,8 @@
     "status": "Planned",
     "acceptance": "Shuttle changes do not corrupt playhead; reverse limitations displayed",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "L plays forward and doubles to 2× and 4× on each press (FFmpeg real-time pacing at that speed, sound sped up with atempo, frames mapped by the faster clock); J scrubs backward at 1×, 2× and 4× (ten preview steps a second, stopping at the start); K pauses both; the transport shows the speed. Backward is a stepping preview without sound, not reverse playback."
   },
   {
     "id": "F033",

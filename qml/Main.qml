@@ -116,6 +116,10 @@ ApplicationWindow {
             editor.togglePlayback();
         else if (id === "pause")
             editor.pause();
+        else if (id === "shuttleForward" && s.duration > 0 && !s.busy)
+            editor.shuttle(true);
+        else if (id === "shuttleBack" && s.duration > 0 && !s.busy)
+            editor.shuttle(false);
         else if (id === "previousFrame")
             goTo(editor.playbackFrame - 1);
         else if (id === "nextFrame")
@@ -977,6 +981,13 @@ ApplicationWindow {
                             onClicked: voice.recording ? editor.stopVoiceOver() : editor.startVoiceOver()
                             ToolTip.visible: hovered
                             ToolTip.text: voice.available === true ? "Record narration from the microphone while the timeline plays from the playhead. Use headphones so the recording does not pick up the timeline." : "No microphone found"
+                        }
+                        Label {
+                            objectName: "playbackRate"
+                            visible: editor.playbackRate !== 1 && (editor.playing || editor.playbackRate < 0)
+                            text: (editor.playbackRate < 0 ? "◀◀ " : "▶▶ ") + Math.abs(editor.playbackRate) + "×"
+                            color: "#ffd479"
+                            font.bold: true
                         }
                         Label {
                             text: win.clock(editor.playbackFrame) + " / " + win.clock(win.s.duration)
