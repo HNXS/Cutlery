@@ -1,5 +1,19 @@
 # Validation record
 
+## Windows portable build — 2026-10-02, release 0.5.0 with level meters
+
+[GitHub Actions run 36996269492](https://github.com/HNXS/Cutlery/actions/runs/36996269492) completed successfully for commit `d35326ceeceb9c13eed0397a0a1b3d84909789b4`, with the same toolchain as the lower-thirds build. The artifacts are named 0.5.0. New coverage:
+
+- **Engine test `pausesAndLoudness`:**
+  - `pcmPeaks` for 16-bit and float PCM, and `parseTruePeak`.
+  - "Measure mix" end to end: a test tone measures −33 LUFS with a true peak of −31.5 dBTP, and the result reads as stale after an edit.
+- **Interface:** the export dialog's measure button and result text, and the level meter, load without QML warnings.
+
+Downloads (expire 2026-11-01):
+
+- [Portable build](https://github.com/HNXS/Cutlery/actions/runs/36996269492/artifacts/11221554077): 148,512,563 bytes, archive SHA-256 `1d8595e6618487d0deb6e9facb3c24d1df068711be8c5a97b4c1f5474130eaea`.
+- [AI pack](https://github.com/HNXS/Cutlery/actions/runs/36996269492/artifacts/11222530480): 701,994,869 bytes, archive SHA-256 `c9d252d964f95d390e276250289553609a032cc063c5e95006ca4bcdaf828d0c`.
+
 ## Windows portable build — 2026-10-02, lower thirds and title cards (0.5 development)
 
 [GitHub Actions run 36981200885](https://github.com/HNXS/Cutlery/actions/runs/36981200885) completed successfully for commit `a4e48e1eb1b0fab9ee131d79c3a7f8c476f2497c`, with the same toolchain as the blur-and-mosaic build. New coverage:

@@ -948,6 +948,15 @@ double parseIntegratedLoudness(const QString &log) {
     }
     return value;
 }
+double parseTruePeak(const QString &log) {
+    static const QRegularExpression peak("True peak:\\s*Peak:\\s*(-?[0-9.]+|-inf)\\s*dBFS");
+    double value = std::numeric_limits<double>::quiet_NaN();
+    for (auto it = peak.globalMatch(log); it.hasNext();) {
+        const auto m = it.next().captured(1);
+        value = m == "-inf" ? -std::numeric_limits<double>::infinity() : m.toDouble();
+    }
+    return value;
+}
 QStringList measureArguments(const RenderPlan &r, const QString &graph) {
     QStringList a{"-hide_banner", "-nostdin", "-loglevel", "info", "-nostats"};
     a += r.inputs;

@@ -1,12 +1,12 @@
 # Cutlery
 
-An original, local desktop video editor for Windows. **Version 0.4.0 is a functional alpha, not the completed 187-feature roadmap.** Built with C++20, Qt Quick 6.8 and a shared FFmpeg reference renderer.
+An original, local desktop video editor for Windows. **Version 0.5.0 is a functional alpha, not the completed 187-feature roadmap.** Built with C++20, Qt Quick 6.8 and a shared FFmpeg reference renderer.
 
 ![Cutlery alpha rendering a synthetic demonstration project](docs/images/editor.png)
 
 ## Try it on Windows
 
-Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/actions/workflows/windows.yml), select a successful run, and download **Cutlery-0.4.0-win64-portable** from its artifacts. Extract the entire ZIP into a writable folder and run `Cutlery.exe`. The package is unsigned. No account, service, telemetry or model download is required by the application.
+Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/actions/workflows/windows.yml), select a successful run, and download **Cutlery-0.5.0-win64-portable** from its artifacts. Extract the entire ZIP into a writable folder and run `Cutlery.exe`. The package is unsigned. No account, service, telemetry or model download is required by the application.
 
 1. Drop local video, audio or image files into the media library, or directly onto a timeline track. Drag library items to the desired track/time. Double-click still appends to the chosen track.
 2. Add tracks with **+ Track**. Drag video, audio, images or titles along a track or between tracks; drag near the viewport edges to scroll. Escape cancels. Higher tracks appear on top. Free tracks allow overlaps in insertion order.
@@ -40,6 +40,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - Constant speed **0.25–4×**, reverse, volume/mute, stereo mixing with an output limiter.
 - **Remove pauses…** (inspector) finds the quiet moments in a clip's sound and cuts them out in one undoable step, keeping a little room around speech; detached audio is cut alongside.
 - Loudness normalisation on export: Cutlery measures the whole mix (EBU R128) and sets one gain for YouTube/streaming (−14 LUFS), podcasts (−16) or TV (−23), with peaks limited below full scale.
+- Level meters: left/right peak meters during playback, and a whole-mix loudness measurement (LUFS, true peak) in the export dialog.
 - Rasterized Unicode titles, manual captions, SRT import/export and subtitle burn-in.
 - Automatic captions: **Captions → Generate captions (AI)** transcribes all audible clips offline with whisper.cpp and places the captions on their own track (needs the [AI pack](docs/AI.md)). Styles: karaoke (the spoken word is highlighted), plain, or one word at a time.
 - Live playback that starts in a fraction of a second, audio-clocked with frame skipping when the CPU falls behind; preview frames that render only the playhead frame; export progress and cancellation.
@@ -55,7 +56,7 @@ Only finite local media files are supported. Source audio/video remain together 
 
 The current development build saves schema 10, which adds transitions, keyframes, overlay styles, AI cutout, timed captions, blur/mosaic areas and title templates; 0.4 and older cannot open it. It reads all earlier schemas. Use **Save As** to preserve an older project copy.
 
-See [what remains](docs/ROADMAP.md), [drag/drop and magnetic tracks](docs/TIMELINE.md), [BUILDING](docs/BUILDING.md), [PORTABLE](docs/PORTABLE.md), [architecture](docs/ARCHITECTURE.md), [feature status](docs/FEATURE_STATUS.md), [offline AI](docs/AI.md), [the original blueprint](docs/BLUEPRINT.md), and [third-party notices](docs/THIRD_PARTY.md).
+See the [release notes](docs/RELEASE_NOTES.md), [what remains](docs/ROADMAP.md), [drag/drop and magnetic tracks](docs/TIMELINE.md), [BUILDING](docs/BUILDING.md), [PORTABLE](docs/PORTABLE.md), [architecture](docs/ARCHITECTURE.md), [feature status](docs/FEATURE_STATUS.md), [offline AI](docs/AI.md), [the original blueprint](docs/BLUEPRINT.md), and [third-party notices](docs/THIRD_PARTY.md).
 
 ## Development
 

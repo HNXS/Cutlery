@@ -16,6 +16,9 @@
 class QTemporaryDir;
 
 namespace cutlery {
+// Peak amplitude (0..1) of the left and right channel of interleaved stereo PCM, 16-bit signed or
+// 32-bit float.
+std::pair<double, double> pcmPeaks(const char *data, qsizetype bytes, bool floatSamples);
 // Live timeline playback. FFmpeg renders the timeline from the playhead into two pipes, paced to
 // real time: raw yuv420p video and 48 kHz stereo PCM. Audio output is the master clock; video
 // frames are shown when the clock reaches them, and late frames are skipped rather than delaying
@@ -48,12 +51,19 @@ class Playback final : public QObject {
     bool clockStarted() const {
         return m_clockStarted;
     }
+    // Level meter of the sound being played, in dBFS per channel (−90 when silent), with peaks
+    // held and falling back by about 20 dB per second.
+    std::pair<double, double> levels() const {
+        return {m_levels[0], m_levels[1]};
+    }
   signals:
     void frameChanged();
     void finished();
     void failed(const QString &message);
 
   private:
+    double m_levels[2] = {-90, -90};
+    QElapsedTimer m_levelClock;
     struct Frame {
         qint64 index = 0;
         QByteArray data;

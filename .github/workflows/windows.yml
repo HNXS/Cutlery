@@ -113,7 +113,7 @@ jobs:
           $env:QML2_IMPORT_PATH = ''
           $env:QML_IMPORT_PATH = ''
           $env:PATH = "$env:SystemRoot/System32;$env:SystemRoot"
-          $exe = Resolve-Path dist/Cutlery-0.4.0-win64-portable/Cutlery.exe
+          $exe = Resolve-Path dist/Cutlery-0.5.0-win64-portable/Cutlery.exe
           $p = Start-Process $exe -ArgumentList '--smoke-test' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw 'Deployed application failed' }
           # The deployed worker starts with only the packaged DLLs.
@@ -126,14 +126,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Deployed whisper-cli failed' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: Cutlery-0.4.0-win64-portable
-          path: dist/Cutlery-0.4.0-win64-portable/
+          name: Cutlery-0.5.0-win64-portable
+          path: dist/Cutlery-0.5.0-win64-portable/
           if-no-files-found: error
           retention-days: 30
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: Cutlery-0.4.0-AI-pack
-          path: dist/Cutlery-0.4.0-AI-pack/
+          name: Cutlery-0.5.0-AI-pack
+          path: dist/Cutlery-0.5.0-AI-pack/
           if-no-files-found: error
           retention-days: 30
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -1285,6 +1285,18 @@ class EngineTest : public QObject {
                                          "-33.7 LUFS\n"),
                  -23.4);
         QVERIFY(std::isnan(parseIntegratedLoudness("nothing")));
+        QCOMPARE(parseTruePeak("  True peak:\n    Peak:        -3.2 dBFS\n"), -3.2);
+        QVERIFY(std::isinf(parseTruePeak("  True peak:\n    Peak:        -inf dBFS\n")));
+        QVERIFY(std::isnan(parseTruePeak("nothing")));
+        // Playback meter peaks per channel, for 16-bit and float samples.
+        const qint16 pcm[] = {16384, -8192, -32768, 100};
+        const auto [left, right] = pcmPeaks(reinterpret_cast<const char *>(pcm), sizeof pcm, false);
+        QVERIFY(std::abs(left - 1.0) < 1e-3 && std::abs(right - 0.25) < 1e-3);
+        const float pcmFloat[] = {0.5f, -0.75f};
+        const auto [fl, fr] =
+            pcmPeaks(reinterpret_cast<const char *>(pcmFloat), sizeof pcmFloat, true);
+        QCOMPARE(fl, 0.5);
+        QCOMPARE(fr, 0.75);
 
         // End to end: a tone, 1.5 s of silence, a tone; then a loudness-normalised export.
         const auto ffmpeg = Editor::executable("ffmpeg");
@@ -1323,6 +1335,22 @@ class EngineTest : public QObject {
         QCOMPARE(editor.state()["pauses"].toMap()["status"].toString(), QString("idle"));
         editor.undo();
         QCOMPARE(editor.project().clips.size(), size_t(1));
+
+        // Measuring the mix in the editor: FFmpeg's sine has amplitude 1/8, so the mono tone at 0.3
+        // measures -33 LUFS and, panned to both channels at -3 dB, peaks at -31.5 dBFS. An edit
+        // then makes the result stale.
+        editor.analyzeLoudness();
+        QCOMPARE(editor.state()["loudness"].toMap()["status"].toString(), QString("measuring"));
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["loudness"].toMap()["status"].toString(),
+                                  QString("ready"), 30000);
+        const auto mix = editor.state()["loudness"].toMap();
+        QVERIFY2(std::abs(mix["integrated"].toDouble() + 33) < 1.5,
+                 qPrintable(mix["integrated"].toString()));
+        QVERIFY2(std::abs(mix["peak"].toDouble() + 31.5) < 1.5, qPrintable(mix["peak"].toString()));
+        editor.select(editor.project().clips.first().id);
+        editor.setClip("volume", 0.5);
+        QCOMPARE(editor.state()["loudness"].toMap()["status"].toString(), QString("stale"));
+        editor.undo();
 
         // Export normalised to -14 LUFS: measured afterwards, it is within a decibel.
         const auto out = dir.filePath("loud.mp4");

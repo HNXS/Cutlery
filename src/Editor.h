@@ -35,6 +35,8 @@ class Editor final : public QObject {
     // Live playback position; separate from `state` so the viewer clock updates cheaply.
     Q_PROPERTY(bool playing READ playing NOTIFY playbackChanged)
     Q_PROPERTY(qint64 playbackFrame READ playbackFrame NOTIFY playbackChanged)
+    // Playback level meter: [left, right] in dBFS.
+    Q_PROPERTY(QVariantList levels READ levels NOTIFY playbackChanged)
   public:
     explicit Editor(FrameProvider *, QObject *parent = nullptr);
     ~Editor() override;
@@ -91,6 +93,12 @@ class Editor final : public QObject {
     Q_INVOKABLE void pause();
     Q_INVOKABLE void togglePlayback();
     Q_INVOKABLE void setVideoSink(QObject *sink);
+    QVariantList levels() const {
+        const auto [l, r] = m_playback->levels();
+        return {l, r};
+    }
+    // Measures the whole mix (EBU R128): state "loudness" {status, integrated LUFS, peak dBTP}.
+    Q_INVOKABLE void analyzeLoudness();
     bool playing() const {
         return m_playback->active();
     }
@@ -163,6 +171,8 @@ class Editor final : public QObject {
     QProcess *m_preview = nullptr, *m_job = nullptr, *m_probe = nullptr;
     QString m_jobTemp;
     QVariantMap m_loudness; // measurement of the running export, when normalising
+    QVariantMap m_mixLoudness; // last analyzeLoudness() result
+    QProcess *m_loudnessProcess = nullptr;
     struct Pauses {
         QString clipId, status; // status: idle, finding, ready, failed
         QVector<QPair<qint64, qint64>> ranges; // clip-local frames
