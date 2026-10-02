@@ -4,7 +4,12 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Eye contact (AI pack):** turns a presenter's eyes toward the camera when they read from a script beside the lens. It redraws only the eyes, by up to 15 %, eases off for blinks and turned heads, and leaves people who already look into the camera alone.
 - **Colour and look:** temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with a strength slider; eight one-click looks.
+- **Image sequences:** numbered frames (e.g. rendered animations) import as one clip, transparency included.
+- **Variable frame rate:** phone and screen recordings with irregular frame timing are flagged, and can be converted to a constant-rate editing copy.
+- **Collect project:** copies the project with all media, LUTs and added fonts into one folder, ready to archive or move.
+- **Markers and in/out:** markers (M) with names and colours; in and out points (I, O) and export of just that range.
 - **Text styling:** any installed font or your own .ttf/.otf files, bold and italic, alignment, letter and line spacing, outline, shadow and a background box.
 - **Voice-over:** record narration from the microphone while the timeline plays; the recording lands at the playhead.
 - **Shapes:** arrows, circles, speech bubbles, boxes and lines for tutorials, with colours, outline and text inside bubbles and boxes.

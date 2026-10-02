@@ -35,6 +35,10 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
   - Offline AI background removal for speakers without a green screen.
 - Offline AI upscaling (Real-ESRGAN) of low-resolution video clips to up to 4K. Both AI features use the GPU through DirectML when available, run in the background once per media file and need the separate [AI pack](docs/AI.md).
 - Static transforms, equal-edge crop, horizontal flip, opacity, brightness/contrast/saturation, blur, clip fades.
+- **Image sequences** (Project menu): numbered frames import as one video clip at a chosen frame rate, with transparency.
+- **Variable frame rate** (phone/screen recordings) is detected on import; "Convert to constant frame rate" makes an even editing copy.
+- **Collect project and media** (Project menu): one folder with the project, its media, LUTs and added fonts, for archiving or moving to another PC.
+- **Markers and in/out:** M adds a marker (double-click to rename), Ctrl+Left/Right jump between them; I and O set a range the export dialog can export alone.
 - **Text styling:** font list and your own font files, bold/italic, alignment, letter and line spacing, outline, shadow and a box behind each line.
 - **Voice-over** (transport row): record narration while the timeline plays; it is added at the playhead.
 - **Shapes** (library panel): arrow, circle, speech bubble, box and line; colours, outline, size and rotation; text inside bubbles and boxes.
@@ -42,6 +46,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - **Audio-only export:** the mix as MP3, AAC (M4A) or WAV.
 - **Smooth slow motion:** clips slower than 1× can blend frames or interpolate motion (optical flow).
 - **Split at scene changes** (inspector): cuts a video clip into its shots in one step.
+- **Eye contact** (AI pack): presenters reading beside the lens look into the camera; only the eyes are redrawn, by small amounts.
 - **Colour and look** (inspector): temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with adjustable strength; one-click looks (Warm, Cool, Cinematic, Vintage, Black & white, Punchy, Dreamy).
 - **Lower thirds and title cards** (library panel): name and role on a plate or beside an accent line, sliding in from the left, or a large centred heading. First text line = name/heading, further lines = role/subtitle; accent colour selectable.
 - **Blur and mosaic areas** (library panel): a rectangle on an upper track blurs or pixelates whatever the tracks below show, e.g. private data in a screen recording or a face. Drag it in the preview; keyframe its position to follow movement.
@@ -58,7 +63,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 
 ## Boundaries of this alpha
 
-This is a CPU reference implementation. It does **not** yet implement the planned D3D11/WASAPI real-time engine, proxies, multilevel waveform pyramids, a keyframe graph editor, easing curves, masks, tracking, HDR colour management, hardware qualification, AI features beyond background removal, upscaling and captions, an installer, or project-media collection. Heavy multi-layer timelines can drop frames during playback on the CPU renderer. Reversed clips decode their whole visible range before playing, so long reversed clips start slowly. The UI is not yet an accessibility-qualified release.
+This is a CPU reference implementation. It does **not** yet implement the planned D3D11/WASAPI real-time engine, proxies, multilevel waveform pyramids, a keyframe graph editor, easing curves, masks, tracking, HDR colour management, hardware qualification, AI features beyond background removal, upscaling and captions, or an installer. Heavy multi-layer timelines can drop frames during playback on the CPU renderer. Reversed clips decode their whole visible range before playing, so long reversed clips start slowly. The UI is not yet an accessibility-qualified release.
 
 Only finite local media files are supported. Source audio/video remain together until you use **Detach audio**; detached clips can then be edited independently. Relinking or resynchronizing detached pairs is not implemented. Timing is rounded to sequence frames; SRT timing is quantized on import. Colour operations are SDR adjustments on the clip (including LUTs), not a colour-managed grading pipeline. Output filenames must be new; exports never overwrite an existing file. Temporary render folders live under `cache`; remove it while Cutlery is closed if space is needed.
 

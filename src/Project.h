@@ -19,7 +19,15 @@ struct Asset {
     double duration = 0;
     int width = 0, height = 0;
     bool hasAudio = false;
+    // Video only: the average frame rate, and whether frames arrive at irregular intervals
+    // (variable frame rate, typical of phone and screen recordings).
+    double frameRate = 0;
+    bool variableRate = false;
 };
+// Variable frame rate: the nominal and average rates of a stream differ by more than 1 %.
+bool isVariableRate(double nominal, double average);
+// A standard frame rate close to `rate` (23.976 … 60), or `rate` itself when none is near.
+double standardRate(double rate);
 // A property value at a clip-local frame. Smooth keyframes ease in and out towards the next one;
 // others interpolate linearly.
 struct Keyframe {
@@ -111,6 +119,9 @@ struct Clip {
     bool aiCutout = false;
     // Picture from the AI-upscaled copy of the asset (see AiJobs) when one covers the clip.
     bool aiUpscale = false;
+    // Picture from the eye-contact copy of the asset (see AiJobs), which replaces the upscaled
+    // one when both are on.
+    bool eyeContact = false;
     bool styled() const {
         return shape != "rect" || border > 0 || shadow > 0 || aiCutout;
     }
@@ -127,8 +138,19 @@ const QStringList &graphicKinds();
 QStringList captionWords(const QString &text);
 // Supported transitions: FFmpeg xfade names paired with display labels.
 const QVector<QPair<QString, QString>> &transitionTypes();
+// A named point on the timeline.
+struct Marker {
+    qint64 frame = 0;
+    QString name, color = "#ffd23f";
+    bool operator==(const Marker &) const = default;
+};
 struct Project {
     QString name = "Untitled";
+    // Timeline markers, sorted by frame; at most one per frame.
+    QVector<Marker> markers;
+    // In and out points of a range for export (frames; -1 unset). The range is [inPoint,
+    // outPoint), from the timeline start or to its end when one is unset.
+    qint64 inPoint = -1, outPoint = -1;
     int width = 1920, height = 1080, fpsN = 30, fpsD = 1, tracks = 3;
     QVector<Track> trackSettings{{"Track 1"}, {"Track 2"}, {"Track 3"}};
     QVector<Asset> assets;

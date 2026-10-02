@@ -146,8 +146,8 @@
     "status": "Planned",
     "acceptance": "Open collected project on second PC with network disconnected",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Project → \"Collect project and media…\" copies every media file, LUT and font added in Cutlery that the project uses into an empty folder (media/, luts/, fonts/ with clashing names numbered) and saves <folder>.cutlery there with relative paths, in the background with progress. Opening a project loads the fonts beside it. Refuses projects with missing media; no trimming of unused source ranges."
   },
   {
     "id": "F007",
@@ -746,8 +746,8 @@
     "status": "Planned",
     "acceptance": "In/out export yields exact frame count and defined audio range",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Frame and previous/next edit navigation; start/end shortcuts. No markers or in/out ranges."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Markers (M) with name and colour, shown on the ruler and across the tracks; click to jump, double-click to rename or recolour, right-click to remove; previous/next marker (Ctrl+Left/Right). In and out points (I, O, Alt+X to clear) shown as a band on the ruler; the export dialog can export just the in/out range. Frame and edit navigation as before. Markers stay at timeline positions; they do not move with ripple edits."
   },
   {
     "id": "F031",
@@ -2896,8 +2896,8 @@
     "status": "Investigation required",
     "acceptance": "Occlusion and multiple faces do not silently switch identity",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Used by eye contact: MediaPipe BlazeFace detection, 468-point Face Mesh and Iris Landmark (Apache-2.0, converted to ONNX) per frame in the cutlery-ai worker, most prominent face only. No face tracking for effects, blur areas or reframing yet."
   },
   {
     "id": "F117",
@@ -3771,8 +3771,8 @@
     "status": "Planned",
     "acceptance": "Missing-number sequence prompts for policy; exact frame count exported",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Project → \"Import image sequence…\": pick any frame of a numbered sequence (shot_0001.png …; PNG, JPEG, TIFF, BMP, WebP, EXR, DPX); the contiguous run around it is found, and FFmpeg turns it at a chosen frame rate into a ProRes 4444 video with alpha in the data folder's sequences/, which is imported as a normal clip. No live link to the image files; no image-sequence export."
   },
   {
     "id": "F152",
@@ -3796,8 +3796,8 @@
     "status": "Planned",
     "acceptance": "Phone and screen capture sync stays within specified one-hour limit",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Import detects variable frame rate (nominal and average rates differ by more than 1 %) and the inspector flags it. Playback and export already place frames by timestamp. \"Convert to constant frame rate\" makes a ProRes 422 + PCM editing copy at the nearest standard rate in the data folder and relinks the media, keeping clip trims. No automatic conversion on import; no repair of broken timestamps beyond the re-encode."
   },
   {
     "id": "F153",

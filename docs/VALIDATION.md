@@ -1,5 +1,33 @@
 # Validation record
 
+## Windows portable build — 2026-10-02, eye contact, markers, collect, VFR, image sequences (0.6 development)
+
+[GitHub Actions run 37012362029](https://github.com/HNXS/Cutlery/actions/runs/37012362029) completed successfully for commit `9bd5f21851e05af5dae09c7765f8fe9329431f72`.
+
+Toolchain change: `Get-Models.ps1` now takes MediaPipe's face detection, Face Mesh and Iris Landmark models from the pinned mediapipe 0.10.18 wheel and converts them to ONNX on the runner with tf2onnx 1.16.1 and TensorFlow 2.17.1. This step took about 2 minutes, and the AI pack now includes the three models.
+
+New coverage:
+
+- **Engine test `eyeContact`**, with the converted models and a public-domain photo:
+  - a face already looking into the camera is left unchanged (under 2 % of the eye width);
+  - a sideways gaze is corrected in both eyes;
+  - a second pass finds less than two thirds of the first correction left;
+  - an editor export changes only the eye region.
+- **CI worker check:** the deployed-style worker on the CPU provider applied −0.069 and −0.070 eye widths to the sideways fixture, the same as the local Linux build.
+- **Other engine tests:**
+  - `markersAndRange`: sorted markers, navigation, renaming, validation; an in/out export of exactly 30 frames and 1 s of audio.
+  - `collectProject`: same-named media are numbered; the LUT and an added font are copied; paths are relative; the copy opens after the originals are deleted.
+  - `variableFrameRate`: detection, then conversion to a constant-rate ProRes copy and relink.
+  - `imageSequences`: run detection with gaps and a `%` in the folder name; a 12-frame ProRes 4444 clip with alpha.
+- **Interface:** a marker on the ruler, and the export range choice.
+
+Not verified on CI: eye contact on recorded presenter footage and on DirectML GPUs.
+
+Downloads (expire 2026-11-01):
+
+- [Portable build](https://github.com/HNXS/Cutlery/actions/runs/37012362029/artifacts/11228648619): 168,066,306 bytes, archive SHA-256 `699d7311180066a041901fcb48e73c2c43d2a403436b1b6111bd597676ae0b39`.
+- [AI pack](https://github.com/HNXS/Cutlery/actions/runs/37012362029/artifacts/11228932529): 706,100,616 bytes, archive SHA-256 `9c4a98349fce048cce82832de7435352bf2843e4578259b284e806516c619cfc`.
+
 ## Windows portable build — 2026-10-02, colour and look, Whisper on Vulkan, editing tools (0.6 development)
 
 [GitHub Actions run 36999719999](https://github.com/HNXS/Cutlery/actions/runs/36999719999) completed successfully for commit `9407ad93e98961805fcabf17180e92805f670af7`. Toolchain changes:

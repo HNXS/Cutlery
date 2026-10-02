@@ -35,9 +35,43 @@ if ($LASTEXITCODE -ne 0) { throw 'Installing the onnx package failed' }
 python "$PSScriptRoot/convert-realesrgan.py" $weights "$Destination/realesr-general-x4v3.onnx"
 if ($LASTEXITCODE -ne 0) { throw 'Model conversion failed' }
 $srOnnx = (Get-FileHash "$Destination/realesr-general-x4v3.onnx" -Algorithm SHA256).Hash.ToLowerInvariant()
+# Eye contact: Google MediaPipe's face detection, face mesh and iris landmark models
+# (Apache-2.0, https://github.com/google-ai-edge/mediapipe), taken from the official mediapipe
+# 0.10.18 wheel on PyPI (pinned) and converted from TFLite to ONNX with tf2onnx. The TFLite
+# files are pinned; the conversion is not byte-reproducible, so the ONNX hashes are recorded.
+$wheelDir = Join-Path (Split-Path $Destination) 'mediapipe'
+New-Item -ItemType Directory -Force $wheelDir | Out-Null
+$wheel = "$wheelDir/mediapipe-0.10.18-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+$wheelSha = 'edbabfb9728dc1fcd93fea47abece12d43300530a1d4261e257f6bd4e3be09d1'
+if (!(Test-Path $wheel) -or (Get-FileHash $wheel -Algorithm SHA256).Hash.ToLowerInvariant() -ne $wheelSha) {
+    python -m pip download --quiet --no-deps mediapipe==0.10.18 --only-binary=:all: --platform manylinux_2_17_x86_64 --python-version 3.12 -d $wheelDir
+    if ($LASTEXITCODE -ne 0) { throw 'Downloading the mediapipe wheel failed' }
+}
+if ((Get-FileHash $wheel -Algorithm SHA256).Hash.ToLowerInvariant() -ne $wheelSha) { throw 'mediapipe wheel checksum mismatch' }
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [IO.Compression.ZipFile]::OpenRead($wheel)
+$faceModels = @(
+    @{ name='face_detection_short_range'; entry='mediapipe/modules/face_detection/face_detection_short_range.tflite'; sha256='bbff11cebd1eb27a1e004cae0b0e63ec8c551cbf34a4451148b4908b8db3eca8' },
+    @{ name='face_landmark'; entry='mediapipe/modules/face_landmark/face_landmark.tflite'; sha256='1055cb9d4a9ca8b8c688902a3a5194311138ba256bcc94e336d8373a5f30c814' },
+    @{ name='iris_landmark'; entry='mediapipe/modules/iris_landmark/iris_landmark.tflite'; sha256='d1744d2a09c25f501d39eba4faff47e53ecca8852c5ce19bce8eeac39357521f' }
+)
+try {
+    foreach ($m in $faceModels) {
+        $tflite = "$wheelDir/$($m.name).tflite"
+        [IO.Compression.ZipFileExtensions]::ExtractToFile($zip.GetEntry($m.entry), $tflite, $true)
+        if ((Get-FileHash $tflite -Algorithm SHA256).Hash.ToLowerInvariant() -ne $m.sha256) { throw "Checksum mismatch: $($m.name).tflite" }
+    }
+} finally { $zip.Dispose() }
+python -m pip install --quiet tensorflow==2.17.1 tf2onnx==1.16.1 onnx==1.17.0
+if ($LASTEXITCODE -ne 0) { throw 'Installing tf2onnx failed' }
+foreach ($m in $faceModels) {
+    python -m tf2onnx.convert --tflite "$wheelDir/$($m.name).tflite" --output "$Destination/$($m.name).onnx" --opset 17 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Converting $($m.name) failed" }
+    $m.onnx = (Get-FileHash "$Destination/$($m.name).onnx" -Algorithm SHA256).Hash.ToLowerInvariant()
+}
 @{ models=@(
     @{ file='u2net_human_seg.onnx'; url=$matteUrl; sha256=$matteSha; license='Apache-2.0'; source='https://github.com/xuebinqin/U-2-Net'; purpose='person matte for AI background removal' },
     @{ file='ggml-large-v3-turbo-q5_0.bin'; url=$speechUrl; sha1=$speechSha1; sha256=$speechSha; license='MIT'; source='https://github.com/openai/whisper'; purpose='speech recognition for automatic captions' },
     @{ file='realesr-general-x4v3.onnx'; converted_from=$srUrl; source_sha256=$srSha; sha256=$srOnnx; license='BSD-3-Clause'; source='https://github.com/xinntao/Real-ESRGAN'; purpose='4x super-resolution for AI upscale' }
-) } | ConvertTo-Json -Depth 4 | Set-Content "$Destination/manifest.json" -Encoding utf8
+) + @($faceModels | ForEach-Object { @{ file="$($_.name).onnx"; converted_from="mediapipe==0.10.18:$($_.entry)"; source_sha256=$_.sha256; sha256=$_.onnx; license='Apache-2.0'; source='https://github.com/google-ai-edge/mediapipe'; purpose='face, eye and iris landmarks for eye contact' } }) } | ConvertTo-Json -Depth 4 | Set-Content "$Destination/manifest.json" -Encoding utf8
 Write-Output (Resolve-Path $Destination).Path

@@ -66,12 +66,12 @@ ApplicationWindow {
             return false;
         if (textEditing)
             return ["new", "open", "import", "save", "saveAs", "export", "shortcuts"].indexOf(command) >= 0;
-        if (["previousFrame", "nextFrame", "previousCut", "nextCut"].indexOf(command) >= 0 && activeFocusItem && (activeFocusItem instanceof Slider || activeFocusItem instanceof ComboBox || activeFocusItem instanceof SpinBox))
+        if (["previousFrame", "nextFrame", "previousCut", "nextCut", "previousMarker", "nextMarker"].indexOf(command) >= 0 && activeFocusItem && (activeFocusItem instanceof Slider || activeFocusItem instanceof ComboBox || activeFocusItem instanceof SpinBox))
             return false;
         return true;
     }
     function command(id) {
-        if (editor.playing && ["split", "trimStart", "trimEnd", "previousCut", "nextCut"].indexOf(id) >= 0)
+        if (editor.playing && ["split", "trimStart", "trimEnd", "previousCut", "nextCut", "marker", "inPoint", "outPoint", "previousMarker", "nextMarker"].indexOf(id) >= 0)
             goTo(editor.playbackFrame);
         const c = s.selected, editable = s.selectedId.length > 0 && !c.locked;
         if (id === "new")
@@ -124,6 +124,18 @@ ApplicationWindow {
             goTo(editor.adjacentCut(false));
         else if (id === "nextCut")
             goTo(editor.adjacentCut(true));
+        else if (id === "marker")
+            editor.toggleMarker();
+        else if (id === "previousMarker" && editor.adjacentMarker(false) >= 0)
+            goTo(editor.adjacentMarker(false));
+        else if (id === "nextMarker" && editor.adjacentMarker(true) >= 0)
+            goTo(editor.adjacentMarker(true));
+        else if (id === "inPoint")
+            editor.setInPoint();
+        else if (id === "outPoint")
+            editor.setOutPoint();
+        else if (id === "clearInOut")
+            editor.clearInOut();
         else if (id === "start")
             goTo(0);
         else if (id === "end")
@@ -290,6 +302,16 @@ ApplicationWindow {
             MenuItem {
                 text: "Save As…"
                 onTriggered: saveDialog.open()
+            }
+            MenuItem {
+                text: "Import image sequence…"
+                onTriggered: sequenceFile.open()
+            }
+            MenuItem {
+                objectName: "collectProject"
+                text: (win.s.collect || {}).status === "copying" ? "Collecting… " + Math.round(100 * (win.s.collect.progress || 0)) + "%" : "Collect project and media…"
+                enabled: (win.s.collect || {}).status !== "copying"
+                onTriggered: collectDialog.open()
             }
             MenuSeparator {}
             MenuItem {
@@ -1759,6 +1781,29 @@ ApplicationWindow {
                                 text: "Remove pauses…"
                                 onClicked: pauseDialog.open()
                             }
+                            // Phone and screen recordings often have a variable frame rate.
+                            ColumnLayout {
+                                objectName: "variableRate"
+                                Layout.fillWidth: true
+                                visible: win.selection.variableRate === true
+                                Label {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    font.pixelSize: 11
+                                    color: "#ffd479"
+                                    text: "Variable frame rate (typical of phone and screen recordings). Cutlery plays it by timestamps; if picture and sound drift, convert it."
+                                }
+                                Action {
+                                    objectName: "conformFrameRate"
+                                    Layout.fillWidth: true
+                                    readonly property bool converting: (win.s.conform || {}).status === "converting"
+                                    enabled: !win.s.busy && win.selection.locked !== true
+                                    text: converting ? "Converting… " + Math.round(100 * (win.s.conform.progress || 0)) + "%" : "Convert to constant frame rate"
+                                    onClicked: editor.conformFrameRate()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Makes an editing copy (ProRes) with evenly spaced frames in Cutlery's data folder and switches the media to it. The original stays untouched."
+                                }
+                            }
                             Action {
                                 objectName: "splitScenes"
                                 Layout.fillWidth: true
@@ -1769,6 +1814,14 @@ ApplicationWindow {
                                 onClicked: editor.splitAtScenes(0.5)
                                 ToolTip.visible: hovered
                                 ToolTip.text: "Cuts the clip into its shots, e.g. a long recording or a downloaded video. Undo restores it."
+                            }
+                            AiOption {
+                                task: "eyecontact"
+                                flag: "eyeContact"
+                                infoKey: "eyeContactInfo"
+                                label: "Eye contact (AI): look into the camera"
+                                runningText: "Correcting the gaze…"
+                                doneText: "Eye contact ready ✓ · untick to compare"
                             }
                             AiOption {
                                 task: "upscale"
@@ -2234,6 +2287,56 @@ ApplicationWindow {
         title: "Choose replacement media"
         onAccepted: editor.relink(win.selection.assetId, selectedFile)
     }
+    // Collect: copies the project and everything it uses into a new folder, e.g. to archive it or
+    // move it to another computer.
+    FolderDialog {
+        id: collectDialog
+        title: "Collect project into an empty folder"
+        onAccepted: editor.collectProject(selectedFolder)
+    }
+    FileDialog {
+        id: sequenceFile
+        title: "Choose any image of the numbered sequence"
+        nameFilters: ["Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.exr *.dpx)"]
+        onAccepted: {
+            sequenceDialog.file = selectedFile;
+            sequenceDialog.info = editor.imageSequenceAt(selectedFile);
+            sequenceDialog.open();
+        }
+    }
+    Dialog {
+        id: sequenceDialog
+        objectName: "sequenceDialog"
+        property url file
+        property var info: ({})
+        anchors.centerIn: parent
+        title: "Import image sequence"
+        modal: true
+        width: 380
+        standardButtons: info.count ? Dialog.Ok | Dialog.Cancel : Dialog.Close
+        ColumnLayout {
+            width: parent.width
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: sequenceDialog.info.count ? sequenceDialog.info.count + " images, numbered from " + sequenceDialog.info.start + ". They become one video clip (transparency is kept)." : "This image is not part of a numbered sequence (e.g. shot_0001.png, shot_0002.png …)."
+            }
+            RowLayout {
+                visible: !!sequenceDialog.info.count
+                Label { text: "Frames per second" }
+                SpinBox {
+                    id: sequenceRate
+                    objectName: "sequenceRate"
+                    from: 1
+                    to: 120
+                    editable: true
+                    value: Math.round(win.s.fps || 30)
+                }
+            }
+        }
+        onAccepted: if (info.count)
+            editor.importImageSequence(file, sequenceRate.value)
+    }
     FileDialog {
         id: fontFileDialog
         title: "Add a font"
@@ -2561,6 +2664,18 @@ ApplicationWindow {
                 onActivated: if (exportSettings.presets[currentIndex].settings)
                     exportSettings.apply(exportSettings.presets[currentIndex].settings)
             }
+            Label {
+                text: "Range"
+                visible: exportRange.visible
+            }
+            ComboBox {
+                id: exportRange
+                objectName: "exportRange"
+                Layout.fillWidth: true
+                visible: win.s.inPoint >= 0 || win.s.outPoint >= 0
+                model: ["Whole timeline", "In to out (" + win.clock(Math.max(0, win.s.inPoint)) + " – " + win.clock(win.s.outPoint >= 0 ? win.s.outPoint : win.s.duration) + ")"]
+                currentIndex: 1
+            }
             Label { text: "Format" }
             ComboBox {
                 id: exportFormat
@@ -2631,7 +2746,7 @@ ApplicationWindow {
             }
         }
         onAccepted: {
-            win.exportChoice = current;
+            win.exportChoice = Object.assign({}, current, { range: exportRange.visible && exportRange.currentIndex === 1 ? "inout" : "all" });
             exportDialog.open();
         }
     }

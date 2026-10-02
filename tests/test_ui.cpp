@@ -389,6 +389,13 @@ class UiTest : public QObject {
         QCOMPARE(preset->property("currentIndex").toInt(), 0);
         choose("exportFormat", 4);
         QCOMPARE(dialog->property("preview").toMap()["extension"].toString(), QString("mov"));
+        // The range choice appears once an in or out point exists.
+        QVERIFY(!findItem(window->contentItem(), "exportRange")->isVisible());
+        editor.seek(10);
+        editor.setInPoint();
+        QTRY_VERIFY(findItem(window->contentItem(), "exportRange")->isVisible());
+        editor.toggleMarker();
+        QTRY_VERIFY(findItem(window->contentItem(), "marker-0"));
         choose("exportFormat", 6); // MP3: audio only, no resolution
         QCOMPARE(dialog->property("preview").toMap()["extension"].toString(), QString("mp3"));
         QTRY_VERIFY(!findItem(window->contentItem(), "exportHeight")->isEnabled());

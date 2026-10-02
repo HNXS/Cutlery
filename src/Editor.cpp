@@ -6,6 +6,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFontDatabase>
+#include <QThread>
 #include <QAudioInput>
 #include <QMediaCaptureSession>
 #include <QMediaDevices>
@@ -75,6 +76,7 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     m_ai = new AiJobs(m_data + "/ai", executable("ffmpeg"), executable("ffprobe"), worker,
                       {{"matte", models + "/u2net_human_seg.onnx"},
                        {"upscale", models + "/realesr-general-x4v3.onnx"},
+                       {"eyecontact", models + "/face_landmark.onnx"},
                        {"transcribe", models + "/ggml-large-v3-turbo-q5_0.bin"},
                        {"vad", models + "/ggml-silero-v6.2.0.bin"},
                        {"whisper", whisper}},
@@ -122,9 +124,18 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     if (executable("ffmpeg").isEmpty() || executable("ffprobe").isEmpty())
         m_error = "FFmpeg/ffprobe not found. Use the portable package, or add both tools to PATH.";
     // Fonts added in Cutlery live in the data folder, so they travel with a portable install.
-    for (const auto &file : QDir(m_data + "/fonts").entryInfoList({"*.ttf", "*.otf", "*.ttc"},
-                                                                 QDir::Files))
-        QFontDatabase::addApplicationFont(file.absoluteFilePath());
+    loadFonts(m_data + "/fonts");
+}
+void Editor::loadFonts(const QString &folder) {
+    for (const auto &file : QDir(folder).entryInfoList({"*.ttf", "*.otf", "*.ttc"}, QDir::Files)) {
+        const auto path = file.absoluteFilePath();
+        if (std::any_of(m_fontFiles.begin(), m_fontFiles.end(),
+                        [&](const QString &f) { return QFileInfo(f) == file; }))
+            continue;
+        for (const auto &family :
+             QFontDatabase::applicationFontFamilies(QFontDatabase::addApplicationFont(path)))
+            m_fontFiles.insert(family, path);
+    }
 }
 QStringList Editor::fontFamilies() const {
     return QFontDatabase::families();
@@ -147,6 +158,8 @@ QString Editor::addFont(const QUrl &url) {
             QFile::remove(target);
             throw std::runtime_error("This file is not a usable font");
         }
+        for (const auto &family : families)
+            m_fontFiles.insert(family, target);
         m_status = "Added font " + families.first();
         emit changed();
         return families.first();
@@ -158,6 +171,12 @@ QString Editor::addFont(const QUrl &url) {
 Editor::~Editor() {
     if (m_dirty)
         autosave();
+    if (m_collectThread) {
+        m_collectThread->disconnect(this);
+        m_collectThread->requestInterruption();
+        m_collectThread->wait();
+        delete m_collectThread;
+    }
     for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess, m_sceneProcess})
         if (p) {
             p->disconnect(this);
@@ -333,6 +352,8 @@ QVariantMap Editor::state() const {
                                         m_project.asset(c.assetId)->kind != "audio"},
                         {"video", !c.audioOnly && m_project.asset(c.assetId) &&
                                       m_project.asset(c.assetId)->kind == "video"},
+                        {"variableRate", m_project.asset(c.assetId) &&
+                                             m_project.asset(c.assetId)->variableRate},
                         {"locked", m_project.trackSettings[c.track].locked},
                         {"canDetach", !c.audioOnly && m_project.asset(c.assetId) &&
                                           m_project.asset(c.assetId)->kind == "video" &&
@@ -433,9 +454,11 @@ QVariantMap Editor::state() const {
             PROP(keyBlend);
             PROP(aiCutout);
             PROP(aiUpscale);
+            PROP(eyeContact);
 #undef PROP
             if (const auto *a = m_project.asset(c.assetId); a && a->kind == "video") {
-                for (const auto &[task, name] : {std::pair{"matte", "cutout"}, {"upscale", "upscale"}}) {
+                for (const auto &[task, name] : {std::pair{"matte", "cutout"}, {"upscale", "upscale"},
+                                                 {"eyecontact", "eyeContactInfo"}}) {
                     auto info = m_ai->status(task, *a, aiVariant(task, *a));
                     info["covered"] = aiCovered(task, *a, &c);
                     selected[name] = info;
@@ -464,10 +487,21 @@ QVariantMap Editor::state() const {
             {"analyzing", m_analysis->busy() || m_thumbnails->busy()},
             {"aiMissing", QVariantMap{{"matte", m_ai->missing("matte")},
                                       {"upscale", m_ai->missing("upscale")},
+                                      {"eyecontact", m_ai->missing("eyecontact")},
                                       {"transcribe", m_ai->missing("transcribe")}}},
             {"captions", captionState()},
             {"pauses", pauseState()},
             {"scenes", m_scenes},
+            {"collect", m_collect},
+            {"conform", m_conform},
+            {"markers", [this] {
+                 QVariantList list;
+                 for (const auto &m : m_project.markers)
+                     list << QVariantMap{{"frame", m.frame}, {"name", m.name}, {"color", m.color}};
+                 return list;
+             }()},
+            {"inPoint", m_project.inPoint},
+            {"outPoint", m_project.outPoint},
             {"voiceOver", QVariantMap{{"available", !QMediaDevices::audioInputs().isEmpty()},
                                       {"recording", m_voiceRecorder != nullptr},
                                       {"seconds", m_voiceRecorder && m_voiceClock.isValid()
@@ -582,6 +616,8 @@ bool Editor::openProject(const QUrl &url) {
         stopPlayback();
         m_previewUrl.clear();
         m_status = "Opened " + QFileInfo(path).fileName();
+        // A collected project carries the fonts it uses.
+        loadFonts(QFileInfo(path).dir().filePath("fonts"));
         m_previewTimer.start();
         m_analysis->setAssets(m_project.assets);
         m_thumbnails->setAssets(m_project.assets);
@@ -749,6 +785,15 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                     if (type == "video" && a.width == 0) {
                         a.width = s["width"].toInt();
                         a.height = s["height"].toInt();
+                        auto rate = [&](const char *key) {
+                            const auto parts = s[key].toString().split('/');
+                            return parts.size() == 2 && parts[1].toDouble() > 0
+                                       ? parts[0].toDouble() / parts[1].toDouble()
+                                       : 0.;
+                        };
+                        const double nominal = rate("r_frame_rate"), average = rate("avg_frame_rate");
+                        a.frameRate = average > 0 ? average : nominal;
+                        a.variableRate = isVariableRate(nominal, average);
                         // Phones store portrait video as rotated landscape; FFmpeg decodes
                         // it upright, so report the upright size.
                         int rotation = s["tags"].toObject()["rotate"].toString().toInt();
@@ -768,8 +813,11 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                 const bool still =
                     QStringList{"png", "jpg", "jpeg", "bmp", "webp", "tif", "tiff"}.contains(ext);
                 a.kind = still ? "image" : (a.width > 0 ? "video" : "audio");
-                if (still)
+                if (still) {
                     a.duration = 5;
+                    a.frameRate = 0;
+                    a.variableRate = false;
+                }
                 if ((a.width == 0 && !a.hasAudio) || a.duration <= 0)
                     throw std::runtime_error("No supported finite video/audio stream found");
                 QString addedClip, dropWarning;
@@ -1109,6 +1157,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(chromaKey, toBool);
         FIELD(aiCutout, toBool);
         FIELD(aiUpscale, toBool);
+        FIELD(eyeContact, toBool);
         FIELD(keySimilarity, toDouble);
         FIELD(keyBlend, toDouble);
         FIELD(shape, toString);
@@ -1345,6 +1394,355 @@ int Editor::freeTrack(Project &p, int home, qint64 start, qint64 length) {
     p.addTrack();
     return p.tracks - 1;
 }
+void Editor::toggleMarker() {
+    mutate([&](Project &p) {
+        auto it = std::find_if(p.markers.begin(), p.markers.end(),
+                               [&](const Marker &m) { return m.frame == m_playhead; });
+        if (it != p.markers.end()) {
+            p.markers.erase(it);
+            return;
+        }
+        if (p.markers.size() >= 1000)
+            throw std::runtime_error("At most 1000 markers");
+        const auto at = std::lower_bound(
+            p.markers.begin(), p.markers.end(), m_playhead,
+            [](const Marker &m, qint64 frame) { return m.frame < frame; });
+        p.markers.insert(at, Marker{m_playhead, QString("Marker %1").arg(p.markers.size() + 1)});
+    });
+}
+void Editor::setMarker(int index, const QString &key, const QVariant &value) {
+    mutate([&](Project &p) {
+        if (index < 0 || index >= p.markers.size())
+            throw std::runtime_error("No such marker");
+        if (key == "name")
+            p.markers[index].name = value.toString().left(200);
+        else if (key == "color")
+            p.markers[index].color = value.toString();
+        else
+            throw std::runtime_error("Unknown marker setting");
+    });
+}
+void Editor::removeMarker(int index) {
+    mutate([&](Project &p) {
+        if (index >= 0 && index < p.markers.size())
+            p.markers.remove(index);
+    });
+}
+qint64 Editor::adjacentMarker(bool forward) const {
+    qint64 best = -1;
+    for (const auto &m : m_project.markers)
+        if (forward ? m.frame > m_playhead && (best < 0 || m.frame < best)
+                    : m.frame < m_playhead && m.frame > best)
+            best = m.frame;
+    return best;
+}
+void Editor::setInPoint() {
+    mutate([&](Project &p) {
+        p.inPoint = m_playhead;
+        if (p.outPoint >= 0 && p.outPoint <= p.inPoint)
+            p.outPoint = -1;
+    });
+}
+void Editor::setOutPoint() {
+    mutate([&](Project &p) {
+        p.outPoint = m_playhead + 1;
+        if (p.inPoint >= p.outPoint)
+            p.inPoint = -1;
+    });
+}
+void Editor::clearInOut() {
+    mutate([](Project &p) { p.inPoint = p.outPoint = -1; });
+}
+void Editor::collectProject(const QUrl &folderUrl) {
+    if (m_collectThread)
+        return;
+    try {
+        const auto folder = QDir::cleanPath(localPath(folderUrl));
+        const QDir dir(folder);
+        if (dir.exists() && !dir.isEmpty())
+            throw std::runtime_error("Choose an empty or new folder");
+        struct Copy {
+            QString from, to;
+        };
+        auto copies = std::make_shared<QVector<Copy>>();
+        QSet<QString> taken;
+        QHash<QString, QString> mapped; // source → target, so shared files are copied once
+        auto target = [&](const QString &from, const QString &sub) {
+            const auto key = QFileInfo(from).absoluteFilePath();
+            if (mapped.contains(key))
+                return mapped[key];
+            const QFileInfo info(from);
+            QString name = info.fileName();
+            for (int i = 2; taken.contains(sub + "/" + name.toLower()); ++i)
+                name = info.completeBaseName() + QString("-%1.").arg(i) + info.suffix();
+            taken.insert(sub + "/" + name.toLower());
+            const auto to = folder + "/" + sub + "/" + name;
+            copies->push_back({key, to});
+            mapped[key] = to;
+            return to;
+        };
+        auto project = m_project;
+        for (auto &a : project.assets) {
+            if (!QFileInfo(a.path).isFile())
+                throw std::runtime_error(("Missing media: " + a.name +
+                                          ". Relink it before collecting the project.")
+                                             .toStdString());
+            a.path = target(a.path, "media");
+        }
+        QSet<QString> families;
+        for (auto &c : project.clips) {
+            if (!c.lut.isEmpty() && QFileInfo(c.lut).isFile())
+                c.lut = target(c.lut, "luts");
+            if (c.assetId.isEmpty())
+                families.insert(c.fontFamily);
+        }
+        for (const auto &family : families)
+            if (m_fontFiles.contains(family))
+                target(m_fontFiles[family], "fonts");
+        project.name = dir.dirName();
+        const auto file = folder + "/" + project.name + ".cutlery";
+        qint64 total = 0;
+        for (const auto &c : *copies)
+            total += QFileInfo(c.from).size();
+        m_collect = {{"status", "copying"}, {"progress", 0.}, {"path", file}};
+        m_collectThread = QThread::create([this, copies, project, file, total] {
+            qint64 done = 0;
+            QString error;
+            try {
+                for (const auto &c : *copies) {
+                    if (QThread::currentThread()->isInterruptionRequested())
+                        throw std::runtime_error("Cancelled");
+                    QDir().mkpath(QFileInfo(c.to).absolutePath());
+                    if (!QFile::copy(c.from, c.to))
+                        throw std::runtime_error(
+                            ("Cannot copy " + QFileInfo(c.from).fileName()).toStdString());
+                    done += QFileInfo(c.to).size();
+                    const double progress = total > 0 ? double(done) / total : 1.;
+                    QMetaObject::invokeMethod(this, [this, progress] {
+                        m_collect["progress"] = progress;
+                        emit changed();
+                    });
+                }
+                QDir().mkpath(QFileInfo(file).absolutePath());
+                saveProject(project, file);
+            } catch (const std::exception &e) {
+                error = QString::fromUtf8(e.what());
+            }
+            QMetaObject::invokeMethod(this, [this, error, count = copies->size()] {
+                if (error.isEmpty()) {
+                    m_collect["status"] = "done";
+                    m_collect["progress"] = 1.;
+                    m_status = QString("Project collected with %1 file%2")
+                                   .arg(count)
+                                   .arg(count == 1 ? "" : "s");
+                } else {
+                    m_collect["status"] = "failed";
+                    m_collect["error"] = error;
+                    fail("Collecting failed: " + error);
+                }
+                emit changed();
+            });
+        });
+        connect(m_collectThread, &QThread::finished, this, [this] {
+            m_collectThread->deleteLater();
+            m_collectThread = nullptr;
+        });
+        m_collectThread->start();
+        emit changed();
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
+void Editor::conformFrameRate() {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || a->kind != "video")
+        return fail("Select a video clip to convert");
+    if (m_job || m_probe || m_busy)
+        return fail("Wait for the current job to finish");
+    if (!QFileInfo(a->path).isFile())
+        return fail("The media file is missing");
+    const double rate = standardRate(a->frameRate > 0 ? a->frameRate
+                                                      : double(m_project.fpsN) / m_project.fpsD);
+    QDir().mkpath(m_data + "/conformed");
+    const auto output = m_data + "/conformed/" + QFileInfo(a->path).completeBaseName() + "-" +
+                        MediaAnalysis::fingerprint(*a).left(8) + "-cfr.mov";
+    const auto temp = output + ".part.mov";
+    const auto assetId = a->id;
+    auto *process = new QProcess(this);
+    m_job = process;
+    m_busy = true;
+    m_cancelled = false;
+    m_progress = 0;
+    m_conform = {{"status", "converting"}, {"progress", 0.}, {"assetId", assetId}};
+    m_status = "Converting to a constant frame rate…";
+    auto pending = std::make_shared<QByteArray>();
+    auto log = std::make_shared<QByteArray>();
+    connect(process, &QProcess::readyReadStandardError, this, [process, log] {
+        *log += process->readAllStandardError();
+        if (log->size() > 16000)
+            *log = log->right(8000);
+    });
+    connect(process, &QProcess::readyReadStandardOutput, this,
+            [this, process, pending, duration = a->duration] {
+                *pending += process->readAllStandardOutput();
+                int i;
+                while ((i = pending->indexOf('\n')) >= 0) {
+                    const auto line = pending->left(i);
+                    pending->remove(0, i + 1);
+                    if (line.startsWith("out_time_us=") && duration > 0) {
+                        m_progress = std::clamp(line.mid(12).toDouble() / 1e6 / duration, 0., 1.);
+                        m_conform["progress"] = m_progress;
+                    }
+                }
+                emit changed();
+            });
+    auto complete = [this, process, temp, output, assetId, log](bool success) {
+        m_job = nullptr;
+        m_busy = false;
+        process->deleteLater();
+        if (m_cancelled || !success || !QFile::rename(temp, output)) {
+            QFile::remove(temp);
+            m_conform = {{"status", m_cancelled ? "cancelled" : "failed"}, {"assetId", assetId}};
+            if (!m_cancelled)
+                fail("Conversion failed. " + QString::fromUtf8(*log).right(1000));
+            emit changed();
+            return;
+        }
+        m_conform = {{"status", "done"}, {"progress", 1.}, {"assetId", assetId}};
+        // Relinking probes the new file; the clips keep their trims.
+        probeFile(QUrl::fromLocalFile(output), assetId);
+        emit changed();
+    };
+    connect(process, &QProcess::finished, this, [complete](int code, QProcess::ExitStatus status) {
+        complete(code == 0 && status == QProcess::NormalExit);
+    });
+    connect(process, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart)
+            complete(false);
+    });
+    QFile::remove(output);
+    QStringList args{"-hide_banner", "-nostdin", "-y",      "-loglevel", "error",
+                     "-i",           a->path,    "-map",    "0:v:0",     "-map",
+                     "0:a:0?",       "-fps_mode", "cfr",    "-r",        QString::number(rate, 'f', 6),
+                     "-c:v",         "prores_ks", "-profile:v", "2",     "-pix_fmt",
+                     "yuv422p10le",  "-c:a",     "pcm_s16le", "-ar",     "48000",
+                     "-progress",    "pipe:1",   temp};
+    process->start(executable("ffmpeg"), args);
+    emit changed();
+}
+QVariantMap Editor::imageSequence(const QString &file) {
+    const QFileInfo info(file);
+    static const QRegularExpression numbered("^(.*?)(\\d+)\\.(png|jpe?g|tiff?|bmp|webp|exr|dpx)$",
+                                             QRegularExpression::CaseInsensitiveOption);
+    const auto m = numbered.match(info.fileName());
+    if (!m.hasMatch())
+        return {};
+    const auto prefix = m.captured(1), digits = m.captured(2), ext = m.captured(3);
+    // Siblings with the same prefix, digit count and extension, numbered without gaps from the
+    // chosen file's number down and up.
+    QSet<qint64> numbers;
+    const QRegularExpression sibling("^" + QRegularExpression::escape(prefix) + "(\\d{" +
+                                         QString::number(digits.size()) + "})\\." +
+                                         QRegularExpression::escape(ext) + "$",
+                                     QRegularExpression::CaseInsensitiveOption);
+    for (const auto &name : info.dir().entryList(QDir::Files)) {
+        const auto s = sibling.match(name);
+        if (s.hasMatch())
+            numbers.insert(s.captured(1).toLongLong());
+    }
+    qint64 start = digits.toLongLong(), end = start;
+    while (numbers.contains(start - 1))
+        --start;
+    while (numbers.contains(end + 1))
+        ++end;
+    if (end - start + 1 < 2)
+        return {};
+    // FFmpeg's image2 pattern: a literal % in the folder or name is written %%.
+    auto literal = info.dir().filePath(prefix);
+    literal.replace("%", "%%");
+    return {{"pattern", literal + "%0" + QString::number(digits.size()) + "d." + ext},
+            {"start", start},
+            {"count", end - start + 1},
+            {"name", prefix.isEmpty() ? info.dir().dirName() : prefix}};
+}
+void Editor::importImageSequence(const QUrl &firstImage, double fps) {
+    if (m_job || m_busy)
+        return fail("Wait for the current job to finish");
+    QString path;
+    try {
+        path = localPath(firstImage);
+    } catch (const std::exception &e) {
+        return fail(e.what());
+    }
+    const auto sequence = imageSequence(path);
+    if (sequence.isEmpty())
+        return fail("Choose an image whose name ends in a frame number, e.g. shot_0001.png, with "
+                    "the following frames beside it");
+    if (!std::isfinite(fps) || fps < 1 || fps > 120)
+        return fail("Choose a frame rate of 1–120 fps");
+    QDir().mkpath(m_data + "/sequences");
+    auto name = sequence["name"].toString();
+    name.remove(QRegularExpression("[^A-Za-z0-9_-]+$"));
+    const auto output = m_data + "/sequences/" + (name.isEmpty() ? "sequence" : name) + "-" +
+                        newId().left(8) + ".mov";
+    const auto temp = output + ".part.mov";
+    const auto count = sequence["count"].toLongLong();
+    auto *process = new QProcess(this);
+    m_job = process;
+    m_busy = true;
+    m_cancelled = false;
+    m_progress = 0;
+    m_status = QString("Importing %1 images…").arg(count);
+    auto pending = std::make_shared<QByteArray>();
+    auto log = std::make_shared<QByteArray>();
+    connect(process, &QProcess::readyReadStandardError, this, [process, log] {
+        *log += process->readAllStandardError();
+        if (log->size() > 16000)
+            *log = log->right(8000);
+    });
+    connect(process, &QProcess::readyReadStandardOutput, this, [this, process, pending, count] {
+        *pending += process->readAllStandardOutput();
+        int i;
+        while ((i = pending->indexOf('\n')) >= 0) {
+            const auto line = pending->left(i);
+            pending->remove(0, i + 1);
+            if (line.startsWith("frame="))
+                m_progress = std::clamp(line.mid(6).toDouble() / count, 0., 1.);
+        }
+        emit changed();
+    });
+    auto complete = [this, process, temp, output, log](bool success) {
+        m_job = nullptr;
+        m_busy = false;
+        process->deleteLater();
+        if (m_cancelled || !success || !QFile::rename(temp, output)) {
+            QFile::remove(temp);
+            if (!m_cancelled)
+                fail("Image sequence import failed. " + QString::fromUtf8(*log).right(1000));
+            emit changed();
+            return;
+        }
+        importMedia({QUrl::fromLocalFile(output)});
+    };
+    connect(process, &QProcess::finished, this, [complete](int code, QProcess::ExitStatus status) {
+        complete(code == 0 && status == QProcess::NormalExit);
+    });
+    connect(process, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart)
+            complete(false);
+    });
+    // ProRes 4444 keeps transparency (e.g. rendered animations) and edits smoothly; even sizes
+    // are required by the codec's chroma layout.
+    process->start(executable("ffmpeg"),
+                   {"-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-framerate",
+                    QString::number(fps, 'f', 6), "-start_number",
+                    QString::number(sequence["start"].toLongLong()), "-f", "image2", "-i",
+                    sequence["pattern"].toString(), "-frames:v", QString::number(count), "-vf",
+                    "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "prores_ks", "-profile:v", "4",
+                    "-pix_fmt", "yuva444p10le", "-progress", "pipe:1", temp});
+    emit changed();
+}
 void Editor::copy() {
     const auto *c = m_project.clip(m_selected);
     if (!c)
@@ -1425,6 +1823,7 @@ void Editor::pasteAttributes(const QString &group) {
         c->keySimilarity = from.keySimilarity;
         c->keyBlend = from.keyBlend;
         c->aiCutout = from.aiCutout;
+        c->eyeContact = from.eyeContact;
     });
 }
 void Editor::configure(int w, int h, int n, int d) {
@@ -1503,6 +1902,8 @@ void Editor::requestPreview() {
 bool Editor::usesAi(const Clip &c, const QString &task) const {
     if (task == "transcribe")
         return speaks(m_project, c) && !c.reverse;
+    if (task == "eyecontact")
+        return c.eyeContact;
     return task == "upscale" ? c.aiUpscale : c.aiCutout;
 }
 QString Editor::aiVariant(const QString &task, const Asset &a) const {
@@ -1543,6 +1944,9 @@ void Editor::addAiMedia(RenderOptions &options) const {
             if (c.aiCutout && !options.mattes.contains(a->id))
                 if (const auto m = m_ai->result("matte", *a); !m.path.isEmpty())
                     options.mattes.insert(a->id, m);
+            if (c.eyeContact && !options.eyeContact.contains(a->id))
+                if (const auto e = m_ai->result("eyecontact", *a); !e.path.isEmpty())
+                    options.eyeContact.insert(a->id, e);
             if (c.aiUpscale && upscaleHeight(*a) > 0 && !options.upscaled.contains(a->id))
                 if (const auto u = m_ai->result("upscale", *a, aiVariant("upscale", *a));
                     !u.path.isEmpty())
@@ -1994,6 +2398,21 @@ void Editor::exportWith(const QUrl &url, const QVariantMap &settings) {
                 ("Use a ." + formatExtension(s.format) + " filename for this format").toStdString());
         if (m_project.clips.empty())
             throw std::runtime_error("The timeline is empty");
+        // The in/out range, or the whole timeline.
+        const auto range = settings.value("range", "all").toString();
+        if (range != "all" && range != "inout")
+            throw std::runtime_error("Unknown export range");
+        m_exportFrom = 0;
+        m_exportTo = -1;
+        if (range == "inout") {
+            if (m_project.inPoint < 0 && m_project.outPoint < 0)
+                throw std::runtime_error("Set an in or out point first (I / O)");
+            m_exportFrom = std::max<qint64>(0, m_project.inPoint);
+            m_exportTo = m_project.outPoint >= 0 ? std::min(m_project.outPoint, m_project.duration())
+                                                 : -1;
+            if (m_exportFrom >= (m_exportTo >= 0 ? m_exportTo : m_project.duration()))
+                throw std::runtime_error("The in/out range is outside the timeline");
+        }
         const auto size = exportSize(m_project, s.height);
         const double fps = double(m_project.fpsN) / m_project.fpsD;
         m_resumeTimer.stop();
@@ -2090,6 +2509,8 @@ void Editor::measureLoudness(const QString &output, QSize size, const Encoder &e
         RenderOptions options;
         options.video = false;
         options.measureLoudness = true;
+        options.from = m_exportFrom;
+        options.to = m_exportTo;
         const auto plan = compileRender(m_project, work->path(), size.width(), size.height(),
                                         options);
         const auto graph = work->filePath("measure.txt");
@@ -2160,6 +2581,8 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
         options.highQuality = true;
         options.pixelFormat = encoder.pixelFormat;
         options.video = !encoder.audioOnly;
+        options.from = m_exportFrom;
+        options.to = m_exportTo;
         if (gainDb != 0 || m_loudness.contains("target")) {
             // Normalised exports keep peaks about 1 dB below full scale, as streaming services
             // expect; the limiter works on samples, so leave some room for true peaks.

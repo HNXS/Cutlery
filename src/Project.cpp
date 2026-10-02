@@ -135,6 +135,15 @@ void Clip::scaleKeyframes(double factor) {
         list = scaled;
     }
 }
+bool isVariableRate(double nominal, double average) {
+    return nominal > 0 && average > 0 && std::abs(nominal - average) / nominal > 0.01;
+}
+double standardRate(double rate) {
+    for (double r : {24000. / 1001, 24., 25., 30000. / 1001, 30., 48., 50., 60000. / 1001, 60.})
+        if (std::abs(rate - r) / r < 0.04)
+            return r;
+    return rate;
+}
 const QStringList &graphicKinds() {
     static const QStringList kinds{"rectangle", "ellipse", "arrow", "line", "bubble"};
     return kinds;
@@ -208,14 +217,14 @@ QJsonObject Project::json(const QString &base) const {
         auto path = a.path;
         if (!base.isEmpty())
             path = QDir(base).relativeFilePath(path);
-        aa.append(QJsonObject{{"id", a.id},
-                              {"path", path},
-                              {"name", a.name},
-                              {"kind", a.kind},
-                              {"duration", a.duration},
-                              {"width", a.width},
-                              {"height", a.height},
-                              {"audio", a.hasAudio}});
+        QJsonObject o{{"id", a.id},          {"path", path},           {"name", a.name},
+                      {"kind", a.kind},      {"duration", a.duration}, {"width", a.width},
+                      {"height", a.height},  {"audio", a.hasAudio}};
+        if (a.frameRate > 0)
+            o["frameRate"] = a.frameRate;
+        if (a.variableRate)
+            o["variableRate"] = true;
+        aa.append(o);
     }
     for (const auto &c : clips) {
         QJsonObject o{{"id", c.id},
@@ -328,13 +337,28 @@ QJsonObject Project::json(const QString &base) const {
         o["keyBlend"] = c.keyBlend;
         o["aiCutout"] = c.aiCutout;
         o["aiUpscale"] = c.aiUpscale;
+        if (c.eyeContact)
+            o["eyeContact"] = true;
         o["transition"] = c.transition;
         o["transitionFrames"] = QString::number(c.transitionFrames);
         cc.append(o);
     }
-    return {{"format", "cutlery"}, {"schemaVersion", 11}, {"name", name},       {"width", width},
-            {"height", height},    {"fpsN", fpsN},       {"fpsD", fpsD},       {"tracks", tracks},
-            {"assets", aa},        {"clips", cc},        {"trackSettings", tt}};
+    QJsonObject o{{"format", "cutlery"}, {"schemaVersion", 11}, {"name", name},
+                  {"width", width},      {"height", height},    {"fpsN", fpsN},
+                  {"fpsD", fpsD},        {"tracks", tracks},    {"assets", aa},
+                  {"clips", cc},         {"trackSettings", tt}};
+    if (!markers.isEmpty()) {
+        QJsonArray mm;
+        for (const auto &m : markers)
+            mm.append(QJsonObject{
+                {"frame", QString::number(m.frame)}, {"name", m.name}, {"color", m.color}});
+        o["markers"] = mm;
+    }
+    if (inPoint >= 0)
+        o["inPoint"] = QString::number(inPoint);
+    if (outPoint >= 0)
+        o["outPoint"] = QString::number(outPoint);
+    return o;
 }
 Project Project::fromJson(const QJsonObject &o, const QString &base) {
     require(o["format"] == "cutlery" &&
@@ -349,6 +373,15 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
     p.fpsD = o["fpsD"].toInt();
     p.tracks = o["tracks"].toInt();
     require(p.tracks > 0 && p.tracks <= 64, "Invalid track count");
+    const auto markers = o["markers"].toArray();
+    require(markers.size() <= 1000, "Too many markers");
+    for (const auto &v : markers) {
+        const auto m = v.toObject();
+        p.markers.push_back({m["frame"].toString().toLongLong(), m["name"].toString(),
+                             m["color"].toString("#ffd23f")});
+    }
+    p.inPoint = o.contains("inPoint") ? o["inPoint"].toString().toLongLong() : -1;
+    p.outPoint = o.contains("outPoint") ? o["outPoint"].toString().toLongLong() : -1;
     p.trackSettings.clear();
     if (o["schemaVersion"].toInt() == 1) {
         for (int i = 0; i < p.tracks; ++i)
@@ -387,6 +420,8 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         a.width = j["width"].toInt();
         a.height = j["height"].toInt();
         a.hasAudio = j["audio"].toBool();
+        a.frameRate = j["frameRate"].toDouble(0);
+        a.variableRate = j["variableRate"].toBool(false);
         p.assets.push_back(a);
     }
     for (auto v : o["clips"].toArray()) {
@@ -480,6 +515,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.keyBlend = j["keyBlend"].toDouble(0.08);
         c.aiCutout = j["aiCutout"].toBool();
         c.aiUpscale = j["aiUpscale"].toBool();
+        c.eyeContact = j["eyeContact"].toBool(false);
         c.transition = j["transition"].toString();
         if (j.contains("transitionFrames"))
             c.transitionFrames = integer(j["transitionFrames"]);
@@ -496,6 +532,14 @@ void Project::validate() const {
                 double(fpsN) / fpsD <= 120,
             "Frame rate must be 1–120 fps");
     require(tracks > 0 && tracks <= 64, "Alpha supports 1–64 tracks");
+    for (int i = 0; i < markers.size(); ++i)
+        require(markers[i].frame >= 0 && markers[i].frame <= 100000000 &&
+                    markers[i].name.size() <= 200 && QColor(markers[i].color).isValid() &&
+                    (i == 0 || markers[i - 1].frame < markers[i].frame),
+                "Invalid marker");
+    require(inPoint >= -1 && outPoint >= -1 && inPoint <= 100000000 && outPoint <= 100000000 &&
+                (inPoint < 0 || outPoint < 0 || inPoint < outPoint),
+            "Invalid in/out range");
     require(trackSettings.size() == tracks, "Track settings do not match track count");
     QSet<QString> trackIds;
     for (const auto &t : trackSettings) {

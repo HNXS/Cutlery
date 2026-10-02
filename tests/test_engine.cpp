@@ -340,7 +340,7 @@ class EngineTest : public QObject {
         QTemporaryDir dir;
         const auto path = dir.filePath("shortcuts.json");
         KeyboardShortcuts keys(path);
-        QCOMPARE(keys.bindings().size(), 33);
+        QCOMPARE(keys.bindings().size(), 39);
         QVERIFY(!keys.assign("play", "Ctrl+B"));
         QVERIFY(keys.error().contains("Already assigned"));
         QVERIFY(!keys.assign("play", "Ctrl+NotARealKey"));
@@ -934,6 +934,104 @@ class EngineTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["importing"].toBool(), 15000);
         QCOMPARE(editor.project().assets.last().width, 90);
         QCOMPARE(editor.project().assets.last().height, 160);
+    }
+    void eyeContact() {
+#if defined(CUTLERY_AI_WORKER) && defined(CUTLERY_TEST_MODELS)
+        const QString models = CUTLERY_TEST_MODELS;
+        for (const auto *name :
+             {"face_detection_short_range.onnx", "face_landmark.onnx", "iris_landmark.onnx"})
+            if (!QFileInfo::exists(models + "/" + name))
+                QSKIP("The face models are not in the test models folder");
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Half a second of a presenter photo (public domain, see tests/fixtures/README.md):
+        // looking into the camera, and the same face looking to the side.
+        auto video = [&](const QString &name) {
+            const auto out = dir.filePath(name + ".mkv");
+            run(ffmpeg, {"-v", "error", "-loop", "1", "-i",
+                         QString(CUTLERY_SOURCE_DIR) + "/tests/fixtures/face-" + name + ".jpg",
+                         "-t", "0.5", "-r", "10", "-c:v", "ffv1", out});
+            return out;
+        };
+        // The worker's report: the shifts applied to both eyes in the last frame, in eye widths.
+        auto correct = [&](const QString &input, const QString &output) {
+            const auto report = output + ".txt";
+            run(CUTLERY_AI_WORKER,
+                {"eyecontact", "--ffmpeg", ffmpeg, "--model", models + "/face_landmark.onnx",
+                 "--input", input, "--output", output, "--source", "960x540", "--rate", "10/1",
+                 "--cpu", "1", "--report", report});
+            QFile f(report);
+            if (!f.open(QIODevice::ReadOnly))
+                throw std::runtime_error("No eye-contact report");
+            const auto lines = QString::fromUtf8(f.readAll()).trimmed().split('\n');
+            const auto last = lines.last().split(' ');
+            if (lines.size() != 5 || last.size() != 6 || last[1] != "1")
+                throw std::runtime_error(("Unexpected report: " + lines.join('|')).toStdString());
+            return std::array<double, 4>{last[2].toDouble(), last[3].toDouble(),
+                                         last[4].toDouble(), last[5].toDouble()};
+        };
+        // Already looking into the camera: left alone.
+        const auto straight = correct(video("straight"), dir.filePath("straight.mov"));
+        for (double v : straight)
+            QVERIFY2(std::abs(v) < 0.02, qPrintable(QString::number(v)));
+        // Looking to the side: both eyes turn the same way, and a second pass finds at most
+        // two thirds of the first correction left.
+        const auto side = correct(video("side"), dir.filePath("side.mov"));
+        QVERIFY2(std::abs(side[0]) > 0.04 && std::abs(side[2]) > 0.04 && side[0] * side[2] > 0,
+                 qPrintable(QString("%1 %2").arg(side[0]).arg(side[2])));
+        const auto again = correct(dir.filePath("side.mov"), dir.filePath("again.mov"));
+        QVERIFY2(std::abs(again[0]) < 0.67 * std::abs(side[0]) &&
+                     std::abs(again[2]) < 0.67 * std::abs(side[2]),
+                 qPrintable(QString("%1 %2").arg(again[0]).arg(again[2])));
+
+        // Through the editor: the corrected picture replaces the source in an export, and only
+        // around the eyes.
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+        qputenv("CUTLERY_AI_MODELS", models.toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        QCOMPARE(editor.state()["aiMissing"].toMap()["eyecontact"].toString(), QString());
+        editor.configure(960, 540, 10, 1);
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("side.mkv"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        editor.select(editor.project().clips.first().id);
+        editor.setClip("eyeContact", true);
+        editor.runAi("eyecontact");
+        QTRY_COMPARE_WITH_TIMEOUT(
+            editor.state()["selected"].toMap()["eyeContactInfo"].toMap()["status"].toString(),
+            QString("ready"), 120000);
+        QVERIFY(editor.state()["selected"].toMap()["eyeContactInfo"].toMap()["covered"].toBool());
+        const auto out = dir.filePath("export.mov");
+        editor.exportWith(QUrl::fromLocalFile(out), {{"format", "prores"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(QFileInfo::exists(out), qPrintable(editor.state()["error"].toString()));
+        auto still = [&](const QString &file) {
+            QImage image;
+            image.loadFromData(run(ffmpeg, {"-v", "error", "-i", file, "-frames:v", "1", "-f",
+                                            "image2pipe", "-c:v", "png", "-"}),
+                               "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        const auto before = still(dir.filePath("side.mkv")), after = still(out);
+        auto difference = [&](QRect r) {
+            double sum = 0;
+            for (int y = r.top(); y <= r.bottom(); ++y)
+                for (int x = r.left(); x <= r.right(); ++x)
+                    sum += std::abs(qGray(before.pixel(x, y)) - qGray(after.pixel(x, y)));
+            return sum / (r.width() * r.height());
+        };
+        // The eyes sit around y = 190 in the fixture; the mouth and background stay.
+        const double eyes = difference({340, 160, 280, 60}), mouth = difference({380, 360, 200, 60}),
+                     corner = difference({10, 10, 100, 100});
+        QVERIFY2(eyes > 1.5 && mouth < 1.5 && corner < 1.5,
+                 qPrintable(QString("eyes %1 mouth %2 corner %3").arg(eyes).arg(mouth).arg(corner)));
+#else
+        QSKIP("Needs the AI worker and the AI pack's models (CUTLERY_TEST_MODELS)");
+#endif
     }
     void aiCutout() {
         const auto ffmpeg = Editor::executable("ffmpeg");
@@ -1728,6 +1826,266 @@ class EngineTest : public QObject {
         QVERIFY(editor.state()["error"].toString().contains("No microphone"));
         QCOMPARE(editor.state()["voiceOver"].toMap()["recording"].toBool(), false);
         editor.stopVoiceOver(); // nothing to stop
+    }
+    void markersAndRange() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("clip.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=30:d=3", "-f",
+                     "lavfi", "-i", "sine=d=3", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest",
+                     source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        // Markers stay sorted; toggling at the same frame removes one.
+        for (qint64 f : {60, 15, 40}) {
+            editor.seek(f);
+            editor.toggleMarker();
+        }
+        auto frames_ = [&] {
+            QVector<qint64> out;
+            for (const auto &m : editor.project().markers)
+                out << m.frame;
+            return out;
+        };
+        QCOMPARE(frames_(), (QVector<qint64>{15, 40, 60}));
+        editor.seek(40);
+        editor.toggleMarker();
+        QCOMPARE(frames_(), (QVector<qint64>{15, 60}));
+        editor.undo();
+        QCOMPARE(frames_(), (QVector<qint64>{15, 40, 60}));
+        QCOMPARE(editor.adjacentMarker(true), qint64(60));
+        QCOMPARE(editor.adjacentMarker(false), qint64(15));
+        editor.seek(70);
+        QCOMPARE(editor.adjacentMarker(true), qint64(-1));
+        editor.setMarker(0, "name", "Intro");
+        editor.setMarker(0, "color", "#ff5a5f");
+        QCOMPARE(editor.project().markers[0].name, QString("Intro"));
+        editor.setMarker(0, "color", "not a colour");
+        QVERIFY(editor.state()["error"].toString().contains("marker"));
+        editor.clearError();
+        QCOMPARE(editor.project().markers[0].color, QString("#ff5a5f"));
+        QCOMPARE(editor.state()["markers"].toList().size(), 3);
+        editor.removeMarker(2);
+        QCOMPARE(editor.project().markers.size(), 2);
+
+        // Export of the whole timeline needs no range; in/out needs one.
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("none.wav")),
+                          {{"format", "wav"}, {"range", "inout"}});
+        QVERIFY(editor.state()["error"].toString().contains("in or out"));
+        editor.clearError();
+        editor.seek(30);
+        editor.setInPoint();
+        editor.seek(59);
+        editor.setOutPoint();
+        QCOMPARE(editor.project().inPoint, qint64(30));
+        QCOMPARE(editor.project().outPoint, qint64(60));
+        // An out point before the in point clears the in point.
+        editor.seek(10);
+        editor.setOutPoint();
+        QCOMPARE(editor.project().inPoint, qint64(-1));
+        editor.undo();
+        QCOMPARE(editor.project().inPoint, qint64(30));
+        // The in/out export is exactly one second, video and audio.
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("range.mp4")),
+                          {{"format", "mpeg4"}, {"quality", "small"}, {"range", "inout"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(QFileInfo::exists(dir.filePath("range.mp4")),
+                 qPrintable(editor.state()["error"].toString()));
+        const auto probe = QString::fromUtf8(
+            run(Editor::executable("ffprobe"),
+                {"-v", "error", "-show_entries", "stream=codec_type,duration,nb_frames", "-of",
+                 "compact", dir.filePath("range.mp4")}));
+        QVERIFY2(probe.contains("nb_frames=30"), qPrintable(probe));
+        const auto audio = QRegularExpression("codec_type=audio\\|duration=([0-9.]+)").match(probe);
+        QVERIFY2(std::abs(audio.captured(1).toDouble() - 1) < 0.05, qPrintable(probe));
+
+        // Saved with the project and validated.
+        auto json = editor.project().json();
+        const auto loaded = Project::fromJson(json, {});
+        QCOMPARE(loaded.markers, editor.project().markers);
+        QCOMPARE(loaded.inPoint, qint64(30));
+        QCOMPARE(loaded.outPoint, qint64(60));
+        json["inPoint"] = "80";
+        QVERIFY_EXCEPTION_THROWN(Project::fromJson(json, {}), std::runtime_error);
+        editor.clearInOut();
+        QCOMPARE(editor.project().inPoint, qint64(-1));
+        QVERIFY(!editor.project().json().contains("inPoint"));
+    }
+    void collectProject() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Two media files with the same name in different folders, and a LUT.
+        QVERIFY(QDir(dir.path()).mkpath("a") && QDir(dir.path()).mkpath("b"));
+        for (const auto &[folder, colour] : {std::pair{QString("a"), QColor(Qt::red)},
+                                             std::pair{QString("b"), QColor(Qt::blue)}}) {
+            QImage image(160, 90, QImage::Format_RGB32);
+            image.fill(colour);
+            QVERIFY(image.save(dir.filePath(folder + "/shot.png")));
+        }
+        const auto lut = dir.filePath("look.cube");
+        {
+            QFile f(lut);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n");
+        }
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("a/shot.png")),
+                            QUrl::fromLocalFile(dir.filePath("b/shot.png"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        editor.addAsset(editor.project().assets[0].id);
+        editor.addAsset(editor.project().assets[1].id, 1);
+        editor.select(editor.project().clips.first().id);
+        editor.setClip("lut", QUrl::fromLocalFile(lut));
+        // A title in a font added to Cutlery takes the font file along.
+        QString fontFile;
+        for (const auto &folder : {qEnvironmentVariable("WINDIR") + "/Fonts",
+                                   QString("/usr/share/fonts/truetype/dejavu")})
+            for (const auto &f : QDir(folder).entryInfoList({"*.ttf"}, QDir::Files))
+                if (fontFile.isEmpty())
+                    fontFile = f.absoluteFilePath();
+        QString family;
+        if (!fontFile.isEmpty()) {
+            QVERIFY(QFile::copy(fontFile, dir.filePath("Collect Font.ttf")));
+            family = editor.addFont(QUrl::fromLocalFile(dir.filePath("Collect Font.ttf")));
+            QVERIFY(!family.isEmpty());
+            editor.addTitle();
+            editor.setClip("fontFamily", family);
+        }
+        // Only into an empty folder.
+        editor.collectProject(QUrl::fromLocalFile(dir.path()));
+        QVERIFY(editor.state()["error"].toString().contains("empty"));
+        editor.clearError();
+        const auto target = dir.filePath("Archive");
+        editor.collectProject(QUrl::fromLocalFile(target));
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["collect"].toMap()["status"].toString(),
+                                  QString("done"), 30000);
+        QCOMPARE(editor.state()["collect"].toMap()["path"].toString(),
+                 target + "/Archive.cutlery");
+        QVERIFY(QFileInfo::exists(target + "/media/shot.png"));
+        QVERIFY(QFileInfo::exists(target + "/media/shot-2.png"));
+        QVERIFY(QFileInfo::exists(target + "/luts/look.cube"));
+        if (!family.isEmpty()) {
+            QVERIFY(QFileInfo::exists(target + "/fonts/Collect Font.ttf"));
+            QFile::remove(editor.state()["dataPath"].toString() + "/fonts/Collect Font.ttf");
+        }
+        // The copy works on its own: the originals can go away.
+        QVERIFY(QDir(dir.filePath("a")).removeRecursively());
+        QVERIFY(QDir(dir.filePath("b")).removeRecursively());
+        QVERIFY(QFile::remove(lut));
+        const auto collected = loadProject(target + "/Archive.cutlery");
+        QCOMPARE(collected.assets.size(), 2);
+        for (const auto &a : collected.assets)
+            QVERIFY2(QFileInfo(a.path).isFile() && a.path.startsWith(target), qPrintable(a.path));
+        QVERIFY(QImage(collected.assets[0].path).pixelColor(1, 1) !=
+                QImage(collected.assets[1].path).pixelColor(1, 1));
+        QCOMPARE(collected.clips.first().lut, target + "/luts/look.cube");
+        QFile file(target + "/Archive.cutlery");
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto text = QString::fromUtf8(file.readAll());
+        QVERIFY2(text.contains("\"media/shot.png\"") && !text.contains(dir.path()),
+                 "Paths in a collected project are relative");
+        // Missing media stops collecting.
+        editor.collectProject(QUrl::fromLocalFile(dir.filePath("Again")));
+        QVERIFY(editor.state()["error"].toString().contains("Missing media"));
+    }
+    void variableFrameRate() {
+        QVERIFY(isVariableRate(30, 68. / 3));
+        QVERIFY(!isVariableRate(30, 29.9));
+        QVERIFY(!isVariableRate(30, 0));
+        QCOMPARE(standardRate(29.8), 30000. / 1001);
+        QCOMPARE(standardRate(25.3), 25.);
+        QCOMPARE(standardRate(12), 12.);
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // 1.5 s at 30 fps, then 1.5 s at 15 fps.
+        const auto source = dir.filePath("phone.mp4");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=30:d=3", "-f",
+                     "lavfi", "-i", "sine=d=3", "-vf",
+                     "setpts='if(lt(N,45),N/30,1.5+(N-45)/15)/TB'", "-fps_mode", "vfr", "-c:v",
+                     "mpeg4", "-c:a", "aac", "-shortest", source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        const auto asset = editor.project().assets.first();
+        QVERIFY(asset.variableRate);
+        QVERIFY2(std::abs(asset.frameRate - 68. / 3) < 0.5, qPrintable(QString::number(asset.frameRate)));
+        editor.addAsset(asset.id);
+        const auto clip = editor.project().clips.first();
+        editor.select(clip.id);
+        QVERIFY(editor.state()["selected"].toMap()["variableRate"].toBool());
+        QVERIFY(Project::fromJson(editor.project().json(), {}).assets.first().variableRate);
+        editor.conformFrameRate();
+        QCOMPARE(editor.state()["conform"].toMap()["status"].toString(), QString("converting"));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            editor.project().assets.first().path.endsWith("-cfr.mov") && !editor.state()["busy"].toBool(),
+            60000);
+        QCOMPARE(editor.state()["conform"].toMap()["status"].toString(), QString("done"));
+        const auto conformed = editor.project().assets.first();
+        QCOMPARE(conformed.id, asset.id);
+        QVERIFY(!conformed.variableRate);
+        QVERIFY(conformed.hasAudio);
+        QVERIFY(std::abs(conformed.duration - asset.duration) < 0.1);
+        QCOMPARE(editor.project().clips.first().duration, clip.duration);
+        QVERIFY(QFileInfo::exists(source)); // the original stays
+        // Stills are never variable-rate.
+        QImage image(64, 64, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(dir.filePath("still.png")));
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("still.png"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        QCOMPARE(editor.project().assets.last().frameRate, 0.);
+    }
+    void imageSequences() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Frames 7–18 of a half-transparent animation in a folder with a % sign, plus unrelated
+        // files and a gap after 18.
+        const auto folder = dir.filePath("100% render");
+        QVERIFY(QDir().mkpath(folder));
+        for (int i = 7; i <= 18; ++i) {
+            QImage frame(161, 90, QImage::Format_ARGB32);
+            frame.fill(Qt::transparent);
+            for (int y = 0; y < 90; ++y)
+                for (int x = 0; x < 80; ++x)
+                    frame.setPixelColor(x, y, QColor(255, 0, 0));
+            QVERIFY(frame.save(folder + QString("/shot_%1.png").arg(i, 4, 10, QChar('0'))));
+        }
+        QVERIFY(QImage(8, 8, QImage::Format_RGB32).save(folder + "/shot_0020.png"));
+        QVERIFY(QImage(8, 8, QImage::Format_RGB32).save(folder + "/other_0001.png"));
+        const auto info = Editor::imageSequence(folder + "/shot_0010.png");
+        QCOMPARE(info["start"].toLongLong(), qint64(7));
+        QCOMPARE(info["count"].toLongLong(), qint64(12));
+        QCOMPARE(info["pattern"].toString(), dir.filePath("100%% render") + "/shot_%04d.png");
+        QVERIFY(Editor::imageSequence(folder + "/other_0001.png").isEmpty()); // a single frame
+        QVERIFY(Editor::imageSequence(dir.filePath("plain.png")).isEmpty());
+
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importImageSequence(QUrl::fromLocalFile(folder + "/shot_0012.png"), 12);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 30000);
+        const auto a = editor.project().assets.first();
+        QCOMPARE(a.kind, QString("video"));
+        QVERIFY2(std::abs(a.duration - 1) < 0.05, qPrintable(QString::number(a.duration)));
+        QCOMPARE(a.width, 160); // even size for ProRes
+        // Transparency survives: the right half of a frame has no alpha.
+        const auto probe = QString::fromUtf8(run(Editor::executable("ffprobe"),
+            {"-v", "error", "-show_entries", "stream=pix_fmt,nb_frames", "-of", "compact", a.path}));
+        QVERIFY2(probe.contains("yuva444p") && probe.contains("nb_frames=12"), qPrintable(probe));
+        editor.importImageSequence(QUrl::fromLocalFile(dir.filePath("none_0001.png")), 12);
+        QVERIFY(editor.state()["error"].toString().contains("frame number"));
     }
     void smoothSlowMotion() {
         const auto ffmpeg = Editor::executable("ffmpeg");

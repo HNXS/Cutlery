@@ -1,6 +1,6 @@
 # Research: eye-contact correction
 
-Status: research note (October 2026), not implemented. This note decides how Cutlery could make a presenter who reads from a script look into the camera, offline and with a licence Cutlery can ship.
+Status: recommendation 1 implemented (October 2026, `worker/eyecontact.cpp`, "Eye contact (AI)" in the inspector). The Maxine backend (recommendation 2) and the learned refinement are not implemented. This note decides how Cutlery makes a presenter who reads from a script look into the camera, offline and with a licence Cutlery can ship.
 
 ## What the feature has to do
 
@@ -30,6 +30,23 @@ Status: research note (October 2026), not implemented. This note decides how Cut
    - **Learned refinement (optional, later):** a small learned model (a DeepWarp-style flow correction trained on synthetic data). Only with weights whose licence we have checked.
 2. **Maxine backend, optional:** when the Maxine AR runtime with the Eye Contact feature is installed on an RTX machine, offer it as the higher-quality engine. Cutlery would call the user's installed runtime and ship no NVIDIA files. Check the then-current SDK licence before release.
 3. **Not LivePortrait with InsightFace:** the non-commercial landmark weights are incompatible with selling Cutlery or a paid AI pack.
+
+## What was built
+
+- **Models:** MediaPipe's BlazeFace short-range detector, Face Mesh and Iris Landmark, from the official mediapipe 0.10.18 wheel, converted to ONNX with tf2onnx. The ONNX outputs match TFLite to about 1e-4.
+- **Corners:** the eye corners for the gaze target come from the iris model's own lid contour. The face mesh's corners shifted by about 1.5 px between crops of the same picture; the iris model's corners shift by about 0.3 px.
+- **Shared gaze:** both eyes are corrected by the offset they share. One eye alone is often a few per cent off centre even when looking into the lens (convergence, anatomy), so each eye keeps its own offset.
+- **Dead zone:** offsets under about 3 % of the eye width are left alone.
+- **The warp:**
+  - *Vertical:* the iris and the upper lid move together, fading out toward the brow; the lower lid stays.
+  - *Horizontal:* only the inside of the opening moves.
+  - The method has no learned part.
+- **Tests:**
+  - An unmodified photo looking into the camera is left essentially unchanged (shifts under 2 % of the eye width).
+  - The same photo with the gaze moved sideways is corrected in both eyes.
+  - A second pass finds at most two thirds of the first correction left.
+  - An editor export changes only the eye region.
+  - These use one public-domain photo; recorded presenter clips are still needed.
 
 ## Effort and risks
 

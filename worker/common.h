@@ -104,4 +104,5 @@ inline std::unique_ptr<Ort::Session> openModel(Ort::Env &env, const QString &mod
 int matte(const QHash<QString, QString> &);
 int upscale(const QHash<QString, QString> &);
 int transcribe(const QHash<QString, QString> &);
+int eyecontact(const QHash<QString, QString> &);
 } // namespace worker

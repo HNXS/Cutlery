@@ -9,7 +9,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F003 | Drag/drop and background media analysis | Partial | Library-to-track and local file drops, async probing and waveform analysis, partial-error reporting; no directory recursion or cancellable import queue. |
 | F004 | Nondestructive media references | Implemented (alpha) | Relative project references; originals never edited. |
 | F005 | Missing-media relink and replace | Partial | Validated source relinking; no batch relink. |
-| F006 | Collect Project and portable media bundle | Planned | Not implemented in this alpha. |
+| F006 | Collect Project and portable media bundle | Implemented (alpha) | Project → "Collect project and media…" copies every media file, LUT and font added in Cutlery that the project uses into an empty folder (media/, luts/, fonts/ with clashing names numbered) and saves <folder>.cutlery there with relative paths, in the background with progress. Opening a project loads the fonts beside it. Refuses projects with missing media; no trimming of unused source ranges. |
 | F007 | Project schema migrations | Implemented (alpha) | Reads schema 1/2 without moving clips; writes schema 3 with stable track IDs and snapping/magnetic modes. Older versions cannot read new saves. |
 | F008 | Atomic save, autosave and rolling backup | Partial | Atomic save and one recovery file; no rolling backups. |
 | F009 | Undo/redo and deep edit history | Partial | 60 whole-project snapshots; no deep history persistence. |
@@ -33,7 +33,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F027 | Ripple trim, roll, slip and slide | Partial | Magnetic track trims ripple subsequent clips; no roll, slip, slide or linked-pair propagation. |
 | F028 | Nested sequences and compound clips | Planned | Not implemented in this alpha. |
 | F029 | Copy/paste clips and selected attributes | Implemented (alpha) | Copy (Ctrl+C) and paste at the playhead (Ctrl+V) within the session and across projects (the media comes along); the copy goes to its own track when free there, otherwise the nearest free track or a new one. Paste look (colour, effects, LUT) or paste all attributes (Ctrl+Alt+V: also transform, keyframes, shape, keying, volume, fades) onto the selected clip, in one undo step. No system-clipboard exchange or multi-clip selection. |
-| F030 | Markers, in/out and timeline navigation | Partial | Frame and previous/next edit navigation; start/end shortcuts. No markers or in/out ranges. |
+| F030 | Markers, in/out and timeline navigation | Implemented (alpha) | Markers (M) with name and colour, shown on the ruler and across the tracks; click to jump, double-click to rename or recolour, right-click to remove; previous/next marker (Ctrl+Left/Right). In and out points (I, O, Alt+X to clear) shown as a band on the ruler; the export dialog can export just the in/out range. Frame and edit navigation as before. Markers stay at timeline positions; they do not move with ripple edits. |
 | F031 | Timeline zoom and frame-accurate seeking | Partial | Timeline zoom/fit; seeking renders only the playhead frame, so latency no longer grows with position (about 0.1 s for 1080p H.264 on a 4-core development container). Not qualified on the hardware profiles. |
 | F032 | JKL shuttle and reverse audition | Planned | Not implemented in this alpha. |
 | F033 | Constant speed 0.1x to 100x | Partial | 0.25–4x only, preserves pitch via atempo. |
@@ -119,7 +119,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F113 | Display management and multi-monitor HDR | Planned | Not implemented in this alpha. |
 | F114 | Point and planar tracking | Planned | Not implemented in this alpha. |
 | F115 | Object tracking and editable paths | Planned | Not implemented in this alpha. |
-| F116 | Face detection and face tracking | Planned | Not implemented in this alpha. |
+| F116 | Face detection and face tracking | Partial | Used by eye contact: MediaPipe BlazeFace detection, 468-point Face Mesh and Iris Landmark (Apache-2.0, converted to ONNX) per frame in the cutlery-ai worker, most prominent face only. No face tracking for effects, blur areas or reframing yet. |
 | F117 | Tracked masks, blur and overlays | Planned | Not implemented in this alpha. |
 | F118 | Stabilization and auto crop | Planned | Not implemented in this alpha. |
 | F119 | Rolling-shutter and lens correction | Planned | Not implemented in this alpha. |
@@ -154,8 +154,8 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F148 | WAV, MP3, AAC, FLAC, OGG, Opus and M4A | Partial | FFmpeg-based audio import; limited corpus. |
 | F149 | PNG, JPEG, WebP, BMP, TIFF and GIF | Partial | Still images; animated formats not qualified. |
 | F150 | HEIF/HEIC import | Planned | Not implemented in this alpha. |
-| F151 | Numbered image sequences | Planned | Not implemented in this alpha. |
-| F152 | Variable frame rate and timestamp repair | Planned | Not implemented in this alpha. |
+| F151 | Numbered image sequences | Partial | Project → "Import image sequence…": pick any frame of a numbered sequence (shot_0001.png …; PNG, JPEG, TIFF, BMP, WebP, EXR, DPX); the contiguous run around it is found, and FFmpeg turns it at a chosen frame rate into a ProRes 4444 video with alpha in the data folder's sequences/, which is imported as a normal clip. No live link to the image files; no image-sequence export. |
+| F152 | Variable frame rate and timestamp repair | Partial | Import detects variable frame rate (nominal and average rates differ by more than 1 %) and the inspector flags it. Playback and export already place frames by timestamp. "Convert to constant frame rate" makes a ProRes 422 + PCM editing copy at the nearest standard rate in the data folder and relinks the media, keeping clip trims. No automatic conversion on import; no repair of broken timestamps beyond the re-encode. |
 | F153 | MP4/H.264/AAC export | Implemented (alpha) | H.264 via NVENC, AMF, Quick Sync or Media Foundation, whichever passes a probe; no software H.264 encoder in the LGPL build. |
 | F154 | MOV and mezzanine/alpha workflow | Partial | ProRes 422 HQ/422/LT MOV export with PCM audio; no alpha-channel export. |
 | F155 | WebM VP9/Opus software export | Implemented (alpha) | VP9/Opus export profile (integration coverage to expand). |

@@ -542,8 +542,10 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         const double seek = c.sourceIn.seconds() + (c.reverse ? d - secs(c1) : secs(c0)) * s;
         // Smooth slow motion makes in-between frames from source neighbours, so it decodes a
         // little source before and after the range, even for a single preview frame.
-        const auto up = c.aiUpscale && !n.image && n.asset ? o.upscaled.value(n.asset->id)
-                                                           : MatteSource{};
+        const auto up = n.image || !n.asset                         ? MatteSource{}
+                        : c.eyeContact && o.eyeContact.contains(n.asset->id) ? o.eyeContact.value(n.asset->id)
+                        : c.aiUpscale ? o.upscaled.value(n.asset->id)
+                                      : MatteSource{};
         const bool smooth = s < 1 && !c.reverse && !n.image && !c.slowMotion.isEmpty();
         const double pre = smooth ? std::clamp(seek - (up.path.isEmpty() ? 0. : up.start), 0., 0.2)
                                   : 0,

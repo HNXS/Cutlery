@@ -14,7 +14,9 @@
 namespace cutlery {
 namespace {
 QString extension(const QString &task) {
-    return task == "upscale" ? ".mov" : task == "transcribe" ? ".srt" : ".mkv";
+    return task == "upscale" || task == "eyecontact" ? ".mov"
+           : task == "transcribe"                    ? ".srt"
+                                                     : ".mkv";
 }
 } // namespace
 AiJobs::AiJobs(QString dir, QString ffmpeg, QString ffprobe, QString worker,
@@ -33,7 +35,12 @@ QString AiJobs::missing(const QString &task) const {
     if (model.isEmpty() || !QFileInfo(model).isFile())
         return "The AI pack is not installed: models/" +
                QFileInfo(model.isEmpty() ? task : model).fileName() + " is missing.";
-    if (m_ffmpeg.isEmpty() || (task == "upscale" && m_ffprobe.isEmpty()))
+    // Eye contact uses three face models side by side.
+    if (task == "eyecontact")
+        for (const auto *name : {"face_detection_short_range.onnx", "iris_landmark.onnx"})
+            if (!QFileInfo(QFileInfo(model).dir().filePath(name)).isFile())
+                return QString("The AI pack is incomplete: models/%1 is missing.").arg(name);
+    if (m_ffmpeg.isEmpty() || ((task == "upscale" || task == "eyecontact") && m_ffprobe.isEmpty()))
         return "FFmpeg is missing.";
     return {};
 }
@@ -118,9 +125,9 @@ void AiJobs::next() {
     m_progress = 0;
     m_device.clear();
     QDir().mkpath(m_dir);
-    if (m_job.task != "upscale")
+    if (m_job.task != "upscale" && m_job.task != "eyecontact")
         return run(m_job, {});
-    // The upscale keeps every source frame, so it needs the source frame rate.
+    // Upscale and eye contact keep every source frame, so they need the source frame rate.
     auto *probe = new QProcess(this);
     m_process = probe;
     connect(probe, &QProcess::finished, this, [this, probe](int code) {
@@ -161,6 +168,16 @@ void AiJobs::run(const Job &job, const QString &rate) {
         args << "--source" << QString("%1x%2").arg(source.width()).arg(source.height())
              << "--size" << QString("%1x%2").arg(size.width()).arg(size.height()) << "--rate"
              << rate;
+        const auto parts = rate.split('/');
+        resultRate = parts[0].toDouble() / parts[1].toDouble();
+    } else if (job.task == "eyecontact") {
+        // Processed at the source size, at most 4K, so the rest of the picture keeps its detail.
+        const double fit = std::min(1., std::min(3840. / a.width, 2160. / a.height));
+        args << "--source"
+             << QString("%1x%2")
+                    .arg(std::max(2, int(std::lround(a.width * fit / 2)) * 2))
+                    .arg(std::max(2, int(std::lround(a.height * fit / 2)) * 2))
+             << "--rate" << rate;
         const auto parts = rate.split('/');
         resultRate = parts[0].toDouble() / parts[1].toDouble();
     } else if (job.task == "transcribe") {
