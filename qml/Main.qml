@@ -40,6 +40,7 @@ ApplicationWindow {
     property bool allowClose: false
     property var libraryGesture: null
     property bool textEditing: activeFocusItem && typeof activeFocusItem.cursorPosition === "number"
+    property bool showScopes: false
     property bool shortcutsBlocked: openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || srtOpen.visible || srtSave.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
@@ -201,7 +202,7 @@ ApplicationWindow {
         background: Rectangle {
             color: parent.down ? "#34434d" : parent.hovered ? "#2b3742" : "#202831"
             radius: 6
-            border.color: "#35404b"
+            border.color: parent.highlighted ? "#64d8bc" : "#35404b"
             opacity: parent.enabled ? 1 : .4
         }
         contentItem: Text {
@@ -824,6 +825,64 @@ ApplicationWindow {
                     Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        // Video scopes over the top-right corner of the viewer: the preview
+                        // still when paused, the frame on screen four times a second while
+                        // playing.
+                        Rectangle {
+                            id: scopes
+                            objectName: "scopes"
+                            property bool live: false
+                            property int serial: 0
+                            visible: win.showScopes && win.s.duration > 0
+                            z: 10
+                            anchors.top: parent.top
+                            anchors.right: parent.right
+                            anchors.margins: 6
+                            width: scopeImage.implicitWidth + 12
+                            height: scopeImage.implicitHeight + scopeKind.height + 18
+                            color: "#e6101418"
+                            radius: 6
+                            border.color: "#2e3741"
+                            Timer {
+                                interval: 250
+                                repeat: true
+                                running: scopes.visible && editor.playing
+                                onTriggered: if (editor.captureScopeFrame()) {
+                                    scopes.live = true;
+                                    scopes.serial++;
+                                }
+                            }
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                spacing: 6
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    ComboBox {
+                                        id: scopeKind
+                                        objectName: "scopeKind"
+                                        Layout.fillWidth: true
+                                        implicitHeight: 26
+                                        font.pixelSize: 11
+                                        readonly property var kinds: ["histogram", "waveform", "vectorscope"]
+                                        model: ["Histogram", "Waveform", "Vectorscope"]
+                                    }
+                                    Action {
+                                        text: "✕"
+                                        padding: 4
+                                        onClicked: win.showScopes = false
+                                    }
+                                }
+                                Image {
+                                    id: scopeImage
+                                    objectName: "scopeImage"
+                                    cache: false
+                                    // The still is used again as soon as playback stops.
+                                    readonly property bool useLive: scopes.live && editor.playing
+                                    source: scopes.visible ? "image://frames/scope/" + scopeKind.kinds[scopeKind.currentIndex] + "/" + (useLive ? "live" : "still") + "/" + scopes.serial + "-" + win.s.previewUrl : ""
+                                }
+                            }
+                        }
                         Rectangle {
                             anchors.centerIn: parent
                             width: Math.min(parent.width, parent.height * win.s.width / win.s.height)
@@ -993,6 +1052,15 @@ ApplicationWindow {
                             text: win.clock(editor.playbackFrame) + " / " + win.clock(win.s.duration)
                             font.family: "Consolas"
                             color: win.mint
+                        }
+                        Action {
+                            objectName: "toggleScopes"
+                            text: "Scopes"
+                            highlighted: win.showScopes
+                            padding: 4
+                            onClicked: win.showScopes = !win.showScopes
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Histogram, waveform and vectorscope of the picture, to judge exposure and colour"
                         }
                         // Peak meter for the left and right channel, −60 to 0 dBFS.
                         Column {

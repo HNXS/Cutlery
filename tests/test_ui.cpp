@@ -575,6 +575,20 @@ class UiTest : public QObject {
         editor.clearError();
         editor.setClip("lut", "");
         QVERIFY(clip().lut.isEmpty());
+        // Scopes over the viewer, for the preview still.
+        auto *scopes = findItem(window->contentItem(), "scopes");
+        QVERIFY(scopes && !scopes->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "toggleScopes"), "clicked"));
+        QTRY_VERIFY(scopes->isVisible());
+        auto *scopeImage = findItem(window->contentItem(), "scopeImage");
+        QTRY_COMPARE(scopeImage->property("implicitWidth").toInt(), 256);
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "scopeKind"), "activated", Q_ARG(int, 2)));
+        findItem(window->contentItem(), "scopeKind")->setProperty("currentIndex", 2);
+        QTRY_COMPARE(scopeImage->property("implicitWidth").toInt(), 192);
+        if (qEnvironmentVariableIsSet("CUTLERY_SCOPE_SHOT"))
+            window->grabWindow().save(qEnvironmentVariable("CUTLERY_SCOPE_SHOT"));
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "toggleScopes"), "clicked"));
+        QTRY_VERIFY(!scopes->isVisible());
         // Style effects: a picture has the effect choice, but no motion blur or stabilizing.
         QVERIFY(findItem(window->contentItem(), "effectsSection")->isVisible());
         QVERIFY(!findItem(window->contentItem(), "stabilize")->isVisible());

@@ -2569,6 +2569,13 @@ void Editor::setVideoSink(QObject *sink) {
     m_playback->setVideoSink(qobject_cast<QVideoSink *>(sink));
     m_playback->showImage(m_frames->frame);
 }
+bool Editor::captureScopeFrame() {
+    const auto image = m_playback->currentImage();
+    if (image.isNull())
+        return false;
+    m_frames->live = image;
+    return true;
+}
 void Editor::play() {
     m_resumeTimer.stop();
     m_reverseTimer.stop();

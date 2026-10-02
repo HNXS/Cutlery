@@ -5,6 +5,7 @@
 #include "Thumbnails.h"
 #include "AiJobs.h"
 #include "Project.h"
+#include "Scopes.h"
 #include <QObject>
 #include <QProcess>
 #include <QQuickImageProvider>
@@ -25,11 +26,17 @@ namespace cutlery {
 class FrameProvider final : public QQuickImageProvider {
   public:
     FrameProvider() : QQuickImageProvider(QQuickImageProvider::Image) {}
-    QImage frame;
-    QImage requestImage(const QString &, QSize *size, const QSize &) override {
+    // `frame`: the preview still; `live`: the last playback frame captured for the scopes.
+    QImage frame, live;
+    // "scope/<kind>/<still|live>/<serial>" gives a scope of that picture (see renderScope).
+    QImage requestImage(const QString &id, QSize *size, const QSize &) override {
+        auto image = frame;
+        if (id.startsWith("scope/"))
+            image = renderScope(id.section('/', 2, 2) == "live" && !live.isNull() ? live : frame,
+                                id.section('/', 1, 1));
         if (size)
-            *size = frame.size();
-        return frame;
+            *size = image.size();
+        return image;
     }
 };
 class Editor final : public QObject {
@@ -157,6 +164,8 @@ class Editor final : public QObject {
         return m_reverseTimer.isActive() ? -m_shuttleRate : m_playRate;
     }
     Q_INVOKABLE void setVideoSink(QObject *sink);
+    // Keeps the frame on screen for the scopes while playing; false when there is none.
+    Q_INVOKABLE bool captureScopeFrame();
     QVariantList levels() const {
         const auto [l, r] = m_playback->levels();
         return {l, r};

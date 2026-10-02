@@ -5,6 +5,7 @@
 #include "MediaAnalysis.h"
 #include "Project.h"
 #include "RenderGraph.h"
+#include "Scopes.h"
 #include "Thumbnails.h"
 #include <QJsonArray>
 #include <QPainter>
@@ -217,6 +218,54 @@ class EngineTest : public QObject {
         QVERIFY(styled.contains("Style: Default,Inter Bold,64,"));
         QVERIFY(styled.contains("Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,x\n"));
         QVERIFY(writeSubtitles({{0, 1, "x"}}, "vtt").startsWith("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nx\n"));
+    }
+    void videoScopes() {
+        // Left half black, right half pure red.
+        QImage picture(640, 360, QImage::Format_RGB32);
+        picture.fill(Qt::black);
+        for (int y = 0; y < 360; ++y)
+            for (int x = 320; x < 640; ++x)
+                picture.setPixel(x, y, qRgb(255, 0, 0));
+        auto bright = [](const QImage &i, int x, int y) { return qGray(i.pixel(x, y)); };
+        // Histogram: levels at black (left) and full red (right edge), little in the middle.
+        const auto histogram = renderScope(picture, "histogram");
+        QCOMPARE(histogram.size(), QSize(256, 128));
+        QVERIFY(QColor(histogram.pixel(255, 100)).red() > 100);
+        QVERIFY(bright(histogram, 0, 100) > 60);
+        QVERIFY(bright(histogram, 128, 100) < 40);
+        // Waveform: black at the bottom on the left; red's luma (about 21 %) on the right.
+        const auto waveform = renderScope(picture, "waveform");
+        QCOMPARE(waveform.size(), QSize(256, 128));
+        QVERIFY(QColor(waveform.pixel(60, 127)).green() > 150);
+        const int redRow = 127 - qRound(0.2126 * 127);
+        QVERIFY(QColor(waveform.pixel(200, redRow)).green() > 150);
+        QVERIFY(QColor(waveform.pixel(60, redRow)).green() < 60);
+        QVERIFY(QColor(waveform.pixel(200, 10)).green() < 60);
+        // Vectorscope: black in the centre, red towards its target (right of up-left... Cr up,
+        // Cb slightly left), drawn in red.
+        const auto vectors = renderScope(picture, "vectorscope");
+        QCOMPARE(vectors.size(), QSize(192, 192));
+        QVERIFY(bright(vectors, 96, 96) > 40);
+        const double radius = 96 - 6;
+        const QPoint red(qRound(96 + (-0.1146 * 255) / 128 * radius), qRound(96 - (0.5 * 255) / 128 * radius));
+        const QColor at(vectors.pixel(red));
+        QVERIFY2(at.red() > 150 && at.red() > at.green() + 60, qPrintable(at.name()));
+        // A grey picture keeps the vectorscope empty away from the centre.
+        QImage grey(64, 64, QImage::Format_RGB32);
+        grey.fill(QColor(128, 128, 128));
+        QVERIFY(bright(renderScope(grey, "vectorscope"), red.x(), red.y()) < 40);
+        // Unknown kinds and empty pictures give an empty scope.
+        QVERIFY(!renderScope({}, "waveform").isNull());
+        QCOMPARE(renderScope(picture, "nonsense").size(), QSize(256, 128));
+        // Through the frame provider, which the viewer uses.
+        FrameProvider frames;
+        frames.frame = picture;
+        QSize size;
+        QCOMPARE(frames.requestImage("scope/histogram/still/1", &size, {}), histogram);
+        QCOMPARE(size, QSize(256, 128));
+        frames.live = grey;
+        QCOMPARE(frames.requestImage("scope/vectorscope/live/2", &size, {}), renderScope(grey, "vectorscope"));
+        QCOMPARE(frames.requestImage("7", &size, {}), picture);
     }
     void remoteReferencesRejected() {
         QTemporaryDir dir;
