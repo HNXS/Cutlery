@@ -89,6 +89,13 @@ struct Clip {
     // reduction and de-essing.
     double eqLow = 0, eqMid = 0, eqHigh = 0, lowCut = 0;
     double compressor = 0, gate = 0, denoise = 0, deess = 0;
+    // Style effect: "", "shake", "glitch", "vhs" or "film", at fxStrength (0..1). Motion blur
+    // blends successive frames (0..1); stabilize smooths camera shake.
+    QString fx;
+    double fxStrength = 0.5, motionBlur = 0;
+    bool stabilize = false;
+    // Room reverb and a distinct echo, 0..1.
+    double reverb = 0, echo = 0;
     // Look: 0..1, 0 off.
     double sharpen = 0, glow = 0, vignette = 0, grain = 0;
     // A 3D LUT file (.cube or .3dl) mixed in at lutStrength (0..1). Missing files are skipped.

@@ -11,7 +11,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 1. Drop local video, audio or image files into the media library, or directly onto a timeline track. Drag library items to the desired track/time. Double-click still appends to the chosen track.
 2. Add tracks with **+ Track**. Drag video, audio, images or titles along a track or between tracks; drag near the viewport edges to scroll. Escape cancels. Higher tracks appear on top. Free tracks allow overlaps in insertion order.
 3. Each track has **Snap** (align edges while dragging) and **Magnet** (keep clips together from frame 0). Enabling Magnet closes existing gaps/overlaps; Undo restores them. Other tracks retain their timing. Drag either clip edge to trim. Double-click a clip to seek its start; click the timeline to seek elsewhere. Split at the playhead, duplicate, delete, or adjust exact frame ranges in the inspector.
-4. Add titles, edit their text and click **Apply text**. Import SRT to create editable, burned-in captions.
+4. Add titles, edit their text and click **Apply text**. Import SRT, WebVTT or ASS to create editable, burned-in captions.
 5. Adjust crop, position, scale, rotation, opacity, colour, speed, reverse, volume and fades. Changes are nondestructive.
 6. Click **Play** or press **Space** with the timeline focused. Playback starts immediately from the playhead; nothing is rendered in advance. Space pauses/resumes. Editing while playing applies the change and keeps playing. Previews, playback and exported files use the same composition compiler.
 7. Save a `.cutlery` project. **Export video** writes a new MP4, WebM or MOV. Pick a preset such as "YouTube (best quality, 4K upload)", or choose format, quality and resolution yourself. Keep your source media; the project references those files.
@@ -39,6 +39,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - **Variable frame rate** (phone/screen recordings) is detected on import; "Convert to constant frame rate" makes an even editing copy.
 - **Collect project and media** (Project menu): one folder with the project, its media, LUTs and added fonts, for archiving or moving to another PC.
 - **Markers and in/out:** M adds a marker (double-click to rename), Ctrl+Left/Right jump between them; I and O set a range the export dialog can export alone.
+- **Beat markers:** "Mark the beats" on a music clip puts a marker on every beat (or every 2nd/4th); clips snap to markers.
 - **Text styling:** font list and your own font files, bold/italic, alignment, letter and line spacing, outline, shadow and a box behind each line.
 - **Voice-over** (transport row): record narration while the timeline plays; it is added at the playhead.
 - **Shapes** (library panel): arrow, circle, speech bubble, box and line; colours, outline, size and rotation; text inside bubbles and boxes.
@@ -49,15 +50,17 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - **Eye contact** (AI pack): presenters reading beside the lens look into the camera; only the eyes are redrawn, by small amounts.
 - **JKL shuttle:** L plays forward at 1×/2×/4×, J scrubs backward, K stops.
 - **Follow a face** (AI pack): blur or mosaic areas keyframe themselves onto a moving face.
-- **Sound tools** (inspector): EQ, low cut, noise reduction, gate, de-esser and compressor per clip, with voice presets.
+- **Sound tools** (inspector): EQ, low cut, noise reduction, gate, de-esser, compressor, reverb and echo per clip, with voice presets.
 - **Colour and look** (inspector): temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with adjustable strength; one-click looks (Warm, Cool, Cinematic, Vintage, Black & white, Punchy, Dreamy).
+- **Effects** (inspector): camera shake, glitch, VHS and old film with a strength; motion blur; stabilizing for shaky footage.
+- **Scopes:** histogram, waveform and vectorscope over the viewer.
 - **Lower thirds and title cards** (library panel): name and role on a plate or beside an accent line, sliding in from the left, or a large centred heading. First text line = name/heading, further lines = role/subtitle; accent colour selectable.
 - **Blur and mosaic areas** (library panel): a rectangle on an upper track blurs or pixelates whatever the tracks below show, e.g. private data in a screen recording or a face. Drag it in the preview; keyframe its position to follow movement.
 - Constant speed **0.25–4×**, reverse, volume/mute, stereo mixing with an output limiter.
 - **Remove pauses…** (inspector) finds the quiet moments in a clip's sound and cuts them out in one undoable step, keeping a little room around speech; detached audio is cut alongside.
 - Loudness normalisation on export: Cutlery measures the whole mix (EBU R128) and sets one gain for YouTube/streaming (−14 LUFS), podcasts (−16) or TV (−23), with peaks limited below full scale.
 - Level meters: left/right peak meters during playback, and a whole-mix loudness measurement (LUFS, true peak) in the export dialog.
-- Rasterized Unicode titles, manual captions, SRT import/export and subtitle burn-in.
+- Rasterized Unicode titles, manual captions, SRT/WebVTT/ASS import and export and subtitle burn-in.
 - Automatic captions: **Captions → Generate captions (AI)** transcribes all audible clips offline with whisper.cpp and places the captions on their own track (needs the [AI pack](docs/AI.md)). Styles: karaoke (the spoken word is highlighted), plain, or one word at a time.
 - Live playback that starts in a fraction of a second, audio-clocked with frame skipping when the CPU falls behind; preview frames that render only the playhead frame; export progress and cancellation.
 - Export presets and controls: H.264, HEVC and AV1 in MP4, VP9 in WebM, ProRes 422 HQ in MOV, legacy MPEG-4; four quality levels; project size up to 4K. Cutlery tries NVIDIA NVENC, AMD AMF, Intel Quick Sync, then Windows Media Foundation, and uses the first that passes a short test encode. AV1 (SVT-AV1), VP9 and ProRes also work in software. Exports use Lanczos scaling, and higher resolutions re-render each source at that size.

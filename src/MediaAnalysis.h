@@ -19,6 +19,10 @@ class PeakAccumulator {
     QByteArray m_tail;
     QVector<float> m_peaks;
 };
+// Beat times in seconds from the start of mono samples at `rate` Hz: an onset envelope from
+// spectral flux, the tempo from its autocorrelation, then dynamic-programming beat tracking.
+// `bpm` receives the tempo when given. Fewer than about two seconds give no beats.
+QVector<double> detectBeats(const QVector<float> &samples, int rate, double *bpm = nullptr);
 class MediaAnalysis final : public QObject {
     Q_OBJECT
   public:

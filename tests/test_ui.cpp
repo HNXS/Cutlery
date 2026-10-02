@@ -575,6 +575,33 @@ class UiTest : public QObject {
         editor.clearError();
         editor.setClip("lut", "");
         QVERIFY(clip().lut.isEmpty());
+        // Scopes over the viewer, for the preview still.
+        auto *scopes = findItem(window->contentItem(), "scopes");
+        QVERIFY(scopes && !scopes->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "toggleScopes"), "clicked"));
+        QTRY_VERIFY(scopes->isVisible());
+        auto *scopeImage = findItem(window->contentItem(), "scopeImage");
+        QTRY_COMPARE(scopeImage->property("implicitWidth").toInt(), 256);
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "scopeKind"), "activated", Q_ARG(int, 2)));
+        findItem(window->contentItem(), "scopeKind")->setProperty("currentIndex", 2);
+        QTRY_COMPARE(scopeImage->property("implicitWidth").toInt(), 192);
+        if (qEnvironmentVariableIsSet("CUTLERY_SCOPE_SHOT"))
+            window->grabWindow().save(qEnvironmentVariable("CUTLERY_SCOPE_SHOT"));
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "toggleScopes"), "clicked"));
+        QTRY_VERIFY(!scopes->isVisible());
+        // Style effects: a picture has the effect choice, but no motion blur or stabilizing.
+        QVERIFY(findItem(window->contentItem(), "effectsSection")->isVisible());
+        QVERIFY(!findItem(window->contentItem(), "stabilize")->isVisible());
+        auto *fx = findItem(window->contentItem(), "fxChoice");
+        QVERIFY(QMetaObject::invokeMethod(fx, "activated", Q_ARG(int, 4))); // Old film
+        QCOMPARE(clip().fx, QString("film"));
+        QTRY_VERIFY(findItem(window->contentItem(), "fxStrength")->isVisible());
+        QTRY_COMPARE(fx->property("currentIndex").toInt(), 4);
+        editor.setClip("fx", "wobble");
+        QCOMPARE(clip().fx, QString("film"));
+        editor.clearError();
+        editor.undo();
+        QVERIFY(clip().fx.isEmpty());
         // Copy the look and paste it onto a title.
         editor.setClip("temperature", 0.5);
         QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "copyClip"), "clicked"));

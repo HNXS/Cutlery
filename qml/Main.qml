@@ -40,6 +40,7 @@ ApplicationWindow {
     property bool allowClose: false
     property var libraryGesture: null
     property bool textEditing: activeFocusItem && typeof activeFocusItem.cursorPosition === "number"
+    property bool showScopes: false
     property bool shortcutsBlocked: openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || srtOpen.visible || srtSave.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
@@ -201,7 +202,7 @@ ApplicationWindow {
         background: Rectangle {
             color: parent.down ? "#34434d" : parent.hovered ? "#2b3742" : "#202831"
             radius: 6
-            border.color: "#35404b"
+            border.color: parent.highlighted ? "#64d8bc" : "#35404b"
             opacity: parent.enabled ? 1 : .4
         }
         contentItem: Text {
@@ -363,11 +364,11 @@ ApplicationWindow {
                 onTriggered: captionDialog.open()
             }
             MenuItem {
-                text: "Import SRT…"
+                text: "Import captions (SRT, VTT, ASS)…"
                 onTriggered: srtOpen.open()
             }
             MenuItem {
-                text: "Export titles/captions as SRT…"
+                text: "Export titles/captions (SRT, VTT, ASS)…"
                 onTriggered: srtSave.open()
             }
         }
@@ -824,6 +825,64 @@ ApplicationWindow {
                     Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        // Video scopes over the top-right corner of the viewer: the preview
+                        // still when paused, the frame on screen four times a second while
+                        // playing.
+                        Rectangle {
+                            id: scopes
+                            objectName: "scopes"
+                            property bool live: false
+                            property int serial: 0
+                            visible: win.showScopes && win.s.duration > 0
+                            z: 10
+                            anchors.top: parent.top
+                            anchors.right: parent.right
+                            anchors.margins: 6
+                            width: scopeImage.implicitWidth + 12
+                            height: scopeImage.implicitHeight + scopeKind.height + 18
+                            color: "#e6101418"
+                            radius: 6
+                            border.color: "#2e3741"
+                            Timer {
+                                interval: 250
+                                repeat: true
+                                running: scopes.visible && editor.playing
+                                onTriggered: if (editor.captureScopeFrame()) {
+                                    scopes.live = true;
+                                    scopes.serial++;
+                                }
+                            }
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                spacing: 6
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    ComboBox {
+                                        id: scopeKind
+                                        objectName: "scopeKind"
+                                        Layout.fillWidth: true
+                                        implicitHeight: 26
+                                        font.pixelSize: 11
+                                        readonly property var kinds: ["histogram", "waveform", "vectorscope"]
+                                        model: ["Histogram", "Waveform", "Vectorscope"]
+                                    }
+                                    Action {
+                                        text: "✕"
+                                        padding: 4
+                                        onClicked: win.showScopes = false
+                                    }
+                                }
+                                Image {
+                                    id: scopeImage
+                                    objectName: "scopeImage"
+                                    cache: false
+                                    // The still is used again as soon as playback stops.
+                                    readonly property bool useLive: scopes.live && editor.playing
+                                    source: scopes.visible ? "image://frames/scope/" + scopeKind.kinds[scopeKind.currentIndex] + "/" + (useLive ? "live" : "still") + "/" + scopes.serial + "-" + win.s.previewUrl : ""
+                                }
+                            }
+                        }
                         Rectangle {
                             anchors.centerIn: parent
                             width: Math.min(parent.width, parent.height * win.s.width / win.s.height)
@@ -993,6 +1052,15 @@ ApplicationWindow {
                             text: win.clock(editor.playbackFrame) + " / " + win.clock(win.s.duration)
                             font.family: "Consolas"
                             color: win.mint
+                        }
+                        Action {
+                            objectName: "toggleScopes"
+                            text: "Scopes"
+                            highlighted: win.showScopes
+                            padding: 4
+                            onClicked: win.showScopes = !win.showScopes
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Histogram, waveform and vectorscope of the picture, to judge exposure and colour"
                         }
                         // Peak meter for the left and right channel, −60 to 0 dBFS.
                         Column {
@@ -1811,6 +1879,27 @@ ApplicationWindow {
                                 text: "Remove pauses…"
                                 onClicked: pauseDialog.open()
                             }
+                            // Beat markers for cutting to music; clips snap to them.
+                            RowLayout {
+                                Layout.fillWidth: true
+                                visible: win.selection.hasAudio === true && win.selection.reverse !== true
+                                Action {
+                                    objectName: "markBeats"
+                                    Layout.fillWidth: true
+                                    readonly property bool finding: (win.s.beats || {}).status === "finding"
+                                    enabled: !finding
+                                    text: finding ? "Finding beats…" : "Mark the beats"
+                                    onClicked: editor.markBeats([1, 2, 4][beatEvery.currentIndex])
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Puts a marker on the beats of the music; clips snap to markers. Undo removes them."
+                                }
+                                ComboBox {
+                                    id: beatEvery
+                                    objectName: "beatEvery"
+                                    Layout.preferredWidth: 110
+                                    model: ["every beat", "every 2nd", "every 4th"]
+                                }
+                            }
                             // Phone and screen recordings often have a variable frame rate.
                             ColumnLayout {
                                 objectName: "variableRate"
@@ -2053,7 +2142,7 @@ ApplicationWindow {
                                     onActivated: index => {
                                         const preset = presets[index].values;
                                         if (preset) {
-                                            const values = { eqLow: 0, eqMid: 0, eqHigh: 0, lowCut: 0, compressor: 0, gate: 0, denoise: 0, deess: 0 };
+                                            const values = { eqLow: 0, eqMid: 0, eqHigh: 0, lowCut: 0, compressor: 0, gate: 0, denoise: 0, deess: 0, reverb: 0, echo: 0 };
                                             for (const k in preset)
                                                 values[k] = preset[k];
                                             editor.setClipValues(values);
@@ -2070,7 +2159,9 @@ ApplicationWindow {
                                         { key: "eqMid", name: "Presence (dB)", lo: -12, hi: 12, step: .5, tip: "Around 2.5 kHz, where speech is clear" },
                                         { key: "eqHigh", name: "Treble (dB)", lo: -12, hi: 12, step: .5, tip: "Above 8 kHz" },
                                         { key: "deess", name: "De-esser", lo: 0, hi: 1, step: .01, tip: "Softens sharp S sounds" },
-                                        { key: "compressor", name: "Compressor", lo: 0, hi: 1, step: .01, tip: "Evens out loud and quiet parts" }
+                                        { key: "compressor", name: "Compressor", lo: 0, hi: 1, step: .01, tip: "Evens out loud and quiet parts" },
+                                        { key: "reverb", name: "Reverb", lo: 0, hi: 1, step: .01, tip: "The sound of a room" },
+                                        { key: "echo", name: "Echo", lo: 0, hi: 1, step: .01, tip: "Repeats a third of a second apart" }
                                     ]
                                     RowLayout {
                                         id: soundRow
@@ -2234,6 +2325,80 @@ ApplicationWindow {
                                         onMoved: if (!pressed)
                                             editor.setClip("lutStrength", value)
                                     }
+                                }
+                            }
+                            // Style effects and camera movement of the clip's picture.
+                            ColumnLayout {
+                                objectName: "effectsSection"
+                                visible: win.selection.picture === true
+                                Layout.fillWidth: true
+                                spacing: 6
+                                Rule {}
+                                Caption { text: "EFFECTS" }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    ComboBox {
+                                        id: fxChoice
+                                        objectName: "fxChoice"
+                                        Layout.fillWidth: true
+                                        enabled: win.selection.locked !== true
+                                        readonly property var keys: ["", "shake", "glitch", "vhs", "film"]
+                                        model: ["No effect", "Camera shake", "Glitch", "VHS", "Old film"]
+                                        currentIndex: Math.max(0, keys.indexOf(win.selection.fx || ""))
+                                        onActivated: index => editor.setClip("fx", keys[index])
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "A style effect on the clip's picture"
+                                    }
+                                    Slider {
+                                        objectName: "fxStrength"
+                                        visible: !!win.selection.fx
+                                        Layout.preferredWidth: 90
+                                        from: 0
+                                        to: 1
+                                        stepSize: .01
+                                        value: win.selection.fxStrength ?? .5
+                                        enabled: win.selection.locked !== true
+                                        onPressedChanged: if (!pressed)
+                                            editor.setClip("fxStrength", value)
+                                        onMoved: if (!pressed)
+                                            editor.setClip("fxStrength", value)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Effect strength"
+                                    }
+                                }
+                                RowLayout {
+                                    visible: win.selection.video === true
+                                    Layout.fillWidth: true
+                                    Label {
+                                        text: "Motion blur"
+                                        color: Number(win.selection.motionBlur || 0) > 0 ? win.mint : win.muted
+                                        Layout.preferredWidth: 105
+                                    }
+                                    Slider {
+                                        objectName: "motionBlur"
+                                        Layout.fillWidth: true
+                                        from: 0
+                                        to: 1
+                                        stepSize: .01
+                                        value: Number(win.selection.motionBlur || 0)
+                                        enabled: win.selection.locked !== true
+                                        onPressedChanged: if (!pressed)
+                                            editor.setClip("motionBlur", value)
+                                        onMoved: if (!pressed)
+                                            editor.setClip("motionBlur", value)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Smears fast movement across frames"
+                                    }
+                                }
+                                CheckBox {
+                                    objectName: "stabilize"
+                                    visible: win.selection.video === true
+                                    text: "Stabilize"
+                                    checked: win.selection.stabilize === true
+                                    enabled: win.selection.locked !== true
+                                    onToggled: editor.setClip("stabilize", checked)
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Smooths a shaky hand-held camera; the edges are filled in"
                                 }
                             }
                             RowLayout {
@@ -2464,15 +2629,15 @@ ApplicationWindow {
     FileDialog {
         id: srtOpen
         title: "Import captions"
-        nameFilters: ["SubRip captions (*.srt)"]
+        nameFilters: ["Captions (*.srt *.vtt *.ass *.ssa)", "SubRip (*.srt)", "WebVTT (*.vtt)", "SubStation Alpha (*.ass *.ssa)"]
         onAccepted: editor.importSrt(selectedFile)
     }
     FileDialog {
         id: srtSave
         title: "Export captions"
         fileMode: FileDialog.SaveFile
-        defaultSuffix: "srt"
-        nameFilters: ["SubRip captions (*.srt)"]
+        defaultSuffix: ["srt", "vtt", "ass"][Math.max(0, selectedNameFilter.index)]
+        nameFilters: ["SubRip (*.srt)", "WebVTT for the web (*.vtt)", "Styled ASS subtitles (*.ass)"]
         onAccepted: editor.exportSrt(selectedFile)
     }
     // Remove pauses: silence detection on the selected clip's sound, then one ripple edit.

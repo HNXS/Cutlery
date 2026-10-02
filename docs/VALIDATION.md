@@ -1,5 +1,22 @@
 # Validation record
 
+## Windows portable build — 2026-10-02, effects, beat markers, WebVTT/ASS, scopes (0.6 development)
+
+[GitHub Actions run 37076300232](https://github.com/HNXS/Cutlery/actions/runs/37076300232) on commit `24c0f93d78e2d7fc95d0a3bfdbb4be3016241164`: every build, test and check step passed; the artifact uploads failed because the artifact storage was still full of older builds. Those older builds were deleted afterwards (the newest 0.5.0 portable build and AI pack were kept), so later runs upload again.
+
+What passed:
+
+- **Compile and tests:** compile, CTest (engine and interface), including `editingAndPlayback`, which fails only on the local Linux check without an audio device.
+- **New engine tests:**
+  - `styleEffects`: shake moves a still picture over time; glitch shifts some frames and leaves others; VHS scanlines; film sepia; no change at strength 0; stabilize renders close to the original; motion blur turns a moving bar grey in single-frame previews.
+  - `reverbAndEcho`: reflections after a click, and repeats at 320 and 640 ms.
+  - `beatDetection`: synthetic drum tracks at 97, 120 and 174 BPM within 2 % of the tempo and beats within 30 ms; markers on every 2nd beat of a trimmed, moved clip; snapping to a marker.
+  - `subtitleFormats`: WebVTT and ASS parsing; SRT, WebVTT and ASS round trips through the editor; FFmpeg reads the exported files.
+  - `videoScopes`: histogram, waveform and vectorscope values for a black and red picture, through the frame provider.
+- **Checks:** the real-model checks, the speech recognition check, packaging and the deployed smoke test.
+
+Not verified: beat detection on real music; the scopes and effects by eye on Windows.
+
 ## Windows portable build — 2026-10-02, sound tools, follow a face, JKL shuttle (0.6 development)
 
 [GitHub Actions run 37053712510](https://github.com/HNXS/Cutlery/actions/runs/37053712510) on commit `f6cef27c63358f0242c0da49331c6bf54c16e032`: every build, test and check step passed, but the artifact uploads failed because the repository's artifact storage quota was full. There are no downloads for this build.

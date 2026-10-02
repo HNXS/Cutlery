@@ -5,6 +5,7 @@
 #include "MediaAnalysis.h"
 #include "Project.h"
 #include "RenderGraph.h"
+#include "Scopes.h"
 #include "Thumbnails.h"
 #include <QJsonArray>
 #include <QPainter>
@@ -144,6 +145,127 @@ class EngineTest : public QObject {
         QVERIFY(e.exportSrt(QUrl::fromLocalFile(dir.filePath("out.srt"))));
         QCOMPARE(readUtf8File(dir.filePath("out.srt")), readUtf8File(input));
         e.save(QUrl::fromLocalFile(dir.filePath("captions.cutlery")));
+    }
+    void subtitleFormats() {
+        // WebVTT: header, a note, identifiers, short and long times, cue settings, tags and
+        // entities.
+        const auto vtt = parseVtt(QString(QChar(0xfeff)) +
+                                  "WEBVTT - demo\r\nKind: captions\r\n\r\nNOTE written by hand\n\n"
+                                  "intro\n00:01.000 --> 00:02.500 align:start line:80%\n"
+                                  "<v Ann><b>Hi</b> &amp; welcome</v>\n\n"
+                                  "01:00:00.250 --> 01:00:01.000\nfirst\nsecond\n\n");
+        QCOMPARE(vtt.size(), 2);
+        QCOMPARE(vtt[0].start, 1.);
+        QCOMPARE(vtt[0].end, 2.5);
+        QCOMPARE(vtt[0].text, QString("Hi & welcome"));
+        QCOMPARE(vtt[1].start, 3600.25);
+        QCOMPARE(vtt[1].text, QString("first\nsecond"));
+        QVERIFY_EXCEPTION_THROWN(parseVtt("1\n00:00:01,000 --> 00:00:02,000\nx"), std::runtime_error);
+        QVERIFY_EXCEPTION_THROWN(parseVtt("WEBVTT\n\nnot a time\ntext"), std::runtime_error);
+        // ASS: the Format line decides the field order; commas in the text, override tags,
+        // line breaks and comments.
+        const auto ass = parseAss("[Script Info]\nTitle: x\n\n[V4+ Styles]\nFormat: Name\n"
+                                  "Style: Default\n\n[Events]\n"
+                                  "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+                                  "Comment: 0,0:00:00.00,0:00:09.00,Default,,0,0,0,,ignored\n"
+                                  "Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,later\n"
+                                  "Dialogue: 0,0:00:01.50,0:00:02.25,Default,,0,0,0,,{\\i1}Well,{\\i0} yes\\Nand\\hno\n");
+        QCOMPARE(ass.size(), 2);
+        QCOMPARE(ass[0].start, 1.5);
+        QCOMPARE(ass[0].end, 2.25);
+        QCOMPARE(ass[0].text, QString("Well, yes\nand no"));
+        QCOMPARE(ass[1].text, QString("later"));
+        QVERIFY_EXCEPTION_THROWN(parseAss("[Events]\nDialogue: 0,1:00,2:00,x"), std::runtime_error);
+        QVERIFY(parseSubtitles("1\n00:00:01,000 --> 00:00:02,000\nx\n", "SRT").size() == 1);
+
+        // Through the editor: each format round-trips the captions' timing and text.
+        for (const auto &suffix : {QString("vtt"), QString("ass"), QString("srt")}) {
+            FrameProvider frames;
+            Editor e(&frames);
+            QTemporaryDir dir;
+            const auto input = dir.filePath("in." + suffix);
+            QFile f(input);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(writeSubtitles({{0.5, 1.5, "Hello, {world} <&>"}, {2, 3.25, "two\nlines"}}, suffix)
+                        .toUtf8());
+            f.close();
+            e.importSrt(QUrl::fromLocalFile(input));
+            QVERIFY2(e.state()["error"].toString().isEmpty(), qPrintable(e.state()["error"].toString()));
+            QCOMPARE(e.project().clips.size(), 2);
+            QCOMPARE(e.project().clips[0].start, qint64(15));
+            QCOMPARE(e.project().clips[0].duration, qint64(30));
+            QCOMPARE(e.project().clips[0].text, QString("Hello, {world} <&>"));
+            QCOMPARE(e.project().clips[1].text, QString("two\nlines"));
+            const auto output = dir.filePath("out." + suffix);
+            QVERIFY(e.exportSrt(QUrl::fromLocalFile(output)));
+            const auto back = parseSubtitles(readUtf8File(output), suffix);
+            QCOMPARE(back.size(), 2);
+            QCOMPARE(back[1].start, 2.);
+            QVERIFY(std::abs(back[1].end - 98 / 30.) < 0.011); // 3.25 s rounds to frame 98 at 30 fps
+            QCOMPARE(back[0].text, QString("Hello, {world} <&>"));
+            // FFmpeg reads the file too (players and platforms use the same formats).
+            const auto ffmpeg = Editor::executable("ffmpeg");
+            if (!ffmpeg.isEmpty()) {
+                const auto converted = QString::fromUtf8(
+                    run(ffmpeg, {"-v", "error", "-i", output, "-f", "srt", "pipe:1"}));
+                QVERIFY2(converted.contains("00:00:02,000 --> 00:00:03,2") && converted.contains("lines"),
+                         qPrintable(converted));
+            }
+        }
+        // The ASS style uses the canvas size and the caption's font.
+        const auto styled = writeSubtitles({{0, 1, "x"}}, "ass", 1080, 1920, "Inter, Bold", 64);
+        QVERIFY(styled.contains("PlayResX: 1080\nPlayResY: 1920"));
+        QVERIFY(styled.contains("Style: Default,Inter Bold,64,"));
+        QVERIFY(styled.contains("Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,x\n"));
+        QVERIFY(writeSubtitles({{0, 1, "x"}}, "vtt").startsWith("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nx\n"));
+    }
+    void videoScopes() {
+        // Left half black, right half pure red.
+        QImage picture(640, 360, QImage::Format_RGB32);
+        picture.fill(Qt::black);
+        for (int y = 0; y < 360; ++y)
+            for (int x = 320; x < 640; ++x)
+                picture.setPixel(x, y, qRgb(255, 0, 0));
+        auto bright = [](const QImage &i, int x, int y) { return qGray(i.pixel(x, y)); };
+        // Histogram: levels at black (left) and full red (right edge), little in the middle.
+        const auto histogram = renderScope(picture, "histogram");
+        QCOMPARE(histogram.size(), QSize(256, 128));
+        QVERIFY(QColor(histogram.pixel(255, 100)).red() > 100);
+        QVERIFY(bright(histogram, 0, 100) > 60);
+        QVERIFY(bright(histogram, 128, 100) < 40);
+        // Waveform: black at the bottom on the left; red's luma (about 21 %) on the right.
+        const auto waveform = renderScope(picture, "waveform");
+        QCOMPARE(waveform.size(), QSize(256, 128));
+        QVERIFY(QColor(waveform.pixel(60, 127)).green() > 150);
+        const int redRow = 127 - qRound(0.2126 * 127);
+        QVERIFY(QColor(waveform.pixel(200, redRow)).green() > 150);
+        QVERIFY(QColor(waveform.pixel(60, redRow)).green() < 60);
+        QVERIFY(QColor(waveform.pixel(200, 10)).green() < 60);
+        // Vectorscope: black in the centre, red towards its target (right of up-left... Cr up,
+        // Cb slightly left), drawn in red.
+        const auto vectors = renderScope(picture, "vectorscope");
+        QCOMPARE(vectors.size(), QSize(192, 192));
+        QVERIFY(bright(vectors, 96, 96) > 40);
+        const double radius = 96 - 6;
+        const QPoint red(qRound(96 + (-0.1146 * 255) / 128 * radius), qRound(96 - (0.5 * 255) / 128 * radius));
+        const QColor at(vectors.pixel(red));
+        QVERIFY2(at.red() > 150 && at.red() > at.green() + 60, qPrintable(at.name()));
+        // A grey picture keeps the vectorscope empty away from the centre.
+        QImage grey(64, 64, QImage::Format_RGB32);
+        grey.fill(QColor(128, 128, 128));
+        QVERIFY(bright(renderScope(grey, "vectorscope"), red.x(), red.y()) < 40);
+        // Unknown kinds and empty pictures give an empty scope.
+        QVERIFY(!renderScope({}, "waveform").isNull());
+        QCOMPARE(renderScope(picture, "nonsense").size(), QSize(256, 128));
+        // Through the frame provider, which the viewer uses.
+        FrameProvider frames;
+        frames.frame = picture;
+        QSize size;
+        QCOMPARE(frames.requestImage("scope/histogram/still/1", &size, {}), histogram);
+        QCOMPARE(size, QSize(256, 128));
+        frames.live = grey;
+        QCOMPARE(frames.requestImage("scope/vectorscope/live/2", &size, {}), renderScope(grey, "vectorscope"));
+        QCOMPARE(frames.requestImage("7", &size, {}), picture);
     }
     void remoteReferencesRejected() {
         QTemporaryDir dir;
@@ -2411,6 +2533,326 @@ class EngineTest : public QObject {
         clips[0] = o;
         bad["clips"] = clips;
         QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, {}), std::runtime_error);
+    }
+    void styleEffects() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Still colour bars, and a white bar moving 8 px per frame over black.
+        const auto bars = dir.filePath("bars.mkv"), moving = dir.filePath("moving.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "smptebars=s=128x72:r=30:d=2", "-c:v",
+                     "ffv1", bars});
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=black:s=128x72:r=30:d=1", "-f",
+                     "lavfi", "-i", "color=white:s=16x72:r=30:d=1", "-filter_complex",
+                     "[0][1]overlay=x=8*n:y=0", "-c:v", "ffv1", moving});
+        Project p;
+        p.width = 128;
+        p.height = 72;
+        for (const auto &[id, path, seconds] :
+             {std::tuple{QString("bars"), bars, 2.}, std::tuple{QString("moving"), moving, 1.}}) {
+            Asset a;
+            a.id = id;
+            a.path = path;
+            a.kind = "video";
+            a.duration = seconds;
+            a.width = 128;
+            a.height = 72;
+            p.assets << a;
+        }
+        Clip clip;
+        clip.id = "c";
+        clip.assetId = "bars";
+        clip.duration = 60;
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Clip &c, qint64 frame) {
+            auto project = p;
+            project.clips = {c};
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 128, 72, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return out.convertToFormat(QImage::Format_RGB32);
+        };
+        // Mean absolute difference per channel between two pictures.
+        auto difference = [](const QImage &a, const QImage &b) {
+            double sum = 0;
+            for (int y = 0; y < a.height(); ++y)
+                for (int x = 0; x < a.width(); ++x) {
+                    const QColor u(a.pixel(x, y)), v(b.pixel(x, y));
+                    sum += std::abs(u.red() - v.red()) + std::abs(u.green() - v.green()) +
+                           std::abs(u.blue() - v.blue());
+                }
+            return sum / (3. * a.width() * a.height());
+        };
+        auto with = [&](auto change) {
+            auto c = clip;
+            change(c);
+            return c;
+        };
+        const auto plain = still(clip, 10);
+        QVERIFY(difference(plain, still(clip, 40)) < 1);
+        // Shake: the still picture moves over time.
+        const auto shake = with([](Clip &c) {
+            c.fx = "shake";
+            c.fxStrength = 1;
+        });
+        const double moved = difference(still(shake, 10), still(shake, 40));
+        QVERIFY2(moved > 4, qPrintable(QString::number(moved)));
+        // Glitch: some frames have their colour channels shifted apart, others are untouched,
+        // and the same frame looks the same every time.
+        const auto glitch = with([](Clip &c) {
+            c.fx = "glitch";
+            c.fxStrength = 1;
+        });
+        int shifted = 0, untouched = 0;
+        for (qint64 f = 1; f < 60; f += 3) {
+            const double d = difference(still(glitch, f), plain);
+            shifted += d > 3;
+            untouched += d < 1;
+        }
+        QVERIFY2(shifted >= 1 && untouched >= 1,
+                 qPrintable(QString("%1 %2").arg(shifted).arg(untouched)));
+        QCOMPARE(compileRender([&] { auto q = p; q.clips = {glitch}; return q; }(), "w", 128, 72, {}).graph,
+                 compileRender([&] { auto q = p; q.clips = {glitch}; return q; }(), "w", 128, 72, {}).graph);
+        // VHS: smeared colours and dark scanlines every third row.
+        const auto vhs = still(with([](Clip &c) {
+                                   c.fx = "vhs";
+                                   c.fxStrength = 1;
+                               }),
+                               10);
+        QVERIFY(difference(vhs, plain) > 5);
+        double lines = 0, rows = 0;
+        for (int x = 0; x < 16; ++x) // the light grey bar
+            for (int y = 3; y < 30; ++y)
+                (y % 3 == 0 ? lines : rows) += qGray(vhs.pixel(x, y)) / (y % 3 == 0 ? 1. : 2.);
+        QVERIFY2(lines < rows - 16 * 9 * 15, qPrintable(QString("%1 %2").arg(lines).arg(rows)));
+        // Old film: sepia on the light grey bar.
+        const auto film = QColor(still(with([](Clip &c) {
+                                           c.fx = "film";
+                                           c.fxStrength = 1;
+                                       }),
+                                       10)
+                                     .pixel(8, 20));
+        const QColor grey(plain.pixel(8, 20));
+        QVERIFY(std::abs(grey.red() - grey.blue()) < 10);
+        QVERIFY2(film.red() > film.blue() + 30, qPrintable(film.name()));
+        // No strength, no effect.
+        QVERIFY(difference(still(with([](Clip &c) {
+                                     c.fx = "film";
+                                     c.fxStrength = 0;
+                                 }),
+                                 10),
+                           plain) < 1);
+        // Stabilize renders and leaves a still picture about where it was.
+        const auto steady = still(with([](Clip &c) { c.stabilize = true; }), 10);
+        QVERIFY2(difference(steady, plain) < 8, qPrintable(QString::number(difference(steady, plain))));
+        // Motion blur: as the bar passes x = 64, frames show grey instead of only black or white,
+        // also in single-frame previews.
+        auto bar = clip;
+        bar.assetId = "moving";
+        bar.duration = 30;
+        int sharp = 0, smeared = 0;
+        for (qint64 f = 6; f < 12; ++f) {
+            const int g0 = qGray(still(bar, f).pixel(64, 36)),
+                      g1 = qGray(still(with([&](Clip &c) {
+                                           c = bar;
+                                           c.motionBlur = 1;
+                                       }),
+                                       f)
+                                     .pixel(64, 36));
+            sharp += g0 > 40 && g0 < 215;
+            smeared += g1 > 40 && g1 < 215;
+        }
+        QCOMPARE(sharp, 0);
+        QVERIFY2(smeared >= 2, qPrintable(QString::number(smeared)));
+
+        // Saved only when set; invalid values are refused.
+        auto saved = p;
+        saved.clips = {with([](Clip &c) {
+            c.fx = "vhs";
+            c.fxStrength = 0.7;
+            c.motionBlur = 0.4;
+            c.stabilize = true;
+            c.reverb = 0.3;
+            c.echo = 0.2;
+        })};
+        const auto json = saved.json();
+        const auto loaded = Project::fromJson(json, {}).clips[0];
+        QCOMPARE(loaded.fx, QString("vhs"));
+        QCOMPARE(loaded.fxStrength, 0.7);
+        QCOMPARE(loaded.motionBlur, 0.4);
+        QVERIFY(loaded.stabilize);
+        QCOMPARE(loaded.reverb, 0.3);
+        QCOMPARE(loaded.echo, 0.2);
+        saved.clips = {clip};
+        const auto bare = saved.json()["clips"].toArray()[0].toObject();
+        QVERIFY(!bare.contains("fx") && !bare.contains("fxStrength") && !bare.contains("stabilize") &&
+                !bare.contains("reverb"));
+        for (const auto &[key, value] : {std::pair{QString("fx"), QJsonValue("wobble")},
+                                         std::pair{QString("fxStrength"), QJsonValue(2)},
+                                         std::pair{QString("echo"), QJsonValue(-1)}}) {
+            auto bad = json;
+            auto clips = bad["clips"].toArray();
+            auto o = clips[0].toObject();
+            o[key] = value;
+            clips[0] = o;
+            bad["clips"] = clips;
+            QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, {}), std::runtime_error);
+        }
+    }
+    void reverbAndEcho() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // One short click, then silence.
+        const auto source = dir.filePath("click.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "aevalsrc='if(lt(t,0.02),0.8*sin(2*PI*1000*t),0)':d=2",
+                     "-ar", "48000", "-ac", "2", source});
+        Project p;
+        p.width = 128;
+        p.height = 72;
+        Asset a;
+        a.id = "s";
+        a.path = source;
+        a.kind = "audio";
+        a.duration = 2;
+        a.hasAudio = true;
+        p.assets = {a};
+        Clip c;
+        c.id = "c";
+        c.assetId = "s";
+        c.duration = 60;
+        const auto graph = dir.filePath("graph.txt");
+        auto render = [&](const Clip &clip, const QString &name) {
+            auto project = p;
+            project.clips = {clip};
+            RenderOptions options;
+            options.video = false;
+            const auto plan = compileRender(project, dir.filePath("work"), 128, 72, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            const auto out = dir.filePath(name + ".wav");
+            QStringList args{"-v", "error", "-y"};
+            args += plan.inputs;
+            args << "-filter_complex_script" << graph << "-map" << "[aout]" << out;
+            run(ffmpeg, args);
+            return out;
+        };
+        auto peak = [&](const QString &file, double from, double to) {
+            QProcess p;
+            p.start(ffmpeg, {"-hide_banner", "-nostats", "-ss", QString::number(from), "-t",
+                             QString::number(to - from), "-i", file, "-af", "volumedetect", "-f",
+                             "null", "-"});
+            p.waitForFinished(30000);
+            const auto m = QRegularExpression("max_volume: (-?[0-9.]+|-inf) dB")
+                               .match(QString::fromUtf8(p.readAllStandardError()));
+            return !m.hasMatch() || m.captured(1) == "-inf" ? -999. : m.captured(1).toDouble();
+        };
+        const auto plain = render(c, "plain");
+        QVERIFY(peak(plain, 0, 0.02) > -10);
+        QVERIFY(peak(plain, 0.05, 0.15) < -60);
+        auto x = c;
+        x.reverb = 1;
+        const auto room = render(x, "reverb");
+        QVERIFY2(peak(room, 0.05, 0.15) > -30, "reflections after the click");
+        QVERIFY(peak(room, 0.5, 1) < -60);
+        x = c;
+        x.echo = 1;
+        const auto echo = render(x, "echo");
+        QVERIFY2(peak(echo, 0.31, 0.36) > -20, "first repeat");
+        QVERIFY2(peak(echo, 0.63, 0.68) > -25, "second repeat");
+        QVERIFY(peak(echo, 0.1, 0.3) < -60);
+    }
+    void beatDetection() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Drum-like hits at a given tempo from `first` seconds on, over steady noise, with an
+        // off-beat hi-hat, decoded the way the editor does.
+        auto track = [&](double bpm, double first, double seconds) {
+            const auto period = 60 / bpm;
+            const auto path = dir.filePath(QString("beat%1.wav").arg(bpm));
+            const auto kick = QString("if(gte(t,%1),exp(-25*mod(t-%1,%2))*sin(2*PI*70*mod(t-%1,%2)),0)")
+                                  .arg(first)
+                                  .arg(period);
+            const auto hat = QString("if(gte(t,%1),0.15*exp(-80*mod(t-%1,%2))*sin(2*PI*7000*t),0)")
+                                 .arg(first + period / 2)
+                                 .arg(period);
+            run(ffmpeg, {"-v", "error", "-y", "-f", "lavfi", "-i",
+                         QString("aevalsrc='0.8*%1+%2':s=44100:d=%3[a];anoisesrc=a=0.02:d=%3:r=44100[n];"
+                                 "[a][n]amix=inputs=2:normalize=0")
+                             .arg(kick, hat)
+                             .arg(seconds),
+                         "-ac", "2", path});
+            const auto pcm = run(ffmpeg, {"-v", "error", "-i", path, "-ac", "1", "-ar", "11025",
+                                          "-f", "f32le", "pipe:1"});
+            QVector<float> samples(pcm.size() / 4);
+            std::memcpy(samples.data(), pcm.constData(), size_t(samples.size()) * 4);
+            return std::pair{path, samples};
+        };
+        for (const auto &[tempo, first] : {std::pair{120., 0.5}, std::pair{97., 1.2}, std::pair{174., 0.3}}) {
+            const auto samples = track(tempo, first, 12).second;
+            double bpm = 0;
+            const auto beats = detectBeats(samples, 11025, &bpm);
+            QVERIFY2(std::abs(bpm - tempo) < tempo * 0.02, qPrintable(QString("%1 → %2").arg(tempo).arg(bpm)));
+            const double period = 60 / tempo;
+            const int expected = int((12 - first) / period);
+            QVERIFY2(std::abs(beats.size() - expected) <= 2,
+                     qPrintable(QString("%1: %2 of %3").arg(tempo).arg(beats.size()).arg(expected)));
+            double worst = 0;
+            for (const auto t : beats) {
+                const double n = std::round((t - first) / period);
+                worst = std::max(worst, std::abs(t - first - n * period));
+            }
+            QVERIFY2(worst < 0.03, qPrintable(QString("%1: %2 s off").arg(tempo).arg(worst)));
+            QVERIFY(beats.first() > first - 0.05);
+        }
+        // Silence and very short sound have no beats.
+        QVERIFY(detectBeats(QVector<float>(11025 * 5, 0.f), 11025).isEmpty());
+        QVERIFY(detectBeats(QVector<float>(1000, 0.5f), 11025).isEmpty());
+
+        // In the editor: markers on every 2nd beat of a clip that starts at 1 s and skips the
+        // first 2 s of the music, and clips snap to them.
+        const auto music = track(120, 0.5, 12).first;
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(music)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto id = editor.project().clips.first().id;
+        editor.select(id);
+        editor.setClip("duration", 240);
+        editor.setClip("sourceIn", 2.0);
+        editor.setClip("start", 30);
+        QCOMPARE(editor.project().clips.first().start, 30);
+        QCOMPARE(editor.project().clips.first().sourceIn.seconds(), 2.);
+        editor.markBeats(2);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.state()["beats"].toMap()["status"] == "done", 30000);
+        const auto markers = editor.project().markers;
+        QVERIFY2(markers.size() >= 4, qPrintable(QString::number(markers.size())));
+        // Source beats at 0.5 + k/2 s; from 2 s on that is 2.5 s, 3.5 s... every 2nd beat, so
+        // timeline frames 30 + 15 + 30k (± 1).
+        for (const auto &m : markers) {
+            const auto offset = (m.frame - 45) % 30;
+            QVERIFY2(m.frame >= 30 && (offset <= 1 || offset >= 29), qPrintable(QString::number(m.frame)));
+        }
+        QCOMPARE(editor.state()["beats"].toMap()["bpm"].toInt(), 120);
+        QCOMPARE(editor.snap(markers[1].frame + 3, 5, {}, 0), markers[1].frame);
+        editor.undo();
+        QVERIFY(editor.project().markers.isEmpty());
+        QVERIFY(editor.state()["error"].toString().isEmpty());
     }
     void sceneDetection() {
         const auto ffmpeg = Editor::executable("ffmpeg");

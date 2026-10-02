@@ -5,6 +5,7 @@
 #include "Thumbnails.h"
 #include "AiJobs.h"
 #include "Project.h"
+#include "Scopes.h"
 #include <QObject>
 #include <QProcess>
 #include <QQuickImageProvider>
@@ -25,11 +26,17 @@ namespace cutlery {
 class FrameProvider final : public QQuickImageProvider {
   public:
     FrameProvider() : QQuickImageProvider(QQuickImageProvider::Image) {}
-    QImage frame;
-    QImage requestImage(const QString &, QSize *size, const QSize &) override {
+    // `frame`: the preview still; `live`: the last playback frame captured for the scopes.
+    QImage frame, live;
+    // "scope/<kind>/<still|live>/<serial>" gives a scope of that picture (see renderScope).
+    QImage requestImage(const QString &id, QSize *size, const QSize &) override {
+        auto image = frame;
+        if (id.startsWith("scope/"))
+            image = renderScope(id.section('/', 2, 2) == "live" && !live.isNull() ? live : frame,
+                                id.section('/', 1, 1));
         if (size)
-            *size = frame.size();
-        return frame;
+            *size = image.size();
+        return image;
     }
 };
 class Editor final : public QObject {
@@ -157,6 +164,8 @@ class Editor final : public QObject {
         return m_reverseTimer.isActive() ? -m_shuttleRate : m_playRate;
     }
     Q_INVOKABLE void setVideoSink(QObject *sink);
+    // Keeps the frame on screen for the scopes while playing; false when there is none.
+    Q_INVOKABLE bool captureScopeFrame();
     QVariantList levels() const {
         const auto [l, r] = m_playback->levels();
         return {l, r};
@@ -176,6 +185,8 @@ class Editor final : public QObject {
     // Output size and file extension for export settings, for the export dialog.
     Q_INVOKABLE QVariantMap exportPreview(const QVariantMap &settings) const;
     Q_INVOKABLE void cancelJob();
+    // Captions from and to subtitle files; the format follows the suffix: .srt, .vtt, .ass
+    // (and .ssa for import).
     Q_INVOKABLE void importSrt(const QUrl &);
     Q_INVOKABLE bool exportSrt(const QUrl &);
     Q_INVOKABLE void clearError();
@@ -201,6 +212,10 @@ class Editor final : public QObject {
     // Finds the shot changes in the selected video clip and splits it there, with any detached
     // audio, in one undo step. Sensitivity 0..1: higher finds subtler cuts.
     Q_INVOKABLE void splitAtScenes(double sensitivity = 0.5);
+    // Finds the beats in the selected clip's sound and puts a timeline marker on every
+    // `every`-th one (1, 2 or 4), asynchronously (state "beats": status finding|done|failed,
+    // count, bpm). Existing markers stay; one undo step.
+    Q_INVOKABLE void markBeats(int every = 1);
     // Automatic captions: transcribes every audible clip's media (language "auto", "de", "en",
     // ...) and puts the captions on the "AI captions" track, replacing earlier ones.
     // `style`: "" plain lines, "karaoke" (spoken word highlighted), "word" (one word at a time).
@@ -269,6 +284,8 @@ class Editor final : public QObject {
     QProcess *m_pauseProcess = nullptr;
     QProcess *m_sceneProcess = nullptr;
     QVariantMap m_scenes; // splitAtScenes(): status finding|done|failed, count
+    QThread *m_beatThread = nullptr;
+    QVariantMap m_beats;
     QVariantMap pauseState() const;
     struct DropBatch {
         QString trackId;

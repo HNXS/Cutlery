@@ -20,6 +20,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <algorithm>
+#include <cstring>
 #include <memory>
 
 namespace cutlery {
@@ -184,12 +185,13 @@ QString Editor::addFont(const QUrl &url) {
 Editor::~Editor() {
     if (m_dirty)
         autosave();
-    if (m_collectThread) {
-        m_collectThread->disconnect(this);
-        m_collectThread->requestInterruption();
-        m_collectThread->wait();
-        delete m_collectThread;
-    }
+    for (auto *t : {m_collectThread, m_beatThread})
+        if (t) {
+            t->disconnect(this);
+            t->requestInterruption();
+            t->wait();
+            delete t;
+        }
     for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess, m_sceneProcess})
         if (p) {
             p->disconnect(this);
@@ -437,6 +439,12 @@ QVariantMap Editor::state() const {
             PROP(gate);
             PROP(denoise);
             PROP(deess);
+            PROP(fx);
+            PROP(fxStrength);
+            PROP(motionBlur);
+            PROP(stabilize);
+            PROP(reverb);
+            PROP(echo);
             PROP(slowMotion);
             PROP(fontFamily);
             PROP(graphic);
@@ -514,6 +522,7 @@ QVariantMap Editor::state() const {
             {"captions", captionState()},
             {"pauses", pauseState()},
             {"scenes", m_scenes},
+            {"beats", m_beats},
             {"collect", m_collect},
             {"follow", m_follow},
             {"conform", m_conform},
@@ -1158,6 +1167,12 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(gate, toDouble);
         FIELD(denoise, toDouble);
         FIELD(deess, toDouble);
+        FIELD(fx, toString);
+        FIELD(fxStrength, toDouble);
+        FIELD(motionBlur, toDouble);
+        FIELD(stabilize, toBool);
+        FIELD(reverb, toDouble);
+        FIELD(echo, toDouble);
         FIELD(slowMotion, toString);
         FIELD(bold, toBool);
         FIELD(italic, toBool);
@@ -1973,6 +1988,9 @@ void Editor::pasteAttributes(const QString &group) {
         c->grain = from.grain;
         c->lut = from.lut;
         c->lutStrength = from.lutStrength;
+        c->fx = from.fx;
+        c->fxStrength = from.fxStrength;
+        c->motionBlur = from.motionBlur;
         if (group == "look")
             return;
         c->scale = from.scale;
@@ -1991,6 +2009,8 @@ void Editor::pasteAttributes(const QString &group) {
         c->gate = from.gate;
         c->denoise = from.denoise;
         c->deess = from.deess;
+        c->reverb = from.reverb;
+        c->echo = from.echo;
         c->fadeIn = from.fadeIn;
         c->fadeOut = from.fadeOut;
         // Keyframes keep their clip-relative frames; those past the end of a shorter clip stay
@@ -2345,6 +2365,98 @@ void Editor::splitAtScenes(double sensitivity) {
               "null", "-"});
     emit changed();
 }
+void Editor::markBeats(int every) {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || !a->hasAudio)
+        return fail("Select a clip with sound to find its beats");
+    if (c->reverse)
+        return fail("Reversed clips cannot be searched for beats");
+    if (m_beatThread)
+        return;
+    every = std::clamp(every, 1, 4);
+    const double speed = c->speed.seconds(), in = c->sourceIn.seconds(),
+                 fps = double(m_project.fpsN) / m_project.fpsD,
+                 length = std::min(c->duration / fps * speed, 3600.);
+    m_beats = {{"status", "finding"}};
+    const auto path = a->path, ffmpeg = executable("ffmpeg");
+    // Decoded and analysed in the background: mono at 11025 Hz, as 32-bit floats.
+    m_beatThread = QThread::create([this, path, ffmpeg, in, length, speed, fps, every,
+                                    id = c->id, revision = m_revision, start = c->start,
+                                    frames = c->duration] {
+        constexpr int rate = 11025;
+        QProcess decoder;
+        decoder.start(ffmpeg, {"-hide_banner", "-nostdin", "-v", "error", "-ss",
+                               QString::number(in, 'f', 6), "-t", QString::number(length, 'f', 6),
+                               "-i", path, "-map", "0:a:0", "-vn", "-ac", "1", "-ar",
+                               QString::number(rate), "-f", "f32le", "pipe:1"});
+        QByteArray pcm;
+        bool ok = decoder.waitForStarted();
+        while (ok && decoder.state() != QProcess::NotRunning) {
+            if (QThread::currentThread()->isInterruptionRequested()) {
+                decoder.kill();
+                decoder.waitForFinished(1500);
+                return;
+            }
+            decoder.waitForReadyRead(100);
+            pcm += decoder.readAllStandardOutput();
+        }
+        pcm += decoder.readAllStandardOutput();
+        ok = ok && decoder.exitStatus() == QProcess::NormalExit && decoder.exitCode() == 0;
+        QVector<float> samples(pcm.size() / 4);
+        std::memcpy(samples.data(), pcm.constData(), size_t(samples.size()) * 4);
+        double bpm = 0;
+        const auto beats = ok ? detectBeats(samples, rate, &bpm) : QVector<double>{};
+        QMetaObject::invokeMethod(this, [=, this] {
+            if (!ok) {
+                m_beats = {{"status", "failed"}};
+                return fail("Cannot read the clip's sound");
+            }
+            if (revision != m_revision) {
+                m_beats = {};
+                return fail("The clip changed while beats were found; try again");
+            }
+            // Source seconds to timeline frames inside the clip.
+            QVector<qint64> marks;
+            for (qsizetype i = 0; i < beats.size(); i += every) {
+                const auto local = qRound64(beats[i] / speed * fps);
+                if (local >= 0 && local < frames && (marks.isEmpty() || marks.last() < start + local))
+                    marks << start + local;
+            }
+            int added = 0;
+            const bool marked = mutate([&](Project &p) {
+                for (const auto frame : marks) {
+                    const auto at = std::lower_bound(
+                        p.markers.begin(), p.markers.end(), frame,
+                        [](const Marker &m, qint64 f) { return m.frame < f; });
+                    if (at != p.markers.end() && at->frame == frame)
+                        continue;
+                    if (p.markers.size() >= 1000)
+                        throw std::runtime_error("At most 1000 markers: mark every 2nd or 4th beat");
+                    p.markers.insert(at, Marker{frame, QString("Beat %1").arg(++added), "#4fc3f7"});
+                }
+            });
+            if (!marked) {
+                m_beats = {{"status", "failed"}};
+                emit changed();
+                return;
+            }
+            m_beats = {{"status", "done"}, {"count", added}, {"bpm", qRound(bpm / speed)}, {"clipId", id}};
+            m_status = beats.isEmpty() ? QString("No beats found")
+                                       : QString("%1 beat markers (about %2 BPM)")
+                                             .arg(added)
+                                             .arg(qRound(bpm / speed));
+            emit changed();
+        });
+    });
+    connect(m_beatThread, &QThread::finished, this, [this] {
+        m_beatThread->deleteLater();
+        m_beatThread = nullptr;
+        emit changed();
+    });
+    m_beatThread->start();
+    emit changed();
+}
 void Editor::removePauses() {
     if (m_pauses.status != "ready" || m_pauses.revision != m_revision || m_pauses.ranges.isEmpty())
         return fail("Find pauses again: the clip has changed");
@@ -2456,6 +2568,13 @@ QSize Editor::previewSize(int longSide) const {
 void Editor::setVideoSink(QObject *sink) {
     m_playback->setVideoSink(qobject_cast<QVideoSink *>(sink));
     m_playback->showImage(m_frames->frame);
+}
+bool Editor::captureScopeFrame() {
+    const auto image = m_playback->currentImage();
+    if (image.isNull())
+        return false;
+    m_frames->live = image;
+    return true;
 }
 void Editor::play() {
     m_resumeTimer.stop();
@@ -2915,11 +3034,12 @@ void Editor::cancelJob() {
 }
 void Editor::importSrt(const QUrl &url) {
     try {
-        const auto cues = parseSrt(readUtf8File(localPath(url)));
+        const auto path = localPath(url);
+        const auto cues = parseSubtitles(readUtf8File(path), QFileInfo(path).suffix());
         mutate([&](Project &p) {
             if (p.trackSettings[p.tracks - 1].magnetic)
                 throw std::runtime_error("Turn off Magnet on the caption track before importing "
-                                         "SRT to preserve caption timing");
+                                         "captions to preserve their timing");
             for (const auto &cue : cues) {
                 Clip c;
                 c.id = newId();
@@ -2933,11 +3053,11 @@ void Editor::importSrt(const QUrl &url) {
                 c.fontSize = 48;
                 c.y = .32;
                 if (c.duration <= 0 || c.text.isEmpty())
-                    throw std::runtime_error("Empty or reversed SRT cue");
+                    throw std::runtime_error("Empty or reversed caption cue");
                 p.clips.push_back(c);
             }
             if (cues.isEmpty())
-                throw std::runtime_error("No SRT captions found");
+                throw std::runtime_error("No captions found");
         });
     } catch (const std::exception &e) {
         fail(e.what());
@@ -2946,33 +3066,36 @@ void Editor::importSrt(const QUrl &url) {
 bool Editor::exportSrt(const QUrl &url) {
     try {
         const auto path = localPath(url);
-        QString text;
-        int i = 0;
+        const auto suffix = QFileInfo(path).suffix().toLower();
+        const QString format = suffix == "vtt" ? "vtt" : suffix == "ass" ? "ass" : "srt";
         auto clips = m_project.clips;
         std::stable_sort(clips.begin(), clips.end(),
                          [](const Clip &a, const Clip &b) { return a.start < b.start; });
-        auto stamp = [&](qint64 frame) {
-            auto ms = qRound64(frameTime(frame, m_project.fpsN, m_project.fpsD).seconds() * 1000);
-            return QString("%1:%2:%3,%4")
-                .arg(ms / 3600000, 2, 10, QChar('0'))
-                .arg(ms / 60000 % 60, 2, 10, QChar('0'))
-                .arg(ms / 1000 % 60, 2, 10, QChar('0'))
-                .arg(ms % 1000, 3, 10, QChar('0'));
+        auto seconds = [&](qint64 frame) {
+            return frameTime(frame, m_project.fpsN, m_project.fpsD).seconds();
         };
+        QVector<Cue> cues;
+        const Clip *first = nullptr;
         for (const auto &c : clips)
             if (c.assetId.isEmpty() && c.effect.isEmpty() && c.graphic.isEmpty() && !c.hidden &&
-                !m_project.trackSettings[c.track].hidden)
-                text += QString::number(++i) + "\n" + stamp(c.start) + " --> " +
-                        stamp(c.start + c.duration) + "\n" + c.text + "\n\n";
-        if (!i)
+                !m_project.trackSettings[c.track].hidden) {
+                cues.push_back({seconds(c.start), seconds(c.start + c.duration), c.text});
+                if (!first)
+                    first = &c;
+            }
+        if (cues.isEmpty())
             throw std::runtime_error("No visible titles/captions to export");
+        // The ASS default style follows the first caption's font and size.
+        const auto text = writeSubtitles(
+            cues, format, m_project.width, m_project.height,
+            first->fontFamily.isEmpty() ? QString("Arial") : first->fontFamily, first->fontSize);
         QSaveFile f(path);
         if (!f.open(QIODevice::WriteOnly))
-            throw std::runtime_error("Cannot write SRT");
+            throw std::runtime_error("Cannot write the captions");
         const auto data = text.toUtf8();
         if (f.write(data) != data.size() || !f.commit())
-            throw std::runtime_error("Cannot save SRT");
-        m_status = "SRT saved";
+            throw std::runtime_error("Cannot save the captions");
+        m_status = format.toUpper() + " saved";
         emit changed();
         return true;
     } catch (const std::exception &e) {

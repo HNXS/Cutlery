@@ -40,6 +40,8 @@ class Playback final : public QObject {
     void setVideoSink(QVideoSink *);
     // Shows a still frame in the viewer (used for rendered previews while stopped).
     void showImage(const QImage &);
+    // The frame on screen, or a null image.
+    QImage currentImage() const;
     void start(const Request &);
     void stop();
     bool active() const {

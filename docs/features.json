@@ -1221,8 +1221,8 @@
     "status": "Planned",
     "acceptance": "All declared parameters animate and render repeatably",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Per clip in EFFECTS: camera shake (zoom-in with an irregular moving crop), glitch (colour channels jumping apart in short bursts that are the same every render), VHS (channel offset, softness, desaturation, noise and scanlines) and old film (sepia mixed by strength, flicker, grain), each with a strength. One effect per clip; no retro presets beyond these four or effect keyframes."
   },
   {
     "id": "F050",
@@ -1271,8 +1271,8 @@
     "status": "Planned",
     "acceptance": "Moving geometry trails correctly; cuts do not blend unrelated shots",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Per video clip: motion blur 0..1 mixes 2–6 consecutive frames (tmix); a little source before the frame is decoded so previews match playback and export. Frame blending, not motion-vector blur."
   },
   {
     "id": "F052",
@@ -1646,8 +1646,8 @@
     "status": "Planned",
     "acceptance": "Export includes requested tail; no unbounded feedback at limits",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Per clip in SOUND: reverb (four short room reflections) and echo (repeats 320 and 640 ms apart), 0..1 each (FFmpeg aecho). The tail ends with the clip; no room presets or tempo-synced delay."
   },
   {
     "id": "F067",
@@ -1746,8 +1746,8 @@
     "status": "Planned",
     "acceptance": "Known click-track beats within 30 ms; half/double tempo correctable",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "\"Mark the beats\" analyses the selected clip's sound in the background (spectral flux onsets, autocorrelation tempo 60–200 BPM, dynamic-programming beat tracking, beats moved to the nearest onset) and adds blue markers on every 1st, 2nd or 4th beat inside the clip, in one undo step. Tested on synthetic drum tracks at 97, 120 and 174 BPM (beats within 30 ms); no downbeat/bar detection or tempo changes within a song."
   },
   {
     "id": "F071",
@@ -1771,8 +1771,8 @@
     "status": "Planned",
     "acceptance": "Apply produces normal reversible timeline edits",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Clips snap to markers (beat markers included) while dragging and trimming. No automatic cut-to-beat or montage generation."
   },
   {
     "id": "F072",
@@ -2146,8 +2146,8 @@
     "status": "Planned",
     "acceptance": "Round-trip supported tags; animation loss reported, not ignored",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Captions import from SRT, WebVTT (identifiers, cue settings, tags and entities handled) and ASS/SSA (field order from the Format line, override tags dropped), and export to SRT, WebVTT and ASS with a canvas-sized default style using the first caption's font and size. Per-caption styling, positions and karaoke timing are not carried over."
   },
   {
     "id": "F087",
@@ -2696,8 +2696,8 @@
     "status": "Planned",
     "acceptance": "Reference bars yield expected positions and channel ranges",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "\"Scopes\" in the transport row shows a histogram (R, G, B, luma), a luma waveform or a vectorscope (BT.709, 75 % bar targets, skin-tone line) over the viewer, for the preview still and four times a second while playing. No RGB parade or false colour."
   },
   {
     "id": "F109",
@@ -2946,8 +2946,8 @@
     "status": "Planned",
     "acceptance": "Measured residual motion decreases on corpus; crop loss disclosed",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Per video clip: \"Stabilize\" smooths camera shake with FFmpeg's deshake (edges mirrored, about 32 px search). Single-pass and local; no two-pass vid.stab, smoothing strength or automatic crop/zoom."
   },
   {
     "id": "F119",

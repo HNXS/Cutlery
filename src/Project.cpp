@@ -72,7 +72,8 @@ const QVector<QPair<QString, double Clip::*>> &lookFields() {
         {"eqMid", &Clip::eqMid},             {"eqHigh", &Clip::eqHigh},
         {"lowCut", &Clip::lowCut},           {"compressor", &Clip::compressor},
         {"gate", &Clip::gate},               {"denoise", &Clip::denoise},
-        {"deess", &Clip::deess}};
+        {"deess", &Clip::deess},             {"motionBlur", &Clip::motionBlur},
+        {"reverb", &Clip::reverb},           {"echo", &Clip::echo}};
     return fields;
 }
 } // namespace
@@ -286,6 +287,12 @@ QJsonObject Project::json(const QString &base) const {
                 o[k] = c.*field;
         if (!c.slowMotion.isEmpty())
             o["slowMotion"] = c.slowMotion;
+        if (!c.fx.isEmpty()) {
+            o["fx"] = c.fx;
+            o["fxStrength"] = c.fxStrength;
+        }
+        if (c.stabilize)
+            o["stabilize"] = true;
         if (!c.graphic.isEmpty()) {
             o["graphic"] = c.graphic;
             o["fillColor"] = c.fillColor;
@@ -468,6 +475,9 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         for (const auto &[k, field] : lookFields())
             c.*field = j[k].toDouble(0);
         c.slowMotion = j["slowMotion"].toString();
+        c.fx = j["fx"].toString();
+        c.fxStrength = j["fxStrength"].toDouble(0.5);
+        c.stabilize = j["stabilize"].toBool(false);
         c.graphic = j["graphic"].toString();
         c.fillColor = j["fillColor"].toString("#ffd23f");
         c.strokeColor = j["strokeColor"].toString("#000000");
@@ -646,6 +656,10 @@ void Project::validate() const {
                     bounded(c.compressor, 0, 1) && bounded(c.gate, 0, 1) &&
                     bounded(c.denoise, 0, 1) && bounded(c.deess, 0, 1),
                 "Invalid sound setting");
+        require(QStringList{"", "shake", "glitch", "vhs", "film"}.contains(c.fx) &&
+                    bounded(c.fxStrength, 0, 1) && bounded(c.motionBlur, 0, 1) &&
+                    bounded(c.reverb, 0, 1) && bounded(c.echo, 0, 1),
+                "Invalid effect setting");
         require(QStringList{"", "lowerThird", "lowerThirdLine", "titleCard"}.contains(
                     c.titleStyle) &&
                     QColor(c.accentColor).isValid(),
@@ -911,6 +925,8 @@ qint64 Project::snap(qint64 frame, qint64 threshold, const QString &exclude, qin
     };
     candidate(0);
     candidate(playhead);
+    for (const auto &m : markers)
+        candidate(m.frame);
     for (const auto &c : clips)
         if (c.id != exclude) {
             candidate(c.start);

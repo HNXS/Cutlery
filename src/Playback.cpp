@@ -35,6 +35,9 @@ Playback::~Playback() {
 void Playback::setVideoSink(QVideoSink *sink) {
     m_sink = sink;
 }
+QImage Playback::currentImage() const {
+    return m_sink ? m_sink->videoFrame().toImage() : QImage();
+}
 void Playback::showImage(const QImage &image) {
     if (!m_sink || image.isNull())
         return;
