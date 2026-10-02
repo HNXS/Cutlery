@@ -1,5 +1,20 @@
 # Validation record
 
+## Windows portable build — 2026-10-02, lower thirds and title cards (0.5 development)
+
+[GitHub Actions run 36981200885](https://github.com/HNXS/Cutlery/actions/runs/36981200885) completed successfully for commit `a4e48e1eb1b0fab9ee131d79c3a7f8c476f2497c`, with the same toolchain as the blur-and-mosaic build. New coverage:
+
+- **Engine test `titleTemplates`:**
+  - Layout: the lower third is anchored in the title-safe lower left, the title card centred, plain titles have no plate, and text scales with the clip.
+  - Rendered pixels: the accent bar and plate after the slide-in, the plate still off-screen on the first frame, and movement with the clip's y offset.
+  - Schema 10 round trip and validation; `addTitleTemplate`; the preview frame matches the plate.
+- **Interface:** "+ Lower third" adds and selects a lower third, and the style list switches it to a title card.
+
+Downloads (expire 2026-11-01):
+
+- [Portable build](https://github.com/HNXS/Cutlery/actions/runs/36981200885/artifacts/11216301264): 148,503,915 bytes, archive SHA-256 `4e5cb3fb760967fe8eb7c224d6ab9c590ae38d242122540dcd9578d1d18ae0a1`.
+- [AI pack](https://github.com/HNXS/Cutlery/actions/runs/36981200885/artifacts/11216026844): 701,994,868 bytes, archive SHA-256 `c6c90eb0bc5c17aca66630fd6922bad9aca63853a2b392cd4e8a69a2384b9162`.
+
 ## Windows portable build — 2026-10-01, blur and mosaic (0.5 development)
 
 [GitHub Actions run 36929907077](https://github.com/HNXS/Cutlery/actions/runs/36929907077) completed successfully for commit `7f67b2047e175c92de8aebac32705f18ac99a0fb`, with the same toolchain as the karaoke-captions build. New coverage:
