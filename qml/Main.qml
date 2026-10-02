@@ -1811,6 +1811,27 @@ ApplicationWindow {
                                 text: "Remove pauses…"
                                 onClicked: pauseDialog.open()
                             }
+                            // Beat markers for cutting to music; clips snap to them.
+                            RowLayout {
+                                Layout.fillWidth: true
+                                visible: win.selection.hasAudio === true && win.selection.reverse !== true
+                                Action {
+                                    objectName: "markBeats"
+                                    Layout.fillWidth: true
+                                    readonly property bool finding: (win.s.beats || {}).status === "finding"
+                                    enabled: !finding
+                                    text: finding ? "Finding beats…" : "Mark the beats"
+                                    onClicked: editor.markBeats([1, 2, 4][beatEvery.currentIndex])
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Puts a marker on the beats of the music; clips snap to markers. Undo removes them."
+                                }
+                                ComboBox {
+                                    id: beatEvery
+                                    objectName: "beatEvery"
+                                    Layout.preferredWidth: 110
+                                    model: ["every beat", "every 2nd", "every 4th"]
+                                }
+                            }
                             // Phone and screen recordings often have a variable frame rate.
                             ColumnLayout {
                                 objectName: "variableRate"

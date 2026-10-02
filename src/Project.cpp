@@ -925,6 +925,8 @@ qint64 Project::snap(qint64 frame, qint64 threshold, const QString &exclude, qin
     };
     candidate(0);
     candidate(playhead);
+    for (const auto &m : markers)
+        candidate(m.frame);
     for (const auto &c : clips)
         if (c.id != exclude) {
             candidate(c.start);

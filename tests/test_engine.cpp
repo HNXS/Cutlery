@@ -2652,6 +2652,86 @@ class EngineTest : public QObject {
         QVERIFY2(peak(echo, 0.63, 0.68) > -25, "second repeat");
         QVERIFY(peak(echo, 0.1, 0.3) < -60);
     }
+    void beatDetection() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Drum-like hits at a given tempo from `first` seconds on, over steady noise, with an
+        // off-beat hi-hat, decoded the way the editor does.
+        auto track = [&](double bpm, double first, double seconds) {
+            const auto period = 60 / bpm;
+            const auto path = dir.filePath(QString("beat%1.wav").arg(bpm));
+            const auto kick = QString("if(gte(t,%1),exp(-25*mod(t-%1,%2))*sin(2*PI*70*mod(t-%1,%2)),0)")
+                                  .arg(first)
+                                  .arg(period);
+            const auto hat = QString("if(gte(t,%1),0.15*exp(-80*mod(t-%1,%2))*sin(2*PI*7000*t),0)")
+                                 .arg(first + period / 2)
+                                 .arg(period);
+            run(ffmpeg, {"-v", "error", "-y", "-f", "lavfi", "-i",
+                         QString("aevalsrc='0.8*%1+%2':s=44100:d=%3[a];anoisesrc=a=0.02:d=%3:r=44100[n];"
+                                 "[a][n]amix=inputs=2:normalize=0")
+                             .arg(kick, hat)
+                             .arg(seconds),
+                         "-ac", "2", path});
+            const auto pcm = run(ffmpeg, {"-v", "error", "-i", path, "-ac", "1", "-ar", "11025",
+                                          "-f", "f32le", "pipe:1"});
+            QVector<float> samples(pcm.size() / 4);
+            std::memcpy(samples.data(), pcm.constData(), size_t(samples.size()) * 4);
+            return std::pair{path, samples};
+        };
+        for (const auto &[tempo, first] : {std::pair{120., 0.5}, std::pair{97., 1.2}, std::pair{174., 0.3}}) {
+            const auto samples = track(tempo, first, 12).second;
+            double bpm = 0;
+            const auto beats = detectBeats(samples, 11025, &bpm);
+            QVERIFY2(std::abs(bpm - tempo) < tempo * 0.02, qPrintable(QString("%1 → %2").arg(tempo).arg(bpm)));
+            const double period = 60 / tempo;
+            const int expected = int((12 - first) / period);
+            QVERIFY2(std::abs(beats.size() - expected) <= 2,
+                     qPrintable(QString("%1: %2 of %3").arg(tempo).arg(beats.size()).arg(expected)));
+            double worst = 0;
+            for (const auto t : beats) {
+                const double n = std::round((t - first) / period);
+                worst = std::max(worst, std::abs(t - first - n * period));
+            }
+            QVERIFY2(worst < 0.03, qPrintable(QString("%1: %2 s off").arg(tempo).arg(worst)));
+            QVERIFY(beats.first() > first - 0.05);
+        }
+        // Silence and very short sound have no beats.
+        QVERIFY(detectBeats(QVector<float>(11025 * 5, 0.f), 11025).isEmpty());
+        QVERIFY(detectBeats(QVector<float>(1000, 0.5f), 11025).isEmpty());
+
+        // In the editor: markers on every 2nd beat of a clip that starts at 1 s and skips the
+        // first 2 s of the music, and clips snap to them.
+        const auto music = track(120, 0.5, 12).first;
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(music)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto id = editor.project().clips.first().id;
+        editor.select(id);
+        editor.setClip("duration", 240);
+        editor.setClip("sourceIn", 2.0);
+        editor.setClip("start", 30);
+        QCOMPARE(editor.project().clips.first().start, 30);
+        QCOMPARE(editor.project().clips.first().sourceIn.seconds(), 2.);
+        editor.markBeats(2);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.state()["beats"].toMap()["status"] == "done", 30000);
+        const auto markers = editor.project().markers;
+        QVERIFY2(markers.size() >= 4, qPrintable(QString::number(markers.size())));
+        // Source beats at 0.5 + k/2 s; from 2 s on that is 2.5 s, 3.5 s... every 2nd beat, so
+        // timeline frames 30 + 15 + 30k (± 1).
+        for (const auto &m : markers) {
+            const auto offset = (m.frame - 45) % 30;
+            QVERIFY2(m.frame >= 30 && (offset <= 1 || offset >= 29), qPrintable(QString::number(m.frame)));
+        }
+        QCOMPARE(editor.state()["beats"].toMap()["bpm"].toInt(), 120);
+        QCOMPARE(editor.snap(markers[1].frame + 3, 5, {}, 0), markers[1].frame);
+        editor.undo();
+        QVERIFY(editor.project().markers.isEmpty());
+        QVERIFY(editor.state()["error"].toString().isEmpty());
+    }
     void sceneDetection() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

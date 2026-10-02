@@ -201,6 +201,10 @@ class Editor final : public QObject {
     // Finds the shot changes in the selected video clip and splits it there, with any detached
     // audio, in one undo step. Sensitivity 0..1: higher finds subtler cuts.
     Q_INVOKABLE void splitAtScenes(double sensitivity = 0.5);
+    // Finds the beats in the selected clip's sound and puts a timeline marker on every
+    // `every`-th one (1, 2 or 4), asynchronously (state "beats": status finding|done|failed,
+    // count, bpm). Existing markers stay; one undo step.
+    Q_INVOKABLE void markBeats(int every = 1);
     // Automatic captions: transcribes every audible clip's media (language "auto", "de", "en",
     // ...) and puts the captions on the "AI captions" track, replacing earlier ones.
     // `style`: "" plain lines, "karaoke" (spoken word highlighted), "word" (one word at a time).
@@ -269,6 +273,8 @@ class Editor final : public QObject {
     QProcess *m_pauseProcess = nullptr;
     QProcess *m_sceneProcess = nullptr;
     QVariantMap m_scenes; // splitAtScenes(): status finding|done|failed, count
+    QThread *m_beatThread = nullptr;
+    QVariantMap m_beats;
     QVariantMap pauseState() const;
     struct DropBatch {
         QString trackId;

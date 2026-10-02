@@ -20,6 +20,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <algorithm>
+#include <cstring>
 #include <memory>
 
 namespace cutlery {
@@ -184,12 +185,13 @@ QString Editor::addFont(const QUrl &url) {
 Editor::~Editor() {
     if (m_dirty)
         autosave();
-    if (m_collectThread) {
-        m_collectThread->disconnect(this);
-        m_collectThread->requestInterruption();
-        m_collectThread->wait();
-        delete m_collectThread;
-    }
+    for (auto *t : {m_collectThread, m_beatThread})
+        if (t) {
+            t->disconnect(this);
+            t->requestInterruption();
+            t->wait();
+            delete t;
+        }
     for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess, m_sceneProcess})
         if (p) {
             p->disconnect(this);
@@ -520,6 +522,7 @@ QVariantMap Editor::state() const {
             {"captions", captionState()},
             {"pauses", pauseState()},
             {"scenes", m_scenes},
+            {"beats", m_beats},
             {"collect", m_collect},
             {"follow", m_follow},
             {"conform", m_conform},
@@ -2360,6 +2363,98 @@ void Editor::splitAtScenes(double sensitivity) {
               QString::number(length, 'f', 6), "-i", a->path, "-map", "0:v:0", "-an", "-sn",
               "-vf", QString("scale=320:-2,scdet=threshold=%1").arg(threshold, 0, 'f', 1), "-f",
               "null", "-"});
+    emit changed();
+}
+void Editor::markBeats(int every) {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || !a->hasAudio)
+        return fail("Select a clip with sound to find its beats");
+    if (c->reverse)
+        return fail("Reversed clips cannot be searched for beats");
+    if (m_beatThread)
+        return;
+    every = std::clamp(every, 1, 4);
+    const double speed = c->speed.seconds(), in = c->sourceIn.seconds(),
+                 fps = double(m_project.fpsN) / m_project.fpsD,
+                 length = std::min(c->duration / fps * speed, 3600.);
+    m_beats = {{"status", "finding"}};
+    const auto path = a->path, ffmpeg = executable("ffmpeg");
+    // Decoded and analysed in the background: mono at 11025 Hz, as 32-bit floats.
+    m_beatThread = QThread::create([this, path, ffmpeg, in, length, speed, fps, every,
+                                    id = c->id, revision = m_revision, start = c->start,
+                                    frames = c->duration] {
+        constexpr int rate = 11025;
+        QProcess decoder;
+        decoder.start(ffmpeg, {"-hide_banner", "-nostdin", "-v", "error", "-ss",
+                               QString::number(in, 'f', 6), "-t", QString::number(length, 'f', 6),
+                               "-i", path, "-map", "0:a:0", "-vn", "-ac", "1", "-ar",
+                               QString::number(rate), "-f", "f32le", "pipe:1"});
+        QByteArray pcm;
+        bool ok = decoder.waitForStarted();
+        while (ok && decoder.state() != QProcess::NotRunning) {
+            if (QThread::currentThread()->isInterruptionRequested()) {
+                decoder.kill();
+                decoder.waitForFinished(1500);
+                return;
+            }
+            decoder.waitForReadyRead(100);
+            pcm += decoder.readAllStandardOutput();
+        }
+        pcm += decoder.readAllStandardOutput();
+        ok = ok && decoder.exitStatus() == QProcess::NormalExit && decoder.exitCode() == 0;
+        QVector<float> samples(pcm.size() / 4);
+        std::memcpy(samples.data(), pcm.constData(), size_t(samples.size()) * 4);
+        double bpm = 0;
+        const auto beats = ok ? detectBeats(samples, rate, &bpm) : QVector<double>{};
+        QMetaObject::invokeMethod(this, [=, this] {
+            if (!ok) {
+                m_beats = {{"status", "failed"}};
+                return fail("Cannot read the clip's sound");
+            }
+            if (revision != m_revision) {
+                m_beats = {};
+                return fail("The clip changed while beats were found; try again");
+            }
+            // Source seconds to timeline frames inside the clip.
+            QVector<qint64> marks;
+            for (qsizetype i = 0; i < beats.size(); i += every) {
+                const auto local = qRound64(beats[i] / speed * fps);
+                if (local >= 0 && local < frames && (marks.isEmpty() || marks.last() < start + local))
+                    marks << start + local;
+            }
+            int added = 0;
+            const bool marked = mutate([&](Project &p) {
+                for (const auto frame : marks) {
+                    const auto at = std::lower_bound(
+                        p.markers.begin(), p.markers.end(), frame,
+                        [](const Marker &m, qint64 f) { return m.frame < f; });
+                    if (at != p.markers.end() && at->frame == frame)
+                        continue;
+                    if (p.markers.size() >= 1000)
+                        throw std::runtime_error("At most 1000 markers: mark every 2nd or 4th beat");
+                    p.markers.insert(at, Marker{frame, QString("Beat %1").arg(++added), "#4fc3f7"});
+                }
+            });
+            if (!marked) {
+                m_beats = {{"status", "failed"}};
+                emit changed();
+                return;
+            }
+            m_beats = {{"status", "done"}, {"count", added}, {"bpm", qRound(bpm / speed)}, {"clipId", id}};
+            m_status = beats.isEmpty() ? QString("No beats found")
+                                       : QString("%1 beat markers (about %2 BPM)")
+                                             .arg(added)
+                                             .arg(qRound(bpm / speed));
+            emit changed();
+        });
+    });
+    connect(m_beatThread, &QThread::finished, this, [this] {
+        m_beatThread->deleteLater();
+        m_beatThread = nullptr;
+        emit changed();
+    });
+    m_beatThread->start();
     emit changed();
 }
 void Editor::removePauses() {
