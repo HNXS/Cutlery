@@ -81,4 +81,4 @@ Two defects in the shared graph were found while proving window equivalence, and
 2. D3D11 renderer and audio clock using the same project contract; deterministic CPU/GPU frame comparisons.
 3. Multilevel waveforms, proxies, a keyframe graph editor, advanced trims and linked-pair resync.
 4. Colour management, broader codec qualification, installer and signed distribution.
-5. Further local inference (word-level caption timing, eye contact, image upscaling, GPU speech recognition) on the worker/AI-pack pattern.
+5. Further local inference (image upscaling, face tracking for effects) on the worker/AI-pack pattern.

@@ -2896,8 +2896,8 @@
     "status": "Investigation required",
     "acceptance": "Occlusion and multiple faces do not silently switch identity",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Used by eye contact: MediaPipe BlazeFace detection, 468-point Face Mesh and Iris Landmark (Apache-2.0, converted to ONNX) per frame in the cutlery-ai worker, most prominent face only. No face tracking for effects, blur areas or reframing yet."
   },
   {
     "id": "F117",

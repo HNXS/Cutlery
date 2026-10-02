@@ -46,6 +46,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - **Audio-only export:** the mix as MP3, AAC (M4A) or WAV.
 - **Smooth slow motion:** clips slower than 1× can blend frames or interpolate motion (optical flow).
 - **Split at scene changes** (inspector): cuts a video clip into its shots in one step.
+- **Eye contact** (AI pack): presenters reading beside the lens look into the camera; only the eyes are redrawn, by small amounts.
 - **Colour and look** (inspector): temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with adjustable strength; one-click looks (Warm, Cool, Cinematic, Vintage, Black & white, Punchy, Dreamy).
 - **Lower thirds and title cards** (library panel): name and role on a plate or beside an accent line, sliding in from the left, or a large centred heading. First text line = name/heading, further lines = role/subtitle; accent colour selectable.
 - **Blur and mosaic areas** (library panel): a rectangle on an upper track blurs or pixelates whatever the tracks below show, e.g. private data in a screen recording or a face. Drag it in the preview; keyframe its position to follow movement.

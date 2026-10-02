@@ -935,6 +935,104 @@ class EngineTest : public QObject {
         QCOMPARE(editor.project().assets.last().width, 90);
         QCOMPARE(editor.project().assets.last().height, 160);
     }
+    void eyeContact() {
+#if defined(CUTLERY_AI_WORKER) && defined(CUTLERY_TEST_MODELS)
+        const QString models = CUTLERY_TEST_MODELS;
+        for (const auto *name :
+             {"face_detection_short_range.onnx", "face_landmark.onnx", "iris_landmark.onnx"})
+            if (!QFileInfo::exists(models + "/" + name))
+                QSKIP("The face models are not in the test models folder");
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Half a second of a presenter photo (public domain, see tests/fixtures/README.md):
+        // looking into the camera, and the same face looking to the side.
+        auto video = [&](const QString &name) {
+            const auto out = dir.filePath(name + ".mkv");
+            run(ffmpeg, {"-v", "error", "-loop", "1", "-i",
+                         QString(CUTLERY_SOURCE_DIR) + "/tests/fixtures/face-" + name + ".jpg",
+                         "-t", "0.5", "-r", "10", "-c:v", "ffv1", out});
+            return out;
+        };
+        // The worker's report: the shifts applied to both eyes in the last frame, in eye widths.
+        auto correct = [&](const QString &input, const QString &output) {
+            const auto report = output + ".txt";
+            run(CUTLERY_AI_WORKER,
+                {"eyecontact", "--ffmpeg", ffmpeg, "--model", models + "/face_landmark.onnx",
+                 "--input", input, "--output", output, "--source", "960x540", "--rate", "10/1",
+                 "--cpu", "1", "--report", report});
+            QFile f(report);
+            if (!f.open(QIODevice::ReadOnly))
+                throw std::runtime_error("No eye-contact report");
+            const auto lines = QString::fromUtf8(f.readAll()).trimmed().split('\n');
+            const auto last = lines.last().split(' ');
+            if (lines.size() != 5 || last.size() != 6 || last[1] != "1")
+                throw std::runtime_error(("Unexpected report: " + lines.join('|')).toStdString());
+            return std::array<double, 4>{last[2].toDouble(), last[3].toDouble(),
+                                         last[4].toDouble(), last[5].toDouble()};
+        };
+        // Already looking into the camera: left alone.
+        const auto straight = correct(video("straight"), dir.filePath("straight.mov"));
+        for (double v : straight)
+            QVERIFY2(std::abs(v) < 0.02, qPrintable(QString::number(v)));
+        // Looking to the side: both eyes turn the same way, and a second pass finds at most
+        // two thirds of the first correction left.
+        const auto side = correct(video("side"), dir.filePath("side.mov"));
+        QVERIFY2(std::abs(side[0]) > 0.04 && std::abs(side[2]) > 0.04 && side[0] * side[2] > 0,
+                 qPrintable(QString("%1 %2").arg(side[0]).arg(side[2])));
+        const auto again = correct(dir.filePath("side.mov"), dir.filePath("again.mov"));
+        QVERIFY2(std::abs(again[0]) < 0.67 * std::abs(side[0]) &&
+                     std::abs(again[2]) < 0.67 * std::abs(side[2]),
+                 qPrintable(QString("%1 %2").arg(again[0]).arg(again[2])));
+
+        // Through the editor: the corrected picture replaces the source in an export, and only
+        // around the eyes.
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+        qputenv("CUTLERY_AI_MODELS", models.toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        QCOMPARE(editor.state()["aiMissing"].toMap()["eyecontact"].toString(), QString());
+        editor.configure(960, 540, 10, 1);
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("side.mkv"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        editor.select(editor.project().clips.first().id);
+        editor.setClip("eyeContact", true);
+        editor.runAi("eyecontact");
+        QTRY_COMPARE_WITH_TIMEOUT(
+            editor.state()["selected"].toMap()["eyeContactInfo"].toMap()["status"].toString(),
+            QString("ready"), 120000);
+        QVERIFY(editor.state()["selected"].toMap()["eyeContactInfo"].toMap()["covered"].toBool());
+        const auto out = dir.filePath("export.mov");
+        editor.exportWith(QUrl::fromLocalFile(out), {{"format", "prores"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(QFileInfo::exists(out), qPrintable(editor.state()["error"].toString()));
+        auto still = [&](const QString &file) {
+            QImage image;
+            image.loadFromData(run(ffmpeg, {"-v", "error", "-i", file, "-frames:v", "1", "-f",
+                                            "image2pipe", "-c:v", "png", "-"}),
+                               "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        const auto before = still(dir.filePath("side.mkv")), after = still(out);
+        auto difference = [&](QRect r) {
+            double sum = 0;
+            for (int y = r.top(); y <= r.bottom(); ++y)
+                for (int x = r.left(); x <= r.right(); ++x)
+                    sum += std::abs(qGray(before.pixel(x, y)) - qGray(after.pixel(x, y)));
+            return sum / (r.width() * r.height());
+        };
+        // The eyes sit around y = 190 in the fixture; the mouth and background stay.
+        const double eyes = difference({340, 160, 280, 60}), mouth = difference({380, 360, 200, 60}),
+                     corner = difference({10, 10, 100, 100});
+        QVERIFY2(eyes > 1.5 && mouth < 1.5 && corner < 1.5,
+                 qPrintable(QString("eyes %1 mouth %2 corner %3").arg(eyes).arg(mouth).arg(corner)));
+#else
+        QSKIP("Needs the AI worker and the AI pack's models (CUTLERY_TEST_MODELS)");
+#endif
+    }
     void aiCutout() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

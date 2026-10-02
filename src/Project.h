@@ -119,6 +119,9 @@ struct Clip {
     bool aiCutout = false;
     // Picture from the AI-upscaled copy of the asset (see AiJobs) when one covers the clip.
     bool aiUpscale = false;
+    // Picture from the eye-contact copy of the asset (see AiJobs), which replaces the upscaled
+    // one when both are on.
+    bool eyeContact = false;
     bool styled() const {
         return shape != "rect" || border > 0 || shadow > 0 || aiCutout;
     }

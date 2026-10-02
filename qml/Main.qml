@@ -1816,6 +1816,14 @@ ApplicationWindow {
                                 ToolTip.text: "Cuts the clip into its shots, e.g. a long recording or a downloaded video. Undo restores it."
                             }
                             AiOption {
+                                task: "eyecontact"
+                                flag: "eyeContact"
+                                infoKey: "eyeContactInfo"
+                                label: "Eye contact (AI): look into the camera"
+                                runningText: "Correcting the gaze…"
+                                doneText: "Eye contact ready ✓ · untick to compare"
+                            }
+                            AiOption {
                                 task: "upscale"
                                 flag: "aiUpscale"
                                 infoKey: "upscale"

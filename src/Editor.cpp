@@ -76,6 +76,7 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     m_ai = new AiJobs(m_data + "/ai", executable("ffmpeg"), executable("ffprobe"), worker,
                       {{"matte", models + "/u2net_human_seg.onnx"},
                        {"upscale", models + "/realesr-general-x4v3.onnx"},
+                       {"eyecontact", models + "/face_landmark.onnx"},
                        {"transcribe", models + "/ggml-large-v3-turbo-q5_0.bin"},
                        {"vad", models + "/ggml-silero-v6.2.0.bin"},
                        {"whisper", whisper}},
@@ -453,9 +454,11 @@ QVariantMap Editor::state() const {
             PROP(keyBlend);
             PROP(aiCutout);
             PROP(aiUpscale);
+            PROP(eyeContact);
 #undef PROP
             if (const auto *a = m_project.asset(c.assetId); a && a->kind == "video") {
-                for (const auto &[task, name] : {std::pair{"matte", "cutout"}, {"upscale", "upscale"}}) {
+                for (const auto &[task, name] : {std::pair{"matte", "cutout"}, {"upscale", "upscale"},
+                                                 {"eyecontact", "eyeContactInfo"}}) {
                     auto info = m_ai->status(task, *a, aiVariant(task, *a));
                     info["covered"] = aiCovered(task, *a, &c);
                     selected[name] = info;
@@ -484,6 +487,7 @@ QVariantMap Editor::state() const {
             {"analyzing", m_analysis->busy() || m_thumbnails->busy()},
             {"aiMissing", QVariantMap{{"matte", m_ai->missing("matte")},
                                       {"upscale", m_ai->missing("upscale")},
+                                      {"eyecontact", m_ai->missing("eyecontact")},
                                       {"transcribe", m_ai->missing("transcribe")}}},
             {"captions", captionState()},
             {"pauses", pauseState()},
@@ -1153,6 +1157,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(chromaKey, toBool);
         FIELD(aiCutout, toBool);
         FIELD(aiUpscale, toBool);
+        FIELD(eyeContact, toBool);
         FIELD(keySimilarity, toDouble);
         FIELD(keyBlend, toDouble);
         FIELD(shape, toString);
@@ -1818,6 +1823,7 @@ void Editor::pasteAttributes(const QString &group) {
         c->keySimilarity = from.keySimilarity;
         c->keyBlend = from.keyBlend;
         c->aiCutout = from.aiCutout;
+        c->eyeContact = from.eyeContact;
     });
 }
 void Editor::configure(int w, int h, int n, int d) {
@@ -1896,6 +1902,8 @@ void Editor::requestPreview() {
 bool Editor::usesAi(const Clip &c, const QString &task) const {
     if (task == "transcribe")
         return speaks(m_project, c) && !c.reverse;
+    if (task == "eyecontact")
+        return c.eyeContact;
     return task == "upscale" ? c.aiUpscale : c.aiCutout;
 }
 QString Editor::aiVariant(const QString &task, const Asset &a) const {
@@ -1936,6 +1944,9 @@ void Editor::addAiMedia(RenderOptions &options) const {
             if (c.aiCutout && !options.mattes.contains(a->id))
                 if (const auto m = m_ai->result("matte", *a); !m.path.isEmpty())
                     options.mattes.insert(a->id, m);
+            if (c.eyeContact && !options.eyeContact.contains(a->id))
+                if (const auto e = m_ai->result("eyecontact", *a); !e.path.isEmpty())
+                    options.eyeContact.insert(a->id, e);
             if (c.aiUpscale && upscaleHeight(*a) > 0 && !options.upscaled.contains(a->id))
                 if (const auto u = m_ai->result("upscale", *a, aiVariant("upscale", *a));
                     !u.path.isEmpty())

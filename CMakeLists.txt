@@ -8,6 +8,8 @@ qt_standard_project_setup(REQUIRES 6.8)
 set(CUTLERY_ONNXRUNTIME_DIR "$ENV{CUTLERY_ONNXRUNTIME_DIR}" CACHE PATH "ONNX Runtime release folder")
 # A whisper.cpp whisper-cli build, for testing automatic captions (packaged separately).
 set(CUTLERY_WHISPER_CLI "$ENV{CUTLERY_WHISPER_CLI}" CACHE FILEPATH "whisper-cli executable for tests")
+# The AI pack's models folder, for tests of the real face models (eye contact).
+set(CUTLERY_TEST_MODELS "$ENV{CUTLERY_TEST_MODELS}" CACHE PATH "AI pack models folder for tests")
 add_library(cutlery_engine STATIC src/ExportProfiles.cpp src/ExportProfiles.h src/Playback.cpp src/Playback.h src/Thumbnails.cpp src/Thumbnails.h src/AiJobs.cpp src/AiJobs.h src/Captions.cpp src/Captions.h src/KeyboardShortcuts.cpp src/KeyboardShortcuts.h src/MediaAnalysis.cpp src/MediaAnalysis.h src/Project.cpp src/RenderGraph.cpp src/Editor.cpp src/Project.h src/RenderGraph.h src/Editor.h src/RationalTime.h)
 target_include_directories(cutlery_engine PUBLIC src)
 target_link_libraries(cutlery_engine PUBLIC Qt6::Core Qt6::Gui Qt6::Quick Qt6::Multimedia)
@@ -33,6 +35,10 @@ if(CUTLERY_ONNXRUNTIME_DIR)
   file(TO_CMAKE_PATH "${CUTLERY_WHISPER_CLI}" WHISPER_CLI_PATH)
   target_compile_definitions(cutlery_tests PRIVATE CUTLERY_WHISPER_CLI="${WHISPER_CLI_PATH}")
  endif()
+ if(CUTLERY_TEST_MODELS)
+  file(TO_CMAKE_PATH "${CUTLERY_TEST_MODELS}" TEST_MODELS_PATH)
+  target_compile_definitions(cutlery_tests PRIVATE CUTLERY_TEST_MODELS="${TEST_MODELS_PATH}")
+ endif()
 endif()
 # The offscreen platform does not see system fonts on Windows; point it at them so text renders
 # as in the application.
@@ -47,7 +53,7 @@ install(TARGETS Cutlery RUNTIME DESTINATION .)
 # DirectML build (include/dml_provider_factory.h, lib/DirectML.dll) adds GPU inference.
 if(CUTLERY_ONNXRUNTIME_DIR)
  find_library(ONNXRUNTIME_LIBRARY onnxruntime PATHS "${CUTLERY_ONNXRUNTIME_DIR}/lib" NO_DEFAULT_PATH REQUIRED)
- qt_add_executable(cutlery-ai worker/main.cpp worker/matte.cpp worker/upscale.cpp worker/transcribe.cpp worker/common.h)
+ qt_add_executable(cutlery-ai worker/main.cpp worker/matte.cpp worker/upscale.cpp worker/transcribe.cpp worker/eyecontact.cpp worker/common.h)
  target_include_directories(cutlery-ai PRIVATE "${CUTLERY_ONNXRUNTIME_DIR}/include")
  target_link_libraries(cutlery-ai PRIVATE Qt6::Core Qt6::Gui "${ONNXRUNTIME_LIBRARY}")
  set_target_properties(cutlery-ai PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" WIN32_EXECUTABLE FALSE)

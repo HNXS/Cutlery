@@ -77,6 +77,26 @@ You can change the style and highlight colour of any caption later in the inspec
 - Karaoke captions cannot be animated, rotated or scaled; they keep their position and fades. Turn the style to *Plain caption* to animate one.
 - There is no speaker labelling yet.
 
+## Eye contact (look into the camera)
+
+For presenters who read from a script or notes beside the lens: select the video clip and turn on **Eye contact (AI)** under *Picture & sound*. Cutlery makes a copy of the clip's media in which the eyes look toward the camera, and preview, playback and export use it. Untick the option to compare with the original.
+
+- **What it changes:** only the eyes. The iris moves toward the middle of the eye opening, and for an upward correction the upper lid moves with it, as it does in reality. The correction is at most 15 % of the eye width, about the difference between reading a teleprompter-like script and looking into the lens.
+- **When it holds back:** it eases off while the eyes close, when the head turns away, when the face is small, and when the gaze is far off. A presenter who already looks into the camera is left alone.
+- **Stability:** both eyes are corrected together, by the gaze they share, and the correction is smoothed over time so the eyes do not shimmer.
+- **Storage:** the copy is ProRes 422 at the source size (at most 4K), about 0.9 GB per minute at 1080p, cached per media file in `data/ai`.
+
+### How it works
+
+Three small Google MediaPipe models (Apache-2.0) find the face, 468 face landmarks and, for each eye, the iris and the lid contour. Cutlery's own code warps only the eye regions. Nothing generative is involved: the result is the original picture, slightly redrawn. On a 4-core CPU, a 1080p frame takes about a tenth of a second.
+
+### Limits
+
+- **Small corrections only:** larger corrections would look unnatural and are reduced.
+- **Difficult pictures:** glasses with strong reflections, heavy side light and very small faces can leave the eyes uncorrected.
+- **One person:** only the most prominent face is corrected.
+- **Not yet validated on real recordings:** tests use a photo with the gaze moved synthetically. Check your result before you publish.
+
 ## Model and licences
 
 | File | Model | Licence |
@@ -85,8 +105,9 @@ You can change the style and highlight colour of any caption later in the inspec
 | `models/realesr-general-x4v3.onnx` | Real-ESRGAN realesr-general-x4v3 (Wang et al., 2021), converted from the published weights by `tools/convert-realesrgan.py` | BSD-3-Clause, [source](https://github.com/xinntao/Real-ESRGAN) |
 | `models/ggml-large-v3-turbo-q5_0.bin` | OpenAI Whisper large-v3-turbo, 5-bit, in whisper.cpp's format | MIT, [source](https://github.com/openai/whisper) |
 | `models/ggml-silero-v6.2.0.bin` | Silero VAD 6.2.0 voice detector, converted by whisper.cpp | MIT, [source](https://github.com/snakers4/silero-vad) |
+| `models/face_detection_short_range.onnx`, `models/face_landmark.onnx`, `models/iris_landmark.onnx` | Google MediaPipe face detection (BlazeFace), Face Mesh and Iris Landmark, taken from the pinned mediapipe 0.10.18 wheel and converted from TFLite with tf2onnx | Apache-2.0, [source](https://github.com/google-ai-edge/mediapipe) |
 | `whisper-cli.exe` (application package) | whisper.cpp v1.9.4, built from the pinned commit | MIT, [source](https://github.com/ggml-org/whisper.cpp/tree/v1.9.4) |
 | `onnxruntime.dll` (application package) | ONNX Runtime 1.22.0 with the DirectML provider | MIT, [source](https://github.com/microsoft/onnxruntime/tree/v1.22.0) |
 | `DirectML.dll` (application package) | DirectML 1.15.4 redistributable | Microsoft DirectML licence (in `licenses/onnxruntime`) |
 
-`tools/Get-OnnxRuntime.ps1`, `tools/Get-Whisper.ps1` and `tools/Get-Models.ps1` download everything from pinned NuGet packages and GitHub releases and verify SHA-256 hashes.
+`tools/Get-OnnxRuntime.ps1`, `tools/Get-Whisper.ps1` and `tools/Get-Models.ps1` download everything from pinned NuGet packages, GitHub releases and PyPI and verify SHA-256 hashes. The face models' TFLite originals are pinned; the ONNX conversion is not byte-reproducible, so its hashes are recorded in `models/manifest.json`.

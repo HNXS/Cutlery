@@ -56,7 +56,7 @@ jobs:
           "WHISPER_DIR=$whisper" | Out-File $env:GITHUB_ENV -Append
       - name: Configure and compile
         run: |
-          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DCUTLERY_ONNXRUNTIME_DIR=$env:ONNXRUNTIME_DIR" "-DCUTLERY_WHISPER_CLI=$env:WHISPER_DIR/whisper-cli.exe"
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DCUTLERY_ONNXRUNTIME_DIR=$env:ONNXRUNTIME_DIR" "-DCUTLERY_WHISPER_CLI=$env:WHISPER_DIR/whisper-cli.exe" "-DCUTLERY_TEST_MODELS=$env:MODELS_DIR"
           if ($LASTEXITCODE -ne 0) { throw 'Configuration failed' }
           cmake --build build --config Release --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
@@ -89,6 +89,11 @@ jobs:
           build/bin/Release/cutlery-ai.exe upscale --ffmpeg $ff --model "$env:MODELS_DIR/realesr-general-x4v3.onnx" --input build/test.mkv --output build/test-up-cpu.mov --source 320x240 --size 1280x960 --rate 8/1 --duration 0.25 --cpu 1
           if ($LASTEXITCODE -ne 0) { throw 'CPU upscale failed' }
           ffprobe -v error -show_entries stream=width,height,codec_name,nb_frames -of compact build/test-up.mov
+          # Eye contact on the CPU provider with the converted MediaPipe models.
+          ffmpeg -v error -loop 1 -i tests/fixtures/face-side.jpg -t 0.5 -r 10 -c:v ffv1 build/face.mkv
+          build/bin/Release/cutlery-ai.exe eyecontact --ffmpeg $ff --model "$env:MODELS_DIR/face_landmark.onnx" --input build/face.mkv --output build/face-fixed.mov --source 640x360 --rate 10/1 --cpu 1 --report build/face-report.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Eye contact failed' }
+          Get-Content build/face-report.txt -Tail 2
       - name: Check speech recognition on synthesized speech
         timeout-minutes: 20
         run: |

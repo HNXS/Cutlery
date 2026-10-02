@@ -11,6 +11,8 @@ namespace cutlery {
 // Results of the optional cutlery-ai worker, cached per media file (fingerprint) under `dir`:
 //  - "matte": person matte for AI background removal (gray FFV1, 8 analysed frames/s);
 //  - "upscale": the video at a higher resolution (ProRes 422 at the source frame rate);
+//  - "eyecontact": the video with the presenter's gaze turned toward the camera (ProRes 422 at
+//    the source size and frame rate);
 //  - "transcribe": speech as SRT subtitles (whisper.cpp).
 // Jobs run one at a time in request order; each result covers a range of source seconds.
 class AiJobs final : public QObject {

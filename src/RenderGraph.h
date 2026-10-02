@@ -42,6 +42,9 @@ struct RenderOptions {
     // AI-upscaled pictures by asset id, used instead of the source by clips with AI upscale.
     // Same timing as the source from time `start` (`rate` is unused).
     QHash<QString, MatteSource> upscaled;
+    // Eye-contact pictures by asset id, used instead of the source (and of an upscale) by clips
+    // with eye contact. Same timing as `upscaled`.
+    QHash<QString, MatteSource> eyeContact;
 };
 // A title template (Clip::titleStyle) drawn tightly on a transparent image, and where its top-left
 // corner sits on a width × height canvas before the clip's x/y offset; text sizes follow the
