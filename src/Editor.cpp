@@ -3,8 +3,14 @@
 #include "RenderGraph.h"
 #include <QCoreApplication>
 #include <cmath>
+#include <QDateTime>
 #include <QDir>
 #include <QFontDatabase>
+#include <QAudioInput>
+#include <QMediaCaptureSession>
+#include <QMediaDevices>
+#include <QMediaFormat>
+#include <QMediaRecorder>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -462,6 +468,11 @@ QVariantMap Editor::state() const {
             {"captions", captionState()},
             {"pauses", pauseState()},
             {"scenes", m_scenes},
+            {"voiceOver", QVariantMap{{"available", !QMediaDevices::audioInputs().isEmpty()},
+                                      {"recording", m_voiceRecorder != nullptr},
+                                      {"seconds", m_voiceRecorder && m_voiceClock.isValid()
+                                                      ? m_voiceClock.elapsed() / 1000.
+                                                      : 0.}}},
             {"loudness", [this] {
                  auto l = m_mixLoudness;
                  // A measurement describes the mix it was made on.
@@ -1232,6 +1243,108 @@ void Editor::duplicate() {
     });
     select(id);
 }
+void Editor::startVoiceOver() {
+    if (m_voiceRecorder || m_busy)
+        return;
+    const auto device = QMediaDevices::defaultAudioInput();
+    if (device.isNull())
+        return fail("No microphone found. Connect one and allow Cutlery to use it in Windows' "
+                    "privacy settings.");
+    QDir().mkpath(m_data + "/recordings");
+    const auto file =
+        m_data + "/recordings/voice-" +
+        QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss") + ".wav";
+    m_voiceSession = new QMediaCaptureSession(this);
+    m_voiceInput = new QAudioInput(device, this);
+    m_voiceRecorder = new QMediaRecorder(this);
+    m_voiceSession->setAudioInput(m_voiceInput);
+    m_voiceSession->setRecorder(m_voiceRecorder);
+    QMediaFormat format(QMediaFormat::Wave);
+    format.setAudioCodec(QMediaFormat::AudioCodec::Wave);
+    m_voiceRecorder->setMediaFormat(format);
+    m_voiceRecorder->setQuality(QMediaRecorder::HighQuality);
+    m_voiceRecorder->setOutputLocation(QUrl::fromLocalFile(file));
+    m_voiceStart = m_playhead;
+    auto cleanup = [this] {
+        for (QObject *o : std::initializer_list<QObject *>{m_voiceRecorder, m_voiceInput,
+                                                           m_voiceSession})
+            if (o)
+                o->deleteLater();
+        m_voiceRecorder = nullptr;
+        m_voiceInput = nullptr;
+        m_voiceSession = nullptr;
+        m_voiceClock.invalidate();
+    };
+    connect(m_voiceRecorder, &QMediaRecorder::errorOccurred, this,
+            [this, cleanup](QMediaRecorder::Error, const QString &message) {
+                pause();
+                cleanup();
+                fail("Recording failed: " + message);
+            });
+    connect(m_voiceRecorder, &QMediaRecorder::durationChanged, this, &Editor::changed);
+    connect(m_voiceRecorder, &QMediaRecorder::recorderStateChanged, this,
+            [this, cleanup](QMediaRecorder::RecorderState state) {
+                if (state != QMediaRecorder::StoppedState || !m_voiceRecorder)
+                    return;
+                const auto location = m_voiceRecorder->actualLocation();
+                const auto length = qRound64(m_voiceClock.elapsed() / 1000. * m_project.fpsN /
+                                             m_project.fpsD);
+                const auto frame = m_voiceStart;
+                cleanup();
+                if (!location.isLocalFile() || !QFileInfo(location.toLocalFile()).isFile())
+                    return fail("The recording was not saved");
+                // On the lowest free track that is not magnetic (a magnetic main track would
+                // push its clips aside), or on a new track.
+                int track = -1;
+                for (int t = 0; t < m_project.tracks && track < 0; ++t) {
+                    const auto &settings = m_project.trackSettings[t];
+                    const bool free = std::none_of(
+                        m_project.clips.begin(), m_project.clips.end(), [&](const Clip &o) {
+                            return o.track == t && o.start < frame + std::max<qint64>(1, length) &&
+                                   frame < o.start + o.duration;
+                        });
+                    if (!settings.magnetic && !settings.locked && free)
+                        track = t;
+                }
+                if (track < 0) {
+                    mutate([](Project &p) { p.addTrack(); });
+                    track = m_project.tracks - 1;
+                }
+                dropFiles({location}, track, frame);
+                m_status = "Voice-over added";
+                emit changed();
+            });
+    m_voiceRecorder->record();
+    m_voiceClock.start();
+    // The timeline plays along, so the narration matches the picture (use headphones).
+    if (!m_project.clips.empty())
+        play();
+    m_status = "Recording voice-over…";
+    emit changed();
+}
+void Editor::stopVoiceOver() {
+    if (!m_voiceRecorder)
+        return;
+    pause();
+    m_voiceRecorder->stop();
+}
+int Editor::freeTrack(Project &p, int home, qint64 start, qint64 length) {
+    auto fits = [&](int track) {
+        if (track < 0 || track >= p.tracks || p.trackSettings[track].locked)
+            return false;
+        if (p.trackSettings[track].magnetic)
+            return true;
+        return std::none_of(p.clips.begin(), p.clips.end(), [&](const Clip &o) {
+            return o.track == track && o.start < start + length && start < o.start + o.duration;
+        });
+    };
+    for (int d = 0; d < p.tracks; ++d)
+        for (int t : {home + d, home - d})
+            if (fits(t))
+                return t;
+    p.addTrack();
+    return p.tracks - 1;
+}
 void Editor::copy() {
     const auto *c = m_project.clip(m_selected);
     if (!c)
@@ -1257,27 +1370,7 @@ void Editor::paste() {
         // The clip goes to its own track when that is free at the playhead (magnetic tracks make
         // room), otherwise to the nearest free track above or below, or to a new track on top.
         copy.start = m_playhead;
-        auto fits = [&](int track) {
-            if (track < 0 || track >= p.tracks || p.trackSettings[track].locked)
-                return false;
-            if (p.trackSettings[track].magnetic)
-                return true;
-            return std::none_of(p.clips.begin(), p.clips.end(), [&](const Clip &o) {
-                return o.track == track && o.start < copy.start + copy.duration &&
-                       copy.start < o.start + o.duration;
-            });
-        };
-        const int home = std::min(copy.track, p.tracks - 1);
-        int track = -1;
-        for (int d = 0; d < p.tracks && track < 0; ++d)
-            for (int t : {home + d, home - d})
-                if (track < 0 && fits(t))
-                    track = t;
-        if (track < 0) {
-            p.addTrack();
-            track = p.tracks - 1;
-        }
-        copy.track = track;
+        copy.track = freeTrack(p, std::min(copy.track, p.tracks - 1), copy.start, copy.duration);
         p.clips.push_back(copy);
         p.move(copy.id, copy.track, copy.start);
     });

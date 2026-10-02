@@ -91,13 +91,17 @@ class UiTest : public QObject {
         QVERIFY(library);
         QStringList clipIds;
         for (int i = 0; i < 3; ++i) {
-            library->setProperty(
-                "contentY",
-                std::max(0., std::min(i * 84., library->property("contentHeight").toDouble() -
-                                                   library->height())));
-            QTest::qWait(30);
             auto *tile = findItem(window->contentItem(), "asset-" + editor.project().assets[i].id);
             QVERIFY(tile);
+            // Scroll the library so the tile is in view.
+            auto *content = qvariant_cast<QQuickItem *>(library->property("contentItem"));
+            QVERIFY(content);
+            const double top = tile->mapToItem(content, QPointF(0, 0)).y();
+            library->setProperty(
+                "contentY",
+                std::max(0., std::min(top - 10, library->property("contentHeight").toDouble() -
+                                                    library->height())));
+            QTest::qWait(30);
             drag(window, center(tile), trackPoint(i, 30 * (i + 1)));
             QTRY_COMPARE_WITH_TIMEOUT(editor.project().clips.size(), i + 1, 2000);
             const auto c = editor.project().clips.last();
@@ -576,9 +580,10 @@ class UiTest : public QObject {
         QVERIFY(QMetaObject::invokeMethod(pasteLook, "clicked"));
         QCOMPARE(editor.project().clips.back().temperature, 0.5);
         // Shapes from the library: the shape section replaces the text box for arrows.
-        auto *addArrow = findItem(window->contentItem(), "addGraphic-arrow");
-        QVERIFY(addArrow);
-        QVERIFY(QMetaObject::invokeMethod(addArrow, "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "addShape"), "clicked"));
+        QObject *addArrow = nullptr;
+        QTRY_VERIFY((addArrow = findItem(window->contentItem(), "addGraphic-arrow")));
+        QVERIFY(QMetaObject::invokeMethod(addArrow, "triggered"));
         QCOMPARE(editor.project().clips.back().graphic, QString("arrow"));
         QTRY_VERIFY(findItem(window->contentItem(), "graphicSection")->isVisible());
         QTRY_VERIFY(!findItem(window->contentItem(), "titleText")->isVisible());

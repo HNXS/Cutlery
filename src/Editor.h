@@ -8,7 +8,11 @@
 #include <QObject>
 #include <QProcess>
 #include <QQuickImageProvider>
+#include <QElapsedTimer>
 #include <QTimer>
+class QAudioInput;
+class QMediaCaptureSession;
+class QMediaRecorder;
 #include <optional>
 #include <QUrl>
 #include <QVariantList>
@@ -100,6 +104,11 @@ class Editor final : public QObject {
     // Applies the copied clip's settings to the selected clip: "look" (colour, effects, LUT) or
     // "all" (also transform, keyframes, shape and border, keying, volume and fades).
     Q_INVOKABLE void pasteAttributes(const QString &group = "all");
+    // Voice-over: records the default microphone to a WAV file in the data folder's recordings/
+    // while the timeline plays from the playhead; stopping adds the recording there on a free
+    // track. State "voiceOver": {available, recording, seconds}.
+    Q_INVOKABLE void startVoiceOver();
+    Q_INVOKABLE void stopVoiceOver();
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE void configure(int width, int height, int fpsN, int fpsD);
@@ -190,6 +199,13 @@ class Editor final : public QObject {
     QVariantMap m_loudness; // measurement of the running export, when normalising
     QVariantMap m_mixLoudness; // last analyzeLoudness() result
     std::optional<Clip> m_clipboard;
+    // The track nearest `home` with room for [start, start + length), or a new one on top.
+    static int freeTrack(Project &, int home, qint64 start, qint64 length);
+    QMediaCaptureSession *m_voiceSession = nullptr;
+    QAudioInput *m_voiceInput = nullptr;
+    QMediaRecorder *m_voiceRecorder = nullptr;
+    qint64 m_voiceStart = 0;
+    QElapsedTimer m_voiceClock;
     std::optional<Asset> m_clipboardAsset;
     QProcess *m_loudnessProcess = nullptr;
     struct Pauses {

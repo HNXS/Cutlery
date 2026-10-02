@@ -1717,6 +1717,18 @@ class EngineTest : public QObject {
         editor.addGraphic("hexagon");
         QVERIFY(editor.state()["error"].toString().contains("shape"));
     }
+    void voiceOverWithoutMicrophone() {
+        FrameProvider frames;
+        Editor editor(&frames);
+        const auto voice = editor.state()["voiceOver"].toMap();
+        QCOMPARE(voice["recording"].toBool(), false);
+        if (voice["available"].toBool())
+            QSKIP("This machine has a microphone; recording is checked by hand");
+        editor.startVoiceOver();
+        QVERIFY(editor.state()["error"].toString().contains("No microphone"));
+        QCOMPARE(editor.state()["voiceOver"].toMap()["recording"].toBool(), false);
+        editor.stopVoiceOver(); // nothing to stop
+    }
     void smoothSlowMotion() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

@@ -729,26 +729,39 @@ ApplicationWindow {
                             ToolTip.text: "Pixelates whatever lower tracks show inside a rectangle, e.g. a face"
                         }
                         // Shapes for tutorials and explainers.
-                        GridLayout {
+                        Action {
+                            objectName: "addShape"
+                            text: "+ Shape ▾"
                             Layout.fillWidth: true
-                            columns: 3
-                            columnSpacing: 4
-                            rowSpacing: 4
-                            Repeater {
-                                model: [
-                                    { kind: "arrow", label: "➜ Arrow" },
-                                    { kind: "ellipse", label: "◯ Circle" },
-                                    { kind: "bubble", label: "💬 Bubble" },
-                                    { kind: "rectangle", label: "▭ Box" },
-                                    { kind: "line", label: "― Line" }
-                                ]
-                                Action {
-                                    required property var modelData
-                                    objectName: "addGraphic-" + modelData.kind
-                                    Layout.fillWidth: true
-                                    padding: 5
-                                    text: modelData.label
-                                    onClicked: editor.addGraphic(modelData.kind)
+                            onClicked: shapeMenu.popup()
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Arrow, circle, speech bubble, box or line"
+                            Menu {
+                                id: shapeMenu
+                                MenuItem {
+                                    objectName: "addGraphic-arrow"
+                                    text: "➜  Arrow"
+                                    onTriggered: editor.addGraphic("arrow")
+                                }
+                                MenuItem {
+                                    objectName: "addGraphic-ellipse"
+                                    text: "◯  Circle"
+                                    onTriggered: editor.addGraphic("ellipse")
+                                }
+                                MenuItem {
+                                    objectName: "addGraphic-bubble"
+                                    text: "🗨  Speech bubble"
+                                    onTriggered: editor.addGraphic("bubble")
+                                }
+                                MenuItem {
+                                    objectName: "addGraphic-rectangle"
+                                    text: "▭  Box"
+                                    onTriggered: editor.addGraphic("rectangle")
+                                }
+                                MenuItem {
+                                    objectName: "addGraphic-line"
+                                    text: "―  Line"
+                                    onTriggered: editor.addGraphic("line")
                                 }
                             }
                         }
@@ -932,6 +945,16 @@ ApplicationWindow {
                         Action {
                             text: "+1"
                             onClicked: win.command("nextFrame")
+                        }
+                        Action {
+                            objectName: "voiceOver"
+                            readonly property var voice: win.s.voiceOver || ({})
+                            text: voice.recording ? "■ Stop " + Number(voice.seconds || 0).toFixed(0) + " s" : "● Voice-over"
+                            palette.buttonText: voice.recording ? "#ff6b6b" : "#e7edf2"
+                            enabled: voice.recording || (voice.available === true && !win.s.busy)
+                            onClicked: voice.recording ? editor.stopVoiceOver() : editor.startVoiceOver()
+                            ToolTip.visible: hovered
+                            ToolTip.text: voice.available === true ? "Record narration from the microphone while the timeline plays from the playhead. Use headphones so the recording does not pick up the timeline." : "No microphone found"
                         }
                         Label {
                             text: win.clock(editor.playbackFrame) + " / " + win.clock(win.s.duration)
