@@ -2421,8 +2421,8 @@
     "status": "Planned",
     "acceptance": "Geometry editable and rendered at custom export resolution",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Shape clips from the library: arrow, circle/ellipse, speech bubble, box and line, with fill (or none), outline colour and width, and size; moved, resized, rotated and keyframed like overlays. Bubbles and boxes hold styled text. No callout pointers that follow a target or custom paths."
   },
   {
     "id": "F098",

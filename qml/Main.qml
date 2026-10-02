@@ -728,6 +728,30 @@ ApplicationWindow {
                             ToolTip.visible: hovered
                             ToolTip.text: "Pixelates whatever lower tracks show inside a rectangle, e.g. a face"
                         }
+                        // Shapes for tutorials and explainers.
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 3
+                            columnSpacing: 4
+                            rowSpacing: 4
+                            Repeater {
+                                model: [
+                                    { kind: "arrow", label: "➜ Arrow" },
+                                    { kind: "ellipse", label: "◯ Circle" },
+                                    { kind: "bubble", label: "💬 Bubble" },
+                                    { kind: "rectangle", label: "▭ Box" },
+                                    { kind: "line", label: "― Line" }
+                                ]
+                                Action {
+                                    required property var modelData
+                                    objectName: "addGraphic-" + modelData.kind
+                                    Layout.fillWidth: true
+                                    padding: 5
+                                    text: modelData.label
+                                    onClicked: editor.addGraphic(modelData.kind)
+                                }
+                            }
+                        }
                     }
                     Caption {
                         text: "LOCAL FILES. YOUR STORY."
@@ -1167,11 +1191,94 @@ ApplicationWindow {
                                 }
                                 Rule {}
                             }
+                            // Shape: kind, colours, outline and size. Move, resize and rotate it in
+                            // the preview like any overlay.
+                            ColumnLayout {
+                                objectName: "graphicSection"
+                                Layout.fillWidth: true
+                                visible: (win.selection.graphic || "") !== ""
+                                spacing: 6
+                                Caption { text: "SHAPE" }
+                                ComboBox {
+                                    objectName: "graphicKind"
+                                    Layout.fillWidth: true
+                                    readonly property var kinds: ["arrow", "ellipse", "bubble", "rectangle", "line"]
+                                    model: ["Arrow", "Circle / ellipse", "Speech bubble", "Box", "Line"]
+                                    currentIndex: Math.max(0, kinds.indexOf(win.selection.graphic || "arrow"))
+                                    onActivated: index => editor.setClip("graphic", kinds[index])
+                                }
+                                Repeater {
+                                    model: [
+                                        { key: "fillColor", name: "Fill", colors: ["#ffd23f", "#ff5a5f", "#64d8bc", "#5fa8ff", "#ffffff", "#14181d", "#00000000"] },
+                                        { key: "strokeColor", name: "Outline", colors: ["#000000", "#ffffff", "#ff5a5f", "#ffd23f"] }
+                                    ]
+                                    RowLayout {
+                                        id: graphicColours
+                                        required property var modelData
+                                        Label {
+                                            text: graphicColours.modelData.name
+                                            color: win.muted
+                                            Layout.preferredWidth: 60
+                                        }
+                                        Repeater {
+                                            model: graphicColours.modelData.colors
+                                            Rectangle {
+                                                required property string modelData
+                                                width: 18
+                                                height: 18
+                                                radius: 9
+                                                color: modelData
+                                                border.width: win.selection[graphicColours.modelData.key] === modelData ? 3 : 1
+                                                border.color: win.selection[graphicColours.modelData.key] === modelData ? win.mint : "#6481a0"
+                                                Label {
+                                                    anchors.centerIn: parent
+                                                    visible: parent.modelData === "#00000000"
+                                                    text: "∅"
+                                                    font.pixelSize: 11
+                                                }
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    onClicked: editor.setClip(graphicColours.modelData.key, parent.modelData)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Repeater {
+                                    model: [
+                                        { key: "stroke", name: "Outline width", lo: 0, hi: 0.05 },
+                                        { key: "graphicWidth", name: "Width", lo: 0.01, hi: 1 },
+                                        { key: "graphicHeight", name: "Height", lo: 0.005, hi: 1 }
+                                    ]
+                                    RowLayout {
+                                        id: graphicRow
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        Label {
+                                            text: graphicRow.modelData.name
+                                            color: win.muted
+                                            Layout.preferredWidth: 95
+                                        }
+                                        Slider {
+                                            objectName: "graphic-" + graphicRow.modelData.key
+                                            Layout.fillWidth: true
+                                            from: graphicRow.modelData.lo
+                                            to: graphicRow.modelData.hi
+                                            value: win.selection[graphicRow.modelData.key] ?? 0
+                                            onPressedChanged: if (!pressed)
+                                                editor.setClip(graphicRow.modelData.key, value)
+                                            onMoved: if (!pressed)
+                                                editor.setClip(graphicRow.modelData.key, value)
+                                        }
+                                    }
+                                }
+                                Rule {}
+                            }
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                visible: win.selection.assetId === "" && (win.selection.effect || "") === ""
+                                visible: win.selection.assetId === "" && (win.selection.effect || "") === "" && ["arrow", "line"].indexOf(win.selection.graphic || "") < 0
                                 Caption {
-                                    text: "TITLE / CAPTION"
+                                    text: (win.selection.graphic || "") !== "" ? "TEXT IN SHAPE" : "TITLE / CAPTION"
                                 }
                                 TextArea {
                                     id: titleText

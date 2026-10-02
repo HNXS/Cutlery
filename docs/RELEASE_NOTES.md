@@ -6,6 +6,7 @@ Projects are saved as schema 11; 0.5 cannot open them.
 
 - **Colour and look:** temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with a strength slider; eight one-click looks.
 - **Text styling:** any installed font or your own .ttf/.otf files, bold and italic, alignment, letter and line spacing, outline, shadow and a background box.
+- **Shapes:** arrows, circles, speech bubbles, boxes and lines for tutorials, with colours, outline and text inside bubbles and boxes.
 - **Copy and paste:** clips (Ctrl+C / Ctrl+V, also into another project) and their attributes: "Paste look" or "Paste all" (Ctrl+Alt+V) onto the selected clip.
 - **Smooth slow motion:** blended or optical-flow in-between frames for clips slower than 1×.
 - **Split at scene changes:** cuts a video clip (and its detached audio) into its shots.

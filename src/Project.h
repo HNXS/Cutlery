@@ -61,6 +61,13 @@ struct Clip {
     // rectangle of effectWidth × effectHeight canvas fractions at scale 1, centred at x/y.
     QString effect; // "", "blur", "pixelate"
     double effectStrength = 0.6, effectWidth = 0.3, effectHeight = 0.2;
+    // Graphic clips (no media): a shape of graphicWidth × graphicHeight canvas fractions at
+    // scale 1, centred at x/y, filled with fillColor and outlined with strokeColor at `stroke`
+    // (fraction of the canvas height). Arrows and lines point right; rotate them. Speech bubbles
+    // and boxes show the clip's text inside.
+    QString graphic; // "", "rectangle", "ellipse", "arrow", "line", "bubble"
+    QString fillColor = "#ffd23f", strokeColor = "#000000";
+    double stroke = 0, graphicWidth = 0.3, graphicHeight = 0.2;
     // Gaussian blur of the clip's own picture, 0..1.
     double blur = 0;
     // In-between frames when the clip plays slower than its source: "" repeats frames, "blend"
@@ -114,6 +121,8 @@ struct Clip {
     void scaleKeyframes(double factor);
 };
 const QStringList &animatableProperties();
+// Clip::graphic values.
+const QStringList &graphicKinds();
 // Words of a caption text, as used with Clip::wordStarts.
 QStringList captionWords(const QString &text);
 // Supported transitions: FFmpeg xfade names paired with display labels.

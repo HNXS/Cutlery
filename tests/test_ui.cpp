@@ -575,6 +575,17 @@ class UiTest : public QObject {
         QTRY_VERIFY(pasteLook && pasteLook->isEnabled());
         QVERIFY(QMetaObject::invokeMethod(pasteLook, "clicked"));
         QCOMPARE(editor.project().clips.back().temperature, 0.5);
+        // Shapes from the library: the shape section replaces the text box for arrows.
+        auto *addArrow = findItem(window->contentItem(), "addGraphic-arrow");
+        QVERIFY(addArrow);
+        QVERIFY(QMetaObject::invokeMethod(addArrow, "clicked"));
+        QCOMPARE(editor.project().clips.back().graphic, QString("arrow"));
+        QTRY_VERIFY(findItem(window->contentItem(), "graphicSection")->isVisible());
+        QTRY_VERIFY(!findItem(window->contentItem(), "titleText")->isVisible());
+        auto *kind = findItem(window->contentItem(), "graphicKind");
+        QVERIFY(QMetaObject::invokeMethod(kind, "activated", Q_ARG(int, 2)));
+        QCOMPARE(editor.project().clips.back().graphic, QString("bubble"));
+        QTRY_VERIFY(findItem(window->contentItem(), "titleText")->isVisible());
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void aiCutoutControls() {

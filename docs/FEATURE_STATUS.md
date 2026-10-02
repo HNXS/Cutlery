@@ -100,7 +100,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F094 | Offline text-to-speech | Planned | Not implemented in this alpha. |
 | F095 | German text-to-speech | Planned | Not implemented in this alpha. |
 | F096 | Local dubbing and duration fitting | Planned | Not implemented in this alpha. |
-| F097 | Shapes, arrows, callouts and speech bubbles | Planned | Not implemented in this alpha. |
+| F097 | Shapes, arrows, callouts and speech bubbles | Partial | Shape clips from the library: arrow, circle/ellipse, speech bubble, box and line, with fill (or none), outline colour and width, and size; moved, resized, rotated and keyframed like overlays. Bubbles and boxes hold styled text. No callout pointers that follow a target or custom paths. |
 | F098 | Stickers, icons and overlays | Partial | Imported images as overlays only. |
 | F099 | PNG, SVG, GIF and image-sequence overlays | Partial | Raster still images only. |
 | F100 | Collage and reusable layout templates | Planned | Not implemented in this alpha. |

@@ -135,9 +135,15 @@ void Clip::scaleKeyframes(double factor) {
         list = scaled;
     }
 }
+const QStringList &graphicKinds() {
+    static const QStringList kinds{"rectangle", "ellipse", "arrow", "line", "bubble"};
+    return kinds;
+}
 QSizeF Project::pictureSize(const Clip &c, double boxWidth, double boxHeight) const {
     if (!c.effect.isEmpty())
         return {boxWidth * c.effectWidth, boxHeight * c.effectHeight};
+    if (!c.graphic.isEmpty())
+        return {boxWidth * c.graphicWidth, boxHeight * c.graphicHeight};
     const auto *a = asset(c.assetId);
     double aspect = a && a->width > 0 && a->height > 0 ? double(a->width) / a->height
                                                        : double(width) / height;
@@ -267,6 +273,14 @@ QJsonObject Project::json(const QString &base) const {
                 o[k] = c.*field;
         if (!c.slowMotion.isEmpty())
             o["slowMotion"] = c.slowMotion;
+        if (!c.graphic.isEmpty()) {
+            o["graphic"] = c.graphic;
+            o["fillColor"] = c.fillColor;
+            o["strokeColor"] = c.strokeColor;
+            o["stroke"] = c.stroke;
+            o["graphicWidth"] = c.graphicWidth;
+            o["graphicHeight"] = c.graphicHeight;
+        }
         if (!c.lut.isEmpty()) {
             o["lut"] = base.isEmpty() ? c.lut : QDir(base).relativeFilePath(c.lut);
             o["lutStrength"] = c.lutStrength;
@@ -415,6 +429,12 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         for (const auto &[k, field] : lookFields())
             c.*field = j[k].toDouble(0);
         c.slowMotion = j["slowMotion"].toString();
+        c.graphic = j["graphic"].toString();
+        c.fillColor = j["fillColor"].toString("#ffd23f");
+        c.strokeColor = j["strokeColor"].toString("#000000");
+        c.stroke = j["stroke"].toDouble(0);
+        c.graphicWidth = j["graphicWidth"].toDouble(0.3);
+        c.graphicHeight = j["graphicHeight"].toDouble(0.2);
         c.lut = j["lut"].toString();
         if (!c.lut.isEmpty())
             c.lut = QDir::cleanPath(QDir::isRelativePath(c.lut) ? QDir(base).absoluteFilePath(c.lut)
@@ -550,6 +570,12 @@ void Project::validate() const {
                     bounded(c.background, 0, 1) && QColor(c.outlineColor).isValid() &&
                     QColor(c.backgroundColor).isValid() && c.fontFamily.size() <= 200,
                 "Invalid text style");
+        require((c.graphic.isEmpty() ||
+                 (graphicKinds().contains(c.graphic) && c.assetId.isEmpty() && c.effect.isEmpty())) &&
+                    QColor(c.fillColor).isValid() && QColor(c.strokeColor).isValid() &&
+                    bounded(c.stroke, 0, 0.05) && bounded(c.graphicWidth, 0.01, 1) &&
+                    bounded(c.graphicHeight, 0.005, 1),
+                "Invalid shape");
         require((c.captionStyle.isEmpty() || c.captionStyle == "karaoke" ||
                  c.captionStyle == "word") &&
                     QColor(c.highlightColor).isValid() && c.wordStarts.size() <= 2000 &&

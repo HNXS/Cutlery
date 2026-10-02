@@ -391,6 +391,12 @@ QVariantMap Editor::state() const {
             PROP(lutStrength);
             PROP(slowMotion);
             PROP(fontFamily);
+            PROP(graphic);
+            PROP(fillColor);
+            PROP(strokeColor);
+            PROP(stroke);
+            PROP(graphicWidth);
+            PROP(graphicHeight);
             PROP(bold);
             PROP(italic);
             PROP(align);
@@ -906,6 +912,45 @@ void Editor::addEffect(const QString &effect) {
     });
     select(id);
 }
+void Editor::addGraphic(const QString &kind) {
+    if (!graphicKinds().contains(kind))
+        return fail("Unknown shape");
+    const auto id = newId();
+    mutate([&](Project &p) {
+        Clip c;
+        c.id = id;
+        c.graphic = kind;
+        c.name = kind == "bubble"  ? "Speech bubble"
+                 : kind == "arrow" ? "Arrow"
+                 : kind == "line"  ? "Line"
+                                   : kind == "ellipse" ? "Circle" : "Box";
+        if (kind == "bubble") {
+            c.text = "Hello!";
+            c.fillColor = "#ffffff";
+            c.textColor = "#14181d";
+            c.textShadow = 0;
+            c.fontSize = 48;
+            c.stroke = 0.004;
+        } else if (kind == "arrow" || kind == "line") {
+            c.graphicHeight = kind == "arrow" ? 0.12 : 0.012;
+            c.fillColor = kind == "arrow" ? "#ff5a5f" : "#ffffff";
+        } else if (kind == "ellipse") {
+            // An outline circle, like a highlight around something on screen.
+            c.graphicWidth = 0.2;
+            c.graphicHeight = 0.2 * p.width / p.height;
+            c.fillColor = "#00000000";
+            c.strokeColor = "#ff5a5f";
+            c.stroke = 0.008;
+        }
+        c.track = p.tracks - 1;
+        p.requireEditable(c.track);
+        c.start = m_playhead;
+        c.duration = qRound64(4. * p.fpsN / p.fpsD);
+        p.clips.push_back(c);
+        p.move(c.id, c.track, c.start);
+    });
+    select(id);
+}
 void Editor::moveClip(const QString &id, qint64 frame, int track) {
     mutate([&](Project &p) { p.move(id, track, frame); });
 }
@@ -1035,6 +1080,12 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(background, toDouble);
         FIELD(backgroundColor, toString);
         FIELD(fontFamily, toString);
+        FIELD(graphic, toString);
+        FIELD(fillColor, toString);
+        FIELD(strokeColor, toString);
+        FIELD(stroke, toDouble);
+        FIELD(graphicWidth, toDouble);
+        FIELD(graphicHeight, toDouble);
         FIELD(fadeIn, toDouble);
         FIELD(fadeOut, toDouble);
         FIELD(reverse, toBool);
@@ -2174,7 +2225,7 @@ bool Editor::exportSrt(const QUrl &url) {
                 .arg(ms % 1000, 3, 10, QChar('0'));
         };
         for (const auto &c : clips)
-            if (c.assetId.isEmpty() && c.effect.isEmpty() && !c.hidden &&
+            if (c.assetId.isEmpty() && c.effect.isEmpty() && c.graphic.isEmpty() && !c.hidden &&
                 !m_project.trackSettings[c.track].hidden)
                 text += QString::number(++i) + "\n" + stamp(c.start) + " --> " +
                         stamp(c.start + c.duration) + "\n" + c.text + "\n\n";

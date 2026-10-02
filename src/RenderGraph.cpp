@@ -205,6 +205,48 @@ static void paintText(QPainter &paint, const Clip &c, const QFont &font, const Q
     }
     paintStyledPath(paint, c, path, px, QColor(c.textColor));
 }
+// A graphic clip's shape filling `box` on a canvas `height` pixels high.
+static void paintGraphic(QPainter &paint, const Clip &c, const QRectF &box, int height) {
+    QPainterPath path;
+    const double w = box.width(), h = box.height();
+    if (c.graphic == "ellipse")
+        path.addEllipse(box);
+    else if (c.graphic == "rectangle")
+        path.addRoundedRect(box, std::min(w, h) * 0.08, std::min(w, h) * 0.08);
+    else if (c.graphic == "line")
+        path.addRect(box);
+    else if (c.graphic == "arrow") {
+        // A shaft and a head pointing right; the head is as long as the arrow is thick.
+        const double head = std::min(h * 1.1, w * 0.5), shaft = h * 0.36;
+        const double mid = box.center().y(), tip = box.right(), neck = tip - head;
+        path.moveTo(box.left(), mid - shaft / 2);
+        path.lineTo(neck, mid - shaft / 2);
+        path.lineTo(neck, box.top());
+        path.lineTo(tip, mid);
+        path.lineTo(neck, box.bottom());
+        path.lineTo(neck, mid + shaft / 2);
+        path.lineTo(box.left(), mid + shaft / 2);
+        path.closeSubpath();
+    } else if (c.graphic == "bubble") {
+        // A rounded body with a tail at the lower left.
+        const QRectF body(box.left(), box.top(), w, h * 0.8);
+        const double r = std::min(body.width(), body.height()) * 0.25;
+        path.addRoundedRect(body, r, r);
+        QPainterPath tail;
+        tail.moveTo(body.left() + w * 0.18, body.bottom() - 1);
+        tail.lineTo(body.left() + w * 0.12, box.bottom());
+        tail.lineTo(body.left() + w * 0.34, body.bottom() - 1);
+        tail.closeSubpath();
+        path = path.united(tail);
+    }
+    paint.setPen(Qt::NoPen);
+    paint.fillPath(path, QColor(c.fillColor));
+    if (c.stroke > 0) {
+        QPen pen(QColor(c.strokeColor), c.stroke * height);
+        pen.setJoinStyle(Qt::RoundJoin);
+        paint.strokePath(path, pen);
+    }
+}
 // Timed captions ("karaoke", "word"): one band-high variant per word, stacked vertically, so a
 // single looped image serves the whole caption and a per-frame crop picks the spoken word.
 struct CaptionSprite {
@@ -436,8 +478,20 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             QPainter paint(&img);
             paint.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
             const auto font = textFont(c, qRound(c.fontSize * double(height) / p.height));
-            const QRect rect(width / 15, height / 12, width * 13 / 15, height * 5 / 6);
-            paintText(paint, c, font, rect);
+            QRect rect(width / 15, height / 12, width * 13 / 15, height * 5 / 6);
+            if (!c.graphic.isEmpty()) {
+                // Shapes are drawn centred on the canvas at their own size; text goes inside.
+                const QSizeF size(width * c.graphicWidth, height * c.graphicHeight);
+                const QRectF box(QPointF(width - size.width(), height - size.height()) / 2, size);
+                paintGraphic(paint, c, box, height);
+                const double inset = std::min(box.width(), box.height()) * 0.12;
+                rect = box.adjusted(inset, inset, -inset, -inset - (c.graphic == "bubble"
+                                                                       ? box.height() * 0.18
+                                                                       : 0))
+                           .toRect();
+            }
+            if (!c.text.isEmpty() && c.graphic != "arrow" && c.graphic != "line")
+                paintText(paint, c, font, rect);
             paint.end();
             if (!img.save(n.file))
                 throw std::runtime_error("Cannot write title render asset");

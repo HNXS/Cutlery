@@ -69,6 +69,8 @@ class Editor final : public QObject {
     Q_INVOKABLE void addTitleTemplate(const QString &style);
     // A blur ("blur") or mosaic ("pixelate") area over the lower tracks, at the playhead.
     Q_INVOKABLE void addEffect(const QString &effect);
+    // Adds a shape (see graphicKinds()) at the playhead on the top track.
+    Q_INVOKABLE void addGraphic(const QString &kind);
     Q_INVOKABLE void select(const QString &id);
     Q_INVOKABLE void seek(qint64 frame);
     Q_INVOKABLE void setClip(const QString &key, const QVariant &value);

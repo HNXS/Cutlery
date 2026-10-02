@@ -36,6 +36,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - Offline AI upscaling (Real-ESRGAN) of low-resolution video clips to up to 4K. Both AI features use the GPU through DirectML when available, run in the background once per media file and need the separate [AI pack](docs/AI.md).
 - Static transforms, equal-edge crop, horizontal flip, opacity, brightness/contrast/saturation, blur, clip fades.
 - **Text styling:** font list and your own font files, bold/italic, alignment, letter and line spacing, outline, shadow and a box behind each line.
+- **Shapes** (library panel): arrow, circle, speech bubble, box and line; colours, outline, size and rotation; text inside bubbles and boxes.
 - **Copy and paste** clips (Ctrl+C/Ctrl+V, also between projects) and their look or all attributes (Ctrl+Alt+V) onto another clip.
 - **Audio-only export:** the mix as MP3, AAC (M4A) or WAV.
 - **Smooth slow motion:** clips slower than 1× can blend frames or interpolate motion (optical flow).

@@ -1631,6 +1631,92 @@ class EngineTest : public QObject {
         QVERIFY(editor.addFont(QUrl::fromLocalFile(dir.filePath("grey.png"))).isEmpty());
         QVERIFY(editor.state()["error"].toString().contains(".ttf"));
     }
+    void shapes() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        QImage grey(320, 180, QImage::Format_RGB32);
+        grey.fill(QColor(128, 128, 128));
+        QVERIFY(grey.save(dir.filePath("grey.png")));
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("grey.png"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        editor.seek(0);
+        editor.addGraphic("arrow");
+        const auto arrow = editor.state()["selectedId"].toString();
+        QCOMPARE(editor.state()["selected"].toMap()["graphic"].toString(), QString("arrow"));
+        // The preview frame fits the shape.
+        const auto bounds = editor.clipBounds(arrow);
+        QVERIFY2(std::abs(bounds["width"].toDouble() - 0.3) < 0.01 &&
+                     std::abs(bounds["height"].toDouble() - 0.12) < 0.01,
+                 qPrintable(QString("%1 %2").arg(bounds["width"].toDouble()).arg(bounds["height"].toDouble())));
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&]() {
+            RenderOptions options;
+            options.audio = false;
+            options.from = 5;
+            options.to = 6;
+            const auto plan = compileRender(editor.project(), dir.filePath("work"), 320, 180, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return out.convertToFormat(QImage::Format_RGB32);
+        };
+        auto red = [](const QImage &i, int x, int y) {
+            const QColor c(i.pixel(x, y));
+            return c.red() > 200 && c.green() < 130 && c.blue() < 130;
+        };
+        auto image = still();
+        QVERIFY(red(image, 160, 90));   // shaft
+        QVERIFY(red(image, 200, 90));   // head
+        QVERIFY(!red(image, 160, 80));  // above the shaft, beside the head: background
+        QVERIFY(!red(image, 160, 120)); // below the arrow
+        // Rotated a quarter turn, it points down.
+        editor.setClip("rotation", 90);
+        image = still();
+        QVERIFY(red(image, 160, 120));
+        QVERIFY(!red(image, 200, 90));
+        editor.undo();
+        // An outline circle leaves its centre clear.
+        editor.setClip("graphic", "ellipse");
+        editor.setClipValues({{"fillColor", "#00000000"}, {"strokeColor", "#ff5a5f"},
+                              {"stroke", 0.02}, {"graphicWidth", 0.4}, {"graphicHeight", 0.6}});
+        image = still();
+        QVERIFY(!red(image, 160, 90));
+        QVERIFY(red(image, 160, 90 - 54)); // top of the ring: 0.6 × 180 / 2
+        // A speech bubble shows its text inside on a white body.
+        editor.remove(false);
+        editor.addGraphic("bubble");
+        const auto bubble = editor.project().clip(editor.state()["selectedId"].toString());
+        QCOMPARE(bubble->text, QString("Hello!"));
+        image = still();
+        int dark = 0, bright = 0;
+        for (int x = 120; x < 200; ++x) {
+            const int g = qGray(image.pixel(x, 85));
+            dark += g < 60;
+            bright += g > 240;
+        }
+        QVERIFY2(dark > 3 && bright > 20, qPrintable(QString("%1 %2").arg(dark).arg(bright)));
+        // Shapes are not captions, and the project validates them.
+        QVERIFY(!editor.exportSrt(QUrl::fromLocalFile(dir.filePath("none.srt"))));
+        auto json = editor.project().json();
+        QCOMPARE(Project::fromJson(json, {}).clips.back().graphic, QString("bubble"));
+        auto clips = json["clips"].toArray();
+        auto o = clips.last().toObject();
+        o["graphic"] = "star";
+        clips[clips.size() - 1] = o;
+        json["clips"] = clips;
+        QVERIFY_EXCEPTION_THROWN(Project::fromJson(json, {}), std::runtime_error);
+        editor.addGraphic("hexagon");
+        QVERIFY(editor.state()["error"].toString().contains("shape"));
+    }
     void smoothSlowMotion() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
