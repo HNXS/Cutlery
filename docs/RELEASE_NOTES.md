@@ -4,6 +4,7 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Sound effects:** mouse click, double click, keyboard typing and swooshes made by Cutlery, plus recorded CC0 clicks, typing and whooshes; listen, add at the playhead, or a whoosh on every transition (loudest at the cut).
 - **Effects:** camera shake, glitch, VHS and old film with a strength slider; motion blur; stabilizing for shaky hand-held footage.
 - **Reverb and echo** per clip in the sound tools.
 - **Beat markers:** "Mark the beats" finds the beats of a music clip and puts a marker on every beat, every 2nd or every 4th; clips snap to markers.

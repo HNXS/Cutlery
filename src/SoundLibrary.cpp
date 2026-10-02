@@ -84,12 +84,17 @@ QVector<Sound> soundLibrary(const QString &generatedDir, const QString &packDir)
         s.licence = "Made by Cutlery: free to use without credit";
         s.source = "Synthesised by Cutlery";
         s.path = QDir(generatedDir).filePath(QString("cutlery-%1-%2.wav").arg(b.id, version));
+        // Swooshes are loudest about a third of the way in.
+        s.peak = QString(b.id).startsWith("swoosh") ? 0.32 * b.seconds : 0;
         sounds << s;
     }
     QFile manifest(QDir(packDir).filePath("sounds.json"));
     if (packDir.isEmpty() || !manifest.open(QIODevice::ReadOnly) || manifest.size() > 1024 * 1024)
         return sounds;
-    const auto entries = QJsonDocument::fromJson(manifest.readAll()).array();
+    auto json = manifest.readAll();
+    if (json.startsWith("\xEF\xBB\xBF")) // a byte order mark from PowerShell
+        json.remove(0, 3);
+    const auto entries = QJsonDocument::fromJson(json).array();
     for (const auto &v : entries) {
         const auto o = v.toObject();
         Sound s;
@@ -97,11 +102,13 @@ QVector<Sound> soundLibrary(const QString &generatedDir, const QString &packDir)
         s.name = o["name"].toString();
         s.category = o["category"].toString("Recorded");
         s.seconds = o["seconds"].toDouble();
+        s.peak = std::clamp(o["peak"].toDouble(), 0., s.seconds);
         s.licence = o["licence"].toString();
         s.source = o["source"].toString();
         // Only plain file names inside the pack folder.
         const auto file = o["file"].toString();
         if (o["id"].toString().isEmpty() || s.name.isEmpty() || s.licence.isEmpty() ||
+            !(s.seconds > 0 && s.seconds < 3600) ||
             file.isEmpty() || file.contains('/') || file.contains('\\') || file.startsWith('.'))
             continue;
         s.path = QDir(packDir).filePath(file);

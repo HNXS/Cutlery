@@ -7,11 +7,12 @@ namespace cutlery {
 // use, and recorded sounds from an optional pack folder described by its sounds.json.
 struct Sound {
     QString id, name, category, path, licence, source;
-    double seconds = 0;
+    // Length, and the loudest moment (whooshes are centred on a cut there), in seconds.
+    double seconds = 0, peak = 0;
     bool builtIn = false;
 };
 // The built-in sounds (paths in `generatedDir`, which may not exist yet) followed by the pack's.
-// A pack entry is {"id", "file", "name", "category", "seconds", "licence", "source"}; entries
+// A pack entry is {"id", "file", "name", "category", "seconds", "peak", "licence", "source"}; entries
 // whose file is missing are skipped, and a missing or broken sounds.json gives no pack sounds.
 QVector<Sound> soundLibrary(const QString &generatedDir, const QString &packDir);
 // Interleaved stereo samples of a built-in sound at `rate` Hz, peaking at about -3 dBFS; empty

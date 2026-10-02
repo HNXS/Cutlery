@@ -1,0 +1,23 @@
+{
+  "comment": "Recorded sound effects shipped with the portable build. Get-Sounds.ps1 downloads each file from its pinned commit, checks the SHA-256 and writes sounds/sounds.json for Cutlery. seconds and peak (the loudest moment, used to centre a whoosh on a cut) were measured with FFmpeg.",
+  "sources": {
+    "kenney": {
+      "base": "https://raw.githubusercontent.com/Calinou/kenney-interface-sounds/4596a49eaf5a533948d49a47467f606bcdea70ff/addons/kenney_interface_sounds/",
+      "licence": "CC0 1.0 (public domain)",
+      "source": "Kenney, Interface Sounds 1.0 (kenney.nl), via github.com/Calinou/kenney-interface-sounds"
+    },
+    "elements": {
+      "base": "https://raw.githubusercontent.com/crafter-station/elements/cb4d5283443a3b565893821257c886a0b6b6553b/public/sfx/",
+      "licence": "CC0 1.0 (public domain), as stated by the collection",
+      "source": "Elements SFX by Crafter Station (tryelements.dev), github.com/crafter-station/elements"
+    }
+  },
+  "sounds": [
+    {"id": "kenney-switch", "from": "kenney", "file": "switch_001.wav", "sha256": "56a1dd5278d06b4c47c69d7664482bcb3feeac3027fdd8cb6d0883fda7738eb2", "name": "Switch click (Kenney)", "category": "Clicks", "seconds": 0.62, "peak": 0.11},
+    {"id": "elements-click", "from": "elements", "file": "click.mp3", "sha256": "90b3a3642f47fa069c774b24e0a586208c38ff6ddeefa97a61042453b10fb5f0", "name": "Mouse click (recorded)", "category": "Clicks", "seconds": 1.032, "peak": 0.055},
+    {"id": "elements-keyboard", "from": "elements", "file": "keyboard.mp3", "sha256": "50499e20c5cde940ecba6371eb05ce075b7534a4160a0e37f063b443cc7d920d", "name": "Keyboard typing (recorded, 8 s)", "category": "Keyboard", "seconds": 8.046, "peak": 0},
+    {"id": "elements-whoosh", "from": "elements", "file": "whoosh.mp3", "sha256": "c2efd9d902a59bf9ec5019035d7deadd17762136896b6e3cb6dd99ea50997a30", "name": "Whoosh (recorded)", "category": "Transitions", "seconds": 0.575, "peak": 0.165},
+    {"id": "elements-whoosh-full", "from": "elements", "file": "whoosh-alt1.mp3", "sha256": "ac901b8379be71eef102b7c83fdaddbb91accf75d09098188b6e2fc6717b4966", "name": "Whoosh, fuller (recorded)", "category": "Transitions", "seconds": 1.104, "peak": 0.38},
+    {"id": "elements-whoosh-long", "from": "elements", "file": "whoosh-alt2.mp3", "sha256": "2de86b6715399806a7a9a5a0d5ad1833af068777a917b7043204b2a532708742", "name": "Whoosh, long (recorded)", "category": "Transitions", "seconds": 1.56, "peak": 0.58}
+  ]
+}

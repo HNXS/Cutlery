@@ -2522,7 +2522,7 @@
     "acceptance": "Per-asset license shown; no CapCut assets extracted",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Partial",
-    "alphaNotes": "User audio file import only."
+    "alphaNotes": "Sound effects library (\"♪ Sound effects…\" in the media library): Cutlery's own synthesised sounds (mouse click, double click, keyboard typing of 2, 5 and 10 s, two swooshes; deterministic, written as WAV on first use, free to use) and, in the portable build, six recorded CC0 sounds (Kenney switch click; Elements mouse click, 8 s keyboard typing and three whooshes) pinned by hash. Listen, add at the playhead on a free track, or put a whoosh on every transition with its loudest moment at the cut. Licence and source are shown per sound. User audio files import as before. No stock music, search or online catalogue."
   },
   {
     "id": "F102",

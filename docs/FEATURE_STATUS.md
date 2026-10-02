@@ -104,7 +104,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F098 | Stickers, icons and overlays | Partial | Imported images as overlays only. |
 | F099 | PNG, SVG, GIF and image-sequence overlays | Partial | Raster still images only. |
 | F100 | Collage and reusable layout templates | Planned | Not implemented in this alpha. |
-| F101 | Stock music and sound effects import | Partial | User audio file import only. |
+| F101 | Stock music and sound effects import | Partial | Sound effects library ("♪ Sound effects…" in the media library): Cutlery's own synthesised sounds (mouse click, double click, keyboard typing of 2, 5 and 10 s, two swooshes; deterministic, written as WAV on first use, free to use) and, in the portable build, six recorded CC0 sounds (Kenney switch click; Elements mouse click, 8 s keyboard typing and three whooshes) pinned by hash. Listen, add at the playhead on a free track, or put a whoosh on every transition with its loudest moment at the cut. Licence and source are shown per sound. User audio files import as before. No stock music, search or online catalogue. |
 | F102 | Commercial-use rights metadata | Planned | Not implemented in this alpha. |
 | F103 | Exposure, brightness, contrast and saturation | Partial | Brightness/contrast/saturation; no exposure model. |
 | F104 | Temperature, tint, vibrance and tonal controls | Partial | Per clip: temperature (light colour temperature with lightness kept), tint (green–magenta), vibrance, and shadows/highlights through a master curve, each −1..1, plus the existing brightness, contrast and saturation. Not keyframable; no exposure/whites/blacks split or auto white balance. |

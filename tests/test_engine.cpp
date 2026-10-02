@@ -426,6 +426,61 @@ class EngineTest : public QObject {
         QVERIFY(level(mix, 0, cut - 0.05, cut + 0.05) > 20 * std::max(1e-5, level(mix, 0, 0.5, 1)));
         qunsetenv("CUTLERY_SOUNDS_DIR");
     }
+    void recordedSoundPack() {
+        // The pack Get-Sounds.ps1 downloads (CI sets CUTLERY_TEST_SOUNDS to its folder).
+        const auto pack = qEnvironmentVariable("CUTLERY_TEST_SOUNDS");
+        if (pack.isEmpty())
+            QSKIP("Recorded sound pack not available");
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        QVector<Sound> recorded;
+        for (const auto &s : soundLibrary(dir.path(), pack))
+            if (!s.builtIn)
+                recorded << s;
+        QFile manifest(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/tools/sound-pack.json");
+        QVERIFY(manifest.open(QIODevice::ReadOnly));
+        QCOMPARE(recorded.size(), QJsonDocument::fromJson(manifest.readAll())["sounds"].toArray().size());
+        for (const auto &s : recorded) {
+            QVERIFY2(s.licence.startsWith("CC0") && !s.source.isEmpty(), qPrintable(s.id));
+            // Decodes at the stated length, loudest at the stated moment (keyboard: anywhere).
+            const auto pcm = run(ffmpeg, {"-v", "error", "-i", s.path, "-ac", "1", "-ar", "8000", "-f", "f32le", "pipe:1"});
+            const auto n = pcm.size() / 4;
+            QVERIFY2(std::abs(n / 8000. - s.seconds) < 0.05, qPrintable(s.id));
+            const auto *x = reinterpret_cast<const float *>(pcm.constData());
+            double best = 0, at = 0;
+            for (qsizetype i = 0; i + 80 <= n; i += 40) {
+                double e = 0;
+                for (int k = 0; k < 80; ++k)
+                    e += x[i + k] * x[i + k];
+                if (e > best) {
+                    best = e;
+                    at = (i + 40) / 8000.;
+                }
+            }
+            QVERIFY2(best > 0.01, qPrintable(s.id));
+            if (s.category != "Keyboard")
+                QVERIFY2(std::abs(at - s.peak) < 0.03, qPrintable(QString("%1 %2").arg(s.id).arg(at)));
+        }
+        // A recorded whoosh at a transition, loudest at the cut.
+        qputenv("CUTLERY_SOUNDS_DIR", pack.toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.addTitle();
+        editor.addTitle();
+        auto clips = editor.project().clips;
+        QCOMPARE(clips.size(), size_t(2));
+        editor.select(clips[1].id);
+        editor.setClip("start", clips[0].start + clips[0].duration);
+        editor.setClip("track", clips[0].track);
+        editor.setClip("transition", "fade");
+        editor.addSoundAtTransitions("pack:elements-whoosh");
+        QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+        const auto cut = editor.project().clip(clips[1].id)->start;
+        QCOMPARE(editor.project().clips.back().start, cut - qRound64(0.165 * 30));
+        qunsetenv("CUTLERY_SOUNDS_DIR");
+    }
     void remoteReferencesRejected() {
         QTemporaryDir dir;
         const auto path = dir.filePath("remote.m3u8");

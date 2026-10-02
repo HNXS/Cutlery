@@ -1434,7 +1434,7 @@ QVariantList Editor::sounds() const {
     for (const auto &s : soundList())
         list << QVariantMap{{"id", s.id},           {"name", s.name},       {"category", s.category},
                             {"seconds", s.seconds}, {"licence", s.licence}, {"source", s.source},
-                            {"builtIn", s.builtIn}};
+                            {"builtIn", s.builtIn}, {"peak", s.peak}};
     return list;
 }
 QUrl Editor::soundFile(const QString &id) {
@@ -1511,8 +1511,8 @@ void Editor::addSoundAtTransitions(const QString &id) {
             throw std::runtime_error("No such sound");
         ensureSoundFile(*it);
         const double fps = double(m_project.fpsN) / m_project.fpsD;
-        // Swooshes are loudest about a third of the way in; other sounds start at the cut.
-        const auto lead = it->id.startsWith("swoosh") ? qRound64(0.32 * it->seconds * fps) : 0;
+        // Loudest at the cut.
+        const auto lead = qRound64(it->peak * fps);
         int added = 0;
         mutate([&](Project &p) {
             QVector<qint64> cuts;

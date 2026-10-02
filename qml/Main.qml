@@ -2684,18 +2684,6 @@ ApplicationWindow {
         }
         footer: DialogButtonBox {
             Button {
-                objectName: "swooshTransitions"
-                text: "Swoosh at every transition"
-                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
-                onClicked: {
-                    editor.addSoundAtTransitions("swoosh");
-                    if (!win.s.error)
-                        soundDialog.close();
-                }
-                ToolTip.visible: hovered
-                ToolTip.text: "Adds the swoosh at each transition between two clips, loudest at the cut, e.g. where the full-screen video changes to the presenter layout"
-            }
-            Button {
                 text: "Close"
                 DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
                 onClicked: soundDialog.close()
@@ -2717,6 +2705,7 @@ ApplicationWindow {
             delegate: RowLayout {
                 id: soundRow
                 required property string soundId
+                required property string category
                 required property string name
                 required property double seconds
                 required property string licence
@@ -2765,6 +2754,21 @@ ApplicationWindow {
                         ToolTip.text: text
                         HoverHandler { id: licenceHover }
                     }
+                }
+                // Whooshes go onto every transition at once, e.g. where the full-screen video
+                // changes to the presenter layout.
+                Action {
+                    objectName: "transitionSound-" + soundRow.soundId
+                    visible: soundRow.category === "Transitions"
+                    text: "⇄ All"
+                    padding: 8
+                    onClicked: {
+                        editor.addSoundAtTransitions(soundRow.soundId);
+                        if (!win.s.error)
+                            soundDialog.close();
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Adds this sound at every transition between two clips, loudest at the cut"
                 }
                 Action {
                     objectName: "addSound-" + soundRow.soundId

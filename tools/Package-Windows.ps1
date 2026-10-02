@@ -8,6 +8,8 @@ param(
     [string]$Models = '',
     # Optional whisper.cpp build folder from Get-Whisper.ps1.
     [string]$Whisper = '',
+    # Optional recorded sound effects from Get-Sounds.ps1.
+    [string]$Sounds = '',
     [string]$AiPackDir = "$PSScriptRoot/../dist/Cutlery-0.5.0-AI-pack"
 )
 $ErrorActionPreference = 'Stop'
@@ -25,6 +27,10 @@ Copy-Item $ffManifest "$OutputDir/codecs/manifest.json"
 Get-ChildItem $ffRoot | Where-Object { $_.Name -ne 'bin' } | Copy-Item -Destination "$OutputDir/licenses/FFmpeg-upstream" -Recurse -Force
 Copy-Item "$root/docs/THIRD_PARTY.md","$root/docs/PORTABLE.md","$root/docs/SHORTCUTS.md","$root/docs/TIMELINE.md","$root/docs/ROADMAP.md","$root/docs/AI.md","$root/docs/RELEASE_NOTES.md" "$OutputDir/docs"
 Copy-Item "$root/README.md" $OutputDir
+if ($Sounds) {
+    New-Item -ItemType Directory -Force "$OutputDir/sounds" | Out-Null
+    Copy-Item "$Sounds/*" "$OutputDir/sounds"
+}
 if ($OnnxRuntime) {
     # The worker runs in its own process; onnxruntime.dll and DirectML.dll sit next to it so the
     # older copies Windows ships in System32 are never picked up.
