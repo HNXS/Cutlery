@@ -60,6 +60,25 @@ static std::pair<double, double> propertyRange(const QString &p) {
         return {0, 1};
     return {0, 4}; // volume
 }
+namespace {
+// Colour and look values stored only when not 0.
+const QVector<QPair<QString, double Clip::*>> &lookFields() {
+    static const QVector<QPair<QString, double Clip::*>> fields{
+        {"temperature", &Clip::temperature}, {"tint", &Clip::tint},
+        {"vibrance", &Clip::vibrance},       {"shadows", &Clip::shadows},
+        {"highlights", &Clip::highlights},   {"sharpen", &Clip::sharpen},
+        {"glow", &Clip::glow},               {"vignette", &Clip::vignette},
+        {"grain", &Clip::grain}};
+    return fields;
+}
+} // namespace
+const QStringList &Clip::lookProperties() {
+    static const QStringList names{"brightness", "contrast",   "saturation", "blur",
+                                   "temperature", "tint",      "vibrance",   "shadows",
+                                   "highlights", "sharpen",    "glow",       "vignette",
+                                   "grain",      "lut",        "lutStrength"};
+    return names;
+}
 double Clip::staticValue(const QString &p) const {
     if (p == "scale")
         return scale;
@@ -116,9 +135,15 @@ void Clip::scaleKeyframes(double factor) {
         list = scaled;
     }
 }
+const QStringList &graphicKinds() {
+    static const QStringList kinds{"rectangle", "ellipse", "arrow", "line", "bubble"};
+    return kinds;
+}
 QSizeF Project::pictureSize(const Clip &c, double boxWidth, double boxHeight) const {
     if (!c.effect.isEmpty())
         return {boxWidth * c.effectWidth, boxHeight * c.effectHeight};
+    if (!c.graphic.isEmpty())
+        return {boxWidth * c.graphicWidth, boxHeight * c.graphicHeight};
     const auto *a = asset(c.assetId);
     double aspect = a && a->width > 0 && a->height > 0 ? double(a->width) / a->height
                                                        : double(width) / height;
@@ -210,6 +235,27 @@ QJsonObject Project::json(const QString &base) const {
                       {"fontFamily", c.fontFamily},
                       {"textColor", c.textColor},
                       {"fontSize", c.fontSize}};
+        // Text style, stored when it differs from the default.
+        if (!c.bold)
+            o["bold"] = false;
+        if (c.italic)
+            o["italic"] = true;
+        if (c.align != "center")
+            o["align"] = c.align;
+        if (c.letterSpacing != 0)
+            o["letterSpacing"] = c.letterSpacing;
+        if (c.lineSpacing != 1)
+            o["lineSpacing"] = c.lineSpacing;
+        if (c.outline > 0) {
+            o["outline"] = c.outline;
+            o["outlineColor"] = c.outlineColor;
+        }
+        if (c.textShadow != 1)
+            o["textShadow"] = c.textShadow;
+        if (c.background > 0) {
+            o["background"] = c.background;
+            o["backgroundColor"] = c.backgroundColor;
+        }
         if (!c.titleStyle.isEmpty()) {
             o["titleStyle"] = c.titleStyle;
             o["accentColor"] = c.accentColor;
@@ -222,6 +268,23 @@ QJsonObject Project::json(const QString &base) const {
         }
         if (c.blur > 0)
             o["blur"] = c.blur;
+        for (const auto &[k, field] : lookFields())
+            if (c.*field != 0)
+                o[k] = c.*field;
+        if (!c.slowMotion.isEmpty())
+            o["slowMotion"] = c.slowMotion;
+        if (!c.graphic.isEmpty()) {
+            o["graphic"] = c.graphic;
+            o["fillColor"] = c.fillColor;
+            o["strokeColor"] = c.strokeColor;
+            o["stroke"] = c.stroke;
+            o["graphicWidth"] = c.graphicWidth;
+            o["graphicHeight"] = c.graphicHeight;
+        }
+        if (!c.lut.isEmpty()) {
+            o["lut"] = base.isEmpty() ? c.lut : QDir(base).relativeFilePath(c.lut);
+            o["lutStrength"] = c.lutStrength;
+        }
         if (!c.captionStyle.isEmpty() || !c.wordStarts.isEmpty()) {
             o["captionStyle"] = c.captionStyle;
             o["highlightColor"] = c.highlightColor;
@@ -269,13 +332,13 @@ QJsonObject Project::json(const QString &base) const {
         o["transitionFrames"] = QString::number(c.transitionFrames);
         cc.append(o);
     }
-    return {{"format", "cutlery"}, {"schemaVersion", 10}, {"name", name},       {"width", width},
+    return {{"format", "cutlery"}, {"schemaVersion", 11}, {"name", name},       {"width", width},
             {"height", height},    {"fpsN", fpsN},       {"fpsD", fpsD},       {"tracks", tracks},
             {"assets", aa},        {"clips", cc},        {"trackSettings", tt}};
 }
 Project Project::fromJson(const QJsonObject &o, const QString &base) {
     require(o["format"] == "cutlery" &&
-                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 10),
+                (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 11),
             "Unsupported project format/version. Original left unchanged.");
     require(o["assets"].isArray() && o["clips"].isArray(), "Missing project collections");
     Project p;
@@ -346,6 +409,16 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.fontFamily = j["fontFamily"].toString("Arial");
         c.textColor = j["textColor"].toString("#ffffff");
         c.fontSize = j["fontSize"].toInt(72);
+        c.bold = j["bold"].toBool(true);
+        c.italic = j["italic"].toBool(false);
+        c.align = j["align"].toString("center");
+        c.letterSpacing = j["letterSpacing"].toDouble(0);
+        c.lineSpacing = j["lineSpacing"].toDouble(1);
+        c.outline = j["outline"].toDouble(0);
+        c.outlineColor = j["outlineColor"].toString("#000000");
+        c.textShadow = j["textShadow"].toDouble(1);
+        c.background = j["background"].toDouble(0);
+        c.backgroundColor = j["backgroundColor"].toString("#000000");
         c.titleStyle = j["titleStyle"].toString();
         c.accentColor = j["accentColor"].toString("#64d8bc");
         c.effect = j["effect"].toString();
@@ -353,6 +426,20 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.effectWidth = j["effectWidth"].toDouble(0.3);
         c.effectHeight = j["effectHeight"].toDouble(0.2);
         c.blur = j["blur"].toDouble(0);
+        for (const auto &[k, field] : lookFields())
+            c.*field = j[k].toDouble(0);
+        c.slowMotion = j["slowMotion"].toString();
+        c.graphic = j["graphic"].toString();
+        c.fillColor = j["fillColor"].toString("#ffd23f");
+        c.strokeColor = j["strokeColor"].toString("#000000");
+        c.stroke = j["stroke"].toDouble(0);
+        c.graphicWidth = j["graphicWidth"].toDouble(0.3);
+        c.graphicHeight = j["graphicHeight"].toDouble(0.2);
+        c.lut = j["lut"].toString();
+        if (!c.lut.isEmpty())
+            c.lut = QDir::cleanPath(QDir::isRelativePath(c.lut) ? QDir(base).absoluteFilePath(c.lut)
+                                                                : c.lut);
+        c.lutStrength = j["lutStrength"].toDouble(1);
         c.captionStyle = j["captionStyle"].toString();
         c.highlightColor = j["highlightColor"].toString("#ffd23f");
         for (const auto &w : j["wordStarts"].toArray())
@@ -477,6 +564,18 @@ void Project::validate() const {
         require(bounded(c.fadeIn, 0, 3600) && bounded(c.fadeOut, 0, 3600) && c.fontSize >= 8 &&
                     c.fontSize <= 500 && c.text.size() <= 10000 && QColor(c.textColor).isValid(),
                 "Invalid text/fade value");
+        require(QStringList{"left", "center", "right"}.contains(c.align) &&
+                    bounded(c.letterSpacing, -0.1, 0.5) && bounded(c.lineSpacing, 0.7, 3) &&
+                    bounded(c.outline, 0, 0.25) && bounded(c.textShadow, 0, 1) &&
+                    bounded(c.background, 0, 1) && QColor(c.outlineColor).isValid() &&
+                    QColor(c.backgroundColor).isValid() && c.fontFamily.size() <= 200,
+                "Invalid text style");
+        require((c.graphic.isEmpty() ||
+                 (graphicKinds().contains(c.graphic) && c.assetId.isEmpty() && c.effect.isEmpty())) &&
+                    QColor(c.fillColor).isValid() && QColor(c.strokeColor).isValid() &&
+                    bounded(c.stroke, 0, 0.05) && bounded(c.graphicWidth, 0.01, 1) &&
+                    bounded(c.graphicHeight, 0.005, 1),
+                "Invalid shape");
         require((c.captionStyle.isEmpty() || c.captionStyle == "karaoke" ||
                  c.captionStyle == "word") &&
                     QColor(c.highlightColor).isValid() && c.wordStarts.size() <= 2000 &&
@@ -487,6 +586,13 @@ void Project::validate() const {
                     bounded(c.effectStrength, 0, 1) && bounded(c.effectWidth, 0.02, 1) &&
                     bounded(c.effectHeight, 0.02, 1) && bounded(c.blur, 0, 1),
                 "Invalid blur or mosaic setting");
+        require(bounded(c.temperature, -1, 1) && bounded(c.tint, -1, 1) &&
+                    bounded(c.vibrance, -1, 1) && bounded(c.shadows, -1, 1) &&
+                    bounded(c.highlights, -1, 1) && bounded(c.sharpen, 0, 1) &&
+                    bounded(c.glow, 0, 1) && bounded(c.vignette, 0, 1) && bounded(c.grain, 0, 1) &&
+                    bounded(c.lutStrength, 0, 1) && c.lut.size() <= 4096 &&
+                    QStringList{"", "blend", "flow"}.contains(c.slowMotion),
+                "Invalid colour or look setting");
         require(QStringList{"", "lowerThird", "lowerThirdLine", "titleCard"}.contains(
                     c.titleStyle) &&
                     QColor(c.accentColor).isValid(),

@@ -54,6 +54,11 @@ ApplicationWindow {
         editor.seek(frame);
         timelinePanel.reveal(s.playhead);
     }
+    // The key combination bound to a command, for tooltips.
+    function shortcut(command) {
+        const b = shortcutSettings.bindings.find(b => b.id === command);
+        return b && b.sequence ? b.sequence : "no shortcut";
+    }
     function shortcutEnabled(command) {
         if ((libraryGesture && libraryGesture.dragging) || timelinePanel.draggingClip)
             return false;
@@ -89,6 +94,12 @@ ApplicationWindow {
             editor.split();
         else if (id === "duplicate" && editable)
             editor.duplicate();
+        else if (id === "copy" && s.selectedId.length > 0)
+            editor.copy();
+        else if (id === "paste" && s.clipboard)
+            editor.paste();
+        else if (id === "pasteAttributes" && editable && s.clipboard)
+            editor.pasteAttributes("all");
         else if (id === "delete" && editable)
             editor.remove(false);
         else if (id === "rippleDelete" && editable)
@@ -717,6 +728,43 @@ ApplicationWindow {
                             ToolTip.visible: hovered
                             ToolTip.text: "Pixelates whatever lower tracks show inside a rectangle, e.g. a face"
                         }
+                        // Shapes for tutorials and explainers.
+                        Action {
+                            objectName: "addShape"
+                            text: "+ Shape ▾"
+                            Layout.fillWidth: true
+                            onClicked: shapeMenu.popup()
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Arrow, circle, speech bubble, box or line"
+                            Menu {
+                                id: shapeMenu
+                                MenuItem {
+                                    objectName: "addGraphic-arrow"
+                                    text: "➜  Arrow"
+                                    onTriggered: editor.addGraphic("arrow")
+                                }
+                                MenuItem {
+                                    objectName: "addGraphic-ellipse"
+                                    text: "◯  Circle"
+                                    onTriggered: editor.addGraphic("ellipse")
+                                }
+                                MenuItem {
+                                    objectName: "addGraphic-bubble"
+                                    text: "🗨  Speech bubble"
+                                    onTriggered: editor.addGraphic("bubble")
+                                }
+                                MenuItem {
+                                    objectName: "addGraphic-rectangle"
+                                    text: "▭  Box"
+                                    onTriggered: editor.addGraphic("rectangle")
+                                }
+                                MenuItem {
+                                    objectName: "addGraphic-line"
+                                    text: "―  Line"
+                                    onTriggered: editor.addGraphic("line")
+                                }
+                            }
+                        }
                     }
                     Caption {
                         text: "LOCAL FILES. YOUR STORY."
@@ -898,6 +946,16 @@ ApplicationWindow {
                             text: "+1"
                             onClicked: win.command("nextFrame")
                         }
+                        Action {
+                            objectName: "voiceOver"
+                            readonly property var voice: win.s.voiceOver || ({})
+                            text: voice.recording ? "■ Stop " + Number(voice.seconds || 0).toFixed(0) + " s" : "● Voice-over"
+                            palette.buttonText: voice.recording ? "#ff6b6b" : "#e7edf2"
+                            enabled: voice.recording || (voice.available === true && !win.s.busy)
+                            onClicked: voice.recording ? editor.stopVoiceOver() : editor.startVoiceOver()
+                            ToolTip.visible: hovered
+                            ToolTip.text: voice.available === true ? "Record narration from the microphone while the timeline plays from the playhead. Use headphones so the recording does not pick up the timeline." : "No microphone found"
+                        }
                         Label {
                             text: win.clock(editor.playbackFrame) + " / " + win.clock(win.s.duration)
                             font.family: "Consolas"
@@ -1021,6 +1079,25 @@ ApplicationWindow {
                                     }
                                 }
                             }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                visible: win.selection.video === true && (win.selection.speed ?? 1) < 1
+                                Label {
+                                    text: "Slow motion"
+                                    color: win.muted
+                                    Layout.fillWidth: true
+                                }
+                                ComboBox {
+                                    objectName: "slowMotion"
+                                    Layout.preferredWidth: 170
+                                    readonly property var modes: ["", "blend", "flow"]
+                                    model: ["Repeat frames", "Blend frames", "Optical flow (slow)"]
+                                    currentIndex: Math.max(0, modes.indexOf(win.selection.slowMotion || ""))
+                                    onActivated: index => editor.setClip("slowMotion", modes[index])
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "How in-between frames are made when the clip plays slower than it was filmed. Optical flow is smoothest but renders slowly."
+                                }
+                            }
                             ComboBox {
                                 Layout.fillWidth: true
                                 model: editor.trackList
@@ -1137,11 +1214,94 @@ ApplicationWindow {
                                 }
                                 Rule {}
                             }
+                            // Shape: kind, colours, outline and size. Move, resize and rotate it in
+                            // the preview like any overlay.
+                            ColumnLayout {
+                                objectName: "graphicSection"
+                                Layout.fillWidth: true
+                                visible: (win.selection.graphic || "") !== ""
+                                spacing: 6
+                                Caption { text: "SHAPE" }
+                                ComboBox {
+                                    objectName: "graphicKind"
+                                    Layout.fillWidth: true
+                                    readonly property var kinds: ["arrow", "ellipse", "bubble", "rectangle", "line"]
+                                    model: ["Arrow", "Circle / ellipse", "Speech bubble", "Box", "Line"]
+                                    currentIndex: Math.max(0, kinds.indexOf(win.selection.graphic || "arrow"))
+                                    onActivated: index => editor.setClip("graphic", kinds[index])
+                                }
+                                Repeater {
+                                    model: [
+                                        { key: "fillColor", name: "Fill", colors: ["#ffd23f", "#ff5a5f", "#64d8bc", "#5fa8ff", "#ffffff", "#14181d", "#00000000"] },
+                                        { key: "strokeColor", name: "Outline", colors: ["#000000", "#ffffff", "#ff5a5f", "#ffd23f"] }
+                                    ]
+                                    RowLayout {
+                                        id: graphicColours
+                                        required property var modelData
+                                        Label {
+                                            text: graphicColours.modelData.name
+                                            color: win.muted
+                                            Layout.preferredWidth: 60
+                                        }
+                                        Repeater {
+                                            model: graphicColours.modelData.colors
+                                            Rectangle {
+                                                required property string modelData
+                                                width: 18
+                                                height: 18
+                                                radius: 9
+                                                color: modelData
+                                                border.width: win.selection[graphicColours.modelData.key] === modelData ? 3 : 1
+                                                border.color: win.selection[graphicColours.modelData.key] === modelData ? win.mint : "#6481a0"
+                                                Label {
+                                                    anchors.centerIn: parent
+                                                    visible: parent.modelData === "#00000000"
+                                                    text: "∅"
+                                                    font.pixelSize: 11
+                                                }
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    onClicked: editor.setClip(graphicColours.modelData.key, parent.modelData)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Repeater {
+                                    model: [
+                                        { key: "stroke", name: "Outline width", lo: 0, hi: 0.05 },
+                                        { key: "graphicWidth", name: "Width", lo: 0.01, hi: 1 },
+                                        { key: "graphicHeight", name: "Height", lo: 0.005, hi: 1 }
+                                    ]
+                                    RowLayout {
+                                        id: graphicRow
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        Label {
+                                            text: graphicRow.modelData.name
+                                            color: win.muted
+                                            Layout.preferredWidth: 95
+                                        }
+                                        Slider {
+                                            objectName: "graphic-" + graphicRow.modelData.key
+                                            Layout.fillWidth: true
+                                            from: graphicRow.modelData.lo
+                                            to: graphicRow.modelData.hi
+                                            value: win.selection[graphicRow.modelData.key] ?? 0
+                                            onPressedChanged: if (!pressed)
+                                                editor.setClip(graphicRow.modelData.key, value)
+                                            onMoved: if (!pressed)
+                                                editor.setClip(graphicRow.modelData.key, value)
+                                        }
+                                    }
+                                }
+                                Rule {}
+                            }
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                visible: win.selection.assetId === "" && (win.selection.effect || "") === ""
+                                visible: win.selection.assetId === "" && (win.selection.effect || "") === "" && ["arrow", "line"].indexOf(win.selection.graphic || "") < 0
                                 Caption {
-                                    text: "TITLE / CAPTION"
+                                    text: (win.selection.graphic || "") !== "" ? "TEXT IN SHAPE" : "TITLE / CAPTION"
                                 }
                                 TextArea {
                                     id: titleText
@@ -1289,6 +1449,130 @@ ApplicationWindow {
                                     text: win.selection.textColor || "#ffffff"
                                     placeholderText: "Text colour (#rrggbb)"
                                     onEditingFinished: editor.setClip("textColor", text)
+                                }
+                                // Typography: font, weight, alignment, spacing, outline, shadow, box.
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    ComboBox {
+                                        id: fontBox
+                                        objectName: "fontFamily"
+                                        Layout.fillWidth: true
+                                        editable: true
+                                        property var families: editor.fontFamilies()
+                                        model: families
+                                        currentIndex: families.indexOf(win.selection.fontFamily || "Arial")
+                                        onActivated: index => editor.setClip("fontFamily", families[index])
+                                        onAccepted: {
+                                            const i = families.findIndex(f => f.toLowerCase() === editText.toLowerCase());
+                                            if (i >= 0)
+                                                editor.setClip("fontFamily", families[i]);
+                                        }
+                                        delegate: ItemDelegate {
+                                            required property string modelData
+                                            required property int index
+                                            width: ListView.view ? ListView.view.width : 200
+                                            text: modelData
+                                            font.family: modelData
+                                            highlighted: fontBox.highlightedIndex === index
+                                        }
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Type to find a font. Fonts you add are kept in Cutlery's data folder."
+                                    }
+                                    Action {
+                                        objectName: "addFont"
+                                        text: "+ Font"
+                                        padding: 6
+                                        onClicked: fontFileDialog.open()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Add a .ttf or .otf font file"
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 4
+                                    Repeater {
+                                        model: [
+                                            { key: "bold", label: "B" },
+                                            { key: "italic", label: "I" }
+                                        ]
+                                        Button {
+                                            required property var modelData
+                                            objectName: "text-" + modelData.key
+                                            text: modelData.label
+                                            checkable: true
+                                            checked: win.selection[modelData.key] === true
+                                            font.bold: modelData.key === "bold"
+                                            font.italic: modelData.key === "italic"
+                                            implicitWidth: 34
+                                            onClicked: editor.setClip(modelData.key, checked)
+                                        }
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Repeater {
+                                        model: [
+                                            { key: "left", label: "⯇ Left" },
+                                            { key: "center", label: "Centre" },
+                                            { key: "right", label: "Right ⯈" }
+                                        ]
+                                        Button {
+                                            required property var modelData
+                                            objectName: "align-" + modelData.key
+                                            text: modelData.label
+                                            checkable: true
+                                            checked: (win.selection.align || "center") === modelData.key
+                                            padding: 4
+                                            onClicked: editor.setClip("align", modelData.key)
+                                        }
+                                    }
+                                }
+                                Repeater {
+                                    model: [
+                                        { key: "letterSpacing", name: "Letter spacing", lo: -0.1, hi: 0.5, def: 0 },
+                                        { key: "lineSpacing", name: "Line spacing", lo: 0.7, hi: 3, def: 1 },
+                                        { key: "outline", name: "Outline", lo: 0, hi: 0.25, def: 0 },
+                                        { key: "textShadow", name: "Shadow", lo: 0, hi: 1, def: 1 },
+                                        { key: "background", name: "Background box", lo: 0, hi: 1, def: 0 }
+                                    ]
+                                    RowLayout {
+                                        id: textStyleRow
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        Label {
+                                            text: textStyleRow.modelData.name
+                                            color: win.muted
+                                            Layout.preferredWidth: 95
+                                        }
+                                        Slider {
+                                            objectName: "text-" + textStyleRow.modelData.key
+                                            Layout.fillWidth: true
+                                            from: textStyleRow.modelData.lo
+                                            to: textStyleRow.modelData.hi
+                                            stepSize: .01
+                                            value: win.selection[textStyleRow.modelData.key] ?? textStyleRow.modelData.def
+                                            onPressedChanged: if (!pressed)
+                                                editor.setClip(textStyleRow.modelData.key, value)
+                                            onMoved: if (!pressed)
+                                                editor.setClip(textStyleRow.modelData.key, value)
+                                        }
+                                        // Outline and box colours.
+                                        Repeater {
+                                            model: textStyleRow.modelData.key === "outline" ? ["#000000", "#ffffff", "#ffd23f"] : textStyleRow.modelData.key === "background" ? ["#000000", "#ffffff", "#64d8bc"] : []
+                                            Rectangle {
+                                                required property string modelData
+                                                readonly property string colorKey: textStyleRow.modelData.key === "outline" ? "outlineColor" : "backgroundColor"
+                                                width: 16
+                                                height: 16
+                                                radius: 8
+                                                color: modelData
+                                                border.width: win.selection[colorKey] === modelData ? 3 : 1
+                                                border.color: win.selection[colorKey] === modelData ? win.mint : "#6481a0"
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    onClicked: editor.setClip(parent.colorKey, parent.modelData)
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             // Presenter overlays: corner placement, shape, border, shadow, green screen.
@@ -1475,6 +1759,17 @@ ApplicationWindow {
                                 text: "Remove pauses…"
                                 onClicked: pauseDialog.open()
                             }
+                            Action {
+                                objectName: "splitScenes"
+                                Layout.fillWidth: true
+                                visible: win.selection.video === true && win.selection.reverse !== true
+                                readonly property bool finding: (win.s.scenes || {}).status === "finding"
+                                enabled: win.selection.locked !== true && !finding
+                                text: finding ? "Finding scene changes…" : "Split at scene changes"
+                                onClicked: editor.splitAtScenes(0.5)
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Cuts the clip into its shots, e.g. a long recording or a downloaded video. Undo restores it."
+                            }
                             AiOption {
                                 task: "upscale"
                                 flag: "aiUpscale"
@@ -1650,6 +1945,138 @@ ApplicationWindow {
                                     }
                                 }
                             }
+                            // Colour and look of the clip's picture.
+                            ColumnLayout {
+                                objectName: "lookSection"
+                                visible: win.selection.picture === true
+                                Layout.fillWidth: true
+                                spacing: 6
+                                Rule {}
+                                Caption { text: "COLOUR & LOOK" }
+                                ComboBox {
+                                    id: lookPreset
+                                    objectName: "lookPreset"
+                                    Layout.fillWidth: true
+                                    enabled: win.selection.locked !== true
+                                    readonly property var looks: [
+                                        { label: "Apply a look…", values: null },
+                                        { label: "Natural (reset)", values: {} },
+                                        { label: "Warm", values: { temperature: .35, vibrance: .2 } },
+                                        { label: "Cool", values: { temperature: -.35, vibrance: .1 } },
+                                        { label: "Cinematic", values: { temperature: .1, contrast: 1.15, highlights: -.25, vibrance: .15, vignette: .35 } },
+                                        { label: "Vintage", values: { temperature: .3, saturation: .75, shadows: .35, highlights: -.15, grain: .4, vignette: .4 } },
+                                        { label: "Black & white", values: { saturation: 0, contrast: 1.2, grain: .2 } },
+                                        { label: "Punchy", values: { contrast: 1.15, vibrance: .5, sharpen: .3 } },
+                                        { label: "Dreamy", values: { glow: .5, highlights: .15, contrast: .9, temperature: .1 } }
+                                    ]
+                                    model: looks.map(l => l.label)
+                                    onActivated: index => {
+                                        const look = looks[index].values;
+                                        if (look) {
+                                            // Every look setting at once, in one undo step; the LUT stays.
+                                            const values = { brightness: 0, contrast: 1, saturation: 1, temperature: 0, tint: 0, vibrance: 0, shadows: 0, highlights: 0, sharpen: 0, glow: 0, vignette: 0, grain: 0 };
+                                            for (const k in look)
+                                                values[k] = look[k];
+                                            editor.setClipValues(values);
+                                        }
+                                        currentIndex = 0;
+                                    }
+                                }
+                                Repeater {
+                                    model: [
+                                        { key: "temperature", name: "Temperature", lo: -1, hi: 1, tip: "Warmer (right) or cooler (left) light" },
+                                        { key: "tint", name: "Tint", lo: -1, hi: 1, tip: "Magenta (right) or green (left)" },
+                                        { key: "vibrance", name: "Vibrance", lo: -1, hi: 1, tip: "Saturates muted colours more than strong ones; skin stays natural" },
+                                        { key: "shadows", name: "Shadows", lo: -1, hi: 1, tip: "Lift or deepen the dark parts" },
+                                        { key: "highlights", name: "Highlights", lo: -1, hi: 1, tip: "Recover or brighten the bright parts" },
+                                        { key: "sharpen", name: "Sharpen", lo: 0, hi: 1, tip: "Contrast-adaptive sharpening" },
+                                        { key: "glow", name: "Glow", lo: 0, hi: 1, tip: "A soft glow around bright areas" },
+                                        { key: "vignette", name: "Vignette", lo: 0, hi: 1, tip: "Darker corners draw the eye to the centre" },
+                                        { key: "grain", name: "Film grain", lo: 0, hi: 1, tip: "Moving grain like film" }
+                                    ]
+                                    ColumnLayout {
+                                        id: lookRow
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        spacing: 0
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Label {
+                                                text: lookRow.modelData.name
+                                                color: Number(win.selection[lookRow.modelData.key] || 0) !== 0 ? win.mint : win.muted
+                                                Layout.fillWidth: true
+                                            }
+                                            Label {
+                                                text: Number(win.selection[lookRow.modelData.key] || 0).toFixed(2)
+                                                font.pixelSize: 10
+                                            }
+                                        }
+                                        Slider {
+                                            objectName: "look-" + lookRow.modelData.key
+                                            Layout.fillWidth: true
+                                            from: lookRow.modelData.lo
+                                            to: lookRow.modelData.hi
+                                            stepSize: .01
+                                            value: Number(win.selection[lookRow.modelData.key] || 0)
+                                            enabled: win.selection.locked !== true
+                                            onPressedChanged: if (!pressed)
+                                                editor.setClip(lookRow.modelData.key, value)
+                                            onMoved: if (!pressed)
+                                                editor.setClip(lookRow.modelData.key, value)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: lookRow.modelData.tip + ". Double-click to reset."
+                                            TapHandler {
+                                                acceptedButtons: Qt.LeftButton
+                                                onDoubleTapped: editor.setClip(lookRow.modelData.key, 0)
+                                            }
+                                        }
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label {
+                                        objectName: "lutName"
+                                        Layout.fillWidth: true
+                                        elide: Text.ElideMiddle
+                                        color: win.selection.lutMissing ? "#e5534b" : win.selection.lut ? win.mint : win.muted
+                                        text: !win.selection.lut ? "No LUT" : win.selection.lutMissing ? "LUT missing: " + win.selection.lutName : "LUT: " + win.selection.lutName
+                                    }
+                                    Action {
+                                        objectName: "chooseLut"
+                                        text: win.selection.lut ? "Change…" : "Load LUT…"
+                                        padding: 6
+                                        enabled: win.selection.locked !== true
+                                        onClicked: lutDialog.open()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "A 3D colour lookup table (.cube or .3dl), e.g. a camera log conversion or a film look"
+                                    }
+                                    Action {
+                                        text: "✕"
+                                        padding: 6
+                                        visible: !!win.selection.lut
+                                        onClicked: editor.setClip("lut", "")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Remove the LUT"
+                                    }
+                                }
+                                RowLayout {
+                                    visible: !!win.selection.lut
+                                    Layout.fillWidth: true
+                                    Label { text: "LUT strength"; color: win.muted }
+                                    Slider {
+                                        objectName: "lutStrength"
+                                        Layout.fillWidth: true
+                                        from: 0
+                                        to: 1
+                                        stepSize: .01
+                                        value: win.selection.lutStrength ?? 1
+                                        onPressedChanged: if (!pressed)
+                                            editor.setClip("lutStrength", value)
+                                        onMoved: if (!pressed)
+                                            editor.setClip("lutStrength", value)
+                                    }
+                                }
+                            }
                             RowLayout {
                                 CheckBox {
                                     text: "Reverse"
@@ -1672,6 +2099,35 @@ ApplicationWindow {
                                     text: "Hide"
                                     checked: win.selection.hidden || false
                                     onToggled: editor.setClip("hidden", checked)
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Action {
+                                    objectName: "copyClip"
+                                    text: "Copy"
+                                    padding: 6
+                                    onClicked: editor.copy()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Copy this clip (" + win.shortcut("copy") + "); paste it at the playhead with " + win.shortcut("paste")
+                                }
+                                Action {
+                                    objectName: "pasteLook"
+                                    text: "Paste look"
+                                    padding: 6
+                                    enabled: !!win.s.clipboard && win.selection.locked !== true
+                                    onClicked: editor.pasteAttributes("look")
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Colour, effects and LUT from " + (win.s.clipboard || "the copied clip")
+                                }
+                                Action {
+                                    objectName: "pasteAttributes"
+                                    text: "Paste all"
+                                    padding: 6
+                                    enabled: !!win.s.clipboard && win.selection.locked !== true
+                                    onClicked: editor.pasteAttributes("all")
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Look, position and size, keyframes, shape, keying, volume and fades from " + (win.s.clipboard || "the copied clip") + " (" + win.shortcut("pasteAttributes") + ")"
                                 }
                             }
                             Action {
@@ -1777,6 +2233,24 @@ ApplicationWindow {
         id: relinkDialog
         title: "Choose replacement media"
         onAccepted: editor.relink(win.selection.assetId, selectedFile)
+    }
+    FileDialog {
+        id: fontFileDialog
+        title: "Add a font"
+        nameFilters: ["Fonts (*.ttf *.otf *.ttc)"]
+        onAccepted: {
+            const family = editor.addFont(selectedFile);
+            if (family.length > 0) {
+                fontBox.families = editor.fontFamilies();
+                editor.setClip("fontFamily", family);
+            }
+        }
+    }
+    FileDialog {
+        id: lutDialog
+        title: "Choose a LUT"
+        nameFilters: ["3D LUTs (*.cube *.3dl)", "All files (*)"]
+        onAccepted: editor.setClip("lut", selectedFile)
     }
     FileDialog {
         id: srtOpen
@@ -2021,7 +2495,10 @@ ApplicationWindow {
             { id: "av1", label: "AV1 · MP4 (smallest, modern devices)" },
             { id: "vp9", label: "VP9 · WebM (web)" },
             { id: "prores", label: "ProRes 422 HQ · MOV (editing master, large)" },
-            { id: "mpeg4", label: "MPEG-4 Part 2 · MP4 (legacy, always available)" }
+            { id: "mpeg4", label: "MPEG-4 Part 2 · MP4 (legacy, always available)" },
+            { id: "mp3", label: "Audio only · MP3" },
+            { id: "m4a", label: "Audio only · AAC (M4A)" },
+            { id: "wav", label: "Audio only · WAV (uncompressed)" }
         ]
         readonly property var qualities: [
             { id: "max", label: "Maximum" },
@@ -2108,6 +2585,7 @@ ApplicationWindow {
                 objectName: "exportHeight"
                 Layout.fillWidth: true
                 model: exportSettings.heights.map(h => h === 0 ? "Project (" + win.s.width + " × " + win.s.height + ")" : h === 2160 ? "4K (2160p)" : h + "p")
+                enabled: !exportSettings.preview.audio
                 onActivated: exportSettings.changed()
             }
             Label { text: "Loudness" }
@@ -2149,7 +2627,7 @@ ApplicationWindow {
                 wrapMode: Text.Wrap
                 color: win.muted
                 font.pixelSize: 11
-                text: "Output " + (exportSettings.preview.width || 0) + " × " + (exportSettings.preview.height || 0) + " · ." + (exportSettings.preview.extension || "mp4") + ". Cutlery uses your graphics card's encoder (NVIDIA, AMD or Intel) when available, otherwise Windows' encoder; AV1, VP9 and ProRes also work in software. Higher resolutions re-render each source at that size with sharp Lanczos scaling, so 4K sources stay 4K."
+                text: exportSettings.preview.audio ? "Output: the timeline's sound only, 48 kHz stereo · ." + exportSettings.preview.extension + (exportSettings.preview.extension === "wav" ? " (24-bit at Maximum quality, otherwise 16-bit)" : "") + "." : "Output " + (exportSettings.preview.width || 0) + " × " + (exportSettings.preview.height || 0) + " · ." + (exportSettings.preview.extension || "mp4") + ". Cutlery uses your graphics card's encoder (NVIDIA, AMD or Intel) when available, otherwise Windows' encoder; AV1, VP9 and ProRes also work in software. Higher resolutions re-render each source at that size with sharp Lanczos scaling, so 4K sources stay 4K."
             }
         }
         onAccepted: {

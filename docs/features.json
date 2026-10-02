@@ -721,8 +721,8 @@
     "status": "Planned",
     "acceptance": "Paste animation on a different-duration clip follows declared time policy",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Copy (Ctrl+C) and paste at the playhead (Ctrl+V) within the session and across projects (the media comes along); the copy goes to its own track when free there, otherwise the nearest free track or a new one. Paste look (colour, effects, LUT) or paste all attributes (Ctrl+Alt+V: also transform, keyframes, shape, keying, volume, fades) onto the selected clip, in one undo step. No system-clipboard exchange or multi-clip selection."
   },
   {
     "id": "F030",
@@ -1196,8 +1196,8 @@
     "status": "Planned",
     "acceptance": "Seeded render repeats; glow handles alpha and HDR limits",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Per clip: contrast-adaptive sharpening, glow (screened soft copy), vignette and moving luma film grain, 0..1 each; alpha is preserved for overlays and cutouts."
   },
   {
     "id": "F049",
@@ -1296,8 +1296,8 @@
     "status": "Planned",
     "acceptance": "Blend weights and boundary rules match golden sequence",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "For clips slower than 1×: \"Blend frames\" (FFmpeg framerate, cross-fading neighbouring source frames, without blending across scene cuts) or \"Optical flow\" (minterpolate motion-compensated interpolation, slow to render); a little source around the range is decoded so preview frames match export. Not for reversed clips."
   },
   {
     "id": "F053",
@@ -1596,8 +1596,8 @@
     "status": "Planned",
     "acceptance": "Recorded clap offset measured; device loss finalizes recoverable file",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "\"● Voice-over\" in the transport row records the default microphone to WAV (Qt Multimedia) in the data folder's recordings/ while the timeline plays from the playhead; stopping adds the recording at that frame on the lowest free non-magnetic track (or a new one). No input-device choice, level display during recording, count-in or punch-in; checked on CI only for the no-microphone path."
   },
   {
     "id": "F065",
@@ -1971,8 +1971,8 @@
     "status": "Planned",
     "acceptance": "Copied font pack works on second PC; unavailable font is reported",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Font list of all installed families (each shown in its own font, type to search) and local .ttf/.otf/.ttc files added with \"+ Font\", copied into the data folder so they travel with a portable install and load at start. No favourites; projects store the family name only."
   },
   {
     "id": "F080",
@@ -1996,8 +1996,8 @@
     "status": "Planned",
     "acceptance": "Reopen preserves line breaks and typography on same font bytes",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Size, fixed bold/center/wrap; no typography editor."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Font size, bold, italic, left/centre/right alignment, letter spacing (−0.1..0.5 of the size) and line spacing (0.7..3×) for titles and captions; kerning is the font's own. Title templates keep their fixed layout."
   },
   {
     "id": "F081",
@@ -2022,7 +2022,7 @@
     "acceptance": "Transparent edges and outline width match viewer/export",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Partial",
-    "alphaNotes": "Fixed shadow only."
+    "alphaNotes": "Outline (width and colour), drop shadow strength and a rounded box behind each line (colour and opacity) for titles; karaoke captions get outline and shadow. No text glow; templates keep their own plate."
   },
   {
     "id": "F082",
@@ -2197,7 +2197,7 @@
     "acceptance": "DE/EN test corpus meets documented WER and timing thresholds",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Partial",
-    "alphaNotes": "whisper.cpp v1.9.4 (static AVX2 whisper-cli, built from the pinned commit) with Whisper large-v3-turbo q5_0 and Silero VAD, via the cutlery-ai transcribe task; language auto or chosen; word-level transcripts cached per media file and language, grouped into lines of at most 42 characters; cues mapped through each audible clip's trim, position and speed onto an 'AI captions' track, replaced on every run. CPU only; no speaker labels."
+    "alphaNotes": "whisper.cpp v1.9.4 (whisper-cli with Vulkan GPU and per-CPU-level backends, built from the pinned commit) with Whisper large-v3-turbo q5_0 and Silero VAD, via the cutlery-ai transcribe task; language auto or chosen; word-level transcripts cached per media file and language, grouped into lines of at most 42 characters; cues mapped through each audible clip's trim, position and speed onto an 'AI captions' track, replaced on every run. GPU through Vulkan with CPU fallback (GPU unverified on CI, which has none); no speaker labels."
   },
   {
     "id": "F089",
@@ -2421,8 +2421,8 @@
     "status": "Planned",
     "acceptance": "Geometry editable and rendered at custom export resolution",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Shape clips from the library: arrow, circle/ellipse, speech bubble, box and line, with fill (or none), outline colour and width, and size; moved, resized, rotated and keyframed like overlays. Bubbles and boxes hold styled text. No callout pointers that follow a target or custom paths."
   },
   {
     "id": "F098",
@@ -2596,8 +2596,8 @@
     "status": "Planned",
     "acceptance": "Highlights/shadows/whites/blacks/fade follow endpoint fixtures",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Per clip: temperature (light colour temperature with lightness kept), tint (green–magenta), vibrance, and shadows/highlights through a master curve, each −1..1, plus the existing brightness, contrast and saturation. Not keyframable; no exposure/whites/blacks split or auto white balance."
   },
   {
     "id": "F105",
@@ -2671,8 +2671,8 @@
     "status": "Planned",
     "acceptance": "Identity LUT exact; invalid sizes rejected; strength interpolates as specified",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": ".cube and .3dl 3D LUTs per clip (tetrahedral interpolation) with a strength mix; missing files are skipped and flagged. Eight original one-click looks built from the colour and look controls; no bundled LUT files or LUT browser."
   },
   {
     "id": "F108",
@@ -3271,8 +3271,8 @@
     "status": "Planned",
     "acceptance": "Labeled hard-cut corpus precision/recall >=0.95 target",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "\"Split at scene changes\" on a video clip: FFmpeg scdet on a 320-pixel copy of the clip's source range finds shot changes; the clip and its detached audio are split there in one undo step, ignoring shots under 0.5 s. Fixed sensitivity in the UI; no review list before splitting."
   },
   {
     "id": "F132",
@@ -3921,8 +3921,8 @@
     "status": "Planned",
     "acceptance": "WAV and PNG results match corresponding timeline render",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Audio-only export of the timeline mix: MP3 (LAME VBR), AAC in M4A, or WAV (24-bit at Maximum quality, else 16-bit), 48 kHz stereo, with the same loudness normalisation as video. No image-sequence export."
   },
   {
     "id": "F158",

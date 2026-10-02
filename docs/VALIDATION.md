@@ -1,5 +1,37 @@
 # Validation record
 
+## Windows portable build — 2026-10-02, colour and look, Whisper on Vulkan, editing tools (0.6 development)
+
+[GitHub Actions run 36999719999](https://github.com/HNXS/Cutlery/actions/runs/36999719999) completed successfully for commit `9407ad93e98961805fcabf17180e92805f670af7`. Toolchain changes:
+
+- **whisper.cpp v1.9.4:** now built with ggml backends as DLLs (Vulkan, plus one CPU backend per x64 level, MSVC OpenMP), using the LunarG Vulkan SDK 1.4.321.1 (installer SHA-256 `baaa4f7c…68bd`) as a build tool.
+- **CI cache:** the build is cached by the hash of its scripts.
+
+New coverage:
+
+- **Speech recognition:** the check passes with the new build and asserts the CPU fallback on the GPU-less runner. The deployed smoke test runs the packaged whisper-cli with its backend DLLs.
+- **Engine tests:**
+  - `colourAndLook`: each control moves rendered pixels as expected; LUTs at full and half strength from a folder with special characters; alpha survives every filter; schema 11 round trip.
+  - `clipboardAndAudioExport`: paste to a free track and into a new project; paste look or all; MP3, M4A and WAV exports with no video stream.
+  - `sceneDetection`: video and detached audio split at 1 s and 2 s, and a 0.2 s flash ignored.
+  - `smoothSlowMotion`: blended in-between frames versus repeats; optical flow renders.
+  - `textStyles`: alignment, letter spacing, outline, box and shadow in pixels; a font file added to the data folder.
+  - `shapes`: arrow, rotation, outline ring and bubble text in pixels; SRT export excludes shapes; validation.
+  - `voiceOverWithoutMicrophone`: the error path when no microphone is present.
+- **Interface:**
+  - colour and look section, look presets, LUT load and rejection;
+  - paste look;
+  - shape menu and section;
+  - audio formats in the export dialog.
+- **`Get-FFmpeg.ps1`** now also requires `colortemperature`, `vibrance`, `curves`, `lut3d`, `cas`, `vignette`, `noise`, `alphaextract`, `scdet` and `minterpolate`.
+
+Not verified on CI: Vulkan inference on a real GPU, and microphone recording.
+
+Downloads (expire 2026-11-01):
+
+- [Portable build](https://github.com/HNXS/Cutlery/actions/runs/36999719999/artifacts/11224285667): 168,000,472 bytes, archive SHA-256 `eeed55fd0c50720406d815c12dd44520825cd73672c9c4b3fd7058b490f36ea9`.
+- [AI pack](https://github.com/HNXS/Cutlery/actions/runs/36999719999/artifacts/11223514058): 701,994,943 bytes, archive SHA-256 `ec9d7ba1d5e8461a45bdd16b0aaa757ce72c679d3f6e9b679ea4198772384df2`.
+
 ## Windows portable build — 2026-10-02, release 0.5.0 with level meters
 
 [GitHub Actions run 36996269492](https://github.com/HNXS/Cutlery/actions/runs/36996269492) completed successfully for commit `d35326ceeceb9c13eed0397a0a1b3d84909789b4`, with the same toolchain as the lower-thirds build. The artifacts are named 0.5.0. New coverage:

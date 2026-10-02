@@ -39,6 +39,15 @@ struct Clip {
     double fadeIn = 0, fadeOut = 0;
     QString text, fontFamily = "Arial", textColor = "#ffffff";
     int fontSize = 72;
+    // Text style: weight and slant, alignment ("left", "center", "right"), letter spacing as a
+    // fraction of the font size, line spacing as a multiple of the line height, an outline
+    // (width as a fraction of the font size), a drop shadow (0..1) and a box behind each line
+    // (opacity 0..1).
+    bool bold = true, italic = false;
+    QString align = "center";
+    double letterSpacing = 0, lineSpacing = 1;
+    double outline = 0, textShadow = 1, background = 0;
+    QString outlineColor = "#000000", backgroundColor = "#000000";
     // Captions with word timing: the clip-local frame each word of `text` (split at white
     // space) starts on. "karaoke" colours the word being spoken in `highlightColor`; "word"
     // shows one word at a time. Without matching timing a caption renders plainly.
@@ -52,8 +61,28 @@ struct Clip {
     // rectangle of effectWidth × effectHeight canvas fractions at scale 1, centred at x/y.
     QString effect; // "", "blur", "pixelate"
     double effectStrength = 0.6, effectWidth = 0.3, effectHeight = 0.2;
+    // Graphic clips (no media): a shape of graphicWidth × graphicHeight canvas fractions at
+    // scale 1, centred at x/y, filled with fillColor and outlined with strokeColor at `stroke`
+    // (fraction of the canvas height). Arrows and lines point right; rotate them. Speech bubbles
+    // and boxes show the clip's text inside.
+    QString graphic; // "", "rectangle", "ellipse", "arrow", "line", "bubble"
+    QString fillColor = "#ffd23f", strokeColor = "#000000";
+    double stroke = 0, graphicWidth = 0.3, graphicHeight = 0.2;
     // Gaussian blur of the clip's own picture, 0..1.
     double blur = 0;
+    // In-between frames when the clip plays slower than its source: "" repeats frames, "blend"
+    // cross-fades neighbours, "flow" interpolates motion (slow to render).
+    QString slowMotion;
+    // Colour: warmer/cooler, magenta/green, gentle saturation of muted colours, and lifted or
+    // lowered shadows and highlights, each −1..1 with 0 unchanged.
+    double temperature = 0, tint = 0, vibrance = 0, shadows = 0, highlights = 0;
+    // Look: 0..1, 0 off.
+    double sharpen = 0, glow = 0, vignette = 0, grain = 0;
+    // A 3D LUT file (.cube or .3dl) mixed in at lutStrength (0..1). Missing files are skipped.
+    QString lut;
+    double lutStrength = 1;
+    // The look settings above (for copy and paste of attributes).
+    static const QStringList &lookProperties();
     QString highlightColor = "#ffd23f";
     QVector<qint64> wordStarts;
     // Word timing usable for the caption style: one start per word of the text.
@@ -92,6 +121,8 @@ struct Clip {
     void scaleKeyframes(double factor);
 };
 const QStringList &animatableProperties();
+// Clip::graphic values.
+const QStringList &graphicKinds();
 // Words of a caption text, as used with Clip::wordStarts.
 QStringList captionWords(const QString &text);
 // Supported transitions: FFmpeg xfade names paired with display labels.

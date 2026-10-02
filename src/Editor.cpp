@@ -3,7 +3,14 @@
 #include "RenderGraph.h"
 #include <QCoreApplication>
 #include <cmath>
+#include <QDateTime>
 #include <QDir>
+#include <QFontDatabase>
+#include <QAudioInput>
+#include <QMediaCaptureSession>
+#include <QMediaDevices>
+#include <QMediaFormat>
+#include <QMediaRecorder>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -114,11 +121,44 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     connect(&m_saveTimer, &QTimer::timeout, this, &Editor::autosave);
     if (executable("ffmpeg").isEmpty() || executable("ffprobe").isEmpty())
         m_error = "FFmpeg/ffprobe not found. Use the portable package, or add both tools to PATH.";
+    // Fonts added in Cutlery live in the data folder, so they travel with a portable install.
+    for (const auto &file : QDir(m_data + "/fonts").entryInfoList({"*.ttf", "*.otf", "*.ttc"},
+                                                                 QDir::Files))
+        QFontDatabase::addApplicationFont(file.absoluteFilePath());
+}
+QStringList Editor::fontFamilies() const {
+    return QFontDatabase::families();
+}
+QString Editor::addFont(const QUrl &url) {
+    const auto source = url.isLocalFile() ? url.toLocalFile() : url.toString();
+    const QFileInfo info(source);
+    try {
+        if (!info.isFile() || !QStringList{"ttf", "otf", "ttc"}.contains(info.suffix().toLower()))
+            throw std::runtime_error("Choose a .ttf or .otf font file");
+        if (info.size() > 64 * 1024 * 1024)
+            throw std::runtime_error("The font file is too large");
+        QDir().mkpath(m_data + "/fonts");
+        const auto target = m_data + "/fonts/" + info.fileName();
+        if (!QFileInfo::exists(target) && !QFile::copy(source, target))
+            throw std::runtime_error("Cannot copy the font into the Cutlery data folder");
+        const int id = QFontDatabase::addApplicationFont(target);
+        const auto families = QFontDatabase::applicationFontFamilies(id);
+        if (id < 0 || families.isEmpty()) {
+            QFile::remove(target);
+            throw std::runtime_error("This file is not a usable font");
+        }
+        m_status = "Added font " + families.first();
+        emit changed();
+        return families.first();
+    } catch (const std::exception &e) {
+        fail(e.what());
+        return {};
+    }
 }
 Editor::~Editor() {
     if (m_dirty)
         autosave();
-    for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess})
+    for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess, m_sceneProcess})
         if (p) {
             p->disconnect(this);
             p->kill();
@@ -289,6 +329,10 @@ QVariantMap Editor::state() const {
             selected = {{"id", c.id},
                         {"assetId", c.assetId},
                         {"audioOnly", c.audioOnly},
+                        {"picture", !c.audioOnly && m_project.asset(c.assetId) &&
+                                        m_project.asset(c.assetId)->kind != "audio"},
+                        {"video", !c.audioOnly && m_project.asset(c.assetId) &&
+                                      m_project.asset(c.assetId)->kind == "video"},
                         {"locked", m_project.trackSettings[c.track].locked},
                         {"canDetach", !c.audioOnly && m_project.asset(c.assetId) &&
                                           m_project.asset(c.assetId)->kind == "video" &&
@@ -341,6 +385,37 @@ QVariantMap Editor::state() const {
             PROP(contrast);
             PROP(saturation);
             PROP(crop);
+            PROP(temperature);
+            PROP(tint);
+            PROP(vibrance);
+            PROP(shadows);
+            PROP(highlights);
+            PROP(sharpen);
+            PROP(glow);
+            PROP(vignette);
+            PROP(grain);
+            PROP(lutStrength);
+            PROP(slowMotion);
+            PROP(fontFamily);
+            PROP(graphic);
+            PROP(fillColor);
+            PROP(strokeColor);
+            PROP(stroke);
+            PROP(graphicWidth);
+            PROP(graphicHeight);
+            PROP(bold);
+            PROP(italic);
+            PROP(align);
+            PROP(letterSpacing);
+            PROP(lineSpacing);
+            PROP(outline);
+            PROP(outlineColor);
+            PROP(textShadow);
+            PROP(background);
+            PROP(backgroundColor);
+            selected["lut"] = c.lut;
+            selected["lutName"] = QFileInfo(c.lut).completeBaseName();
+            selected["lutMissing"] = !c.lut.isEmpty() && !QFileInfo(c.lut).isFile();
             PROP(fadeIn);
             PROP(fadeOut);
             PROP(reverse);
@@ -392,6 +467,12 @@ QVariantMap Editor::state() const {
                                       {"transcribe", m_ai->missing("transcribe")}}},
             {"captions", captionState()},
             {"pauses", pauseState()},
+            {"scenes", m_scenes},
+            {"voiceOver", QVariantMap{{"available", !QMediaDevices::audioInputs().isEmpty()},
+                                      {"recording", m_voiceRecorder != nullptr},
+                                      {"seconds", m_voiceRecorder && m_voiceClock.isValid()
+                                                      ? m_voiceClock.elapsed() / 1000.
+                                                      : 0.}}},
             {"loudness", [this] {
                  auto l = m_mixLoudness;
                  // A measurement describes the mix it was made on.
@@ -400,6 +481,7 @@ QVariantMap Editor::state() const {
                  return l;
              }()},
             {"progress", m_progress},
+            {"clipboard", m_clipboard ? m_clipboard->name : QString()},
             {"previewUrl", m_previewUrl},
             {"playing", m_playback->active() || m_resumeTimer.isActive()},
             {"canUndo", !m_undo.empty()},
@@ -841,6 +923,45 @@ void Editor::addEffect(const QString &effect) {
     });
     select(id);
 }
+void Editor::addGraphic(const QString &kind) {
+    if (!graphicKinds().contains(kind))
+        return fail("Unknown shape");
+    const auto id = newId();
+    mutate([&](Project &p) {
+        Clip c;
+        c.id = id;
+        c.graphic = kind;
+        c.name = kind == "bubble"  ? "Speech bubble"
+                 : kind == "arrow" ? "Arrow"
+                 : kind == "line"  ? "Line"
+                                   : kind == "ellipse" ? "Circle" : "Box";
+        if (kind == "bubble") {
+            c.text = "Hello!";
+            c.fillColor = "#ffffff";
+            c.textColor = "#14181d";
+            c.textShadow = 0;
+            c.fontSize = 48;
+            c.stroke = 0.004;
+        } else if (kind == "arrow" || kind == "line") {
+            c.graphicHeight = kind == "arrow" ? 0.12 : 0.012;
+            c.fillColor = kind == "arrow" ? "#ff5a5f" : "#ffffff";
+        } else if (kind == "ellipse") {
+            // An outline circle, like a highlight around something on screen.
+            c.graphicWidth = 0.2;
+            c.graphicHeight = 0.2 * p.width / p.height;
+            c.fillColor = "#00000000";
+            c.strokeColor = "#ff5a5f";
+            c.stroke = 0.008;
+        }
+        c.track = p.tracks - 1;
+        p.requireEditable(c.track);
+        c.start = m_playhead;
+        c.duration = qRound64(4. * p.fpsN / p.fpsD);
+        p.clips.push_back(c);
+        p.move(c.id, c.track, c.start);
+    });
+    select(id);
+}
 void Editor::moveClip(const QString &id, qint64 frame, int track) {
     mutate([&](Project &p) { p.move(id, track, frame); });
 }
@@ -911,6 +1032,19 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             c->effectStrength = v.toDouble();
         else if (key == "blur")
             c->blur = v.toDouble();
+        else if (key == "lut") {
+            // A file URL or path; empty removes the LUT.
+            const auto path = v.typeId() == QMetaType::QUrl
+                                  ? v.toUrl().toLocalFile()
+                                  : v.toString();
+            const QFileInfo info(path);
+            if (!path.isEmpty() &&
+                (!info.isFile() || !QStringList{"cube", "3dl"}.contains(info.suffix().toLower())))
+                throw std::runtime_error("Choose a .cube or .3dl LUT file");
+            if (info.size() > 64 * 1024 * 1024)
+                throw std::runtime_error("The LUT file is too large");
+            c->lut = path.isEmpty() ? QString() : QDir::cleanPath(info.absoluteFilePath());
+        }
         else if (key == "captionStyle")
             c->captionStyle = v.toString();
         else if (key == "highlightColor")
@@ -935,6 +1069,34 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(contrast, toDouble);
         FIELD(saturation, toDouble);
         FIELD(crop, toDouble);
+        FIELD(temperature, toDouble);
+        FIELD(tint, toDouble);
+        FIELD(vibrance, toDouble);
+        FIELD(shadows, toDouble);
+        FIELD(highlights, toDouble);
+        FIELD(sharpen, toDouble);
+        FIELD(glow, toDouble);
+        FIELD(vignette, toDouble);
+        FIELD(grain, toDouble);
+        FIELD(lutStrength, toDouble);
+        FIELD(slowMotion, toString);
+        FIELD(bold, toBool);
+        FIELD(italic, toBool);
+        FIELD(align, toString);
+        FIELD(letterSpacing, toDouble);
+        FIELD(lineSpacing, toDouble);
+        FIELD(outline, toDouble);
+        FIELD(outlineColor, toString);
+        FIELD(textShadow, toDouble);
+        FIELD(background, toDouble);
+        FIELD(backgroundColor, toString);
+        FIELD(fontFamily, toString);
+        FIELD(graphic, toString);
+        FIELD(fillColor, toString);
+        FIELD(strokeColor, toString);
+        FIELD(stroke, toDouble);
+        FIELD(graphicWidth, toDouble);
+        FIELD(graphicHeight, toDouble);
         FIELD(fadeIn, toDouble);
         FIELD(fadeOut, toDouble);
         FIELD(reverse, toBool);
@@ -1080,6 +1242,190 @@ void Editor::duplicate() {
         }
     });
     select(id);
+}
+void Editor::startVoiceOver() {
+    if (m_voiceRecorder || m_busy)
+        return;
+    const auto device = QMediaDevices::defaultAudioInput();
+    if (device.isNull())
+        return fail("No microphone found. Connect one and allow Cutlery to use it in Windows' "
+                    "privacy settings.");
+    QDir().mkpath(m_data + "/recordings");
+    const auto file =
+        m_data + "/recordings/voice-" +
+        QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss") + ".wav";
+    m_voiceSession = new QMediaCaptureSession(this);
+    m_voiceInput = new QAudioInput(device, this);
+    m_voiceRecorder = new QMediaRecorder(this);
+    m_voiceSession->setAudioInput(m_voiceInput);
+    m_voiceSession->setRecorder(m_voiceRecorder);
+    QMediaFormat format(QMediaFormat::Wave);
+    format.setAudioCodec(QMediaFormat::AudioCodec::Wave);
+    m_voiceRecorder->setMediaFormat(format);
+    m_voiceRecorder->setQuality(QMediaRecorder::HighQuality);
+    m_voiceRecorder->setOutputLocation(QUrl::fromLocalFile(file));
+    m_voiceStart = m_playhead;
+    auto cleanup = [this] {
+        for (QObject *o : std::initializer_list<QObject *>{m_voiceRecorder, m_voiceInput,
+                                                           m_voiceSession})
+            if (o)
+                o->deleteLater();
+        m_voiceRecorder = nullptr;
+        m_voiceInput = nullptr;
+        m_voiceSession = nullptr;
+        m_voiceClock.invalidate();
+    };
+    connect(m_voiceRecorder, &QMediaRecorder::errorOccurred, this,
+            [this, cleanup](QMediaRecorder::Error, const QString &message) {
+                pause();
+                cleanup();
+                fail("Recording failed: " + message);
+            });
+    connect(m_voiceRecorder, &QMediaRecorder::durationChanged, this, &Editor::changed);
+    connect(m_voiceRecorder, &QMediaRecorder::recorderStateChanged, this,
+            [this, cleanup](QMediaRecorder::RecorderState state) {
+                if (state != QMediaRecorder::StoppedState || !m_voiceRecorder)
+                    return;
+                const auto location = m_voiceRecorder->actualLocation();
+                const auto length = qRound64(m_voiceClock.elapsed() / 1000. * m_project.fpsN /
+                                             m_project.fpsD);
+                const auto frame = m_voiceStart;
+                cleanup();
+                if (!location.isLocalFile() || !QFileInfo(location.toLocalFile()).isFile())
+                    return fail("The recording was not saved");
+                // On the lowest free track that is not magnetic (a magnetic main track would
+                // push its clips aside), or on a new track.
+                int track = -1;
+                for (int t = 0; t < m_project.tracks && track < 0; ++t) {
+                    const auto &settings = m_project.trackSettings[t];
+                    const bool free = std::none_of(
+                        m_project.clips.begin(), m_project.clips.end(), [&](const Clip &o) {
+                            return o.track == t && o.start < frame + std::max<qint64>(1, length) &&
+                                   frame < o.start + o.duration;
+                        });
+                    if (!settings.magnetic && !settings.locked && free)
+                        track = t;
+                }
+                if (track < 0) {
+                    mutate([](Project &p) { p.addTrack(); });
+                    track = m_project.tracks - 1;
+                }
+                dropFiles({location}, track, frame);
+                m_status = "Voice-over added";
+                emit changed();
+            });
+    m_voiceRecorder->record();
+    m_voiceClock.start();
+    // The timeline plays along, so the narration matches the picture (use headphones).
+    if (!m_project.clips.empty())
+        play();
+    m_status = "Recording voice-over…";
+    emit changed();
+}
+void Editor::stopVoiceOver() {
+    if (!m_voiceRecorder)
+        return;
+    pause();
+    m_voiceRecorder->stop();
+}
+int Editor::freeTrack(Project &p, int home, qint64 start, qint64 length) {
+    auto fits = [&](int track) {
+        if (track < 0 || track >= p.tracks || p.trackSettings[track].locked)
+            return false;
+        if (p.trackSettings[track].magnetic)
+            return true;
+        return std::none_of(p.clips.begin(), p.clips.end(), [&](const Clip &o) {
+            return o.track == track && o.start < start + length && start < o.start + o.duration;
+        });
+    };
+    for (int d = 0; d < p.tracks; ++d)
+        for (int t : {home + d, home - d})
+            if (fits(t))
+                return t;
+    p.addTrack();
+    return p.tracks - 1;
+}
+void Editor::copy() {
+    const auto *c = m_project.clip(m_selected);
+    if (!c)
+        return;
+    m_clipboard = *c;
+    const auto *a = m_project.asset(c->assetId);
+    m_clipboardAsset = a ? std::optional<Asset>(*a) : std::nullopt;
+    m_status = "Copied " + c->name;
+    emit changed();
+}
+void Editor::paste() {
+    if (!m_clipboard)
+        return;
+    const auto id = newId();
+    mutate([&](Project &p) {
+        auto copy = *m_clipboard;
+        copy.id = id;
+        copy.transition.clear();
+        copy.transitionFrames = 0;
+        if (m_clipboardAsset && !p.asset(m_clipboardAsset->id))
+            p.assets.push_back(*m_clipboardAsset);
+        // Timing is in frames: a clip from a project with another frame rate keeps its length.
+        // The clip goes to its own track when that is free at the playhead (magnetic tracks make
+        // room), otherwise to the nearest free track above or below, or to a new track on top.
+        copy.start = m_playhead;
+        copy.track = freeTrack(p, std::min(copy.track, p.tracks - 1), copy.start, copy.duration);
+        p.clips.push_back(copy);
+        p.move(copy.id, copy.track, copy.start);
+    });
+    select(id);
+}
+void Editor::pasteAttributes(const QString &group) {
+    if (!m_clipboard || (group != "look" && group != "all"))
+        return;
+    mutate([&](Project &p) {
+        auto *c = p.clip(m_selected);
+        if (!c)
+            return;
+        p.requireEditable(c->track);
+        const auto &from = *m_clipboard;
+        c->brightness = from.brightness;
+        c->contrast = from.contrast;
+        c->saturation = from.saturation;
+        c->blur = from.blur;
+        c->temperature = from.temperature;
+        c->tint = from.tint;
+        c->vibrance = from.vibrance;
+        c->shadows = from.shadows;
+        c->highlights = from.highlights;
+        c->sharpen = from.sharpen;
+        c->glow = from.glow;
+        c->vignette = from.vignette;
+        c->grain = from.grain;
+        c->lut = from.lut;
+        c->lutStrength = from.lutStrength;
+        if (group == "look")
+            return;
+        c->scale = from.scale;
+        c->x = from.x;
+        c->y = from.y;
+        c->rotation = from.rotation;
+        c->opacity = from.opacity;
+        c->crop = from.crop;
+        c->flip = from.flip;
+        c->volume = from.volume;
+        c->fadeIn = from.fadeIn;
+        c->fadeOut = from.fadeOut;
+        // Keyframes keep their clip-relative frames; those past the end of a shorter clip stay
+        // and hold the value from the last one inside.
+        c->keyframes = from.keyframes;
+        c->shape = from.shape;
+        c->radius = from.radius;
+        c->border = from.border;
+        c->borderColor = from.borderColor;
+        c->shadow = from.shadow;
+        c->chromaKey = from.chromaKey;
+        c->keyColor = from.keyColor;
+        c->keySimilarity = from.keySimilarity;
+        c->keyBlend = from.keyBlend;
+        c->aiCutout = from.aiCutout;
+    });
 }
 void Editor::configure(int w, int h, int n, int d) {
     mutate([&](Project &p) {
@@ -1340,6 +1686,78 @@ void Editor::findPauses(double thresholdDb, double minPause) {
               "-f", "null", "-"});
     emit changed();
 }
+void Editor::splitAtScenes(double sensitivity) {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || a->kind != "video" || c->audioOnly)
+        return fail("Select a video clip to split at scene changes");
+    if (c->reverse)
+        return fail("Reversed clips cannot be split at scene changes");
+    if (m_sceneProcess)
+        return;
+    const double speed = c->speed.seconds(), in = c->sourceIn.seconds(),
+                 fps = double(m_project.fpsN) / m_project.fpsD,
+                 length = c->duration / fps * speed;
+    // FFmpeg's scene score (0–100) above which a frame starts a new shot.
+    const double threshold = 25 - 20 * std::clamp(sensitivity, 0., 1.);
+    m_scenes = {{"status", "finding"}};
+    auto *p = new QProcess(this);
+    m_sceneProcess = p;
+    auto log = std::make_shared<QByteArray>();
+    connect(p, &QProcess::readyReadStandardError, this,
+            [p, log] { *log += p->readAllStandardError(); });
+    auto complete = [this, p, log, id = c->id, revision = m_revision, start = c->start,
+                     frames = c->duration, speed, fps](bool success) {
+        *log += p->readAllStandardError();
+        p->deleteLater();
+        m_sceneProcess = nullptr;
+        if (!success) {
+            m_scenes = {{"status", "failed"}};
+            emit changed();
+            return;
+        }
+        if (revision != m_revision) {
+            m_scenes = {};
+            return fail("The clip changed while scenes were found; try again");
+        }
+        // "lavfi.scd.time: T" in seconds from the start of the analysed range. Shots shorter
+        // than half a second are not split off (flashes, fast pans).
+        static const QRegularExpression mark("lavfi\\.scd\\.time: (-?[0-9.]+)");
+        const qint64 shortest = std::max<qint64>(1, qRound64(0.5 * fps));
+        QVector<qint64> cuts;
+        for (auto it = mark.globalMatch(QString::fromUtf8(*log)); it.hasNext();) {
+            const auto local = qRound64(it.next().captured(1).toDouble() / speed * fps);
+            if (local >= shortest && local <= frames - shortest &&
+                (cuts.isEmpty() || local - cuts.last() >= shortest))
+                cuts << local;
+        }
+        if (!cuts.isEmpty())
+            mutate([&](Project &project) {
+                const auto linked = project.linkedClips(id);
+                // From the end, so the original keeps its id as the first shot.
+                for (auto it = cuts.rbegin(); it != cuts.rend(); ++it)
+                    for (const auto &clipId : QStringList{id} + linked)
+                        project.split(clipId, start + *it);
+            });
+        m_scenes = {{"status", "done"}, {"count", cuts.size()}};
+        m_status = cuts.isEmpty() ? QString("No scene changes found")
+                                  : QString("Split into %1 shots").arg(cuts.size() + 1);
+        emit changed();
+    };
+    connect(p, &QProcess::finished, this, [complete](int code, QProcess::ExitStatus status) {
+        complete(code == 0 && status == QProcess::NormalExit);
+    });
+    connect(p, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart)
+            complete(false);
+    });
+    p->start(executable("ffmpeg"),
+             {"-hide_banner", "-nostdin", "-nostats", "-ss", QString::number(in, 'f', 6), "-t",
+              QString::number(length, 'f', 6), "-i", a->path, "-map", "0:v:0", "-an", "-sn",
+              "-vf", QString("scale=320:-2,scdet=threshold=%1").arg(threshold, 0, 'f', 1), "-f",
+              "null", "-"});
+    emit changed();
+}
 void Editor::removePauses() {
     if (m_pauses.status != "ready" || m_pauses.revision != m_revision || m_pauses.ranges.isEmpty())
         return fail("Find pauses again: the clip has changed");
@@ -1557,7 +1975,8 @@ QVariantMap Editor::exportPreview(const QVariantMap &settings) const {
         const auto size = exportSize(m_project, s.height);
         return {{"width", size.width()},
                 {"height", size.height()},
-                {"extension", formatExtension(s.format)}};
+                {"extension", formatExtension(s.format)},
+                {"audio", audioFormat(s.format)}};
     } catch (const std::exception &) {
         return {};
     }
@@ -1740,6 +2159,7 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
         RenderOptions options;
         options.highQuality = true;
         options.pixelFormat = encoder.pixelFormat;
+        options.video = !encoder.audioOnly;
         if (gainDb != 0 || m_loudness.contains("target")) {
             // Normalised exports keep peaks about 1 dB below full scale, as streaming services
             // expect; the limiter works on samples, so leave some room for true peaks.
@@ -1898,7 +2318,7 @@ bool Editor::exportSrt(const QUrl &url) {
                 .arg(ms % 1000, 3, 10, QChar('0'));
         };
         for (const auto &c : clips)
-            if (c.assetId.isEmpty() && c.effect.isEmpty() && !c.hidden &&
+            if (c.assetId.isEmpty() && c.effect.isEmpty() && c.graphic.isEmpty() && !c.hidden &&
                 !m_project.trackSettings[c.track].hidden)
                 text += QString::number(++i) + "\n" + stamp(c.start) + " --> " +
                         stamp(c.start + c.duration) + "\n" + c.text + "\n\n";

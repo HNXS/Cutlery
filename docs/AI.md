@@ -70,7 +70,7 @@ You can change the style and highlight colour of any caption later in the inspec
 
 ### Speed and limits
 
-- Speech recognition uses the CPU and needs a processor with AVX2 (Intel from 2013, AMD from 2015). Whisper works through the audio in 30-second blocks. On a 2-core CI machine, one block took about 70 seconds, so 10 minutes of speech would take about 25 minutes there. A modern 8-core PC should be roughly four times faster: about 6 minutes for 10 minutes of speech. Silence and music skipped by the voice detector cost almost nothing.
+- Speech recognition uses the graphics card through Vulkan (NVIDIA, AMD or Intel, with a current driver) and otherwise the CPU, picking the fastest code for the processor (any x64 CPU works; AVX2 and AVX-512 are faster). If the GPU run fails, it repeats on the CPU. On the CPU, Whisper works through the audio in 30-second blocks. On a 2-core CI machine, one block took about 70 seconds, so 10 minutes of speech would take about 25 minutes there. A modern 8-core PC should be roughly four times faster: about 6 minutes for 10 minutes of speech. Silence and music skipped by the voice detector cost almost nothing.
 - Reversed clips are not captioned. When the same speech plays on two tracks, it is captioned once.
 - Names, brands and technical terms can come out wrong. Read the captions before publishing.
 - Word times are accurate to about a tenth of a second. Highlights can lead or trail fast speech slightly.

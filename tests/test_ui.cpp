@@ -91,13 +91,17 @@ class UiTest : public QObject {
         QVERIFY(library);
         QStringList clipIds;
         for (int i = 0; i < 3; ++i) {
-            library->setProperty(
-                "contentY",
-                std::max(0., std::min(i * 84., library->property("contentHeight").toDouble() -
-                                                   library->height())));
-            QTest::qWait(30);
             auto *tile = findItem(window->contentItem(), "asset-" + editor.project().assets[i].id);
             QVERIFY(tile);
+            // Scroll the library so the tile is in view.
+            auto *content = qvariant_cast<QQuickItem *>(library->property("contentItem"));
+            QVERIFY(content);
+            const double top = tile->mapToItem(content, QPointF(0, 0)).y();
+            library->setProperty(
+                "contentY",
+                std::max(0., std::min(top - 10, library->property("contentHeight").toDouble() -
+                                                    library->height())));
+            QTest::qWait(30);
             drag(window, center(tile), trackPoint(i, 30 * (i + 1)));
             QTRY_COMPARE_WITH_TIMEOUT(editor.project().clips.size(), i + 1, 2000);
             const auto c = editor.project().clips.last();
@@ -385,6 +389,11 @@ class UiTest : public QObject {
         QCOMPARE(preset->property("currentIndex").toInt(), 0);
         choose("exportFormat", 4);
         QCOMPARE(dialog->property("preview").toMap()["extension"].toString(), QString("mov"));
+        choose("exportFormat", 6); // MP3: audio only, no resolution
+        QCOMPARE(dialog->property("preview").toMap()["extension"].toString(), QString("mp3"));
+        QTRY_VERIFY(!findItem(window->contentItem(), "exportHeight")->isEnabled());
+        choose("exportFormat", 0);
+        QTRY_VERIFY(findItem(window->contentItem(), "exportHeight")->isEnabled());
         auto *result = findItem(window->contentItem(), "loudnessResult");
         QVERIFY(result && findItem(window->contentItem(), "measureLoudness"));
         QVERIFY(result->property("text").toString().contains("Integrated loudness"));
@@ -494,6 +503,94 @@ class UiTest : public QObject {
         style->setProperty("currentIndex", 3);
         QVERIFY(QMetaObject::invokeMethod(style, "activated", Q_ARG(int, 3)));
         QCOMPARE(editor.project().clip(lower.id)->titleStyle, QString("titleCard"));
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
+    void lookControls() {
+        QTemporaryDir dir;
+        QImage picture(160, 90, QImage::Format_RGB32);
+        picture.fill(Qt::gray);
+        const auto path = dir.filePath("grey.png");
+        QVERIFY(picture.save(path));
+        const auto lut = dir.filePath("look.cube");
+        {
+            QFile f(lut);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n");
+        }
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(path)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto id = editor.project().clips.first().id;
+        editor.select(id);
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        auto *section = findItem(window->contentItem(), "lookSection");
+        QTRY_VERIFY(section && section->isVisible());
+        auto *preset = findItem(window->contentItem(), "lookPreset");
+        QVERIFY(preset);
+        auto clip = [&] { return *editor.project().clip(id); };
+        QVERIFY(QMetaObject::invokeMethod(preset, "activated", Q_ARG(int, 5))); // Vintage
+        QCOMPARE(clip().temperature, .3);
+        QCOMPARE(clip().grain, .4);
+        QCOMPARE(clip().saturation, .75);
+        QCOMPARE(preset->property("currentIndex").toInt(), 0);
+        editor.undo();
+        QCOMPARE(clip().grain, 0.);
+        auto *vignette = findItem(window->contentItem(), "look-vignette");
+        QVERIFY(vignette);
+        vignette->setProperty("value", 0.5);
+        QVERIFY(QMetaObject::invokeMethod(vignette, "moved"));
+        QCOMPARE(clip().vignette, .5);
+        editor.setClip("lut", QUrl::fromLocalFile(lut));
+        QCOMPARE(clip().lut, QDir::cleanPath(lut));
+        QTRY_COMPARE(findItem(window->contentItem(), "lutName")->property("text").toString(),
+                     QString("LUT: look"));
+        QTRY_VERIFY(findItem(window->contentItem(), "lutStrength")->isVisible());
+        editor.setClip("lut", dir.filePath("keys.json"));
+        QVERIFY(editor.state()["error"].toString().contains(".cube"));
+        QCOMPARE(clip().lut, QDir::cleanPath(lut));
+        editor.clearError();
+        editor.setClip("lut", "");
+        QVERIFY(clip().lut.isEmpty());
+        // Copy the look and paste it onto a title.
+        editor.setClip("temperature", 0.5);
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "copyClip"), "clicked"));
+        // Titles have no picture to grade.
+        editor.addTitle();
+        editor.select(editor.project().clips.last().id);
+        QTRY_VERIFY(!section->isVisible());
+        auto *pasteLook = findItem(window->contentItem(), "pasteLook");
+        QTRY_VERIFY(pasteLook && pasteLook->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(pasteLook, "clicked"));
+        QCOMPARE(editor.project().clips.back().temperature, 0.5);
+        // Shapes from the library: the shape section replaces the text box for arrows.
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "addShape"), "clicked"));
+        QObject *addArrow = nullptr;
+        QTRY_VERIFY((addArrow = findItem(window->contentItem(), "addGraphic-arrow")));
+        QVERIFY(QMetaObject::invokeMethod(addArrow, "triggered"));
+        QCOMPARE(editor.project().clips.back().graphic, QString("arrow"));
+        QTRY_VERIFY(findItem(window->contentItem(), "graphicSection")->isVisible());
+        QTRY_VERIFY(!findItem(window->contentItem(), "titleText")->isVisible());
+        auto *kind = findItem(window->contentItem(), "graphicKind");
+        QVERIFY(QMetaObject::invokeMethod(kind, "activated", Q_ARG(int, 2)));
+        QCOMPARE(editor.project().clips.back().graphic, QString("bubble"));
+        QTRY_VERIFY(findItem(window->contentItem(), "titleText")->isVisible());
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void aiCutoutControls() {

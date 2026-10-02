@@ -340,7 +340,7 @@ class EngineTest : public QObject {
         QTemporaryDir dir;
         const auto path = dir.filePath("shortcuts.json");
         KeyboardShortcuts keys(path);
-        QCOMPARE(keys.bindings().size(), 30);
+        QCOMPARE(keys.bindings().size(), 33);
         QVERIFY(!keys.assign("play", "Ctrl+B"));
         QVERIFY(keys.error().contains("Already assigned"));
         QVERIFY(!keys.assign("play", "Ctrl+NotARealKey"));
@@ -349,10 +349,10 @@ class EngineTest : public QObject {
         KeyboardShortcuts loaded(path);
         QCOMPARE(loaded.bindings(), keys.bindings());
         QVERIFY(loaded.reset());
-        QCOMPARE(loaded.bindings()[16].toMap()["sequence"].toString(), QString("Space"));
+        QCOMPARE(loaded.bindings()[19].toMap()["sequence"].toString(), QString("Space"));
         KeyboardShortcuts failed(dir.path());
         QVERIFY(!failed.assign("play", "Ctrl+J"));
-        QCOMPARE(failed.bindings()[16].toMap()["sequence"].toString(), QString("Space"));
+        QCOMPARE(failed.bindings()[19].toMap()["sequence"].toString(), QString("Space"));
     }
     void thumbnailStrips() {
         const auto ffmpeg = Editor::executable("ffmpeg");
@@ -1492,6 +1492,585 @@ class EngineTest : public QObject {
         image = still(r, 40);
         QVERIFY(count(image, true, true) + count(image, false, true) == 0);
         QVERIFY(count(image, true, false) + count(image, false, false) > 50);
+    }
+    void textStyles() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        QImage grey(320, 180, QImage::Format_RGB32);
+        grey.fill(QColor(128, 128, 128));
+        QVERIFY(grey.save(dir.filePath("grey.png")));
+        Project p;
+        p.width = 320;
+        p.height = 180;
+        Asset a;
+        a.id = "grey";
+        a.path = dir.filePath("grey.png");
+        a.kind = "image";
+        a.duration = 5;
+        a.width = 320;
+        a.height = 180;
+        p.assets = {a};
+        Clip bg;
+        bg.id = "bg";
+        bg.assetId = "grey";
+        bg.duration = 30;
+        Clip title;
+        title.id = "t";
+        title.track = 1;
+        title.duration = 30;
+        title.text = "Hi";
+        title.fontSize = 60;
+        p.clips = {bg, title};
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Clip &t) {
+            auto project = p;
+            project.clips[1] = t;
+            RenderOptions options;
+            options.audio = false;
+            options.from = 5;
+            options.to = 6;
+            const auto plan = compileRender(project, dir.filePath("work"), 320, 180, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return out.convertToFormat(QImage::Format_RGB32);
+        };
+        // Columns that contain text-coloured (near white) pixels.
+        auto inkColumns = [](const QImage &i, auto match) {
+            int lo = i.width(), hi = -1, count = 0;
+            for (int x = 0; x < i.width(); ++x)
+                for (int y = 0; y < i.height(); ++y)
+                    if (match(QColor(i.pixel(x, y)))) {
+                        lo = std::min(lo, x);
+                        hi = std::max(hi, x);
+                        ++count;
+                        break;
+                    }
+            return std::tuple{lo, hi, count};
+        };
+        auto white = [](const QColor &c) { return c.red() > 220 && c.green() > 220 && c.blue() > 220; };
+        const auto [cl, ch, cn] = inkColumns(still(title), white);
+        QVERIFY2(cn > 10 && std::abs((cl + ch) / 2 - 160) < 12, qPrintable(QString("%1 %2").arg(cl).arg(ch)));
+        auto left = title;
+        left.align = "left";
+        const auto [ll, lh, ln] = inkColumns(still(left), white);
+        QVERIFY2(ll < cl - 60 && ll < 40, qPrintable(QString::number(ll)));
+        auto right = title;
+        right.align = "right";
+        const auto [rl, rh, rn] = inkColumns(still(right), white);
+        QVERIFY2(rh > ch + 60 && rh > 280, qPrintable(QString::number(rh)));
+        // Letter spacing widens the text.
+        auto spaced = title;
+        spaced.letterSpacing = 0.5;
+        const auto [sl, sh, sn] = inkColumns(still(spaced), white);
+        QVERIFY2(sh - sl > ch - cl + 10, qPrintable(QString("%1 vs %2").arg(sh - sl).arg(ch - cl)));
+        // A yellow outline and a black box behind the line.
+        auto styled = title;
+        styled.outline = 0.1;
+        styled.outlineColor = "#ffd23f";
+        auto yellow = [](const QColor &c) {
+            return c.red() > 200 && c.green() > 170 && c.blue() < 120;
+        };
+        QVERIFY(std::get<2>(inkColumns(still(styled), yellow)) > 10);
+        QCOMPARE(std::get<2>(inkColumns(still(title), yellow)), 0);
+        styled.background = 1;
+        const auto boxed = still(styled);
+        // Just left of the first letter, inside the box: black instead of grey.
+        const QColor beside(boxed.pixel(cl - 11, 90));
+        QVERIFY2(beside.red() < 40, qPrintable(beside.name()));
+        QVERIFY(qGray(boxed.pixel(5, 5)) > 100); // outside the box
+        // No shadow: no dark pixels around plain text on grey.
+        auto flat = title;
+        flat.textShadow = 0;
+        QCOMPARE(std::get<2>(inkColumns(still(flat), [](const QColor &c) { return c.red() < 80; })), 0);
+        QVERIFY(std::get<2>(inkColumns(still(title), [](const QColor &c) { return c.red() < 80; })) > 0);
+        // Saved only when not the default; validated.
+        p.clips[1] = styled;
+        p.clips[1].italic = true;
+        p.clips[1].align = "right";
+        const auto json = p.json();
+        const auto saved = json["clips"].toArray()[1].toObject();
+        QCOMPARE(saved["outlineColor"].toString(), QString("#ffd23f"));
+        QVERIFY(!json["clips"].toArray()[0].toObject().contains("align"));
+        const auto loaded = Project::fromJson(json, {}).clips[1];
+        QCOMPARE(loaded.align, QString("right"));
+        QVERIFY(loaded.italic && loaded.bold);
+        QCOMPARE(loaded.background, 1.);
+        auto bad = json;
+        auto clips = bad["clips"].toArray();
+        auto o = clips[1].toObject();
+        o["align"] = "justify";
+        clips[1] = o;
+        bad["clips"] = clips;
+        QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, {}), std::runtime_error);
+
+        // A font file added to Cutlery is copied to the data folder and usable by family name.
+        QString fontFile;
+        for (const auto &folder : {qEnvironmentVariable("WINDIR") + "/Fonts",
+                                   QString("/usr/share/fonts/truetype/dejavu")})
+            for (const auto &f : QDir(folder).entryInfoList({"*.ttf"}, QDir::Files))
+                if (fontFile.isEmpty())
+                    fontFile = f.absoluteFilePath();
+        if (fontFile.isEmpty())
+            QSKIP("No font file on this machine");
+        const auto copy = dir.filePath("Test Font.ttf");
+        QVERIFY(QFile::copy(fontFile, copy));
+        FrameProvider frames;
+        Editor editor(&frames);
+        const auto family = editor.addFont(QUrl::fromLocalFile(copy));
+        QVERIFY2(!family.isEmpty(), qPrintable(editor.state()["error"].toString()));
+        const auto stored = editor.state()["dataPath"].toString() + "/fonts/Test Font.ttf";
+        QVERIFY(QFileInfo::exists(stored));
+        QVERIFY(editor.fontFamilies().contains(family));
+        QFile::remove(stored);
+        QVERIFY(editor.addFont(QUrl::fromLocalFile(dir.filePath("grey.png"))).isEmpty());
+        QVERIFY(editor.state()["error"].toString().contains(".ttf"));
+    }
+    void shapes() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        QImage grey(320, 180, QImage::Format_RGB32);
+        grey.fill(QColor(128, 128, 128));
+        QVERIFY(grey.save(dir.filePath("grey.png")));
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("grey.png"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        editor.seek(0);
+        editor.addGraphic("arrow");
+        const auto arrow = editor.state()["selectedId"].toString();
+        QCOMPARE(editor.state()["selected"].toMap()["graphic"].toString(), QString("arrow"));
+        // The preview frame fits the shape.
+        const auto bounds = editor.clipBounds(arrow);
+        QVERIFY2(std::abs(bounds["width"].toDouble() - 0.3) < 0.01 &&
+                     std::abs(bounds["height"].toDouble() - 0.12) < 0.01,
+                 qPrintable(QString("%1 %2").arg(bounds["width"].toDouble()).arg(bounds["height"].toDouble())));
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&]() {
+            RenderOptions options;
+            options.audio = false;
+            options.from = 5;
+            options.to = 6;
+            const auto plan = compileRender(editor.project(), dir.filePath("work"), 320, 180, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return out.convertToFormat(QImage::Format_RGB32);
+        };
+        auto red = [](const QImage &i, int x, int y) {
+            const QColor c(i.pixel(x, y));
+            return c.red() > 200 && c.green() < 130 && c.blue() < 130;
+        };
+        auto image = still();
+        QVERIFY(red(image, 160, 90));   // shaft
+        QVERIFY(red(image, 200, 90));   // head
+        QVERIFY(!red(image, 160, 80));  // above the shaft, beside the head: background
+        QVERIFY(!red(image, 160, 120)); // below the arrow
+        // Rotated a quarter turn, it points down.
+        editor.setClip("rotation", 90);
+        image = still();
+        QVERIFY(red(image, 160, 120));
+        QVERIFY(!red(image, 200, 90));
+        editor.undo();
+        // An outline circle leaves its centre clear.
+        editor.setClip("graphic", "ellipse");
+        editor.setClipValues({{"fillColor", "#00000000"}, {"strokeColor", "#ff5a5f"},
+                              {"stroke", 0.02}, {"graphicWidth", 0.4}, {"graphicHeight", 0.6}});
+        image = still();
+        QVERIFY(!red(image, 160, 90));
+        QVERIFY(red(image, 160, 90 - 54)); // top of the ring: 0.6 × 180 / 2
+        // A speech bubble shows its text inside on a white body.
+        editor.remove(false);
+        editor.addGraphic("bubble");
+        const auto bubble = editor.project().clip(editor.state()["selectedId"].toString());
+        QCOMPARE(bubble->text, QString("Hello!"));
+        image = still();
+        int dark = 0, bright = 0;
+        for (int x = 120; x < 200; ++x) {
+            const int g = qGray(image.pixel(x, 85));
+            dark += g < 60;
+            bright += g > 240;
+        }
+        QVERIFY2(dark > 3 && bright > 20, qPrintable(QString("%1 %2").arg(dark).arg(bright)));
+        // Shapes are not captions, and the project validates them.
+        QVERIFY(!editor.exportSrt(QUrl::fromLocalFile(dir.filePath("none.srt"))));
+        auto json = editor.project().json();
+        QCOMPARE(Project::fromJson(json, {}).clips.back().graphic, QString("bubble"));
+        auto clips = json["clips"].toArray();
+        auto o = clips.last().toObject();
+        o["graphic"] = "star";
+        clips[clips.size() - 1] = o;
+        json["clips"] = clips;
+        QVERIFY_EXCEPTION_THROWN(Project::fromJson(json, {}), std::runtime_error);
+        editor.addGraphic("hexagon");
+        QVERIFY(editor.state()["error"].toString().contains("shape"));
+    }
+    void voiceOverWithoutMicrophone() {
+        FrameProvider frames;
+        Editor editor(&frames);
+        const auto voice = editor.state()["voiceOver"].toMap();
+        QCOMPARE(voice["recording"].toBool(), false);
+        if (voice["available"].toBool())
+            QSKIP("This machine has a microphone; recording is checked by hand");
+        editor.startVoiceOver();
+        QVERIFY(editor.state()["error"].toString().contains("No microphone"));
+        QCOMPARE(editor.state()["voiceOver"].toMap()["recording"].toBool(), false);
+        editor.stopVoiceOver(); // nothing to stop
+    }
+    void smoothSlowMotion() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // A white bar moving 8 px per frame over black: at half speed, an in-between frame shows
+        // the bar's trailing part fully (repeat) or half (blend).
+        const auto source = dir.filePath("flicker.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=black:s=128x72:r=30:d=1", "-f", "lavfi", "-i",
+                     "color=white:s=16x72:r=30:d=1", "-filter_complex", "[0][1]overlay=x=8*n:y=0", "-c:v", "ffv1", source});
+        Project p;
+        p.width = 128;
+        p.height = 72;
+        Asset a;
+        a.id = "v";
+        a.path = source;
+        a.kind = "video";
+        a.duration = 1;
+        a.width = 128;
+        a.height = 72;
+        p.assets = {a};
+        Clip c;
+        c.id = "c";
+        c.assetId = "v";
+        c.speed = Time(1, 2);
+        c.duration = 40;
+        p.clips = {c};
+        const auto graph = dir.filePath("graph.txt");
+        auto grey = [&](const QString &mode, qint64 frame, int x) {
+            auto project = p;
+            project.clips[0].slowMotion = mode;
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 128, 72, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return qGray(out.pixel(x, 36));
+        };
+        // While the bar passes x = 64, repeated frames are only black or white; blending
+        // produces grey in-between frames.
+        int repeated = 0, blended = 0;
+        for (qint64 f = 8; f < 24; ++f) {
+            const int r = grey("", f, 64), b = grey("blend", f, 64);
+            repeated += (r > 70 && r < 185);
+            blended += (b > 70 && b < 185);
+        }
+        QCOMPARE(repeated, 0);
+        QVERIFY2(blended >= 1, qPrintable(QString::number(blended)));
+        // Optical flow renders and the setting round-trips.
+        const int flow = grey("flow", 12, 64);
+        QVERIFY(flow >= 0 && flow <= 255);
+        p.clips[0].slowMotion = "blend";
+        QCOMPARE(Project::fromJson(p.json(), {}).clips[0].slowMotion, QString("blend"));
+        auto bad = p.json();
+        auto clips = bad["clips"].toArray();
+        auto o = clips[0].toObject();
+        o["slowMotion"] = "warp";
+        clips[0] = o;
+        bad["clips"] = clips;
+        QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, {}), std::runtime_error);
+    }
+    void sceneDetection() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Three shots of 1 s (red, green, blue) with sound, and a 0.2 s white flash in the last.
+        const auto source = dir.filePath("shots.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "color=red:s=160x90:r=30:d=1[a];color=lime:s=160x90:r=30:d=1[b];"
+                     "color=blue:s=160x90:r=30:d=0.4[c];color=white:s=160x90:r=30:d=0.2[d];"
+                     "color=blue:s=160x90:r=30:d=0.4[e];[a][b][c][d][e]concat=n=5:v=1:a=0",
+                     "-f", "lavfi", "-i", "sine=d=3", "-c:v", "ffv1", "-c:a", "pcm_s16le",
+                     "-shortest", source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto id = editor.project().clips.first().id;
+        editor.select(id);
+        editor.detachAudio();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        editor.select(id);
+        QVERIFY(editor.state()["selected"].toMap()["video"].toBool());
+        editor.splitAtScenes(0.5);
+        QCOMPARE(editor.state()["scenes"].toMap()["status"].toString(), QString("finding"));
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["scenes"].toMap()["status"].toString(),
+                                  QString("done"), 30000);
+        QCOMPARE(editor.state()["scenes"].toMap()["count"].toInt(), 2);
+        // Video and detached audio are both cut at 1 s and 2 s; the flash is too short to split.
+        QCOMPARE(editor.project().clips.size(), size_t(6));
+        QVector<qint64> videoStarts, audioStarts;
+        for (const auto &c : editor.project().clips)
+            (c.audioOnly ? audioStarts : videoStarts) << c.start;
+        std::sort(videoStarts.begin(), videoStarts.end());
+        std::sort(audioStarts.begin(), audioStarts.end());
+        QCOMPARE(videoStarts, (QVector<qint64>{0, 30, 60}));
+        QCOMPARE(audioStarts, videoStarts);
+        QCOMPARE(editor.project().clip(id)->duration, qint64(30));
+        QCOMPARE(editor.project().clip(id)->start, qint64(0));
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        // Titles have no shots.
+        editor.addTitle();
+        editor.splitAtScenes();
+        QVERIFY(editor.state()["error"].toString().contains("video clip"));
+    }
+    void clipboardAndAudioExport() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("clip.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=30:d=2", "-f",
+                     "lavfi", "-i", "sine=f=440:d=2", "-c:v", "ffv1", "-c:a", "pcm_s16le",
+                     "-shortest", source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto first = editor.project().clips.first().id;
+        editor.select(first);
+        editor.setClipValues({{"temperature", 0.4}, {"vignette", 0.3}, {"scale", 0.5},
+                              {"volume", 0.5}});
+
+        // Copy and paste at the playhead: a new clip with the same settings.
+        QVERIFY(editor.state()["clipboard"].toString().isEmpty());
+        editor.copy();
+        QCOMPARE(editor.state()["clipboard"].toString(), editor.project().clips.first().name);
+        // The playhead is inside the original, so the copy goes to the next track up.
+        editor.seek(30);
+        editor.paste();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        const auto pasted = editor.project().clips.last();
+        QVERIFY(pasted.id != first);
+        QCOMPARE(pasted.start, qint64(30));
+        QCOMPARE(pasted.track, 1);
+        QCOMPARE(pasted.temperature, 0.4);
+        QCOMPARE(editor.state()["selectedId"].toString(), pasted.id);
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+
+        // Attributes onto another clip: "look" leaves position and volume alone.
+        editor.addTitle();
+        const auto title = editor.project().clips.last().id;
+        editor.select(title);
+        editor.pasteAttributes("look");
+        auto *t = editor.project().clip(title);
+        QCOMPARE(t->temperature, 0.4);
+        QCOMPARE(t->vignette, 0.3);
+        QCOMPARE(t->scale, 1.);
+        editor.pasteAttributes("all");
+        t = editor.project().clip(title);
+        QCOMPARE(t->scale, 0.5);
+        QCOMPARE(t->volume, 0.5);
+        editor.undo();
+        QCOMPARE(editor.project().clip(title)->scale, 1.);
+
+        // Into a new project: the media comes along.
+        editor.newProject();
+        QVERIFY(editor.project().assets.empty());
+        editor.paste();
+        QCOMPARE(editor.project().assets.size(), size_t(1));
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        QCOMPARE(editor.project().clips.first().vignette, 0.3);
+
+        // Audio-only export in three formats: no video stream, the timeline's length.
+        for (const auto &format : {QString("mp3"), QString("m4a"), QString("wav")}) {
+            const auto out = dir.filePath("sound." + format);
+            editor.exportWith(QUrl::fromLocalFile(out), {{"format", format}, {"quality", "max"}});
+            QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+            QVERIFY2(QFileInfo::exists(out), qPrintable(editor.state()["error"].toString()));
+            const auto probe =
+                QString::fromUtf8(run(Editor::executable("ffprobe"),
+                                      {"-v", "error", "-show_entries",
+                                       "stream=codec_type,codec_name,sample_rate,channels:format="
+                                       "duration",
+                                       "-of", "compact", out}));
+            QVERIFY2(!probe.contains("codec_type=video") && probe.contains("codec_type=audio") &&
+                         probe.contains("sample_rate=48000") && probe.contains("channels=2"),
+                     qPrintable(probe));
+            const auto duration = QRegularExpression("duration=([0-9.]+)").match(probe);
+            QVERIFY2(std::abs(duration.captured(1).toDouble() - 2) < 0.1, qPrintable(probe));
+        }
+        QCOMPARE(editor.exportPreview({{"format", "wav"}})["audio"].toBool(), true);
+        QCOMPARE(editor.exportPreview({{"format", "h264"}})["audio"].toBool(), false);
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("wrong.mp4")), {{"format", "mp3"}});
+        QVERIFY(editor.state()["error"].toString().contains(".mp3"));
+    }
+    void colourAndLook() {
+        QCOMPARE(filterPath("C:/a b/it's,[x];y=z.cube"),
+                 QString("C\\\\:/a b/it\\\\\\'s\\,\\[x\\]\\;y\\\\=z.cube"));
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        auto image = [&](const QString &name, QColor colour, bool hole = false) {
+            QImage i(320, 180, QImage::Format_ARGB32);
+            i.fill(colour);
+            if (hole) // a transparent left half
+                for (int y = 0; y < 180; ++y)
+                    for (int x = 0; x < 160; ++x)
+                        i.setPixelColor(x, y, Qt::transparent);
+            const auto path = dir.filePath(name);
+            if (!i.save(path))
+                throw std::runtime_error("Cannot save test image");
+            return path;
+        };
+        Project p;
+        p.width = 320;
+        p.height = 180;
+        for (const auto &[id, path] :
+             {std::pair{QString("grey"), image("grey.png", QColor(128, 128, 128))},
+              std::pair{QString("red"), image("red.png", QColor(200, 0, 0))},
+              std::pair{QString("cut"), image("cut.png", QColor(128, 128, 128), true)}}) {
+            Asset a;
+            a.id = id;
+            a.path = path;
+            a.kind = "image";
+            a.duration = 5;
+            a.width = 320;
+            a.height = 180;
+            p.assets << a;
+        }
+        Clip clip;
+        clip.id = "c";
+        clip.assetId = "grey";
+        clip.duration = 30;
+        p.clips = {clip};
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Clip &c) {
+            auto project = p;
+            project.clips[project.clips.size() - 1] = c;
+            RenderOptions options;
+            options.audio = false;
+            options.from = 5;
+            options.to = 6;
+            const auto plan = compileRender(project, dir.filePath("work"), 320, 180, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return out.convertToFormat(QImage::Format_RGB32);
+        };
+        auto at = [](const QImage &i, int x = 160, int y = 90) { return QColor(i.pixel(x, y)); };
+        auto with = [&](auto change) {
+            auto c = clip;
+            change(c);
+            return still(c);
+        };
+        const auto plain = at(still(clip));
+        QVERIFY(std::abs(plain.red() - 128) < 6 && std::abs(plain.blue() - 128) < 6);
+        auto warm = at(with([](Clip &c) { c.temperature = 1; }));
+        QVERIFY2(warm.red() > warm.blue() + 20, qPrintable(warm.name()));
+        auto cool = at(with([](Clip &c) { c.temperature = -1; }));
+        QVERIFY2(cool.blue() > cool.red() + 20, qPrintable(cool.name()));
+        auto magenta = at(with([](Clip &c) { c.tint = 1; }));
+        QVERIFY2(magenta.green() < magenta.red() - 15, qPrintable(magenta.name()));
+        auto green = at(with([](Clip &c) { c.tint = -1; }));
+        QVERIFY2(green.green() > green.red() + 15, qPrintable(green.name()));
+        auto lifted = at(with([](Clip &c) { c.shadows = 1; }));
+        QVERIFY2(lifted.red() > plain.red() + 8, qPrintable(lifted.name()));
+        auto lowered = at(with([](Clip &c) { c.highlights = -1; }));
+        QVERIFY2(lowered.red() < plain.red() - 8, qPrintable(lowered.name()));
+        auto glowing = at(with([](Clip &c) { c.glow = 1; }));
+        QVERIFY2(glowing.red() > plain.red() + 30, qPrintable(glowing.name()));
+        const auto vignette = with([](Clip &c) { c.vignette = 1; });
+        QVERIFY(qGray(vignette.pixel(2, 2)) < qGray(vignette.pixel(160, 90)) - 40);
+        const auto grain = with([](Clip &c) { c.grain = 1; });
+        int lo = 255, hi = 0;
+        for (int x = 100; x < 220; ++x) {
+            lo = std::min(lo, qGray(grain.pixel(x, 90)));
+            hi = std::max(hi, qGray(grain.pixel(x, 90)));
+        }
+        QVERIFY2(hi - lo > 20, qPrintable(QString::number(hi - lo)));
+        auto sharp = at(with([](Clip &c) { c.sharpen = 1; }));
+        QVERIFY(std::abs(sharp.red() - plain.red()) < 6); // a flat picture stays flat
+        // A LUT that maps everything to blue, from a folder with awkward characters.
+        QVERIFY(QDir(dir.path()).mkpath("odd dir;it's,[x]"));
+        const auto lutPath = dir.filePath("odd dir;it's,[x]/blue.cube");
+        {
+            QFile lut(lutPath);
+            QVERIFY(lut.open(QIODevice::WriteOnly));
+            lut.write("TITLE \"blue\"\nLUT_3D_SIZE 2\n");
+            for (int i = 0; i < 8; ++i)
+                lut.write("0 0 1\n");
+        }
+        auto blue = at(with([&](Clip &c) { c.lut = lutPath; }));
+        QVERIFY2(blue.blue() > 240 && blue.red() < 15, qPrintable(blue.name()));
+        auto half = at(with([&](Clip &c) {
+            c.lut = lutPath;
+            c.lutStrength = 0.5;
+        }));
+        QVERIFY2(std::abs(half.blue() - 191) < 12 && std::abs(half.red() - 64) < 12,
+                 qPrintable(half.name()));
+        auto missing = at(with([&](Clip &c) { c.lut = dir.filePath("gone.cube"); }));
+        QVERIFY(std::abs(missing.red() - plain.red()) < 6);
+        // Alpha survives every look filter: the red clip below shows through the hole.
+        Clip below = clip;
+        below.id = "below";
+        below.assetId = "red";
+        p.clips = {below, clip};
+        p.clips[1].track = 1;
+        auto cutout = p.clips[1];
+        cutout.assetId = "cut";
+        cutout.vignette = cutout.grain = cutout.glow = cutout.sharpen = 1;
+        cutout.temperature = cutout.vibrance = cutout.shadows = 0.5;
+        cutout.lut = lutPath;
+        cutout.lutStrength = 0.5;
+        const auto layered = still(cutout);
+        const auto hole = at(layered, 80, 90);
+        QVERIFY2(hole.red() > 150 && hole.blue() < 60, qPrintable(hole.name()));
+        QVERIFY(at(layered, 240, 90).blue() > 120);
+
+        // Saved with the project: values only when set, the LUT relative to the project.
+        p.clips[1] = cutout;
+        const auto json = p.json(dir.path());
+        QCOMPARE(json["schemaVersion"].toInt(), 11);
+        const auto saved = json["clips"].toArray()[1].toObject();
+        QCOMPARE(saved["lut"].toString(), QString("odd dir;it's,[x]/blue.cube"));
+        QVERIFY(!json["clips"].toArray()[0].toObject().contains("vignette"));
+        const auto loaded = Project::fromJson(json, dir.path());
+        QCOMPARE(loaded.clips[1].lut, QDir::cleanPath(lutPath));
+        QCOMPARE(loaded.clips[1].grain, 1.);
+        QCOMPARE(loaded.clips[1].temperature, 0.5);
+        auto bad = json;
+        auto clips = bad["clips"].toArray();
+        auto first = clips[0].toObject();
+        first["tint"] = 2;
+        clips[0] = first;
+        bad["clips"] = clips;
+        QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, dir.path()), std::runtime_error);
     }
     void blurAndMosaic() {
         const auto ffmpeg = Editor::executable("ffmpeg");

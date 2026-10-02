@@ -32,7 +32,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F026 | Split, trim, delete and duplicate | Implemented (alpha) | Split, drag-edge/source-aware trims, inspector trims, delete and duplicate; each committed edit is undoable. |
 | F027 | Ripple trim, roll, slip and slide | Partial | Magnetic track trims ripple subsequent clips; no roll, slip, slide or linked-pair propagation. |
 | F028 | Nested sequences and compound clips | Planned | Not implemented in this alpha. |
-| F029 | Copy/paste clips and selected attributes | Planned | Not implemented in this alpha. |
+| F029 | Copy/paste clips and selected attributes | Implemented (alpha) | Copy (Ctrl+C) and paste at the playhead (Ctrl+V) within the session and across projects (the media comes along); the copy goes to its own track when free there, otherwise the nearest free track or a new one. Paste look (colour, effects, LUT) or paste all attributes (Ctrl+Alt+V: also transform, keyframes, shape, keying, volume, fades) onto the selected clip, in one undo step. No system-clipboard exchange or multi-clip selection. |
 | F030 | Markers, in/out and timeline navigation | Partial | Frame and previous/next edit navigation; start/end shortcuts. No markers or in/out ranges. |
 | F031 | Timeline zoom and frame-accurate seeking | Partial | Timeline zoom/fit; seeking renders only the playhead frame, so latency no longer grows with position (about 0.1 s for 1080p H.264 on a 4-core development container). Not qualified on the hardware profiles. |
 | F032 | JKL shuttle and reverse audition | Planned | Not implemented in this alpha. |
@@ -51,11 +51,11 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F045 | Background replacement and canvas | Planned | Not implemented in this alpha. |
 | F046 | Adjustment layers and filter ordering | Planned | Not implemented in this alpha. |
 | F047 | Blur variants, mosaic and pixelation | Partial | Gaussian blur of a clip's picture (inspector slider), and blur or mosaic (pixelate) areas: rectangles on an upper track that affect everything below, placed and resized in the preview, position keyframable, strength 0–100 %. Rectangles only; no ellipse/feathered shape, animated size or face tracking. |
-| F048 | Glow, grain, vignette and sharpen | Planned | Not implemented in this alpha. |
+| F048 | Glow, grain, vignette and sharpen | Implemented (alpha) | Per clip: contrast-adaptive sharpening, glow (screened soft copy), vignette and moving luma film grain, 0..1 each; alpha is preserved for overlays and cutouts. |
 | F049 | Glitch, shake, VHS, retro and film effects | Planned | Not implemented in this alpha. |
 | F050 | Distortion, edge, lens and stylize effects | Planned | Not implemented in this alpha. |
 | F051 | Motion blur | Planned | Not implemented in this alpha. |
-| F052 | Frame blending slow motion | Planned | Not implemented in this alpha. |
+| F052 | Frame blending slow motion | Implemented (alpha) | For clips slower than 1×: "Blend frames" (FFmpeg framerate, cross-fading neighbouring source frames, without blending across scene cuts) or "Optical flow" (minterpolate motion-compensated interpolation, slow to render); a little source around the range is decoded so preview frames match export. Not for reversed clips. |
 | F053 | Camera-like and pseudo-3D effects | Planned | Not implemented in this alpha. |
 | F054 | Dissolve, fade and dip to color | Implemented (alpha) | Two-clip dissolve and dip to black/white centred on a cut, with equal-power audio crossfades; clip fades as before. |
 | F055 | Wipe, slide, push and directional transitions | Partial | Wipe left/right, slide left/right/up/down, smooth left. No push. |
@@ -67,7 +67,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F061 | Volume, gain, pan, mute and fades | Partial | Volume/mute/fades, no pan. |
 | F062 | Multitrack mixing and channel layouts | Partial | 48 kHz stereo only. |
 | F063 | 5.1 and configurable audio routing | Planned | Not implemented in this alpha. |
-| F064 | Voice-over and audio recording | Planned | Not implemented in this alpha. |
+| F064 | Voice-over and audio recording | Partial | "● Voice-over" in the transport row records the default microphone to WAV (Qt Multimedia) in the data folder's recordings/ while the timeline plays from the playhead; stopping adds the recording at that frame on the lowest free non-magnetic track (or a new one). No input-device choice, level display during recording, count-in or punch-in; checked on CI only for the no-microphone path. |
 | F065 | EQ, compressor, limiter and noise gate | Partial | Fixed output limiter only. |
 | F066 | Reverb and delay | Planned | Not implemented in this alpha. |
 | F067 | Loudness measurement and normalization | Partial | Export option: two-pass loudness normalisation. FFmpeg's EBU R128 meter measures the whole mix, then one gain reaches the target (-14 YouTube/streaming, -16 podcast, -23 EBU R128) and a peak limiter holds peaks about 1.5 dB below full scale. In the editor, left/right peak meters follow playback and the export dialog measures the whole mix (integrated LUFS, true peak, gain to the target). No true-peak limiting, loudness-range display or per-clip normalisation. |
@@ -82,16 +82,16 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F076 | Voice changer | Planned | Not implemented in this alpha. |
 | F077 | Voice conversion and custom voice | Planned | Not implemented in this alpha. |
 | F078 | Plain and rich text; Unicode shaping | Partial | Plain Unicode Qt titles; no rich text. |
-| F079 | Font browser, favorites and local font files | Planned | Not implemented in this alpha. |
-| F080 | Size, weight, spacing, kerning and alignment | Partial | Size, fixed bold/center/wrap; no typography editor. |
-| F081 | Outline, shadow, glow and text background | Partial | Fixed shadow only. |
+| F079 | Font browser, favorites and local font files | Partial | Font list of all installed families (each shown in its own font, type to search) and local .ttf/.otf/.ttc files added with "+ Font", copied into the data folder so they travel with a portable install and load at start. No favourites; projects store the family name only. |
+| F080 | Size, weight, spacing, kerning and alignment | Implemented (alpha) | Font size, bold, italic, left/centre/right alignment, letter spacing (−0.1..0.5 of the size) and line spacing (0.7..3×) for titles and captions; kerning is the font's own. Title templates keep their fixed layout. |
+| F081 | Outline, shadow, glow and text background | Partial | Outline (width and colour), drop shadow strength and a rounded box behind each line (colour and opacity) for titles; karaoke captions get outline and shadow. No text glow; templates keep their own plate. |
 | F082 | Text transforms and per-character animation | Planned | Not implemented in this alpha. |
 | F083 | Original titles, lower thirds and presets | Partial | Original title templates: lower third with plate, lower third with accent line (both slide in from the left and fade), and title card; name/role from the text lines, accent colour, scale and position from the preview frame. Three templates, no preset library, no per-template animation choice. |
 | F084 | Manual captions and subtitle track | Partial | Editable title clips used as captions. |
 | F085 | SRT import/export and TXT import | Partial | SRT roundtrip; no TXT. |
 | F086 | WebVTT and ASS/SSA interoperability | Planned | Not implemented in this alpha. |
 | F087 | Subtitle burn-in and sidecar export | Partial | Burn-in and SRT. |
-| F088 | Local transcription and automatic captions | Partial | whisper.cpp v1.9.4 (static AVX2 whisper-cli, built from the pinned commit) with Whisper large-v3-turbo q5_0 and Silero VAD, via the cutlery-ai transcribe task; language auto or chosen; word-level transcripts cached per media file and language, grouped into lines of at most 42 characters; cues mapped through each audible clip's trim, position and speed onto an 'AI captions' track, replaced on every run. CPU only; no speaker labels. |
+| F088 | Local transcription and automatic captions | Partial | whisper.cpp v1.9.4 (whisper-cli with Vulkan GPU and per-CPU-level backends, built from the pinned commit) with Whisper large-v3-turbo q5_0 and Silero VAD, via the cutlery-ai transcribe task; language auto or chosen; word-level transcripts cached per media file and language, grouped into lines of at most 42 characters; cues mapped through each audible clip's trim, position and speed onto an 'AI captions' track, replaced on every run. GPU through Vulkan with CPU fallback (GPU unverified on CI, which has none); no speaker labels. |
 | F089 | Word timing and karaoke highlights | Partial | Whisper word timestamps (one cue per word) grouped into lines; captions keep each word's start (schema 8). Styles: karaoke (spoken word in a highlight colour), one word at a time, plain; changeable per caption in the inspector. Rendered from one sprite per caption with a per-frame crop. No animation of sprite captions, no per-word styling beyond the highlight colour. |
 | F090 | Sentence segmentation and caption layout | Planned | Not implemented in this alpha. |
 | F091 | Transcript-based editing | Planned | Not implemented in this alpha. |
@@ -100,17 +100,17 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F094 | Offline text-to-speech | Planned | Not implemented in this alpha. |
 | F095 | German text-to-speech | Planned | Not implemented in this alpha. |
 | F096 | Local dubbing and duration fitting | Planned | Not implemented in this alpha. |
-| F097 | Shapes, arrows, callouts and speech bubbles | Planned | Not implemented in this alpha. |
+| F097 | Shapes, arrows, callouts and speech bubbles | Partial | Shape clips from the library: arrow, circle/ellipse, speech bubble, box and line, with fill (or none), outline colour and width, and size; moved, resized, rotated and keyframed like overlays. Bubbles and boxes hold styled text. No callout pointers that follow a target or custom paths. |
 | F098 | Stickers, icons and overlays | Partial | Imported images as overlays only. |
 | F099 | PNG, SVG, GIF and image-sequence overlays | Partial | Raster still images only. |
 | F100 | Collage and reusable layout templates | Planned | Not implemented in this alpha. |
 | F101 | Stock music and sound effects import | Partial | User audio file import only. |
 | F102 | Commercial-use rights metadata | Planned | Not implemented in this alpha. |
 | F103 | Exposure, brightness, contrast and saturation | Partial | Brightness/contrast/saturation; no exposure model. |
-| F104 | Temperature, tint, vibrance and tonal controls | Planned | Not implemented in this alpha. |
+| F104 | Temperature, tint, vibrance and tonal controls | Partial | Per clip: temperature (light colour temperature with lightness kept), tint (green–magenta), vibrance, and shadows/highlights through a master curve, each −1..1, plus the existing brightness, contrast and saturation. Not keyframable; no exposure/whites/blacks split or auto white balance. |
 | F105 | HSL, RGB curves and master curves | Planned | Not implemented in this alpha. |
 | F106 | Color wheels and automatic adjustment | Planned | Not implemented in this alpha. |
-| F107 | LUT import, intensity and original presets | Planned | Not implemented in this alpha. |
+| F107 | LUT import, intensity and original presets | Partial | .cube and .3dl 3D LUTs per clip (tetrahedral interpolation) with a strength mix; missing files are skipped and flagged. Eight original one-click looks built from the colour and look controls; no bundled LUT files or LUT browser. |
 | F108 | Histogram, waveform and vectorscope | Planned | Not implemented in this alpha. |
 | F109 | Rec.709, sRGB and range conversions | Planned | Not implemented in this alpha. |
 | F110 | HDR input and SDR tone mapping | Planned | Not implemented in this alpha. |
@@ -134,7 +134,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F128 | Video relighting | Planned | Not implemented in this alpha. |
 | F129 | Object/text/people removal and inpainting | Planned | Not implemented in this alpha. |
 | F130 | Image merge and photo editing | Planned | Not implemented in this alpha. |
-| F131 | Automatic scene detection | Planned | Not implemented in this alpha. |
+| F131 | Automatic scene detection | Partial | "Split at scene changes" on a video clip: FFmpeg scdet on a 320-pixel copy of the clip's source range finds shot changes; the clip and its detached audio are split there in one undo step, ignoring shots under 0.5 s. Fixed sensitivity in the UI; no review list before splitting. |
 | F132 | Long video to shorts and highlight proposals | Planned | Not implemented in this alpha. |
 | F133 | Intelligent proxy generation | Planned | Not implemented in this alpha. |
 | F134 | Local AI image generator | Planned | Not implemented in this alpha. |
@@ -160,7 +160,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F154 | MOV and mezzanine/alpha workflow | Partial | ProRes 422 HQ/422/LT MOV export with PCM audio; no alpha-channel export. |
 | F155 | WebM VP9/Opus software export | Implemented (alpha) | VP9/Opus export profile (integration coverage to expand). |
 | F156 | HEVC and AV1 hardware/software export | Implemented (alpha) | HEVC via hardware or Media Foundation; AV1 via hardware or SVT-AV1 software. |
-| F157 | Audio-only and image-sequence export | Planned | Not implemented in this alpha. |
+| F157 | Audio-only and image-sequence export | Partial | Audio-only export of the timeline mix: MP3 (LAME VBR), AAC in M4A, or WAV (24-bit at Maximum quality, else 16-bit), 48 kHz stereo, with the same loudness normalisation as video. No image-sequence export. |
 | F158 | Resolution, fps, quality, bitrate and format controls | Partial | Presets plus format, four quality levels and output height (720p–4K); no explicit bitrate or fps override. |
 | F159 | Hardware encoder selection and CPU fallback | Implemented (alpha) | Candidates are probed with a short test encode at the real size and arguments, cached per session. Software formats always remain available. Not qualified on real NVIDIA/AMD/Intel hardware yet. |
 | F160 | Queue, range export, progress and cancellation | Partial | One full-sequence job with progress/cancel; no queue/range. |

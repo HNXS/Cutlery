@@ -1,5 +1,19 @@
 # Release notes
 
+## 0.6.0 (in development)
+
+Projects are saved as schema 11; 0.5 cannot open them.
+
+- **Colour and look:** temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with a strength slider; eight one-click looks.
+- **Text styling:** any installed font or your own .ttf/.otf files, bold and italic, alignment, letter and line spacing, outline, shadow and a background box.
+- **Voice-over:** record narration from the microphone while the timeline plays; the recording lands at the playhead.
+- **Shapes:** arrows, circles, speech bubbles, boxes and lines for tutorials, with colours, outline and text inside bubbles and boxes.
+- **Copy and paste:** clips (Ctrl+C / Ctrl+V, also into another project) and their attributes: "Paste look" or "Paste all" (Ctrl+Alt+V) onto the selected clip.
+- **Smooth slow motion:** blended or optical-flow in-between frames for clips slower than 1×.
+- **Split at scene changes:** cuts a video clip (and its detached audio) into its shots.
+- **Audio-only export:** the mix as MP3, AAC (M4A) or WAV, with loudness normalisation.
+- **Faster captions:** speech recognition uses the graphics card through Vulkan (NVIDIA, AMD, Intel) and falls back to the CPU. Any x64 processor works; AVX2 is no longer required.
+
 ## 0.5.0 alpha
 
 0.5 adds the tools for talking-head and presentation videos: speakers over slides, automatic captions, clean sound, and titles. AI features run offline from an optional AI pack. Projects are saved as schema 10. 0.4 cannot open them; use **Save As** to keep an older copy. 0.5 opens every earlier project.

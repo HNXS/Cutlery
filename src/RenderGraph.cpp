@@ -15,6 +15,20 @@
 #include <stdexcept>
 
 namespace cutlery {
+// A file path as a filter option value inside a filter graph: escaped for the option parser,
+// then for the graph parser, so any character in a path is safe.
+QString filterPath(const QString &path) {
+    auto escape = [](const QString &s, const QString &special) {
+        QString out;
+        for (const auto ch : s) {
+            if (special.contains(ch) || ch == '\\' || ch == '\'')
+                out += '\\';
+            out += ch;
+        }
+        return out;
+    };
+    return escape(escape(QDir::fromNativeSeparators(path), ":="), ",;[]");
+}
 static QString num(double v) {
     return QString::number(v, 'f', 9);
 }
@@ -123,6 +137,116 @@ static QString curve(const Clip &c, const QString &property, const QString &fram
     return QString("if(lt(%1,%2),%3,%4)").arg(frame).arg(k.first().frame).arg(
         num(k.first().value), expr);
 }
+// The shadow offset and outline of a text, from the clip's style at a font pixel size.
+static void paintStyledPath(QPainter &paint, const Clip &c, const QPainterPath &path, double px,
+                            const QColor &fill) {
+    paint.setPen(Qt::NoPen);
+    if (c.textShadow > 0) {
+        const double d = std::max(1., px / 24);
+        paint.fillPath(path.translated(d * 0.7, d), QColor(0, 0, 0, qRound(210 * c.textShadow)));
+    }
+    if (c.outline > 0) {
+        QPen pen(QColor(c.outlineColor), 2 * c.outline * px);
+        pen.setJoinStyle(Qt::RoundJoin);
+        paint.strokePath(path, pen);
+    }
+    paint.fillPath(path, fill);
+}
+// A text font with the clip's weight, slant and letter spacing at a pixel size.
+static QFont textFont(const Clip &c, int pixelSize) {
+    QFont font(c.fontFamily);
+    font.setPixelSize(std::max(8, pixelSize));
+    font.setBold(c.bold);
+    font.setItalic(c.italic);
+    if (c.letterSpacing != 0)
+        font.setLetterSpacing(QFont::AbsoluteSpacing, c.letterSpacing * font.pixelSize());
+    return font;
+}
+// Draws the clip's text in `area` as its style describes: wrapped at spaces, aligned, centred
+// vertically, with line spacing, a rounded box behind each line, a shadow and an outline.
+static void paintText(QPainter &paint, const Clip &c, const QFont &font, const QRect &area) {
+    const QFontMetricsF m(font);
+    QStringList lines;
+    for (const auto &paragraph : c.text.split('\n')) {
+        QString line;
+        for (const auto &word : paragraph.split(' ', Qt::SkipEmptyParts)) {
+            const auto candidate = line.isEmpty() ? word : line + ' ' + word;
+            if (!line.isEmpty() && m.horizontalAdvance(candidate) > area.width()) {
+                lines << line;
+                line = word;
+            } else
+                line = candidate;
+        }
+        lines << line;
+    }
+    const double px = font.pixelSize(), step = m.height() * c.lineSpacing,
+                 pad = 0.25 * px;
+    double y = area.top() + (area.height() - (step * (lines.size() - 1) + m.height())) / 2;
+    QPainterPath path;
+    QVector<QRectF> boxes;
+    for (const auto &line : lines) {
+        const double w = m.horizontalAdvance(line);
+        const double x = c.align == "left"    ? area.left()
+                         : c.align == "right" ? area.right() + 1 - w
+                                              : area.left() + (area.width() - w) / 2;
+        if (!line.isEmpty()) {
+            path.addText(QPointF(x, y + m.ascent()), font, line);
+            boxes << QRectF(x - pad, y - pad * 0.3, w + 2 * pad, m.height() + pad * 0.6);
+        }
+        y += step;
+    }
+    if (c.background > 0) {
+        QColor box(c.backgroundColor);
+        box.setAlphaF(c.background);
+        paint.setPen(Qt::NoPen);
+        paint.setBrush(box);
+        for (const auto &b : boxes)
+            paint.drawRoundedRect(b, pad * 0.6, pad * 0.6);
+    }
+    paintStyledPath(paint, c, path, px, QColor(c.textColor));
+}
+// A graphic clip's shape filling `box` on a canvas `height` pixels high.
+static void paintGraphic(QPainter &paint, const Clip &c, const QRectF &box, int height) {
+    QPainterPath path;
+    const double w = box.width(), h = box.height();
+    if (c.graphic == "ellipse")
+        path.addEllipse(box);
+    else if (c.graphic == "rectangle")
+        path.addRoundedRect(box, std::min(w, h) * 0.08, std::min(w, h) * 0.08);
+    else if (c.graphic == "line")
+        path.addRect(box);
+    else if (c.graphic == "arrow") {
+        // A shaft and a head pointing right; the head is as long as the arrow is thick.
+        const double head = std::min(h * 1.1, w * 0.5), shaft = h * 0.36;
+        const double mid = box.center().y(), tip = box.right(), neck = tip - head;
+        path.moveTo(box.left(), mid - shaft / 2);
+        path.lineTo(neck, mid - shaft / 2);
+        path.lineTo(neck, box.top());
+        path.lineTo(tip, mid);
+        path.lineTo(neck, box.bottom());
+        path.lineTo(neck, mid + shaft / 2);
+        path.lineTo(box.left(), mid + shaft / 2);
+        path.closeSubpath();
+    } else if (c.graphic == "bubble") {
+        // A rounded body with a tail at the lower left.
+        const QRectF body(box.left(), box.top(), w, h * 0.8);
+        const double r = std::min(body.width(), body.height()) * 0.25;
+        path.addRoundedRect(body, r, r);
+        QPainterPath tail;
+        tail.moveTo(body.left() + w * 0.18, body.bottom() - 1);
+        tail.lineTo(body.left() + w * 0.12, box.bottom());
+        tail.lineTo(body.left() + w * 0.34, body.bottom() - 1);
+        tail.closeSubpath();
+        path = path.united(tail);
+    }
+    paint.setPen(Qt::NoPen);
+    paint.fillPath(path, QColor(c.fillColor));
+    if (c.stroke > 0) {
+        QPen pen(QColor(c.strokeColor), c.stroke * height);
+        pen.setJoinStyle(Qt::RoundJoin);
+        paint.strokePath(path, pen);
+    }
+}
 // Timed captions ("karaoke", "word"): one band-high variant per word, stacked vertically, so a
 // single looped image serves the whole caption and a per-frame crop picks the spoken word.
 struct CaptionSprite {
@@ -131,11 +255,9 @@ struct CaptionSprite {
 };
 static CaptionSprite captionSprite(const Clip &c, int width, int height, int projectHeight) {
     const auto words = captionWords(c.text);
-    QFont font(c.fontFamily);
     const bool single = c.captionStyle == "word";
-    font.setPixelSize(std::max(
-        8, qRound(c.fontSize * (single ? 1.5 : 1.) * double(height) / projectHeight)));
-    font.setBold(true);
+    const auto font =
+        textFont(c, qRound(c.fontSize * (single ? 1.5 : 1.) * double(height) / projectHeight));
     const QFontMetrics metrics(font);
     const int maxWidth = width * 13 / 15, lineHeight = metrics.height(),
               space = metrics.horizontalAdvance(' ');
@@ -162,10 +284,9 @@ static CaptionSprite captionSprite(const Clip &c, int width, int height, int pro
     paint.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
     paint.setFont(font);
     auto draw = [&](const QString &text, int x, int baseline, const QColor &color) {
-        paint.setPen(QColor(0, 0, 0, 210));
-        paint.drawText(x + 2, baseline + 3, text);
-        paint.setPen(color);
-        paint.drawText(x, baseline, text);
+        QPainterPath path;
+        path.addText(QPointF(x, baseline), font, text);
+        paintStyledPath(paint, c, path, font.pixelSize(), color);
     };
     for (int v = 0; v < s.variants; ++v) {
         const int top = v * s.band + lineHeight / 4;
@@ -356,15 +477,21 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             img.fill(Qt::transparent);
             QPainter paint(&img);
             paint.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
-            QFont font(c.fontFamily);
-            font.setPixelSize(std::max(8, qRound(c.fontSize * double(height) / p.height)));
-            font.setBold(true);
-            paint.setFont(font);
-            const QRect rect(width / 15, height / 12, width * 13 / 15, height * 5 / 6);
-            paint.setPen(QColor(0, 0, 0, 210));
-            paint.drawText(rect.translated(2, 3), Qt::AlignCenter | Qt::TextWordWrap, c.text);
-            paint.setPen(QColor(c.textColor));
-            paint.drawText(rect, Qt::AlignCenter | Qt::TextWordWrap, c.text);
+            const auto font = textFont(c, qRound(c.fontSize * double(height) / p.height));
+            QRect rect(width / 15, height / 12, width * 13 / 15, height * 5 / 6);
+            if (!c.graphic.isEmpty()) {
+                // Shapes are drawn centred on the canvas at their own size; text goes inside.
+                const QSizeF size(width * c.graphicWidth, height * c.graphicHeight);
+                const QRectF box(QPointF(width - size.width(), height - size.height()) / 2, size);
+                paintGraphic(paint, c, box, height);
+                const double inset = std::min(box.width(), box.height()) * 0.12;
+                rect = box.adjusted(inset, inset, -inset, -inset - (c.graphic == "bubble"
+                                                                       ? box.height() * 0.18
+                                                                       : 0))
+                           .toRect();
+            }
+            if (!c.text.isEmpty() && c.graphic != "arrow" && c.graphic != "line")
+                paintText(paint, c, font, rect);
             paint.end();
             if (!img.save(n.file))
                 throw std::runtime_error("Cannot write title render asset");
@@ -413,6 +540,14 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         const qint64 begin = std::min(l0, c0), padStart = std::max<qint64>(0, c0 - l0),
                      padStop = std::max<qint64>(0, l1 - c1) + 1;
         const double seek = c.sourceIn.seconds() + (c.reverse ? d - secs(c1) : secs(c0)) * s;
+        // Smooth slow motion makes in-between frames from source neighbours, so it decodes a
+        // little source before and after the range, even for a single preview frame.
+        const auto up = c.aiUpscale && !n.image && n.asset ? o.upscaled.value(n.asset->id)
+                                                           : MatteSource{};
+        const bool smooth = s < 1 && !c.reverse && !n.image && !c.slowMotion.isEmpty();
+        const double pre = smooth ? std::clamp(seek - (up.path.isEmpty() ? 0. : up.start), 0., 0.2)
+                                  : 0,
+                     post = smooth ? 0.2 : 0;
         const qint64 base = n.vPre;
         // Source frames to clip-local frames: seek, speed, reverse, hold at the ends, then exact
         // frame timestamps, clip-local and shifted by the handle so none are negative. The AI
@@ -420,14 +555,26 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         // A matte arrives already aligned to the seek point and may end a little before the
         // picture (its last analysed frame), which it holds.
         auto timing = [&](const QString &source, bool reversible, bool matte = false) {
+            const bool around = smooth && !matte;
             QString t = source + (matte ? "trim=start=0:duration=" : "trim=duration=") +
-                        num(secs(c1 - c0) * s) + (matte ? "" : ",setpts=PTS-STARTPTS");
+                        num(secs(c1 - c0) * s + (around ? pre + post : 0)) +
+                        (matte ? "" : ",setpts=PTS-STARTPTS");
             if (c.reverse && reversible)
                 t += ",reverse";
             // Sampling 1/8 frame late resolves exact half-frame ties (2x speed, 60 fps sources)
             // the same way regardless of where decoding started, so stills, playback and export
             // agree.
-            t += ",setpts=PTS/" + num(s) + "+" + num(frame / 8) + "/TB,fps=" + fps;
+            t += ",setpts=" + (around ? "(PTS-" + num(pre) + "/TB)" : QString("PTS")) + "/" +
+                 num(s) + "+" + num(frame / 8) + "/TB";
+            // Slow motion: blended or motion-interpolated in-between frames instead of repeats;
+            // the extra source before the range is dropped afterwards.
+            if (around && c.slowMotion == "blend")
+                t += ",framerate=fps=" + fps;
+            else if (around && c.slowMotion == "flow")
+                t += ",minterpolate=fps=" + fps + ":mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1";
+            t += ",fps=" + fps;
+            if (around)
+                t += ",trim=start=0,setpts=PTS-STARTPTS";
             t += QString(",trim=end_frame=%1,tpad=start=%2:stop=%3:start_mode=clone:stop_mode=clone")
                      .arg(c1 - c0)
                      .arg(padStart)
@@ -445,15 +592,13 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             return t;
         };
         int in = 0;
-        if (const auto up = c.aiUpscale && !n.image && n.asset ? o.upscaled.value(n.asset->id)
-                                                               : MatteSource{};
-            !up.path.isEmpty()) {
+        if (!up.path.isEmpty()) {
             r.inputs << "-protocol_whitelist" << "file,pipe" << "-ss"
-                     << num(std::max(0., seek - up.start)) << "-i"
+                     << num(std::max(0., seek - pre - up.start)) << "-i"
                      << QFileInfo(up.path).absoluteFilePath();
             in = input++;
         } else
-            in = addInput(n, seek);
+            in = addInput(n, seek - pre);
         QString f = timing(QString("[%1:v:0]").arg(in), !n.image);
         const bool moving = animatedGeometry(c);
         // Animated geometry first fits the canvas at scale 1 and is resized per frame below;
@@ -480,8 +625,52 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         }
         if (c.saturation != 1)
             f += ",hue=s=" + num(c.saturation);
+        // Colour: light colour temperature with lightness kept, a green–magenta balance, and
+        // vibrance, which saturates muted colours more than saturated ones.
+        if (c.temperature != 0)
+            f += QString(",colortemperature=temperature=%1:pl=1")
+                     .arg(num(c.temperature > 0 ? 6500 - 3500 * c.temperature
+                                                : 6500 - 6500 * c.temperature));
+        if (c.tint > 0)
+            f += ",colorchannelmixer=gg=" + num(1 - 0.2 * c.tint);
+        else if (c.tint < 0)
+            f += QString(",colorchannelmixer=rr=%1:bb=%1").arg(num(1 + 0.2 * c.tint));
+        if (c.vibrance != 0)
+            f += ",vibrance=intensity=" + num(c.vibrance);
+        if (c.shadows != 0 || c.highlights != 0)
+            f += QString(",curves=m='0/0 0.25/%1 0.75/%2 1/1'")
+                     .arg(num(0.25 + 0.12 * c.shadows), num(0.75 + 0.12 * c.highlights));
+        // Branches for filters that mix with the picture or would drop its alpha channel.
+        auto branch = [&](const QString &a, const QString &b, const QString &join) {
+            const auto id = QString::number(serial++);
+            nodes << f + QString(",split[lka%1][lkb%1]").arg(id);
+            nodes << QString("[lka%1]%2[lkc%1]").arg(id, a);
+            nodes << QString("[lkb%1]%2[lkd%1]").arg(id, b);
+            f = QString("[lkc%1][lkd%1]%2").arg(id, join);
+        };
+        if (!c.lut.isEmpty() && c.lutStrength > 0 && QFileInfo(c.lut).isFile()) {
+            const auto lut = "lut3d=file=" + filterPath(c.lut) + ":interp=tetrahedral";
+            if (c.lutStrength >= 1)
+                f += "," + lut;
+            else
+                branch(lut, "null", "blend=all_mode=normal:all_opacity=" + num(c.lutStrength));
+        }
         if (c.blur > 0)
             f += ",gblur=sigma=" + num(c.blur * 30 * w / 1920.0 + 0.5);
+        if (c.sharpen > 0)
+            f += ",cas=strength=" + num(c.sharpen);
+        if (c.glow > 0)
+            // Screen a soft copy over the picture; alpha stays the original's.
+            branch("null", "gblur=sigma=" + num(std::max(1., 18. * w / 1920)),
+                   QString("blend=c0_mode=screen:c1_mode=screen:c2_mode=screen:c0_opacity=%1:"
+                           "c1_opacity=%1:c2_opacity=%1,format=rgba")
+                       .arg(num(0.8 * c.glow)));
+        if (c.vignette > 0)
+            branch("vignette=angle=" + num(c.vignette * 1.1) + ":eval=init", "alphaextract",
+                   "alphamerge,format=rgba");
+        if (c.grain > 0)
+            // Luma grain that changes every frame, on a format that keeps alpha.
+            f += QString(",format=yuva444p,noise=c0s=%1:c0f=t,format=rgba").arg(num(4 + 26 * c.grain));
         const auto matte = c.aiCutout && !n.image && n.asset ? o.mattes.value(n.asset->id)
                                                              : MatteSource{};
         if (!matte.path.isEmpty()) {
@@ -928,12 +1117,17 @@ QStringList exportArguments(const RenderPlan &r, const QString &graph, const QSt
                             const Encoder &e) {
     QStringList a{"-hide_banner", "-nostdin", "-y", "-loglevel", "error"};
     a += r.inputs;
-    a << "-filter_complex_script" << graph << "-map" << "[vout]" << "-map" << "[aout]"
-      << "-frames:v" << QString::number(r.frames) << "-t" << num(r.duration);
-    a += e.videoArguments;
-    a << "-pix_fmt" << e.pixelFormat;
+    a << "-filter_complex_script" << graph;
+    if (e.audioOnly)
+        a << "-map" << "[aout]" << "-t" << num(r.duration) << "-vn";
+    else {
+        a << "-map" << "[vout]" << "-map" << "[aout]" << "-frames:v" << QString::number(r.frames)
+          << "-t" << num(r.duration);
+        a += e.videoArguments;
+        a << "-pix_fmt" << e.pixelFormat;
+    }
     a += e.audioArguments;
-    if (e.extension != "webm")
+    if (QStringList{"mp4", "mov", "m4a"}.contains(e.extension))
         a << "-movflags" << "+faststart";
     a << "-progress" << "pipe:1" << output;
     return a;

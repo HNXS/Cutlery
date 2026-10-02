@@ -66,6 +66,8 @@ QStringList exportArguments(const RenderPlan &, const QString &graphFile, const 
 double parseIntegratedLoudness(const QString &log);
 // True peak (dBTP) from the same summary; NaN when absent.
 double parseTruePeak(const QString &log);
+// A file path as an option value inside a filter graph, with every special character escaped.
+QString filterPath(const QString &path);
 // Audio-only measuring pass for a plan compiled with `measureLoudness`.
 QStringList measureArguments(const RenderPlan &, const QString &graphFile);
 QStringList streamArguments(const RenderPlan &, const QString &graphFile, bool video,

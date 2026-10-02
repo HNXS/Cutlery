@@ -8,7 +8,12 @@
 #include <QObject>
 #include <QProcess>
 #include <QQuickImageProvider>
+#include <QElapsedTimer>
 #include <QTimer>
+class QAudioInput;
+class QMediaCaptureSession;
+class QMediaRecorder;
+#include <optional>
 #include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
@@ -68,6 +73,8 @@ class Editor final : public QObject {
     Q_INVOKABLE void addTitleTemplate(const QString &style);
     // A blur ("blur") or mosaic ("pixelate") area over the lower tracks, at the playhead.
     Q_INVOKABLE void addEffect(const QString &effect);
+    // Adds a shape (see graphicKinds()) at the playhead on the top track.
+    Q_INVOKABLE void addGraphic(const QString &kind);
     Q_INVOKABLE void select(const QString &id);
     Q_INVOKABLE void seek(qint64 frame);
     Q_INVOKABLE void setClip(const QString &key, const QVariant &value);
@@ -86,6 +93,22 @@ class Editor final : public QObject {
     Q_INVOKABLE qint64 adjacentKeyframe(bool forward) const;
     Q_INVOKABLE void remove(bool ripple = false);
     Q_INVOKABLE void duplicate();
+    // Installed font families, including fonts added to Cutlery.
+    Q_INVOKABLE QStringList fontFamilies() const;
+    // Copies a font file into the data folder's fonts/ and returns its family ("" on failure).
+    Q_INVOKABLE QString addFont(const QUrl &file);
+    // Clipboard for clips within the session, also across projects (the media comes along).
+    Q_INVOKABLE void copy();
+    // Inserts the copied clip at the playhead on its track.
+    Q_INVOKABLE void paste();
+    // Applies the copied clip's settings to the selected clip: "look" (colour, effects, LUT) or
+    // "all" (also transform, keyframes, shape and border, keying, volume and fades).
+    Q_INVOKABLE void pasteAttributes(const QString &group = "all");
+    // Voice-over: records the default microphone to a WAV file in the data folder's recordings/
+    // while the timeline plays from the playhead; stopping adds the recording there on a free
+    // track. State "voiceOver": {available, recording, seconds}.
+    Q_INVOKABLE void startVoiceOver();
+    Q_INVOKABLE void stopVoiceOver();
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE void configure(int width, int height, int fpsN, int fpsD);
@@ -134,6 +157,9 @@ class Editor final : public QObject {
     // clip's track and on tracks with its detached audio. One undo step.
     Q_INVOKABLE void findPauses(double thresholdDb, double minPause);
     Q_INVOKABLE void removePauses();
+    // Finds the shot changes in the selected video clip and splits it there, with any detached
+    // audio, in one undo step. Sensitivity 0..1: higher finds subtler cuts.
+    Q_INVOKABLE void splitAtScenes(double sensitivity = 0.5);
     // Automatic captions: transcribes every audible clip's media (language "auto", "de", "en",
     // ...) and puts the captions on the "AI captions" track, replacing earlier ones.
     // `style`: "" plain lines, "karaoke" (spoken word highlighted), "word" (one word at a time).
@@ -172,6 +198,15 @@ class Editor final : public QObject {
     QString m_jobTemp;
     QVariantMap m_loudness; // measurement of the running export, when normalising
     QVariantMap m_mixLoudness; // last analyzeLoudness() result
+    std::optional<Clip> m_clipboard;
+    // The track nearest `home` with room for [start, start + length), or a new one on top.
+    static int freeTrack(Project &, int home, qint64 start, qint64 length);
+    QMediaCaptureSession *m_voiceSession = nullptr;
+    QAudioInput *m_voiceInput = nullptr;
+    QMediaRecorder *m_voiceRecorder = nullptr;
+    qint64 m_voiceStart = 0;
+    QElapsedTimer m_voiceClock;
+    std::optional<Asset> m_clipboardAsset;
     QProcess *m_loudnessProcess = nullptr;
     struct Pauses {
         QString clipId, status; // status: idle, finding, ready, failed
@@ -179,6 +214,8 @@ class Editor final : public QObject {
         qint64 revision = -1;
     } m_pauses;
     QProcess *m_pauseProcess = nullptr;
+    QProcess *m_sceneProcess = nullptr;
+    QVariantMap m_scenes; // splitAtScenes(): status finding|done|failed, count
     QVariantMap pauseState() const;
     struct DropBatch {
         QString trackId;
