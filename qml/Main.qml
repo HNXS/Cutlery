@@ -66,12 +66,12 @@ ApplicationWindow {
             return false;
         if (textEditing)
             return ["new", "open", "import", "save", "saveAs", "export", "shortcuts"].indexOf(command) >= 0;
-        if (["previousFrame", "nextFrame", "previousCut", "nextCut"].indexOf(command) >= 0 && activeFocusItem && (activeFocusItem instanceof Slider || activeFocusItem instanceof ComboBox || activeFocusItem instanceof SpinBox))
+        if (["previousFrame", "nextFrame", "previousCut", "nextCut", "previousMarker", "nextMarker"].indexOf(command) >= 0 && activeFocusItem && (activeFocusItem instanceof Slider || activeFocusItem instanceof ComboBox || activeFocusItem instanceof SpinBox))
             return false;
         return true;
     }
     function command(id) {
-        if (editor.playing && ["split", "trimStart", "trimEnd", "previousCut", "nextCut"].indexOf(id) >= 0)
+        if (editor.playing && ["split", "trimStart", "trimEnd", "previousCut", "nextCut", "marker", "inPoint", "outPoint", "previousMarker", "nextMarker"].indexOf(id) >= 0)
             goTo(editor.playbackFrame);
         const c = s.selected, editable = s.selectedId.length > 0 && !c.locked;
         if (id === "new")
@@ -124,6 +124,18 @@ ApplicationWindow {
             goTo(editor.adjacentCut(false));
         else if (id === "nextCut")
             goTo(editor.adjacentCut(true));
+        else if (id === "marker")
+            editor.toggleMarker();
+        else if (id === "previousMarker" && editor.adjacentMarker(false) >= 0)
+            goTo(editor.adjacentMarker(false));
+        else if (id === "nextMarker" && editor.adjacentMarker(true) >= 0)
+            goTo(editor.adjacentMarker(true));
+        else if (id === "inPoint")
+            editor.setInPoint();
+        else if (id === "outPoint")
+            editor.setOutPoint();
+        else if (id === "clearInOut")
+            editor.clearInOut();
         else if (id === "start")
             goTo(0);
         else if (id === "end")
@@ -2561,6 +2573,18 @@ ApplicationWindow {
                 onActivated: if (exportSettings.presets[currentIndex].settings)
                     exportSettings.apply(exportSettings.presets[currentIndex].settings)
             }
+            Label {
+                text: "Range"
+                visible: exportRange.visible
+            }
+            ComboBox {
+                id: exportRange
+                objectName: "exportRange"
+                Layout.fillWidth: true
+                visible: win.s.inPoint >= 0 || win.s.outPoint >= 0
+                model: ["Whole timeline", "In to out (" + win.clock(Math.max(0, win.s.inPoint)) + " – " + win.clock(win.s.outPoint >= 0 ? win.s.outPoint : win.s.duration) + ")"]
+                currentIndex: 1
+            }
             Label { text: "Format" }
             ComboBox {
                 id: exportFormat
@@ -2631,7 +2655,7 @@ ApplicationWindow {
             }
         }
         onAccepted: {
-            win.exportChoice = current;
+            win.exportChoice = Object.assign({}, current, { range: exportRange.visible && exportRange.currentIndex === 1 ? "inout" : "all" });
             exportDialog.open();
         }
     }

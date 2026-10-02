@@ -468,6 +468,14 @@ QVariantMap Editor::state() const {
             {"captions", captionState()},
             {"pauses", pauseState()},
             {"scenes", m_scenes},
+            {"markers", [this] {
+                 QVariantList list;
+                 for (const auto &m : m_project.markers)
+                     list << QVariantMap{{"frame", m.frame}, {"name", m.name}, {"color", m.color}};
+                 return list;
+             }()},
+            {"inPoint", m_project.inPoint},
+            {"outPoint", m_project.outPoint},
             {"voiceOver", QVariantMap{{"available", !QMediaDevices::audioInputs().isEmpty()},
                                       {"recording", m_voiceRecorder != nullptr},
                                       {"seconds", m_voiceRecorder && m_voiceClock.isValid()
@@ -1345,6 +1353,65 @@ int Editor::freeTrack(Project &p, int home, qint64 start, qint64 length) {
     p.addTrack();
     return p.tracks - 1;
 }
+void Editor::toggleMarker() {
+    mutate([&](Project &p) {
+        auto it = std::find_if(p.markers.begin(), p.markers.end(),
+                               [&](const Marker &m) { return m.frame == m_playhead; });
+        if (it != p.markers.end()) {
+            p.markers.erase(it);
+            return;
+        }
+        if (p.markers.size() >= 1000)
+            throw std::runtime_error("At most 1000 markers");
+        const auto at = std::lower_bound(
+            p.markers.begin(), p.markers.end(), m_playhead,
+            [](const Marker &m, qint64 frame) { return m.frame < frame; });
+        p.markers.insert(at, Marker{m_playhead, QString("Marker %1").arg(p.markers.size() + 1)});
+    });
+}
+void Editor::setMarker(int index, const QString &key, const QVariant &value) {
+    mutate([&](Project &p) {
+        if (index < 0 || index >= p.markers.size())
+            throw std::runtime_error("No such marker");
+        if (key == "name")
+            p.markers[index].name = value.toString().left(200);
+        else if (key == "color")
+            p.markers[index].color = value.toString();
+        else
+            throw std::runtime_error("Unknown marker setting");
+    });
+}
+void Editor::removeMarker(int index) {
+    mutate([&](Project &p) {
+        if (index >= 0 && index < p.markers.size())
+            p.markers.remove(index);
+    });
+}
+qint64 Editor::adjacentMarker(bool forward) const {
+    qint64 best = -1;
+    for (const auto &m : m_project.markers)
+        if (forward ? m.frame > m_playhead && (best < 0 || m.frame < best)
+                    : m.frame < m_playhead && m.frame > best)
+            best = m.frame;
+    return best;
+}
+void Editor::setInPoint() {
+    mutate([&](Project &p) {
+        p.inPoint = m_playhead;
+        if (p.outPoint >= 0 && p.outPoint <= p.inPoint)
+            p.outPoint = -1;
+    });
+}
+void Editor::setOutPoint() {
+    mutate([&](Project &p) {
+        p.outPoint = m_playhead + 1;
+        if (p.inPoint >= p.outPoint)
+            p.inPoint = -1;
+    });
+}
+void Editor::clearInOut() {
+    mutate([](Project &p) { p.inPoint = p.outPoint = -1; });
+}
 void Editor::copy() {
     const auto *c = m_project.clip(m_selected);
     if (!c)
@@ -1994,6 +2061,21 @@ void Editor::exportWith(const QUrl &url, const QVariantMap &settings) {
                 ("Use a ." + formatExtension(s.format) + " filename for this format").toStdString());
         if (m_project.clips.empty())
             throw std::runtime_error("The timeline is empty");
+        // The in/out range, or the whole timeline.
+        const auto range = settings.value("range", "all").toString();
+        if (range != "all" && range != "inout")
+            throw std::runtime_error("Unknown export range");
+        m_exportFrom = 0;
+        m_exportTo = -1;
+        if (range == "inout") {
+            if (m_project.inPoint < 0 && m_project.outPoint < 0)
+                throw std::runtime_error("Set an in or out point first (I / O)");
+            m_exportFrom = std::max<qint64>(0, m_project.inPoint);
+            m_exportTo = m_project.outPoint >= 0 ? std::min(m_project.outPoint, m_project.duration())
+                                                 : -1;
+            if (m_exportFrom >= (m_exportTo >= 0 ? m_exportTo : m_project.duration()))
+                throw std::runtime_error("The in/out range is outside the timeline");
+        }
         const auto size = exportSize(m_project, s.height);
         const double fps = double(m_project.fpsN) / m_project.fpsD;
         m_resumeTimer.stop();
@@ -2090,6 +2172,8 @@ void Editor::measureLoudness(const QString &output, QSize size, const Encoder &e
         RenderOptions options;
         options.video = false;
         options.measureLoudness = true;
+        options.from = m_exportFrom;
+        options.to = m_exportTo;
         const auto plan = compileRender(m_project, work->path(), size.width(), size.height(),
                                         options);
         const auto graph = work->filePath("measure.txt");
@@ -2160,6 +2244,8 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
         options.highQuality = true;
         options.pixelFormat = encoder.pixelFormat;
         options.video = !encoder.audioOnly;
+        options.from = m_exportFrom;
+        options.to = m_exportTo;
         if (gainDb != 0 || m_loudness.contains("target")) {
             // Normalised exports keep peaks about 1 dB below full scale, as streaming services
             // expect; the limiter works on samples, so leave some room for true peaks.

@@ -91,6 +91,16 @@ class Editor final : public QObject {
     Q_INVOKABLE void toggleKeyframe(const QString &property);
     // Previous/next keyframe position of the selected clip (the playhead when there is none).
     Q_INVOKABLE qint64 adjacentKeyframe(bool forward) const;
+    // Markers: add one at the playhead or remove the one there; rename or recolour by index.
+    Q_INVOKABLE void toggleMarker();
+    Q_INVOKABLE void setMarker(int index, const QString &key, const QVariant &value);
+    Q_INVOKABLE void removeMarker(int index);
+    // The nearest marker frame before or after the playhead, or -1.
+    Q_INVOKABLE qint64 adjacentMarker(bool forward) const;
+    // In/out range at the playhead (the out point is after the playhead frame); clear removes it.
+    Q_INVOKABLE void setInPoint();
+    Q_INVOKABLE void setOutPoint();
+    Q_INVOKABLE void clearInOut();
     Q_INVOKABLE void remove(bool ripple = false);
     Q_INVOKABLE void duplicate();
     // Installed font families, including fonts added to Cutlery.
@@ -198,6 +208,7 @@ class Editor final : public QObject {
     QString m_jobTemp;
     QVariantMap m_loudness; // measurement of the running export, when normalising
     QVariantMap m_mixLoudness; // last analyzeLoudness() result
+    qint64 m_exportFrom = 0, m_exportTo = -1; // frame range of the running export
     std::optional<Clip> m_clipboard;
     // The track nearest `home` with room for [start, start + length), or a new one on top.
     static int freeTrack(Project &, int home, qint64 start, qint64 length);

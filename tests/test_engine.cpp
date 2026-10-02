@@ -340,7 +340,7 @@ class EngineTest : public QObject {
         QTemporaryDir dir;
         const auto path = dir.filePath("shortcuts.json");
         KeyboardShortcuts keys(path);
-        QCOMPARE(keys.bindings().size(), 33);
+        QCOMPARE(keys.bindings().size(), 39);
         QVERIFY(!keys.assign("play", "Ctrl+B"));
         QVERIFY(keys.error().contains("Already assigned"));
         QVERIFY(!keys.assign("play", "Ctrl+NotARealKey"));
@@ -1728,6 +1728,95 @@ class EngineTest : public QObject {
         QVERIFY(editor.state()["error"].toString().contains("No microphone"));
         QCOMPARE(editor.state()["voiceOver"].toMap()["recording"].toBool(), false);
         editor.stopVoiceOver(); // nothing to stop
+    }
+    void markersAndRange() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("clip.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=30:d=3", "-f",
+                     "lavfi", "-i", "sine=d=3", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest",
+                     source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        // Markers stay sorted; toggling at the same frame removes one.
+        for (qint64 f : {60, 15, 40}) {
+            editor.seek(f);
+            editor.toggleMarker();
+        }
+        auto frames_ = [&] {
+            QVector<qint64> out;
+            for (const auto &m : editor.project().markers)
+                out << m.frame;
+            return out;
+        };
+        QCOMPARE(frames_(), (QVector<qint64>{15, 40, 60}));
+        editor.seek(40);
+        editor.toggleMarker();
+        QCOMPARE(frames_(), (QVector<qint64>{15, 60}));
+        editor.undo();
+        QCOMPARE(frames_(), (QVector<qint64>{15, 40, 60}));
+        QCOMPARE(editor.adjacentMarker(true), qint64(60));
+        QCOMPARE(editor.adjacentMarker(false), qint64(15));
+        editor.seek(70);
+        QCOMPARE(editor.adjacentMarker(true), qint64(-1));
+        editor.setMarker(0, "name", "Intro");
+        editor.setMarker(0, "color", "#ff5a5f");
+        QCOMPARE(editor.project().markers[0].name, QString("Intro"));
+        editor.setMarker(0, "color", "not a colour");
+        QVERIFY(editor.state()["error"].toString().contains("marker"));
+        editor.clearError();
+        QCOMPARE(editor.project().markers[0].color, QString("#ff5a5f"));
+        QCOMPARE(editor.state()["markers"].toList().size(), 3);
+        editor.removeMarker(2);
+        QCOMPARE(editor.project().markers.size(), 2);
+
+        // Export of the whole timeline needs no range; in/out needs one.
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("none.wav")),
+                          {{"format", "wav"}, {"range", "inout"}});
+        QVERIFY(editor.state()["error"].toString().contains("in or out"));
+        editor.clearError();
+        editor.seek(30);
+        editor.setInPoint();
+        editor.seek(59);
+        editor.setOutPoint();
+        QCOMPARE(editor.project().inPoint, qint64(30));
+        QCOMPARE(editor.project().outPoint, qint64(60));
+        // An out point before the in point clears the in point.
+        editor.seek(10);
+        editor.setOutPoint();
+        QCOMPARE(editor.project().inPoint, qint64(-1));
+        editor.undo();
+        QCOMPARE(editor.project().inPoint, qint64(30));
+        // The in/out export is exactly one second, video and audio.
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("range.mp4")),
+                          {{"format", "mpeg4"}, {"quality", "small"}, {"range", "inout"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(QFileInfo::exists(dir.filePath("range.mp4")),
+                 qPrintable(editor.state()["error"].toString()));
+        const auto probe = QString::fromUtf8(
+            run(Editor::executable("ffprobe"),
+                {"-v", "error", "-show_entries", "stream=codec_type,duration,nb_frames", "-of",
+                 "compact", dir.filePath("range.mp4")}));
+        QVERIFY2(probe.contains("nb_frames=30"), qPrintable(probe));
+        const auto audio = QRegularExpression("codec_type=audio\\|duration=([0-9.]+)").match(probe);
+        QVERIFY2(std::abs(audio.captured(1).toDouble() - 1) < 0.05, qPrintable(probe));
+
+        // Saved with the project and validated.
+        auto json = editor.project().json();
+        const auto loaded = Project::fromJson(json, {});
+        QCOMPARE(loaded.markers, editor.project().markers);
+        QCOMPARE(loaded.inPoint, qint64(30));
+        QCOMPARE(loaded.outPoint, qint64(60));
+        json["inPoint"] = "80";
+        QVERIFY_EXCEPTION_THROWN(Project::fromJson(json, {}), std::runtime_error);
+        editor.clearInOut();
+        QCOMPARE(editor.project().inPoint, qint64(-1));
+        QVERIFY(!editor.project().json().contains("inPoint"));
     }
     void smoothSlowMotion() {
         const auto ffmpeg = Editor::executable("ffmpeg");

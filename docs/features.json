@@ -746,8 +746,8 @@
     "status": "Planned",
     "acceptance": "In/out export yields exact frame count and defined audio range",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Frame and previous/next edit navigation; start/end shortcuts. No markers or in/out ranges."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Markers (M) with name and colour, shown on the ruler and across the tracks; click to jump, double-click to rename or recolour, right-click to remove; previous/next marker (Ctrl+Left/Right). In and out points (I, O, Alt+X to clear) shown as a band on the ruler; the export dialog can export just the in/out range. Frame and edit navigation as before. Markers stay at timeline positions; they do not move with ripple edits."
   },
   {
     "id": "F031",

@@ -53,6 +53,12 @@ KeyboardShortcuts::KeyboardShortcuts(QString path, QObject *parent)
     add("nextCut", "Next edit", "Navigation", "Down");
     add("start", "Start of timeline", "Navigation", "Home");
     add("end", "End of timeline", "Navigation", "End");
+    add("marker", "Add or remove marker", "Navigation", "M");
+    add("previousMarker", "Previous marker", "Navigation", "Ctrl+Left");
+    add("nextMarker", "Next marker", "Navigation", "Ctrl+Right");
+    add("inPoint", "Set in point", "Navigation", "I");
+    add("outPoint", "Set out point", "Navigation", "O");
+    add("clearInOut", "Clear in and out", "Navigation", "Alt+X");
     add("zoomIn", "Zoom in", "Timeline", "Ctrl+=");
     add("zoomOut", "Zoom out", "Timeline", "Ctrl+-");
     add("fit", "Fit timeline", "Timeline", "Shift+Z");

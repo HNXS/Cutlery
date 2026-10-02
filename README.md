@@ -35,6 +35,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
   - Offline AI background removal for speakers without a green screen.
 - Offline AI upscaling (Real-ESRGAN) of low-resolution video clips to up to 4K. Both AI features use the GPU through DirectML when available, run in the background once per media file and need the separate [AI pack](docs/AI.md).
 - Static transforms, equal-edge crop, horizontal flip, opacity, brightness/contrast/saturation, blur, clip fades.
+- **Markers and in/out:** M adds a marker (double-click to rename), Ctrl+Left/Right jump between them; I and O set a range the export dialog can export alone.
 - **Text styling:** font list and your own font files, bold/italic, alignment, letter and line spacing, outline, shadow and a box behind each line.
 - **Voice-over** (transport row): record narration while the timeline plays; it is added at the playhead.
 - **Shapes** (library panel): arrow, circle, speech bubble, box and line; colours, outline, size and rotation; text inside bubbles and boxes.

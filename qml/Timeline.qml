@@ -12,7 +12,8 @@ FocusScope {
     readonly property int rowHeight: 86
     readonly property int labelWidth: 174
     property int renameIndex: -1
-    readonly property bool dialogOpen: renameDialog.visible
+    property int markerIndex: -1
+    readonly property bool dialogOpen: renameDialog.visible || markerDialog.visible
     property var draggingClip: null
     property real pointerX: 0
     property real pointerY: 0
@@ -229,6 +230,56 @@ FocusScope {
                     onPositionChanged: function (mouse) {
                         if (pressed)
                             root.seekRequested(Math.round((mouse.x + timeline.contentX) / root.pixelsPerSecond * root.state.fps));
+                    }
+                }
+                // In/out range: a band along the bottom of the ruler.
+                Rectangle {
+                    objectName: "inOutBand"
+                    visible: root.state.inPoint >= 0 || root.state.outPoint >= 0
+                    readonly property real from: Math.max(0, root.state.inPoint) / root.state.fps * root.pixelsPerSecond - timeline.contentX
+                    readonly property real to: (root.state.outPoint >= 0 ? root.state.outPoint : root.state.duration) / root.state.fps * root.pixelsPerSecond - timeline.contentX
+                    x: from
+                    width: Math.max(2, to - from)
+                    y: parent.height - 5
+                    height: 5
+                    color: "#5fa8ff"
+                    opacity: 0.8
+                }
+                // Markers: click to jump, double-click to rename, right-click to remove.
+                Repeater {
+                    model: root.state.markers || []
+                    Rectangle {
+                        required property var modelData
+                        required property int index
+                        objectName: "marker-" + index
+                        x: modelData.frame / root.state.fps * root.pixelsPerSecond - timeline.contentX - 5
+                        y: 1
+                        width: 11
+                        height: 11
+                        radius: 2
+                        rotation: 45
+                        color: modelData.color
+                        border.color: "#14181d"
+                        MouseArea {
+                            id: markerMouse
+                            anchors.fill: parent
+                            anchors.margins: -3
+                            hoverEnabled: true
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            onClicked: function (mouse) {
+                                if (mouse.button === Qt.RightButton)
+                                    editor.removeMarker(parent.index);
+                                else
+                                    root.seekRequested(parent.modelData.frame);
+                            }
+                            onDoubleClicked: {
+                                root.markerIndex = parent.index;
+                                markerName.text = parent.modelData.name;
+                                markerDialog.open();
+                            }
+                        }
+                        ToolTip.visible: markerMouse.containsMouse
+                        ToolTip.text: modelData.name + " · double-click to rename, right-click to remove"
                     }
                 }
             }
@@ -782,6 +833,31 @@ FocusScope {
                             color: "#64d8bc"
                             z: 10
                         }
+                        // Markers and in/out points as thin lines across the tracks.
+                        Repeater {
+                            model: root.state.markers || []
+                            Rectangle {
+                                required property var modelData
+                                x: modelData.frame / root.state.fps * root.pixelsPerSecond
+                                width: 1
+                                height: parent.height
+                                color: modelData.color
+                                opacity: 0.55
+                                z: 9
+                            }
+                        }
+                        Repeater {
+                            model: [root.state.inPoint, root.state.outPoint]
+                            Rectangle {
+                                required property var modelData
+                                visible: modelData >= 0
+                                x: modelData / root.state.fps * root.pixelsPerSecond
+                                width: 1
+                                height: parent.height
+                                color: "#5fa8ff"
+                                z: 9
+                            }
+                        }
                         Rectangle {
                             visible: root.snapGuide >= 0
                             x: root.snapGuide / root.state.fps * root.pixelsPerSecond
@@ -868,5 +944,44 @@ FocusScope {
             selectByMouse: true
         }
         onAccepted: editor.setTrack(root.renameIndex, "name", trackName.text)
+    }
+    Dialog {
+        id: markerDialog
+        objectName: "markerDialog"
+        anchors.centerIn: parent
+        title: "Marker"
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        width: 320
+        ColumnLayout {
+            width: parent.width
+            TextField {
+                id: markerName
+                objectName: "markerName"
+                Layout.fillWidth: true
+                maximumLength: 200
+                selectByMouse: true
+                onAccepted: markerDialog.accept()
+            }
+            RowLayout {
+                Repeater {
+                    model: ["#ffd23f", "#ff5a5f", "#64d8bc", "#5fa8ff", "#c38bff"]
+                    Rectangle {
+                        required property string modelData
+                        width: 20
+                        height: 20
+                        radius: 10
+                        color: modelData
+                        border.width: ((root.state.markers || [])[root.markerIndex] || {}).color === modelData ? 3 : 1
+                        border.color: "#e7edf2"
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: editor.setMarker(root.markerIndex, "color", parent.modelData)
+                        }
+                    }
+                }
+            }
+        }
+        onAccepted: editor.setMarker(root.markerIndex, "name", markerName.text)
     }
 }

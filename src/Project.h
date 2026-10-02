@@ -127,8 +127,19 @@ const QStringList &graphicKinds();
 QStringList captionWords(const QString &text);
 // Supported transitions: FFmpeg xfade names paired with display labels.
 const QVector<QPair<QString, QString>> &transitionTypes();
+// A named point on the timeline.
+struct Marker {
+    qint64 frame = 0;
+    QString name, color = "#ffd23f";
+    bool operator==(const Marker &) const = default;
+};
 struct Project {
     QString name = "Untitled";
+    // Timeline markers, sorted by frame; at most one per frame.
+    QVector<Marker> markers;
+    // In and out points of a range for export (frames; -1 unset). The range is [inPoint,
+    // outPoint), from the timeline start or to its end when one is unset.
+    qint64 inPoint = -1, outPoint = -1;
     int width = 1920, height = 1080, fpsN = 30, fpsD = 1, tracks = 3;
     QVector<Track> trackSettings{{"Track 1"}, {"Track 2"}, {"Track 3"}};
     QVector<Asset> assets;
