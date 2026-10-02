@@ -340,7 +340,7 @@ class EngineTest : public QObject {
         QTemporaryDir dir;
         const auto path = dir.filePath("shortcuts.json");
         KeyboardShortcuts keys(path);
-        QCOMPARE(keys.bindings().size(), 39);
+        QCOMPARE(keys.bindings().size(), 41);
         QVERIFY(!keys.assign("play", "Ctrl+B"));
         QVERIFY(keys.error().contains("Already assigned"));
         QVERIFY(!keys.assign("play", "Ctrl+NotARealKey"));
@@ -1029,6 +1029,62 @@ class EngineTest : public QObject {
                      corner = difference({10, 10, 100, 100});
         QVERIFY2(eyes > 1.5 && mouth < 1.5 && corner < 1.5,
                  qPrintable(QString("eyes %1 mouth %2 corner %3").arg(eyes).arg(mouth).arg(corner)));
+#else
+        QSKIP("Needs the AI worker and the AI pack's models (CUTLERY_TEST_MODELS)");
+#endif
+    }
+    void followFace() {
+#if defined(CUTLERY_AI_WORKER) && defined(CUTLERY_TEST_MODELS)
+        const QString models = CUTLERY_TEST_MODELS;
+        if (!QFileInfo::exists(models + "/face_detection_short_range.onnx"))
+            QSKIP("The face models are not in the test models folder");
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // The fixture face (about 13 % of the frame wide) moving from left to right over 2 s on
+        // a grey 1280 × 720 frame.
+        const auto source = dir.filePath("moving.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=1280x720:r=25:d=2", "-i",
+                     QString(CUTLERY_SOURCE_DIR) + "/tests/fixtures/face-straight.jpg",
+                     "-filter_complex", "[1]scale=480:-2[f];[0][f]overlay=x='100+t*300':y=100",
+                     "-c:v", "ffv1", source});
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+        qputenv("CUTLERY_AI_MODELS", models.toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        editor.configure(1280, 720, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        editor.seek(0);
+        editor.addEffect("blur");
+        const auto area = editor.state()["selectedId"].toString();
+        editor.setClip("duration", 50);
+        // Start roughly over the face; the face's centre at t = 0 is near x = 0.27, y = 0.33.
+        editor.setClipValues({{"x", -0.2}, {"y", -0.15}});
+        editor.followFace();
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["follow"].toMap()["status"].toString(),
+                                  QString("done"), 120000);
+        const auto *c = editor.project().clip(area);
+        QVERIFY(c->keyframes.value("x").size() >= 10);
+        // The face's centre moves 300 px/s = 0.234 of the width per second.
+        const double x0 = c->valueAt("x", 3), x1 = c->valueAt("x", 40);
+        QVERIFY2(std::abs((x1 - x0) - 0.234 * 37 / 25.) < 0.04,
+                 qPrintable(QString("%1 → %2").arg(x0).arg(x1)));
+        QVERIFY2(std::abs(c->valueAt("y", 3) - c->valueAt("y", 40)) < 0.02, "steady height");
+        // Sized to the face (about 7 % of the width) with room.
+        QVERIFY2(c->effectWidth > 0.07 && c->effectWidth < 0.3,
+                 qPrintable(QString::number(c->effectWidth)));
+        // One undo step removes it.
+        editor.undo();
+        QVERIFY(editor.project().clip(area)->keyframes.isEmpty());
+        // Nothing to follow without a video below.
+        editor.newProject();
+        editor.addTitle();
+        editor.followFace();
+        QVERIFY(editor.state()["error"].toString().contains("video clip"));
 #else
         QSKIP("Needs the AI worker and the AI pack's models (CUTLERY_TEST_MODELS)");
 #endif
@@ -2086,6 +2142,208 @@ class EngineTest : public QObject {
         QVERIFY2(probe.contains("yuva444p") && probe.contains("nb_frames=12"), qPrintable(probe));
         editor.importImageSequence(QUrl::fromLocalFile(dir.filePath("none_0001.png")), 12);
         QVERIFY(editor.state()["error"].toString().contains("frame number"));
+    }
+    void soundTools() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // 2 s: a 60 Hz hum, a 1 kHz tone and a 10 kHz tone, then 2 s of faint noise and a quiet
+        // 1 kHz tone, so dynamics can be compared.
+        const auto source = dir.filePath("sound.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "sine=f=60:d=4,volume=2[a];sine=f=1000:d=4,volume=2[b];"
+                     "sine=f=10000:d=4,volume=2[c];anoisesrc=d=4:a=0.003:c=white[n];"
+                     "[a][b][c][n]amix=inputs=4:normalize=0,"
+                     "volume='if(lt(t,2),1,0.05)':eval=frame",
+                     "-ar", "48000", "-ac", "2", source});
+        Project p;
+        p.width = 160;
+        p.height = 90;
+        Asset a;
+        a.id = "s";
+        a.path = source;
+        a.kind = "audio";
+        a.duration = 4;
+        a.hasAudio = true;
+        p.assets = {a};
+        Clip c;
+        c.id = "c";
+        c.assetId = "s";
+        c.duration = 120;
+        p.clips = {c};
+        const auto graph = dir.filePath("graph.txt");
+        // The rendered mix as a WAV file.
+        auto render = [&](const Clip &clip, const QString &name) {
+            auto project = p;
+            project.clips[0] = clip;
+            RenderOptions options;
+            options.video = false;
+            const auto plan = compileRender(project, dir.filePath("work"), 160, 90, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            const auto out = dir.filePath(name + ".wav");
+            QStringList args{"-v", "error", "-y"};
+            args += plan.inputs;
+            args << "-filter_complex_script" << graph << "-map" << "[aout]" << out;
+            run(ffmpeg, args);
+            return out;
+        };
+        // Mean level in dB of a band and time range of a file.
+        auto level = [&](const QString &file, const QString &band, double from, double to) {
+            QProcess p;
+            p.start(ffmpeg, {"-hide_banner", "-nostats", "-ss", QString::number(from), "-t",
+                             QString::number(to - from), "-i", file, "-af",
+                             band + (band.isEmpty() ? "" : ",") + "volumedetect", "-f", "null",
+                             "-"});
+            p.waitForFinished(30000);
+            const auto m = QRegularExpression("mean_volume: (-?[0-9.]+) dB")
+                               .match(QString::fromUtf8(p.readAllStandardError()));
+            return m.hasMatch() ? m.captured(1).toDouble() : -999.;
+        };
+        const auto plain = render(c, "plain");
+        const double hum = level(plain, "lowpass=f=120", 0.3, 1.8),
+                     tone = level(plain, "bandpass=f=1000:w=200", 0.3, 1.8),
+                     hiss = level(plain, "highpass=f=7000", 0.3, 1.8);
+        QVERIFY(hum > -30 && tone > -30 && hiss > -30);
+        {
+            auto x = c;
+            x.lowCut = 200;
+            const auto f = render(x, "lowcut");
+            QVERIFY2(level(f, "lowpass=f=120", 0.3, 1.8) < hum - 10, "low cut removes the hum");
+            QVERIFY(std::abs(level(f, "bandpass=f=1000:w=200", 0.3, 1.8) - tone) < 1.5);
+        }
+        {
+            auto x = c;
+            x.eqLow = 12;
+            x.eqHigh = -12;
+            const auto f = render(x, "eq");
+            QVERIFY2(level(f, "lowpass=f=120", 0.3, 1.8) > hum + 6, "bass boost");
+            QVERIFY2(level(f, "highpass=f=7000", 0.3, 1.8) < hiss - 6, "treble cut");
+            // The presence band, on a 2.5 kHz tone.
+            const auto presence = dir.filePath("presence.wav");
+            run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "sine=f=2500:d=4,volume=2", "-ar",
+                         "48000", "-ac", "2", presence});
+            const auto original = p.assets[0].path;
+            p.assets[0].path = presence;
+            x = c;
+            x.eqMid = 9;
+            QVERIFY2(level(render(x, "mid"), "", 0.3, 1.8) > level(render(c, "flat"), "", 0.3, 1.8) + 6,
+                     "presence boost");
+            p.assets[0].path = original;
+        }
+        {
+            // Compression narrows the gap between the loud and the quiet half.
+            auto x = c;
+            x.compressor = 1;
+            const auto f = render(x, "comp");
+            const double before = level(plain, "", 0.3, 1.8) - level(plain, "", 2.3, 3.8),
+                         after = level(f, "", 0.3, 1.8) - level(f, "", 2.3, 3.8);
+            QVERIFY2(after < before - 5, qPrintable(QString("%1 → %2").arg(before).arg(after)));
+        }
+        {
+            // A strong gate pushes the quiet half down further.
+            auto x = c;
+            x.gate = 1;
+            const auto f = render(x, "gate");
+            QVERIFY2(level(f, "", 2.3, 3.8) < level(plain, "", 2.3, 3.8) - 6, "gate");
+            QVERIFY(std::abs(level(f, "", 0.3, 1.8) - level(plain, "", 0.3, 1.8)) < 2);
+        }
+        {
+            // Noise reduction lowers steady hiss.
+            const auto hissy = dir.filePath("hiss-source.wav");
+            run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "anoisesrc=d=4:a=0.006:c=white", "-ar",
+                         "48000", "-ac", "2", hissy});
+            const auto original = p.assets[0].path;
+            p.assets[0].path = hissy;
+            auto x = c;
+            x.denoise = 1;
+            const double noisy = level(render(c, "hiss"), "", 1, 3.5),
+                         cleaned = level(render(x, "denoise"), "", 1, 3.5);
+            QVERIFY2(cleaned < noisy - 6, qPrintable(QString("%1 → %2").arg(noisy).arg(cleaned)));
+            p.assets[0].path = original;
+            x.deess = 1;
+            render(x, "deess"); // renders
+        }
+        // Stored only when set; validated.
+        auto x = c;
+        x.compressor = 0.5;
+        x.eqHigh = -3;
+        p.clips = {x};
+        auto json = p.json();
+        QVERIFY(!json["clips"].toArray()[0].toObject().contains("gate"));
+        const auto back = Project::fromJson(json, {}).clips[0];
+        QCOMPARE(back.compressor, 0.5);
+        QCOMPARE(back.eqHigh, -3.);
+        auto clips = json["clips"].toArray();
+        auto o = clips[0].toObject();
+        o["eqLow"] = 20;
+        clips[0] = o;
+        json["clips"] = clips;
+        QVERIFY_EXCEPTION_THROWN(Project::fromJson(json, {}), std::runtime_error);
+    }
+    void shuttlePlayback() {
+        // Faster playback paces real time faster and keeps sound in step without pitch change.
+        QTemporaryDir dir;
+        {
+            QFile silence(dir.filePath("sound.wav"));
+            QVERIFY(silence.open(QIODevice::WriteOnly)); // only the graph is compiled
+        }
+        Project p;
+        p.width = 160;
+        p.height = 90;
+        Asset a;
+        a.id = "s";
+        a.path = dir.filePath("sound.wav");
+        a.kind = "audio";
+        a.duration = 10;
+        a.hasAudio = true;
+        p.assets = {a};
+        Clip c;
+        c.id = "c";
+        c.assetId = "s";
+        c.duration = 90;
+        p.clips = {c};
+        RenderOptions o;
+        o.realtime = true;
+        o.rate = 4;
+        o.video = false;
+        auto graph = compileRender(p, dir.path(), 160, 90, o).graph;
+        QVERIFY2(graph.contains("atempo=2.000000000,atempo=2.000000000,arealtime"), qPrintable(graph));
+        o.video = true;
+        o.audio = false;
+        graph = compileRender(p, dir.path(), 160, 90, o).graph;
+        QVERIFY2(graph.contains("realtime=speed=4.000000000"), qPrintable(graph));
+        o.rate = 1;
+        graph = compileRender(p, dir.path(), 160, 90, o).graph;
+        QVERIFY(graph.contains(",realtime[vout]") && !graph.contains("speed="));
+
+        // Backward shuttle steps the playhead back ten times a second, faster on each press.
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.addTitle();
+        editor.setClip("duration", 300);
+        editor.seek(250);
+        editor.shuttle(false);
+        QCOMPARE(editor.playbackRate(), -1.);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.state()["playhead"].toLongLong() <= 244, 2000);
+        editor.shuttle(false);
+        QCOMPARE(editor.playbackRate(), -2.);
+        const auto before = editor.state()["playhead"].toLongLong();
+        QTRY_VERIFY_WITH_TIMEOUT(editor.state()["playhead"].toLongLong() <= before - 12, 2000);
+        editor.pause();
+        QCOMPARE(editor.playbackRate(), 1.);
+        const auto stopped = editor.state()["playhead"].toLongLong();
+        QTest::qWait(300);
+        QCOMPARE(editor.state()["playhead"].toLongLong(), stopped);
+        // It stops at the start.
+        editor.seek(3);
+        editor.shuttle(false);
+        QTRY_COMPARE_WITH_TIMEOUT(editor.playbackRate(), 1., 2000);
+        QCOMPARE(editor.state()["playhead"].toLongLong(), qint64(0));
     }
     void smoothSlowMotion() {
         const auto ffmpeg = Editor::executable("ffmpeg");

@@ -41,6 +41,7 @@ class Editor final : public QObject {
     // Live playback position; separate from `state` so the viewer clock updates cheaply.
     Q_PROPERTY(bool playing READ playing NOTIFY playbackChanged)
     Q_PROPERTY(qint64 playbackFrame READ playbackFrame NOTIFY playbackChanged)
+    Q_PROPERTY(double playbackRate READ playbackRate NOTIFY playbackChanged)
     // Playback level meter: [left, right] in dBFS.
     Q_PROPERTY(QVariantList levels READ levels NOTIFY playbackChanged)
   public:
@@ -116,6 +117,11 @@ class Editor final : public QObject {
     // PCM in the data folder's conformed/) and relinks the media to it. State "conform":
     // {status: converting|done|failed, progress, assetId}.
     Q_INVOKABLE void conformFrameRate();
+    // Makes the selected clip (a blur or mosaic area, or any overlay) follow a face in the video
+    // below it: keyframes its position through its length and, for areas, sizes it to the face.
+    // Analyses the faces first when needed (AI pack). State "follow": {status:
+    // analysing|done|failed, keyframes, clipId}.
+    Q_INVOKABLE void followFace();
     // Imports the numbered image sequence that `firstImage` belongs to (e.g. shot_0001.png …)
     // at `fps`: FFmpeg turns it into a ProRes 4444 video (alpha kept) in the data folder's
     // sequences/, which is then imported like any video.
@@ -143,6 +149,13 @@ class Editor final : public QObject {
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();
     Q_INVOKABLE void togglePlayback();
+    // JKL shuttle: L plays forward and doubles the speed up to 4× on each press; J scrubs
+    // backward the same way; K (pause) stops both.
+    Q_INVOKABLE void shuttle(bool forward);
+    // Shuttle speed: 1, 2 or 4 forward, negative while scrubbing backward.
+    double playbackRate() const {
+        return m_reverseTimer.isActive() ? -m_shuttleRate : m_playRate;
+    }
     Q_INVOKABLE void setVideoSink(QObject *sink);
     QVariantList levels() const {
         const auto [l, r] = m_playback->levels();
@@ -233,6 +246,12 @@ class Editor final : public QObject {
     QThread *m_collectThread = nullptr;
     QVariantMap m_collect;
     QVariantMap m_conform;
+    QVariantMap m_follow;
+    double m_playRate = 1, m_shuttleRate = 1;
+    QTimer m_reverseTimer;
+    void applyFollowFace();
+    // The video clip under `c` at its start: the highest lower track with a video playing then.
+    const Clip *videoBelow(const Clip &c) const;
     // The track nearest `home` with room for [start, start + length), or a new one on top.
     static int freeTrack(Project &, int home, qint64 start, qint64 length);
     QMediaCaptureSession *m_voiceSession = nullptr;

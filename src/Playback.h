@@ -32,6 +32,7 @@ class Playback final : public QObject {
         QString videoGraph, audioGraph;
         int fpsN = 30, fpsD = 1;
         qint64 from = 0; // first timeline frame of both plans
+        double rate = 1; // timeline seconds per second (the plans are paced to match)
         std::shared_ptr<QTemporaryDir> work; // graph files and title images, kept while running
     };
     explicit Playback(QObject *parent = nullptr);

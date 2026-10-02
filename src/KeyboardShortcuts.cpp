@@ -47,6 +47,8 @@ KeyboardShortcuts::KeyboardShortcuts(QString path, QObject *parent)
     add("title", "Add title", "Edit", "Ctrl+T");
     add("play", "Play / pause", "Playback", "Space");
     add("pause", "Pause at current frame", "Playback", "K");
+    add("shuttleBack", "Shuttle backward (press again for 2×, 4×)", "Playback", "J");
+    add("shuttleForward", "Shuttle forward (press again for 2×, 4×)", "Playback", "L");
     add("previousFrame", "Previous frame", "Navigation", "Left");
     add("nextFrame", "Next frame", "Navigation", "Right");
     add("previousCut", "Previous edit", "Navigation", "Up");

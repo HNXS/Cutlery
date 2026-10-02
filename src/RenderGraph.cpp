@@ -1040,6 +1040,28 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                                                  .arg(p.fpsD)));
         else
             a += ",volume=" + num(c.volume);
+        // Sound: clean-up first (low cut, noise reduction, gate), then tone, then dynamics.
+        if (c.lowCut > 0)
+            a += ",highpass=f=" + num(c.lowCut) + ":poles=2";
+        if (c.denoise > 0)
+            a += QString(",afftdn=nr=%1:nf=-50").arg(num(6 + 24 * c.denoise));
+        if (c.gate > 0)
+            // Opens above a threshold from −60 dB (gentle) to −30 dB (strong).
+            a += QString(",agate=threshold=%1:ratio=4:attack=5:release=150:range=%2")
+                     .arg(num(std::pow(10, (-60 + 30 * c.gate) / 20)), num(std::pow(10, -24 * c.gate / 20)));
+        if (c.eqLow != 0)
+            a += ",bass=g=" + num(c.eqLow) + ":f=100:w=0.7";
+        if (c.eqMid != 0)
+            a += ",equalizer=f=2500:t=q:w=1:g=" + num(c.eqMid);
+        if (c.eqHigh != 0)
+            a += ",treble=g=" + num(c.eqHigh) + ":f=8000:w=0.7";
+        if (c.deess > 0)
+            a += ",deesser=i=" + num(0.2 + 0.6 * c.deess) + ":m=0.5:f=0.5";
+        if (c.compressor > 0)
+            // Lower threshold and higher ratio with the amount; make-up gain restores level.
+            a += QString(",acompressor=threshold=%1:ratio=%2:attack=10:release=200:makeup=%3")
+                     .arg(num(std::pow(10, (-12 - 18 * c.compressor) / 20)), num(2 + 6 * c.compressor),
+                          num(std::pow(10, 9 * c.compressor / 20)));
         if (c.fadeIn > 0)
             a += ",afade=t=in:st=" + num(k) + ":d=" + num(std::min(c.fadeIn, d));
         if (c.fadeOut > 0) {
@@ -1062,7 +1084,12 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         nodes << a;
         audioLabels << "[a" + id + "]";
     }
-    const QString pace = o.realtime ? ",realtime" : "";
+    const QString pace = !o.realtime ? QString()
+                         : o.rate != 1 ? ",realtime=speed=" + num(o.rate)
+                                       : QString(",realtime");
+    QString tempo;
+    for (double r = o.rate; r > 1.0001; r /= 2)
+        tempo += ",atempo=" + num(std::min(2., r));
     if (o.video)
         nodes << QString("[%1]trim=end_frame=%2,setpts=PTS-STARTPTS,format=%3%4[vout]")
                      .arg(visual)
@@ -1077,11 +1104,12 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                       ? QString(",ebur128=peak=true:framelog=quiet")
                       : QString(",alimiter=limit=%1:level=0:latency=1").arg(num(o.limit));
         nodes << audioLabels.join("") +
-                     QString("amix=inputs=%1:duration=longest:normalize=0%2,atrim=end_sample=%3%4"
+                     QString("amix=inputs=%1:duration=longest:normalize=0%2,atrim=end_sample=%3%4%5"
                              "[aout]")
                          .arg(audioLabels.size())
                          .arg(master)
                          .arg(qRound64(r.duration * 48000))
+                         .arg(tempo)
                          .arg(o.realtime ? ",arealtime" : "");
     }
     r.graph = nodes.join(";\n");

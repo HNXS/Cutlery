@@ -97,6 +97,18 @@ Three small Google MediaPipe models (Apache-2.0) find the face, 468 face landmar
 - **One person:** only the most prominent face is corrected.
 - **Not yet validated on real recordings:** tests use a photo with the gaze moved synthetically. Check your result before you publish.
 
+## Follow a face (blur and mosaic areas)
+
+Select a blur or mosaic area that lies over a video clip and click **Follow a face (AI)**.
+
+- **Finding faces:** the first time, Cutlery finds the faces in that part of the video, 8 times a second, using the face detector from the eye-contact models. Results are cached per media file.
+- **Following:** the area follows the face nearest to where you placed it, frame to frame, and is sized to cover it with some room.
+- **Editing the result:** it is ordinary X/Y keyframes, so you can correct any frame. One undo step removes it.
+- **Limits:**
+  - Faces smaller than about 4 % of the picture height are missed.
+  - A face that disappears behind something or leaves the picture is not picked up again if another face is closer.
+  - Rotated or cropped videos below are only approximated.
+
 ## Model and licences
 
 | File | Model | Licence |

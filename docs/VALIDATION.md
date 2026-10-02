@@ -1,5 +1,20 @@
 # Validation record
 
+## Windows portable build — 2026-10-02, sound tools, follow a face, JKL shuttle (0.6 development)
+
+[GitHub Actions run 37053712510](https://github.com/HNXS/Cutlery/actions/runs/37053712510) on commit `f6cef27c63358f0242c0da49331c6bf54c16e032`: every build, test and check step passed, but the artifact uploads failed because the repository's artifact storage quota was full. There are no downloads for this build.
+
+What passed:
+
+- **Compile and tests:** compile, CTest (engine and interface).
+- **New engine tests:**
+  - `soundTools`: low cut, EQ bands, compressor, gate, and noise reduction (over 6 dB) measured on rendered audio.
+  - `followFace`: a face moving at 300 px/s followed within 0.04 of the frame width with the real detector.
+  - `shuttlePlayback`.
+- **Checks:** the real-model checks (matte, upscale, eye contact), the speech recognition check, packaging and the deployed smoke test.
+
+The workflow now keeps the portable build for 14 days and the AI pack for 7 days (previously 30), so runs fit the quota.
+
 ## Windows portable build — 2026-10-02, eye contact, markers, collect, VFR, image sequences (0.6 development)
 
 [GitHub Actions run 37012362029](https://github.com/HNXS/Cutlery/actions/runs/37012362029) completed successfully for commit `9bd5f21851e05af5dae09c7765f8fe9329431f72`.

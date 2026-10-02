@@ -5,6 +5,9 @@
 Projects are saved as schema 11; 0.5 cannot open them.
 
 - **Eye contact (AI pack):** turns a presenter's eyes toward the camera when they read from a script beside the lens. It redraws only the eyes, by up to 15 %, eases off for blinks and turned heads, and leaves people who already look into the camera alone.
+- **JKL shuttle:** L plays at 1×, 2× and 4×, J scrubs backward, K stops.
+- **Follow a face (AI pack):** a blur or mosaic area follows a face in the video below and is sized to cover it.
+- **Sound tools:** EQ, low cut, noise reduction, noise gate, de-esser and compressor per clip, with presets such as "Clear voice" and "Noisy room".
 - **Colour and look:** temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with a strength slider; eight one-click looks.
 - **Image sequences:** numbered frames (e.g. rendered animations) import as one clip, transparency included.
 - **Variable frame rate:** phone and screen recordings with irregular frame timing are flagged, and can be converted to a constant-rate editing copy.

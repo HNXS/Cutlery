@@ -224,7 +224,7 @@ void Playback::tick() {
     const qint64 end = m_request.from + m_request.video.frames;
     const qint64 target =
         m_request.from +
-        qint64(std::floor(seconds * m_request.fpsN / m_request.fpsD + 1e-9));
+        qint64(std::floor(seconds * m_request.rate * m_request.fpsN / m_request.fpsD + 1e-9));
     // Show the newest decoded frame the clock has reached; frames behind it are skipped.
     QByteArray show;
     while (!m_frames.empty() && m_request.from + m_frames.front().index <= target) {

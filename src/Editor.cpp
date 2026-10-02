@@ -77,6 +77,7 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
                       {{"matte", models + "/u2net_human_seg.onnx"},
                        {"upscale", models + "/realesr-general-x4v3.onnx"},
                        {"eyecontact", models + "/face_landmark.onnx"},
+                       {"faces", models + "/face_detection_short_range.onnx"},
                        {"transcribe", models + "/ggml-large-v3-turbo-q5_0.bin"},
                        {"vad", models + "/ggml-silero-v6.2.0.bin"},
                        {"whisper", whisper}},
@@ -85,6 +86,8 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     // A finished result changes the picture.
     connect(m_ai, &AiJobs::finished, this, [this] {
         m_previewTimer.start();
+        if (m_follow.value("status") == "analysing")
+            applyFollowFace();
         placeCaptions(); // when every transcript of a caption request is ready
     });
     connect(m_thumbnails, &Thumbnails::changed, this, [this] {
@@ -118,6 +121,16 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     m_resumeTimer.setSingleShot(true);
     m_resumeTimer.setInterval(150);
     connect(&m_resumeTimer, &QTimer::timeout, this, &Editor::play);
+    // Backward shuttle: ten steps a second.
+    m_reverseTimer.setInterval(100);
+    connect(&m_reverseTimer, &QTimer::timeout, this, [this] {
+        const auto step = std::max<qint64>(
+            1, qRound64(m_shuttleRate * m_project.fpsN / m_project.fpsD / 10));
+        seek(std::max<qint64>(0, m_playhead - step));
+        if (m_playhead == 0)
+            pause();
+        emit playbackChanged();
+    });
     m_saveTimer.setSingleShot(true);
     m_saveTimer.setInterval(800);
     connect(&m_saveTimer, &QTimer::timeout, this, &Editor::autosave);
@@ -416,6 +429,14 @@ QVariantMap Editor::state() const {
             PROP(vignette);
             PROP(grain);
             PROP(lutStrength);
+            PROP(eqLow);
+            PROP(eqMid);
+            PROP(eqHigh);
+            PROP(lowCut);
+            PROP(compressor);
+            PROP(gate);
+            PROP(denoise);
+            PROP(deess);
             PROP(slowMotion);
             PROP(fontFamily);
             PROP(graphic);
@@ -488,11 +509,13 @@ QVariantMap Editor::state() const {
             {"aiMissing", QVariantMap{{"matte", m_ai->missing("matte")},
                                       {"upscale", m_ai->missing("upscale")},
                                       {"eyecontact", m_ai->missing("eyecontact")},
+                                      {"faces", m_ai->missing("faces")},
                                       {"transcribe", m_ai->missing("transcribe")}}},
             {"captions", captionState()},
             {"pauses", pauseState()},
             {"scenes", m_scenes},
             {"collect", m_collect},
+            {"follow", m_follow},
             {"conform", m_conform},
             {"markers", [this] {
                  QVariantList list;
@@ -1127,6 +1150,14 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(vignette, toDouble);
         FIELD(grain, toDouble);
         FIELD(lutStrength, toDouble);
+        FIELD(eqLow, toDouble);
+        FIELD(eqMid, toDouble);
+        FIELD(eqHigh, toDouble);
+        FIELD(lowCut, toDouble);
+        FIELD(compressor, toDouble);
+        FIELD(gate, toDouble);
+        FIELD(denoise, toDouble);
+        FIELD(deess, toDouble);
         FIELD(slowMotion, toString);
         FIELD(bold, toBool);
         FIELD(italic, toBool);
@@ -1743,6 +1774,150 @@ void Editor::importImageSequence(const QUrl &firstImage, double fps) {
                     "-pix_fmt", "yuva444p10le", "-progress", "pipe:1", temp});
     emit changed();
 }
+const Clip *Editor::videoBelow(const Clip &c) const {
+    const Clip *best = nullptr;
+    for (const auto &v : m_project.clips) {
+        const auto *a = m_project.asset(v.assetId);
+        if (!a || a->kind != "video" || v.audioOnly || v.track >= c.track || v.reverse ||
+            v.start + v.duration <= c.start || v.start >= c.start + c.duration)
+            continue;
+        if (!best || v.track > best->track)
+            best = &v;
+    }
+    return best;
+}
+void Editor::followFace() {
+    const auto *c = m_project.clip(m_selected);
+    if (!c)
+        return fail("Select a blur or mosaic area to follow a face");
+    const auto *v = videoBelow(*c);
+    if (!v)
+        return fail("Place the area over a video clip on a lower track");
+    const auto *a = m_project.asset(v->assetId);
+    if (!m_ai->available("faces"))
+        return fail(m_ai->missing("faces") + " Download the AI pack next to Cutlery.exe.");
+    const double fps = double(m_project.fpsN) / m_project.fpsD, s = v->speed.seconds();
+    // The source range under the clip, a second either side.
+    const qint64 f0 = std::max(c->start, v->start),
+                 f1 = std::min(c->start + c->duration, v->start + v->duration);
+    const double from = v->sourceIn.seconds() + (f0 - v->start) / fps * s - 1,
+                 to = v->sourceIn.seconds() + (f1 - v->start) / fps * s + 1;
+    m_follow = {{"status", "analysing"}, {"clipId", c->id}, {"videoId", v->id}};
+    const auto r = m_ai->result("faces", *a);
+    if (!r.path.isEmpty() && r.start <= std::max(0., from) + 0.01 &&
+        r.end >= std::min(a->duration, to) - 0.01) {
+        applyFollowFace();
+        return;
+    }
+    m_ai->start("faces", *a, std::min(from, r.path.isEmpty() ? from : r.start),
+                std::max(to, r.path.isEmpty() ? to : r.end));
+    m_status = "Finding faces…";
+    emit changed();
+}
+void Editor::applyFollowFace() {
+    const auto areaId = m_follow.value("clipId").toString(),
+               videoId = m_follow.value("videoId").toString();
+    const auto *c = m_project.clip(areaId);
+    const auto *v = m_project.clip(videoId);
+    const auto *a = v ? m_project.asset(v->assetId) : nullptr;
+    const auto r = a ? m_ai->result("faces", *a) : MatteSource{};
+    QFile file(r.path);
+    if (!c || !v || r.path.isEmpty() || !file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        m_follow = {{"status", "failed"}, {"clipId", areaId}};
+        if (a && m_ai->status("faces", *a).value("status") == "failed")
+            fail("Finding faces failed: " + m_ai->status("faces", *a).value("error").toString());
+        emit changed();
+        return;
+    }
+    // Detections per analysed frame (8 per second from the result's start).
+    struct Box {
+        double x, y, w, h;
+    };
+    QHash<qint64, QVector<Box>> frames;
+    for (const auto &line : QString::fromUtf8(file.readAll()).split('\n', Qt::SkipEmptyParts)) {
+        const auto f = line.split(' ');
+        const auto index = qRound64(f[0].toDouble() * r.rate);
+        if (f.size() == 6)
+            frames[index] << Box{f[1].toDouble(), f[2].toDouble(), f[3].toDouble(), f[4].toDouble()};
+    }
+    const double fps = double(m_project.fpsN) / m_project.fpsD, s = v->speed.seconds();
+    const qint64 f0 = std::max(c->start, v->start),
+                 f1 = std::min(c->start + c->duration, v->start + v->duration);
+    // Canvas position (fractions) of a point of the video picture at a timeline frame.
+    auto toCanvas = [&](double u, double w, qint64 frame, bool vertical) {
+        const double local = frame - v->start, scale = v->valueAt("scale", local);
+        const auto size = m_project.pictureSize(*v, m_project.width * scale,
+                                                m_project.height * scale);
+        if (!vertical && v->flip)
+            u = 1 - u;
+        const double extent = vertical ? size.height() / m_project.height
+                                       : size.width() / m_project.width;
+        const double centre = 0.5 + v->valueAt(vertical ? "y" : "x", local);
+        return std::pair{centre + (u - 0.5) * extent, w * extent};
+    };
+    // Follow the face nearest the area's position at the start, then the one nearest the last
+    // position; a face more than a quarter of the picture away is a different one.
+    const qint64 step = std::max<qint64>(1, qRound64(fps / r.rate));
+    double px = 0.5 + c->valueAt("x", f0 - c->start), py = 0.5 + c->valueAt("y", f0 - c->start);
+    double maxW = 0, maxH = 0;
+    QVector<Keyframe> xs, ys;
+    bool found = false;
+    for (qint64 frame = f0; frame < f1; frame += step) {
+        const double source = v->sourceIn.seconds() + (frame - v->start) / fps * s;
+        const auto list = frames.value(qRound64((source - r.start) * r.rate));
+        double bestDistance = found ? 0.25 : 2;
+        std::optional<std::array<double, 4>> best;
+        for (const auto &b : list) {
+            const auto [cx, cw] = toCanvas(b.x, b.w, frame, false);
+            const auto [cy, ch] = toCanvas(b.y, b.h, frame, true);
+            const double d = std::hypot(cx - px, cy - py);
+            if (d < bestDistance) {
+                bestDistance = d;
+                best = std::array<double, 4>{cx, cy, cw, ch};
+            }
+        }
+        if (!best)
+            continue;
+        found = true;
+        px = (*best)[0];
+        py = (*best)[1];
+        maxW = std::max(maxW, (*best)[2]);
+        maxH = std::max(maxH, (*best)[3]);
+        xs << Keyframe{frame - c->start, std::clamp(px - 0.5, -2., 2.), false};
+        ys << Keyframe{frame - c->start, std::clamp(py - 0.5, -2., 2.), false};
+    }
+    if (xs.isEmpty()) {
+        m_follow = {{"status", "failed"}, {"clipId", areaId}};
+        fail("No face found under this clip");
+        return;
+    }
+    // A short moving average steadies the detector's jitter.
+    auto steady = [](QVector<Keyframe> k) {
+        auto out = k;
+        for (int i = 1; i + 1 < k.size(); ++i)
+            out[i].value = (k[i - 1].value + k[i].value + k[i + 1].value) / 3;
+        return out;
+    };
+    const auto count = xs.size();
+    mutate([&](Project &p) {
+        auto *area = p.clip(areaId);
+        if (!area)
+            return;
+        p.requireEditable(area->track);
+        area->keyframes["x"] = steady(xs);
+        area->keyframes["y"] = steady(ys);
+        if (!area->effect.isEmpty()) {
+            // Cover the face with some room; the area's size is fixed for the clip.
+            area->keyframes.remove("scale");
+            area->scale = 1;
+            area->effectWidth = std::clamp(maxW * 1.5, 0.02, 1.);
+            area->effectHeight = std::clamp(maxH * 1.4, 0.02, 1.);
+        }
+    });
+    m_follow = {{"status", "done"}, {"clipId", areaId}, {"keyframes", count}};
+    m_status = QString("Following a face with %1 keyframes").arg(count);
+    emit changed();
+}
 void Editor::copy() {
     const auto *c = m_project.clip(m_selected);
     if (!c)
@@ -1808,6 +1983,14 @@ void Editor::pasteAttributes(const QString &group) {
         c->crop = from.crop;
         c->flip = from.flip;
         c->volume = from.volume;
+        c->eqLow = from.eqLow;
+        c->eqMid = from.eqMid;
+        c->eqHigh = from.eqHigh;
+        c->lowCut = from.lowCut;
+        c->compressor = from.compressor;
+        c->gate = from.gate;
+        c->denoise = from.denoise;
+        c->deess = from.deess;
         c->fadeIn = from.fadeIn;
         c->fadeOut = from.fadeOut;
         // Keyframes keep their clip-relative frames; those past the end of a shorter clip stay
@@ -2276,6 +2459,7 @@ void Editor::setVideoSink(QObject *sink) {
 }
 void Editor::play() {
     m_resumeTimer.stop();
+    m_reverseTimer.stop();
     if (m_project.clips.empty() || m_busy || m_playback->active())
         return;
     if (m_preview) {
@@ -2297,9 +2481,11 @@ void Editor::play() {
         request.fpsD = m_project.fpsD;
         request.from = m_playhead;
         request.work = work;
+        request.rate = m_playRate;
         RenderOptions options;
         options.from = m_playhead;
         options.realtime = true;
+        options.rate = m_playRate;
         options.audio = false;
         addAiMedia(options);
         request.video =
@@ -2325,6 +2511,12 @@ void Editor::play() {
 void Editor::pause() {
     const bool resuming = m_resumeTimer.isActive();
     m_resumeTimer.stop();
+    if (m_reverseTimer.isActive()) {
+        m_reverseTimer.stop();
+        m_status = "Ready";
+        emit playbackChanged();
+        emit changed();
+    }
     if (!m_playback->active() && !resuming)
         return;
     if (m_playback->active())
@@ -2335,10 +2527,37 @@ void Editor::pause() {
     emit changed();
 }
 void Editor::togglePlayback() {
-    if (m_playback->active() || m_resumeTimer.isActive())
+    if (m_playback->active() || m_resumeTimer.isActive() || m_reverseTimer.isActive())
         pause();
-    else
+    else {
+        m_playRate = 1;
         play();
+    }
+}
+void Editor::shuttle(bool forward) {
+    if (forward) {
+        const bool playing = m_playback->active();
+        if (m_reverseTimer.isActive())
+            pause();
+        const double next = playing ? std::min(4., m_playRate * 2) : 1;
+        if (playing && next == m_playRate)
+            return;
+        if (playing) {
+            m_playhead = m_playback->frame();
+            stopPlayback();
+        }
+        m_playRate = next;
+        play();
+        return;
+    }
+    // Backward: step the playhead back, faster on each press; previews follow.
+    if (m_playback->active())
+        pause();
+    m_shuttleRate = m_reverseTimer.isActive() ? std::min(4., m_shuttleRate * 2) : 1;
+    m_reverseTimer.start();
+    m_status = QString("Scrubbing back %1×").arg(m_shuttleRate);
+    emit playbackChanged();
+    emit changed();
 }
 void Editor::stopPlayback() {
     if (!m_playback->active())

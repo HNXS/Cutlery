@@ -116,6 +116,10 @@ ApplicationWindow {
             editor.togglePlayback();
         else if (id === "pause")
             editor.pause();
+        else if (id === "shuttleForward" && s.duration > 0 && !s.busy)
+            editor.shuttle(true);
+        else if (id === "shuttleBack" && s.duration > 0 && !s.busy)
+            editor.shuttle(false);
         else if (id === "previousFrame")
             goTo(editor.playbackFrame - 1);
         else if (id === "nextFrame")
@@ -979,6 +983,13 @@ ApplicationWindow {
                             ToolTip.text: voice.available === true ? "Record narration from the microphone while the timeline plays from the playhead. Use headphones so the recording does not pick up the timeline." : "No microphone found"
                         }
                         Label {
+                            objectName: "playbackRate"
+                            visible: editor.playbackRate !== 1 && (editor.playing || editor.playbackRate < 0)
+                            text: (editor.playbackRate < 0 ? "◀◀ " : "▶▶ ") + Math.abs(editor.playbackRate) + "×"
+                            color: "#ffd479"
+                            font.bold: true
+                        }
+                        Label {
                             text: win.clock(editor.playbackFrame) + " / " + win.clock(win.s.duration)
                             font.family: "Consolas"
                             color: win.mint
@@ -1232,7 +1243,26 @@ ApplicationWindow {
                                     wrapMode: Text.Wrap
                                     font.pixelSize: 11
                                     color: win.muted
-                                    text: "Drag the frame in the preview to place it and its corners to resize. Keyframe X/Y below to follow something moving. The area affects all tracks below it."
+                                    text: "Drag the frame in the preview to place it and its corners to resize. Keyframe X/Y below to follow something moving, or let it follow a face. The area affects all tracks below it."
+                                }
+                                Action {
+                                    objectName: "followFace"
+                                    Layout.fillWidth: true
+                                    readonly property var follow: win.s.follow || ({})
+                                    readonly property bool busy: follow.status === "analysing" && follow.clipId === win.s.selectedId
+                                    enabled: !busy && win.selection.locked !== true && ((win.s.aiMissing || {}).faces || "") === ""
+                                    text: busy ? "Finding faces…" : "Follow a face (AI)"
+                                    onClicked: editor.followFace()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: ((win.s.aiMissing || {}).faces || "") !== "" ? win.s.aiMissing.faces : "Finds the faces in the video below and keyframes the area onto the one nearest to it, sized to cover it"
+                                }
+                                Label {
+                                    objectName: "followStatus"
+                                    Layout.fillWidth: true
+                                    visible: (win.s.follow || {}).clipId === win.s.selectedId && (win.s.follow.status === "done" || win.s.follow.status === "failed")
+                                    font.pixelSize: 11
+                                    color: (win.s.follow || {}).status === "failed" ? "#ec6f5a" : win.muted
+                                    text: (win.s.follow || {}).status === "done" ? "Following a face ✓ · move the playhead to check, adjust keyframes if needed" : "No face found under this area"
                                 }
                                 Rule {}
                             }
@@ -1995,6 +2025,82 @@ ApplicationWindow {
                                             editor.setClip(modelData.key, value)
                                         onMoved: if (!pressed)
                                             editor.setClip(modelData.key, value)
+                                    }
+                                }
+                            }
+                            // Sound: clean-up, tone and dynamics of the clip's audio.
+                            ColumnLayout {
+                                objectName: "soundSection"
+                                visible: win.selection.hasAudio === true
+                                Layout.fillWidth: true
+                                spacing: 6
+                                Rule {}
+                                Caption { text: "SOUND" }
+                                ComboBox {
+                                    objectName: "soundPreset"
+                                    Layout.fillWidth: true
+                                    enabled: win.selection.locked !== true
+                                    readonly property var presets: [
+                                        { label: "Apply a sound preset…", values: null },
+                                        { label: "Natural (reset)", values: {} },
+                                        { label: "Clear voice", values: { lowCut: 80, denoise: .4, gate: .2, eqMid: 3, deess: .3, compressor: .5 } },
+                                        { label: "Warm podcast voice", values: { lowCut: 60, denoise: .3, eqLow: 3, eqMid: 2, eqHigh: -1, deess: .4, compressor: .6 } },
+                                        { label: "Noisy room", values: { lowCut: 120, denoise: .8, gate: .5, eqMid: 2, compressor: .4 } },
+                                        { label: "Phone call", values: { lowCut: 300, eqLow: -12, eqMid: 6, eqHigh: -12, compressor: .7 } },
+                                        { label: "Music: more punch", values: { eqLow: 4, eqHigh: 3, compressor: .3 } }
+                                    ]
+                                    model: presets.map(p => p.label)
+                                    onActivated: index => {
+                                        const preset = presets[index].values;
+                                        if (preset) {
+                                            const values = { eqLow: 0, eqMid: 0, eqHigh: 0, lowCut: 0, compressor: 0, gate: 0, denoise: 0, deess: 0 };
+                                            for (const k in preset)
+                                                values[k] = preset[k];
+                                            editor.setClipValues(values);
+                                        }
+                                        currentIndex = 0;
+                                    }
+                                }
+                                Repeater {
+                                    model: [
+                                        { key: "lowCut", name: "Low cut (Hz)", lo: 0, hi: 300, step: 5, tip: "Removes rumble, hum and wind below this frequency" },
+                                        { key: "denoise", name: "Noise reduction", lo: 0, hi: 1, step: .01, tip: "Reduces steady hiss and hum" },
+                                        { key: "gate", name: "Noise gate", lo: 0, hi: 1, step: .01, tip: "Lowers the sound between phrases" },
+                                        { key: "eqLow", name: "Bass (dB)", lo: -12, hi: 12, step: .5, tip: "Below 100 Hz" },
+                                        { key: "eqMid", name: "Presence (dB)", lo: -12, hi: 12, step: .5, tip: "Around 2.5 kHz, where speech is clear" },
+                                        { key: "eqHigh", name: "Treble (dB)", lo: -12, hi: 12, step: .5, tip: "Above 8 kHz" },
+                                        { key: "deess", name: "De-esser", lo: 0, hi: 1, step: .01, tip: "Softens sharp S sounds" },
+                                        { key: "compressor", name: "Compressor", lo: 0, hi: 1, step: .01, tip: "Evens out loud and quiet parts" }
+                                    ]
+                                    RowLayout {
+                                        id: soundRow
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        Label {
+                                            text: soundRow.modelData.name
+                                            color: Number(win.selection[soundRow.modelData.key] || 0) !== 0 ? win.mint : win.muted
+                                            Layout.preferredWidth: 105
+                                        }
+                                        Slider {
+                                            objectName: "sound-" + soundRow.modelData.key
+                                            Layout.fillWidth: true
+                                            from: soundRow.modelData.lo
+                                            to: soundRow.modelData.hi
+                                            stepSize: soundRow.modelData.step
+                                            value: Number(win.selection[soundRow.modelData.key] || 0)
+                                            enabled: win.selection.locked !== true
+                                            onPressedChanged: if (!pressed)
+                                                editor.setClip(soundRow.modelData.key, value)
+                                            onMoved: if (!pressed)
+                                                editor.setClip(soundRow.modelData.key, value)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: soundRow.modelData.tip
+                                        }
+                                        Label {
+                                            text: Number(win.selection[soundRow.modelData.key] || 0).toFixed(soundRow.modelData.hi > 1 ? 0 : 2)
+                                            font.pixelSize: 10
+                                            Layout.preferredWidth: 28
+                                        }
                                     }
                                 }
                             }

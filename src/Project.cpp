@@ -61,14 +61,18 @@ static std::pair<double, double> propertyRange(const QString &p) {
     return {0, 4}; // volume
 }
 namespace {
-// Colour and look values stored only when not 0.
+// Colour, look and sound values stored only when not 0.
 const QVector<QPair<QString, double Clip::*>> &lookFields() {
     static const QVector<QPair<QString, double Clip::*>> fields{
         {"temperature", &Clip::temperature}, {"tint", &Clip::tint},
         {"vibrance", &Clip::vibrance},       {"shadows", &Clip::shadows},
         {"highlights", &Clip::highlights},   {"sharpen", &Clip::sharpen},
         {"glow", &Clip::glow},               {"vignette", &Clip::vignette},
-        {"grain", &Clip::grain}};
+        {"grain", &Clip::grain},             {"eqLow", &Clip::eqLow},
+        {"eqMid", &Clip::eqMid},             {"eqHigh", &Clip::eqHigh},
+        {"lowCut", &Clip::lowCut},           {"compressor", &Clip::compressor},
+        {"gate", &Clip::gate},               {"denoise", &Clip::denoise},
+        {"deess", &Clip::deess}};
     return fields;
 }
 } // namespace
@@ -637,6 +641,11 @@ void Project::validate() const {
                     bounded(c.lutStrength, 0, 1) && c.lut.size() <= 4096 &&
                     QStringList{"", "blend", "flow"}.contains(c.slowMotion),
                 "Invalid colour or look setting");
+        require(bounded(c.eqLow, -12, 12) && bounded(c.eqMid, -12, 12) &&
+                    bounded(c.eqHigh, -12, 12) && bounded(c.lowCut, 0, 300) &&
+                    bounded(c.compressor, 0, 1) && bounded(c.gate, 0, 1) &&
+                    bounded(c.denoise, 0, 1) && bounded(c.deess, 0, 1),
+                "Invalid sound setting");
         require(QStringList{"", "lowerThird", "lowerThirdLine", "titleCard"}.contains(
                     c.titleStyle) &&
                     QColor(c.accentColor).isValid(),

@@ -586,6 +586,8 @@ class UiTest : public QObject {
         QTRY_VERIFY(pasteLook && pasteLook->isEnabled());
         QVERIFY(QMetaObject::invokeMethod(pasteLook, "clicked"));
         QCOMPARE(editor.project().clips.back().temperature, 0.5);
+        // A picture without sound has no sound section; titles neither.
+        QVERIFY(!findItem(window->contentItem(), "soundSection")->isVisible());
         // Shapes from the library: the shape section replaces the text box for arrows.
         QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "addShape"), "clicked"));
         QObject *addArrow = nullptr;
@@ -725,6 +727,16 @@ class UiTest : public QObject {
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(window);
         QTest::qWait(100);
+        // Sound presets set every sound value in one undo step.
+        auto *section = findItem(window->contentItem(), "soundSection");
+        QTRY_VERIFY(section && section->isVisible());
+        const auto selectedId = editor.project().clips.first().id;
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "soundPreset"), "activated",
+                                          Q_ARG(int, 2))); // Clear voice
+        QCOMPARE(editor.project().clip(selectedId)->lowCut, 80.);
+        QCOMPARE(editor.project().clip(selectedId)->compressor, .5);
+        editor.undo();
+        QCOMPARE(editor.project().clip(selectedId)->lowCut, 0.);
         auto *open = findItem(window->contentItem(), "removePauses");
         QVERIFY(open && open->isVisible() && open->isEnabled());
         QVERIFY(QMetaObject::invokeMethod(open, "clicked"));
