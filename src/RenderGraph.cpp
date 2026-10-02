@@ -188,6 +188,78 @@ static CaptionSprite captionSprite(const Clip &c, int width, int height, int pro
     }
     return s;
 }
+TitlePlate titlePlate(const Clip &c, int width, int height, int projectHeight) {
+    if (c.titleStyle.isEmpty() || !c.assetId.isEmpty() || !c.effect.isEmpty())
+        return {};
+    const auto lines = c.text.split('\n');
+    const QString name = lines.value(0).trimmed();
+    QStringList rest;
+    for (int i = 1; i < lines.size(); ++i)
+        if (!lines[i].trimmed().isEmpty())
+            rest << lines[i].trimmed();
+    const bool card = c.titleStyle == "titleCard";
+    const double unit = double(height) / projectHeight * c.scale;
+    QFont nameFont(c.fontFamily), restFont(c.fontFamily);
+    nameFont.setPixelSize(std::max(8, qRound(c.fontSize * (card ? 1.2 : 0.75) * unit)));
+    nameFont.setBold(true);
+    restFont.setPixelSize(std::max(8, qRound(c.fontSize * (card ? 0.6 : 0.45) * unit)));
+    const QFontMetrics nm(nameFont), rm(restFont);
+    const int pad = std::max(4, nm.height() / 3), accent = std::max(3, nm.height() / 9);
+    const int maxWidth = int(width * (card ? 0.8 : 0.6));
+    auto elide = [&](const QFontMetrics &m, const QString &t) {
+        return m.elidedText(t, Qt::ElideRight, maxWidth);
+    };
+    int textWidth = nm.horizontalAdvance(elide(nm, name));
+    for (const auto &r : rest)
+        textWidth = std::max(textWidth, rm.horizontalAdvance(elide(rm, r)));
+    const int textHeight = nm.height() + int(rest.size()) * rm.height();
+    const bool plate = c.titleStyle != "lowerThirdLine";
+    const int left = card ? pad * 2 : accent + pad, w = left + textWidth + (card ? pad * 2 : pad * 2),
+              h = textHeight + pad * 2 + (card ? accent + pad / 2 : 0);
+    TitlePlate t;
+    t.image = QImage(w + 4, h + 4, QImage::Format_ARGB32_Premultiplied);
+    t.image.fill(Qt::transparent);
+    QPainter paint(&t.image);
+    paint.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
+    if (plate) {
+        paint.setPen(Qt::NoPen);
+        paint.setBrush(QColor(16, 20, 26, 215));
+        paint.drawRoundedRect(QRectF(0, 0, w, h), pad / 2.0, pad / 2.0);
+    }
+    paint.setPen(Qt::NoPen);
+    paint.setBrush(QColor(c.accentColor));
+    if (card) // underline below the headline
+        paint.drawRect(QRectF((w - textWidth) / 2.0, pad + nm.height() + pad / 4.0, textWidth, accent));
+    else // bar along the left edge
+        paint.drawRect(QRectF(0, plate ? 0 : pad / 2.0, accent, plate ? h : h - pad));
+    auto text = [&](const QFont &font, const QFontMetrics &m, const QString &s, int top,
+                    const QColor &color) {
+        const auto shown = elide(m, s);
+        const int x = card ? (w - m.horizontalAdvance(shown)) / 2 : left;
+        paint.setFont(font);
+        if (!plate) { // readable on any picture without a plate
+            paint.setPen(QColor(0, 0, 0, 200));
+            paint.drawText(x + 2, top + m.ascent() + 2, shown);
+        }
+        paint.setPen(color);
+        paint.drawText(x, top + m.ascent(), shown);
+    };
+    int top = pad;
+    text(nameFont, nm, name, top, QColor(c.textColor));
+    top += nm.height() + (card ? accent + pad / 2 : 0);
+    for (const auto &r : rest) {
+        QColor sub(c.textColor);
+        sub.setAlpha(200);
+        text(restFont, rm, r, top, sub);
+        top += rm.height();
+    }
+    paint.end();
+    // Lower thirds sit in the lower left, inside the title-safe area; cards in the centre.
+    const int iw = t.image.width(), ih = t.image.height();
+    t.position = card ? QPoint((width - iw) / 2, (height - ih) / 2)
+                      : QPoint(qRound(width * 0.06), qRound(height * 0.86) - ih);
+    return t;
+}
 RenderPlan compileRender(const Project &p, const QString &work, int width, int height,
                          const RenderOptions &o) {
     p.validate();
@@ -618,6 +690,42 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                              .arg(id, x, y, num(secs(visibleStart - from) - half),
                                   num(secs(visibleEnd - from) - half));
                 visual = "area" + id;
+                continue;
+            }
+            if (n.title && !c.titleStyle.isEmpty() && !animatedGeometry(c) && c.rotation == 0 &&
+                n.vPre == 0) {
+                // Title template: the plate image, faded, and for lower thirds slid in from the
+                // left over the first 0.45 s with an ease-out curve.
+                const auto plate = titlePlate(c, width, height, p.height);
+                const auto file = QDir(work).filePath(QString("plate-%1.png").arg(serial++));
+                if (plate.image.isNull() || !plate.image.save(file))
+                    throw std::runtime_error("Cannot write title render asset");
+                r.inputs << "-loop" << "1" << "-framerate" << fps << "-i" << file;
+                const qint64 l0 = visibleStart - c.start, l1 = visibleEnd - c.start;
+                QString f = QString("[%1:v:0]trim=end_frame=%2,settb=%3/%4,setpts=N+%5,format=rgba")
+                                .arg(input++)
+                                .arg(l1 - l0)
+                                .arg(p.fpsD)
+                                .arg(p.fpsN)
+                                .arg(l0);
+                if (c.opacity != 1)
+                    f += ",colorchannelmixer=aa=" + num(c.opacity);
+                const double d = secs(c.duration);
+                if (c.fadeIn > 0)
+                    f += QString(",fade=t=in:st=0:d=%1:alpha=1").arg(num(std::min(c.fadeIn, d)));
+                if (c.fadeOut > 0) {
+                    const auto fd = std::min(c.fadeOut, d);
+                    f += QString(",fade=t=out:st=%1:d=%2:alpha=1").arg(num(d - fd), num(fd));
+                }
+                const auto px = plate.position.x() + qRound(c.x * width),
+                           py = plate.position.y() + qRound(c.y * height);
+                QString x = QString::number(px);
+                if (c.titleStyle != "titleCard") {
+                    const auto local = QString("(t+%1)").arg(num(secs(from - c.start)));
+                    x = QString("'%1-(%1+w)*pow(max(0,1-%2/0.45),3)'").arg(px).arg(local);
+                }
+                composite(f + ",setpts=PTS-STARTPTS", QString("x=%1:y=%2").arg(x).arg(py),
+                          visibleStart - from, visibleEnd - visibleStart);
                 continue;
             }
             if (n.title && !c.captionStyle.isEmpty() && c.timedWords() && !animatedGeometry(c) &&

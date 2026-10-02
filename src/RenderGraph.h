@@ -1,6 +1,8 @@
 #pragma once
 #include "Project.h"
 #include <QHash>
+#include <QImage>
+#include <QPoint>
 #include <QStringList>
 
 namespace cutlery {
@@ -41,6 +43,14 @@ struct RenderOptions {
     // Same timing as the source from time `start` (`rate` is unused).
     QHash<QString, MatteSource> upscaled;
 };
+// A title template (Clip::titleStyle) drawn tightly on a transparent image, and where its top-left
+// corner sits on a width × height canvas before the clip's x/y offset; text sizes follow the
+// clip's scale. Empty for plain titles.
+struct TitlePlate {
+    QImage image;
+    QPoint position;
+};
+TitlePlate titlePlate(const Clip &, int width, int height, int projectHeight);
 struct Encoder;
 // The same compiler handles preview stills, live playback and final export.
 // FFmpeg is the first CPU reference backend; a D3D11 backend is not implemented.

@@ -43,6 +43,11 @@ struct Clip {
     // space) starts on. "karaoke" colours the word being spoken in `highlightColor`; "word"
     // shows one word at a time. Without matching timing a caption renders plainly.
     QString captionStyle; // "", "karaoke", "word"
+    // Title templates: "lowerThird" (name and role on a plate), "lowerThirdLine" (accent line,
+    // no plate), "titleCard" (large centred text on a plate); "" is the plain centred title.
+    // The first text line is the name or headline, further lines the role or subtitle.
+    QString titleStyle;
+    QString accentColor = "#64d8bc";
     // Effect area clips (no media, no text) blur or pixelate whatever lower tracks show inside a
     // rectangle of effectWidth × effectHeight canvas fractions at scale 1, centred at x/y.
     QString effect; // "", "blur", "pixelate"

@@ -480,6 +480,16 @@ class UiTest : public QObject {
         QVERIFY(QMetaObject::invokeMethod(type, "activated", Q_ARG(int, 0)));
         QCOMPARE(editor.project().clip(area.id)->effect, QString("blur"));
         QVERIFY(!findItem(window->contentItem(), "overlayShape")->isVisible());
+        // A lower third from the library panel; its style can be changed in the inspector.
+        press("addLowerThird");
+        const auto lower = editor.project().clips.last();
+        QCOMPARE(lower.titleStyle, QString("lowerThird"));
+        auto *style = findItem(window->contentItem(), "titleStyle");
+        QTRY_VERIFY(style && style->isVisible());
+        QCOMPARE(style->property("currentIndex").toInt(), 1);
+        style->setProperty("currentIndex", 3);
+        QVERIFY(QMetaObject::invokeMethod(style, "activated", Q_ARG(int, 3)));
+        QCOMPARE(editor.project().clip(lower.id)->titleStyle, QString("titleCard"));
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void aiCutoutControls() {

@@ -1581,6 +1581,114 @@ class EngineTest : public QObject {
         editor.addEffect("swirl");
         QVERIFY(editor.state()["error"].toString().contains("Unknown effect"));
     }
+    void titleTemplates() {
+        Clip lower;
+        lower.id = "lower";
+        lower.duration = 90;
+        lower.titleStyle = "lowerThird";
+        lower.text = "Tim Example\nFounder, Cutlery";
+        lower.accentColor = "#00ff00";
+        lower.textColor = "#ffffff";
+        lower.fadeIn = 0;
+        // Layout: lower left inside the title-safe area, tight around the text.
+        auto plate = titlePlate(lower, 1920, 1080, 1080);
+        QVERIFY(!plate.image.isNull());
+        QCOMPARE(plate.position.x(), 115);
+        QCOMPARE(plate.position.y() + plate.image.height(), 929);
+        QVERIFY(plate.image.width() < 1920 * 0.65 && plate.image.height() < 400);
+        auto card = lower;
+        card.titleStyle = "titleCard";
+        const auto centred = titlePlate(card, 1920, 1080, 1080);
+        QVERIFY(std::abs(centred.position.x() + centred.image.width() / 2 - 960) <= 2);
+        auto plain = lower;
+        plain.titleStyle.clear();
+        QVERIFY(titlePlate(plain, 1920, 1080, 1080).image.isNull());
+        // Text scales with the clip's scale.
+        auto big = lower;
+        big.scale = 2;
+        QVERIFY(titlePlate(big, 1920, 1080, 1080).image.height() > plate.image.height() * 1.8);
+
+        // Rendering over a blue background.
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto background = dir.filePath("blue.png");
+        QImage blue(320, 180, QImage::Format_RGB32);
+        blue.fill(Qt::blue);
+        QVERIFY(blue.save(background));
+        Project p;
+        p.width = 320;
+        p.height = 180;
+        p.fpsN = 30;
+        Asset a;
+        a.id = "bg";
+        a.path = background;
+        a.kind = "image";
+        a.duration = 5;
+        a.width = 320;
+        a.height = 180;
+        p.assets = {a};
+        Clip bg;
+        bg.id = "bg";
+        bg.assetId = "bg";
+        bg.duration = 90;
+        lower.track = 1;
+        lower.fontSize = 20; // proportionate in this 180-pixel-high project
+        p.clips = {bg, lower};
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Project &project, qint64 frame) {
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 320, 180, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        plate = titlePlate(lower, 320, 180, 180);
+        const QPoint barPoint = plate.position + QPoint(1, plate.image.height() / 2),
+                     platePoint = plate.position + QPoint(plate.image.width() - 10, plate.image.height() / 2);
+        auto image = still(p, 45); // settled
+        QColor bar = image.pixelColor(barPoint), dark = image.pixelColor(platePoint);
+        QVERIFY2(bar.green() > 200 && bar.red() < 60 && bar.blue() < 60, qPrintable(bar.name()));
+        QVERIFY2(dark.blue() < 90 && dark.red() < 60, qPrintable(dark.name()));
+        image = still(p, 0); // still outside, sliding in from the left
+        QVERIFY2(image.pixelColor(platePoint).blue() > 200, qPrintable(image.pixelColor(platePoint).name()));
+        // Moved with x/y.
+        auto moved = p;
+        moved.clips[1].y = -0.5;
+        image = still(moved, 45);
+        QVERIFY(image.pixelColor(barPoint).blue() > 200);
+        QVERIFY2(image.pixelColor(barPoint - QPoint(0, 90)).green() > 200,
+                 qPrintable(image.pixelColor(barPoint - QPoint(0, 90)).name()));
+
+        // Model and editor.
+        const auto loaded = Project::fromJson(p.json(), {});
+        QCOMPARE(loaded.clips[1].titleStyle, QString("lowerThird"));
+        QCOMPARE(loaded.clips[1].accentColor, QString("#00ff00"));
+        QVERIFY(p.json()["schemaVersion"].toInt() >= 10);
+        auto invalid = p;
+        invalid.clips[1].titleStyle = "banner";
+        QVERIFY_EXCEPTION_THROWN(invalid.validate(), std::runtime_error);
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 30, 1);
+        editor.addTitleTemplate("lowerThird");
+        const auto id = editor.project().clips.first().id;
+        QCOMPARE(editor.state()["selected"].toMap()["titleStyle"].toString(), QString("lowerThird"));
+        const auto bounds = editor.clipBounds(id);
+        const auto expected = titlePlate(*editor.project().clip(id), 320, 180, 180);
+        QVERIFY(std::abs(bounds["x"].toDouble() - expected.position.x() / 320.) < 1e-9);
+        QVERIFY(std::abs(bounds["width"].toDouble() - expected.image.width() / 320.) < 1e-9);
+        editor.addTitleTemplate("banner");
+        QVERIFY(editor.state()["error"].toString().contains("Unknown title template"));
+    }
     void waveformPeaksAndCache() {
         PeakAccumulator peaks(2);
         const auto pcm = QByteArray::fromHex("0000004000800000");

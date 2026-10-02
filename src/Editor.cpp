@@ -308,6 +308,8 @@ QVariantMap Editor::state() const {
                         {"canTransition", m_project.previousAdjacent(c) != nullptr},
                         {"captionStyle", c.captionStyle},
                         {"effect", c.effect},
+                        {"titleStyle", c.titleStyle},
+                        {"accentColor", c.accentColor},
                         {"effectStrength", c.effectStrength},
                         {"blur", c.blur},
                         {"highlightColor", c.highlightColor},
@@ -792,6 +794,28 @@ void Editor::addTitle() {
     });
     select(id);
 }
+void Editor::addTitleTemplate(const QString &style) {
+    if (!QStringList{"lowerThird", "lowerThirdLine", "titleCard"}.contains(style))
+        return fail("Unknown title template");
+    const auto id = newId();
+    mutate([&](Project &p) {
+        Clip c;
+        c.id = id;
+        c.name = style == "titleCard" ? "Title card" : "Lower third";
+        c.titleStyle = style;
+        c.text = style == "titleCard" ? "Chapter title\nWhat this part is about"
+                                      : "Your Name\nYour role or topic";
+        c.fadeIn = 0.3;
+        c.fadeOut = 0.3;
+        c.track = p.tracks - 1;
+        p.requireEditable(c.track);
+        c.start = m_playhead;
+        c.duration = qRound64((style == "titleCard" ? 3. : 5.) * p.fpsN / p.fpsD);
+        p.clips.push_back(c);
+        p.move(c.id, c.track, c.start);
+    });
+    select(id);
+}
 void Editor::addEffect(const QString &effect) {
     if (effect != "blur" && effect != "pixelate")
         return fail("Unknown effect");
@@ -870,6 +894,10 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             c->text = v.toString();
         else if (key == "fontSize")
             c->fontSize = v.toInt();
+        else if (key == "titleStyle")
+            c->titleStyle = v.toString();
+        else if (key == "accentColor")
+            c->accentColor = v.toString();
         else if (key == "effect")
             c->effect = v.toString();
         else if (key == "effectStrength")
@@ -929,6 +957,16 @@ QVariantMap Editor::clipBounds(const QString &id) const {
         return {};
     // The picture's rectangle on the canvas at the playhead, in canvas fractions.
     const double local = m_playhead - c->start;
+    if (!c->titleStyle.isEmpty() && c->keyframes.isEmpty()) {
+        // Title templates are drawn tightly; the frame surrounds the plate.
+        const auto t = titlePlate(*c, m_project.width, m_project.height, m_project.height);
+        return {{"x", (t.position.x() + c->x * m_project.width) / m_project.width},
+                {"y", (t.position.y() + c->y * m_project.height) / m_project.height},
+                {"width", double(t.image.width()) / m_project.width},
+                {"height", double(t.image.height()) / m_project.height},
+                {"rotation", 0.},
+                {"inside", local >= 0 && local < c->duration}};
+    }
     const double scale = c->valueAt("scale", local);
     const auto size = m_project.pictureSize(*c, m_project.width * scale,
                                             m_project.height * scale);

@@ -62,6 +62,8 @@ class Editor final : public QObject {
     Q_INVOKABLE void relink(const QString &assetId, const QUrl &);
     Q_INVOKABLE void addAsset(const QString &assetId, int track = 0);
     Q_INVOKABLE void addTitle();
+    // A title template ("lowerThird", "lowerThirdLine", "titleCard") at the playhead.
+    Q_INVOKABLE void addTitleTemplate(const QString &style);
     // A blur ("blur") or mosaic ("pixelate") area over the lower tracks, at the playhead.
     Q_INVOKABLE void addEffect(const QString &effect);
     Q_INVOKABLE void select(const QString &id);
