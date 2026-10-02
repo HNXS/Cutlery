@@ -2897,7 +2897,7 @@
     "acceptance": "Occlusion and multiple faces do not silently switch identity",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Partial",
-    "alphaNotes": "Used by eye contact: MediaPipe BlazeFace detection, 468-point Face Mesh and Iris Landmark (Apache-2.0, converted to ONNX) per frame in the cutlery-ai worker, most prominent face only. No face tracking for effects, blur areas or reframing yet."
+    "alphaNotes": "MediaPipe BlazeFace (Apache-2.0, ONNX) in the cutlery-ai worker: the \"faces\" task finds faces 8 times a second on the whole frame and on overlapping tiles (faces from about 4 % of the frame height), cached per media file. \"Follow a face (AI)\" keyframes a blur/mosaic area (or any overlay) onto the face nearest it in the video below, frame-to-frame nearest neighbour with smoothing, and sizes areas to the face. Eye contact uses the same detector with Face Mesh and Iris. No identity tracking across cuts or occlusions; rotation, crop and keyframed scale of the video below are approximated."
   },
   {
     "id": "F117",

@@ -119,7 +119,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F113 | Display management and multi-monitor HDR | Planned | Not implemented in this alpha. |
 | F114 | Point and planar tracking | Planned | Not implemented in this alpha. |
 | F115 | Object tracking and editable paths | Planned | Not implemented in this alpha. |
-| F116 | Face detection and face tracking | Partial | Used by eye contact: MediaPipe BlazeFace detection, 468-point Face Mesh and Iris Landmark (Apache-2.0, converted to ONNX) per frame in the cutlery-ai worker, most prominent face only. No face tracking for effects, blur areas or reframing yet. |
+| F116 | Face detection and face tracking | Partial | MediaPipe BlazeFace (Apache-2.0, ONNX) in the cutlery-ai worker: the "faces" task finds faces 8 times a second on the whole frame and on overlapping tiles (faces from about 4 % of the frame height), cached per media file. "Follow a face (AI)" keyframes a blur/mosaic area (or any overlay) onto the face nearest it in the video below, frame-to-frame nearest neighbour with smoothing, and sizes areas to the face. Eye contact uses the same detector with Face Mesh and Iris. No identity tracking across cuts or occlusions; rotation, crop and keyframed scale of the video below are approximated. |
 | F117 | Tracked masks, blur and overlays | Planned | Not implemented in this alpha. |
 | F118 | Stabilization and auto crop | Planned | Not implemented in this alpha. |
 | F119 | Rolling-shutter and lens correction | Planned | Not implemented in this alpha. |

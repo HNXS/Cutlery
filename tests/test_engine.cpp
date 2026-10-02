@@ -1033,6 +1033,62 @@ class EngineTest : public QObject {
         QSKIP("Needs the AI worker and the AI pack's models (CUTLERY_TEST_MODELS)");
 #endif
     }
+    void followFace() {
+#if defined(CUTLERY_AI_WORKER) && defined(CUTLERY_TEST_MODELS)
+        const QString models = CUTLERY_TEST_MODELS;
+        if (!QFileInfo::exists(models + "/face_detection_short_range.onnx"))
+            QSKIP("The face models are not in the test models folder");
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // The fixture face (about 13 % of the frame wide) moving from left to right over 2 s on
+        // a grey 1280 × 720 frame.
+        const auto source = dir.filePath("moving.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=1280x720:r=25:d=2", "-i",
+                     QString(CUTLERY_SOURCE_DIR) + "/tests/fixtures/face-straight.jpg",
+                     "-filter_complex", "[1]scale=480:-2[f];[0][f]overlay=x='100+t*300':y=100",
+                     "-c:v", "ffv1", source});
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+        qputenv("CUTLERY_AI_MODELS", models.toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        editor.configure(1280, 720, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        editor.seek(0);
+        editor.addEffect("blur");
+        const auto area = editor.state()["selectedId"].toString();
+        editor.setClip("duration", 50);
+        // Start roughly over the face; the face's centre at t = 0 is near x = 0.27, y = 0.33.
+        editor.setClipValues({{"x", -0.2}, {"y", -0.15}});
+        editor.followFace();
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["follow"].toMap()["status"].toString(),
+                                  QString("done"), 120000);
+        const auto *c = editor.project().clip(area);
+        QVERIFY(c->keyframes.value("x").size() >= 10);
+        // The face's centre moves 300 px/s = 0.234 of the width per second.
+        const double x0 = c->valueAt("x", 3), x1 = c->valueAt("x", 40);
+        QVERIFY2(std::abs((x1 - x0) - 0.234 * 37 / 25.) < 0.04,
+                 qPrintable(QString("%1 → %2").arg(x0).arg(x1)));
+        QVERIFY2(std::abs(c->valueAt("y", 3) - c->valueAt("y", 40)) < 0.02, "steady height");
+        // Sized to the face (about 7 % of the width) with room.
+        QVERIFY2(c->effectWidth > 0.07 && c->effectWidth < 0.3,
+                 qPrintable(QString::number(c->effectWidth)));
+        // One undo step removes it.
+        editor.undo();
+        QVERIFY(editor.project().clip(area)->keyframes.isEmpty());
+        // Nothing to follow without a video below.
+        editor.newProject();
+        editor.addTitle();
+        editor.followFace();
+        QVERIFY(editor.state()["error"].toString().contains("video clip"));
+#else
+        QSKIP("Needs the AI worker and the AI pack's models (CUTLERY_TEST_MODELS)");
+#endif
+    }
     void aiCutout() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

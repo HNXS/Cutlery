@@ -116,6 +116,11 @@ class Editor final : public QObject {
     // PCM in the data folder's conformed/) and relinks the media to it. State "conform":
     // {status: converting|done|failed, progress, assetId}.
     Q_INVOKABLE void conformFrameRate();
+    // Makes the selected clip (a blur or mosaic area, or any overlay) follow a face in the video
+    // below it: keyframes its position through its length and, for areas, sizes it to the face.
+    // Analyses the faces first when needed (AI pack). State "follow": {status:
+    // analysing|done|failed, keyframes, clipId}.
+    Q_INVOKABLE void followFace();
     // Imports the numbered image sequence that `firstImage` belongs to (e.g. shot_0001.png …)
     // at `fps`: FFmpeg turns it into a ProRes 4444 video (alpha kept) in the data folder's
     // sequences/, which is then imported like any video.
@@ -233,6 +238,10 @@ class Editor final : public QObject {
     QThread *m_collectThread = nullptr;
     QVariantMap m_collect;
     QVariantMap m_conform;
+    QVariantMap m_follow;
+    void applyFollowFace();
+    // The video clip under `c` at its start: the highest lower track with a video playing then.
+    const Clip *videoBelow(const Clip &c) const;
     // The track nearest `home` with room for [start, start + length), or a new one on top.
     static int freeTrack(Project &, int home, qint64 start, qint64 length);
     QMediaCaptureSession *m_voiceSession = nullptr;

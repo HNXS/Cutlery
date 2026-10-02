@@ -16,6 +16,7 @@ namespace {
 QString extension(const QString &task) {
     return task == "upscale" || task == "eyecontact" ? ".mov"
            : task == "transcribe"                    ? ".srt"
+           : task == "faces"                         ? ".txt"
                                                      : ".mkv";
 }
 } // namespace
@@ -180,6 +181,14 @@ void AiJobs::run(const Job &job, const QString &rate) {
              << "--rate" << rate;
         const auto parts = rate.split('/');
         resultRate = parts[0].toDouble() / parts[1].toDouble();
+    } else if (job.task == "faces") {
+        // Face positions 8 times a second, at most 1280 × 720.
+        const double fit = std::min(1., std::min(1280. / a.width, 720. / a.height));
+        args << "--source"
+             << QString("%1x%2")
+                    .arg(std::max(2, int(std::lround(a.width * fit / 2)) * 2))
+                    .arg(std::max(2, int(std::lround(a.height * fit / 2)) * 2))
+             << "--rate" << QString::number(matteRate);
     } else if (job.task == "transcribe") {
         args << "--whisper" << m_files.value("whisper") << "--language"
              << (job.variant.isEmpty() ? QString("auto") : job.variant);

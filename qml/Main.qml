@@ -1232,7 +1232,26 @@ ApplicationWindow {
                                     wrapMode: Text.Wrap
                                     font.pixelSize: 11
                                     color: win.muted
-                                    text: "Drag the frame in the preview to place it and its corners to resize. Keyframe X/Y below to follow something moving. The area affects all tracks below it."
+                                    text: "Drag the frame in the preview to place it and its corners to resize. Keyframe X/Y below to follow something moving, or let it follow a face. The area affects all tracks below it."
+                                }
+                                Action {
+                                    objectName: "followFace"
+                                    Layout.fillWidth: true
+                                    readonly property var follow: win.s.follow || ({})
+                                    readonly property bool busy: follow.status === "analysing" && follow.clipId === win.s.selectedId
+                                    enabled: !busy && win.selection.locked !== true && ((win.s.aiMissing || {}).faces || "") === ""
+                                    text: busy ? "Finding faces…" : "Follow a face (AI)"
+                                    onClicked: editor.followFace()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: ((win.s.aiMissing || {}).faces || "") !== "" ? win.s.aiMissing.faces : "Finds the faces in the video below and keyframes the area onto the one nearest to it, sized to cover it"
+                                }
+                                Label {
+                                    objectName: "followStatus"
+                                    Layout.fillWidth: true
+                                    visible: (win.s.follow || {}).clipId === win.s.selectedId && (win.s.follow.status === "done" || win.s.follow.status === "failed")
+                                    font.pixelSize: 11
+                                    color: (win.s.follow || {}).status === "failed" ? "#ec6f5a" : win.muted
+                                    text: (win.s.follow || {}).status === "done" ? "Following a face ✓ · move the playhead to check, adjust keyframes if needed" : "No face found under this area"
                                 }
                                 Rule {}
                             }

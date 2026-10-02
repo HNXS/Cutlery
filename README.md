@@ -47,6 +47,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - **Smooth slow motion:** clips slower than 1× can blend frames or interpolate motion (optical flow).
 - **Split at scene changes** (inspector): cuts a video clip into its shots in one step.
 - **Eye contact** (AI pack): presenters reading beside the lens look into the camera; only the eyes are redrawn, by small amounts.
+- **Follow a face** (AI pack): blur or mosaic areas keyframe themselves onto a moving face.
 - **Sound tools** (inspector): EQ, low cut, noise reduction, gate, de-esser and compressor per clip, with voice presets.
 - **Colour and look** (inspector): temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with adjustable strength; one-click looks (Warm, Cool, Cinematic, Vintage, Black & white, Punchy, Dreamy).
 - **Lower thirds and title cards** (library panel): name and role on a plate or beside an accent line, sliding in from the left, or a large centred heading. First text line = name/heading, further lines = role/subtitle; accent colour selectable.
