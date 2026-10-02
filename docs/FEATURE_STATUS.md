@@ -82,9 +82,9 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F076 | Voice changer | Planned | Not implemented in this alpha. |
 | F077 | Voice conversion and custom voice | Planned | Not implemented in this alpha. |
 | F078 | Plain and rich text; Unicode shaping | Partial | Plain Unicode Qt titles; no rich text. |
-| F079 | Font browser, favorites and local font files | Planned | Not implemented in this alpha. |
-| F080 | Size, weight, spacing, kerning and alignment | Partial | Size, fixed bold/center/wrap; no typography editor. |
-| F081 | Outline, shadow, glow and text background | Partial | Fixed shadow only. |
+| F079 | Font browser, favorites and local font files | Partial | Font list of all installed families (each shown in its own font, type to search) and local .ttf/.otf/.ttc files added with "+ Font", copied into the data folder so they travel with a portable install and load at start. No favourites; projects store the family name only. |
+| F080 | Size, weight, spacing, kerning and alignment | Implemented (alpha) | Font size, bold, italic, left/centre/right alignment, letter spacing (−0.1..0.5 of the size) and line spacing (0.7..3×) for titles and captions; kerning is the font's own. Title templates keep their fixed layout. |
+| F081 | Outline, shadow, glow and text background | Partial | Outline (width and colour), drop shadow strength and a rounded box behind each line (colour and opacity) for titles; karaoke captions get outline and shadow. No text glow; templates keep their own plate. |
 | F082 | Text transforms and per-character animation | Planned | Not implemented in this alpha. |
 | F083 | Original titles, lower thirds and presets | Partial | Original title templates: lower third with plate, lower third with accent line (both slide in from the left and fade), and title card; name/role from the text lines, accent colour, scale and position from the preview frame. Three templates, no preset library, no per-template animation choice. |
 | F084 | Manual captions and subtitle track | Partial | Editable title clips used as captions. |

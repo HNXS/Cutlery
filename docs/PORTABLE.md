@@ -10,7 +10,7 @@ Use Project → Recover autosave to load the last recovery snapshot, then Save A
 
 Keyboard bindings live in `data/shortcuts.json`. Edit them through Help → Keyboard shortcuts. Preserve this file when moving to a new portable build. Track controls are saved in the project: **L** prevents clip editing, **M** mutes audio, **S** solos audio (multiple solo tracks may play), and **V** hides picture. Hiding picture does not mute sound.
 
-Current builds save schema 11, which adds colour and look settings and LUTs (the LUT path is stored relative to the project file); 0.5 cannot open it. Schema 10 (0.5) added transitions, keyframes, overlay styles, AI cutout, timed captions, blur/mosaic areas and title templates; 0.4 and older cannot open it. Schemas 1–10 are read without changes. Version 0.3 and 0.4 save schema 3. Versions 0.1/0.2 cannot read schema 3; use Save As if you need to keep an old-version copy.
+Fonts added with "+ Font" are copied to `data/fonts` and load at start. Current builds save schema 11, which adds colour and look settings, LUTs, smooth slow motion and text styles (the LUT path is stored relative to the project file); 0.5 cannot open it. Schema 10 (0.5) added transitions, keyframes, overlay styles, AI cutout, timed captions, blur/mosaic areas and title templates; 0.4 and older cannot open it. Schemas 1–10 are read without changes. Version 0.3 and 0.4 save schema 3. Versions 0.1/0.2 cannot read schema 3; use Save As if you need to keep an old-version copy.
 
 The optional AI pack adds `models/` next to the executable (see [AI](AI.md)). AI results (background mattes, upscaled copies) are kept in `data/ai`; deleting them only means the processing runs again. Upscaled copies are large: about 3.5 GB per minute at 4K.
 

@@ -87,6 +87,10 @@ class Editor final : public QObject {
     Q_INVOKABLE qint64 adjacentKeyframe(bool forward) const;
     Q_INVOKABLE void remove(bool ripple = false);
     Q_INVOKABLE void duplicate();
+    // Installed font families, including fonts added to Cutlery.
+    Q_INVOKABLE QStringList fontFamilies() const;
+    // Copies a font file into the data folder's fonts/ and returns its family ("" on failure).
+    Q_INVOKABLE QString addFont(const QUrl &file);
     // Clipboard for clips within the session, also across projects (the media comes along).
     Q_INVOKABLE void copy();
     // Inserts the copied clip at the playhead on its track.

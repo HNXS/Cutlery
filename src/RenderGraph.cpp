@@ -137,6 +137,74 @@ static QString curve(const Clip &c, const QString &property, const QString &fram
     return QString("if(lt(%1,%2),%3,%4)").arg(frame).arg(k.first().frame).arg(
         num(k.first().value), expr);
 }
+// The shadow offset and outline of a text, from the clip's style at a font pixel size.
+static void paintStyledPath(QPainter &paint, const Clip &c, const QPainterPath &path, double px,
+                            const QColor &fill) {
+    paint.setPen(Qt::NoPen);
+    if (c.textShadow > 0) {
+        const double d = std::max(1., px / 24);
+        paint.fillPath(path.translated(d * 0.7, d), QColor(0, 0, 0, qRound(210 * c.textShadow)));
+    }
+    if (c.outline > 0) {
+        QPen pen(QColor(c.outlineColor), 2 * c.outline * px);
+        pen.setJoinStyle(Qt::RoundJoin);
+        paint.strokePath(path, pen);
+    }
+    paint.fillPath(path, fill);
+}
+// A text font with the clip's weight, slant and letter spacing at a pixel size.
+static QFont textFont(const Clip &c, int pixelSize) {
+    QFont font(c.fontFamily);
+    font.setPixelSize(std::max(8, pixelSize));
+    font.setBold(c.bold);
+    font.setItalic(c.italic);
+    if (c.letterSpacing != 0)
+        font.setLetterSpacing(QFont::AbsoluteSpacing, c.letterSpacing * font.pixelSize());
+    return font;
+}
+// Draws the clip's text in `area` as its style describes: wrapped at spaces, aligned, centred
+// vertically, with line spacing, a rounded box behind each line, a shadow and an outline.
+static void paintText(QPainter &paint, const Clip &c, const QFont &font, const QRect &area) {
+    const QFontMetricsF m(font);
+    QStringList lines;
+    for (const auto &paragraph : c.text.split('\n')) {
+        QString line;
+        for (const auto &word : paragraph.split(' ', Qt::SkipEmptyParts)) {
+            const auto candidate = line.isEmpty() ? word : line + ' ' + word;
+            if (!line.isEmpty() && m.horizontalAdvance(candidate) > area.width()) {
+                lines << line;
+                line = word;
+            } else
+                line = candidate;
+        }
+        lines << line;
+    }
+    const double px = font.pixelSize(), step = m.height() * c.lineSpacing,
+                 pad = 0.25 * px;
+    double y = area.top() + (area.height() - (step * (lines.size() - 1) + m.height())) / 2;
+    QPainterPath path;
+    QVector<QRectF> boxes;
+    for (const auto &line : lines) {
+        const double w = m.horizontalAdvance(line);
+        const double x = c.align == "left"    ? area.left()
+                         : c.align == "right" ? area.right() + 1 - w
+                                              : area.left() + (area.width() - w) / 2;
+        if (!line.isEmpty()) {
+            path.addText(QPointF(x, y + m.ascent()), font, line);
+            boxes << QRectF(x - pad, y - pad * 0.3, w + 2 * pad, m.height() + pad * 0.6);
+        }
+        y += step;
+    }
+    if (c.background > 0) {
+        QColor box(c.backgroundColor);
+        box.setAlphaF(c.background);
+        paint.setPen(Qt::NoPen);
+        paint.setBrush(box);
+        for (const auto &b : boxes)
+            paint.drawRoundedRect(b, pad * 0.6, pad * 0.6);
+    }
+    paintStyledPath(paint, c, path, px, QColor(c.textColor));
+}
 // Timed captions ("karaoke", "word"): one band-high variant per word, stacked vertically, so a
 // single looped image serves the whole caption and a per-frame crop picks the spoken word.
 struct CaptionSprite {
@@ -145,11 +213,9 @@ struct CaptionSprite {
 };
 static CaptionSprite captionSprite(const Clip &c, int width, int height, int projectHeight) {
     const auto words = captionWords(c.text);
-    QFont font(c.fontFamily);
     const bool single = c.captionStyle == "word";
-    font.setPixelSize(std::max(
-        8, qRound(c.fontSize * (single ? 1.5 : 1.) * double(height) / projectHeight)));
-    font.setBold(true);
+    const auto font =
+        textFont(c, qRound(c.fontSize * (single ? 1.5 : 1.) * double(height) / projectHeight));
     const QFontMetrics metrics(font);
     const int maxWidth = width * 13 / 15, lineHeight = metrics.height(),
               space = metrics.horizontalAdvance(' ');
@@ -176,10 +242,9 @@ static CaptionSprite captionSprite(const Clip &c, int width, int height, int pro
     paint.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
     paint.setFont(font);
     auto draw = [&](const QString &text, int x, int baseline, const QColor &color) {
-        paint.setPen(QColor(0, 0, 0, 210));
-        paint.drawText(x + 2, baseline + 3, text);
-        paint.setPen(color);
-        paint.drawText(x, baseline, text);
+        QPainterPath path;
+        path.addText(QPointF(x, baseline), font, text);
+        paintStyledPath(paint, c, path, font.pixelSize(), color);
     };
     for (int v = 0; v < s.variants; ++v) {
         const int top = v * s.band + lineHeight / 4;
@@ -370,15 +435,9 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             img.fill(Qt::transparent);
             QPainter paint(&img);
             paint.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
-            QFont font(c.fontFamily);
-            font.setPixelSize(std::max(8, qRound(c.fontSize * double(height) / p.height)));
-            font.setBold(true);
-            paint.setFont(font);
+            const auto font = textFont(c, qRound(c.fontSize * double(height) / p.height));
             const QRect rect(width / 15, height / 12, width * 13 / 15, height * 5 / 6);
-            paint.setPen(QColor(0, 0, 0, 210));
-            paint.drawText(rect.translated(2, 3), Qt::AlignCenter | Qt::TextWordWrap, c.text);
-            paint.setPen(QColor(c.textColor));
-            paint.drawText(rect, Qt::AlignCenter | Qt::TextWordWrap, c.text);
+            paintText(paint, c, font, rect);
             paint.end();
             if (!img.save(n.file))
                 throw std::runtime_error("Cannot write title render asset");

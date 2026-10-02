@@ -1493,6 +1493,144 @@ class EngineTest : public QObject {
         QVERIFY(count(image, true, true) + count(image, false, true) == 0);
         QVERIFY(count(image, true, false) + count(image, false, false) > 50);
     }
+    void textStyles() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        QImage grey(320, 180, QImage::Format_RGB32);
+        grey.fill(QColor(128, 128, 128));
+        QVERIFY(grey.save(dir.filePath("grey.png")));
+        Project p;
+        p.width = 320;
+        p.height = 180;
+        Asset a;
+        a.id = "grey";
+        a.path = dir.filePath("grey.png");
+        a.kind = "image";
+        a.duration = 5;
+        a.width = 320;
+        a.height = 180;
+        p.assets = {a};
+        Clip bg;
+        bg.id = "bg";
+        bg.assetId = "grey";
+        bg.duration = 30;
+        Clip title;
+        title.id = "t";
+        title.track = 1;
+        title.duration = 30;
+        title.text = "Hi";
+        title.fontSize = 60;
+        p.clips = {bg, title};
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Clip &t) {
+            auto project = p;
+            project.clips[1] = t;
+            RenderOptions options;
+            options.audio = false;
+            options.from = 5;
+            options.to = 6;
+            const auto plan = compileRender(project, dir.filePath("work"), 320, 180, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return out.convertToFormat(QImage::Format_RGB32);
+        };
+        // Columns that contain text-coloured (near white) pixels.
+        auto inkColumns = [](const QImage &i, auto match) {
+            int lo = i.width(), hi = -1, count = 0;
+            for (int x = 0; x < i.width(); ++x)
+                for (int y = 0; y < i.height(); ++y)
+                    if (match(QColor(i.pixel(x, y)))) {
+                        lo = std::min(lo, x);
+                        hi = std::max(hi, x);
+                        ++count;
+                        break;
+                    }
+            return std::tuple{lo, hi, count};
+        };
+        auto white = [](const QColor &c) { return c.red() > 220 && c.green() > 220 && c.blue() > 220; };
+        const auto [cl, ch, cn] = inkColumns(still(title), white);
+        QVERIFY2(cn > 10 && std::abs((cl + ch) / 2 - 160) < 12, qPrintable(QString("%1 %2").arg(cl).arg(ch)));
+        auto left = title;
+        left.align = "left";
+        const auto [ll, lh, ln] = inkColumns(still(left), white);
+        QVERIFY2(ll < cl - 60 && ll < 40, qPrintable(QString::number(ll)));
+        auto right = title;
+        right.align = "right";
+        const auto [rl, rh, rn] = inkColumns(still(right), white);
+        QVERIFY2(rh > ch + 60 && rh > 280, qPrintable(QString::number(rh)));
+        // Letter spacing widens the text.
+        auto spaced = title;
+        spaced.letterSpacing = 0.5;
+        const auto [sl, sh, sn] = inkColumns(still(spaced), white);
+        QVERIFY2(sh - sl > ch - cl + 10, qPrintable(QString("%1 vs %2").arg(sh - sl).arg(ch - cl)));
+        // A yellow outline and a black box behind the line.
+        auto styled = title;
+        styled.outline = 0.1;
+        styled.outlineColor = "#ffd23f";
+        auto yellow = [](const QColor &c) {
+            return c.red() > 200 && c.green() > 170 && c.blue() < 120;
+        };
+        QVERIFY(std::get<2>(inkColumns(still(styled), yellow)) > 10);
+        QCOMPARE(std::get<2>(inkColumns(still(title), yellow)), 0);
+        styled.background = 1;
+        const auto boxed = still(styled);
+        // Just left of the first letter, inside the box: black instead of grey.
+        const QColor beside(boxed.pixel(cl - 11, 90));
+        QVERIFY2(beside.red() < 40, qPrintable(beside.name()));
+        QVERIFY(qGray(boxed.pixel(5, 5)) > 100); // outside the box
+        // No shadow: no dark pixels around plain text on grey.
+        auto flat = title;
+        flat.textShadow = 0;
+        QCOMPARE(std::get<2>(inkColumns(still(flat), [](const QColor &c) { return c.red() < 80; })), 0);
+        QVERIFY(std::get<2>(inkColumns(still(title), [](const QColor &c) { return c.red() < 80; })) > 0);
+        // Saved only when not the default; validated.
+        p.clips[1] = styled;
+        p.clips[1].italic = true;
+        p.clips[1].align = "right";
+        const auto json = p.json();
+        const auto saved = json["clips"].toArray()[1].toObject();
+        QCOMPARE(saved["outlineColor"].toString(), QString("#ffd23f"));
+        QVERIFY(!json["clips"].toArray()[0].toObject().contains("align"));
+        const auto loaded = Project::fromJson(json, {}).clips[1];
+        QCOMPARE(loaded.align, QString("right"));
+        QVERIFY(loaded.italic && loaded.bold);
+        QCOMPARE(loaded.background, 1.);
+        auto bad = json;
+        auto clips = bad["clips"].toArray();
+        auto o = clips[1].toObject();
+        o["align"] = "justify";
+        clips[1] = o;
+        bad["clips"] = clips;
+        QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, {}), std::runtime_error);
+
+        // A font file added to Cutlery is copied to the data folder and usable by family name.
+        QString fontFile;
+        for (const auto &folder : {qEnvironmentVariable("WINDIR") + "/Fonts",
+                                   QString("/usr/share/fonts/truetype/dejavu")})
+            for (const auto &f : QDir(folder).entryInfoList({"*.ttf"}, QDir::Files))
+                if (fontFile.isEmpty())
+                    fontFile = f.absoluteFilePath();
+        if (fontFile.isEmpty())
+            QSKIP("No font file on this machine");
+        const auto copy = dir.filePath("Test Font.ttf");
+        QVERIFY(QFile::copy(fontFile, copy));
+        FrameProvider frames;
+        Editor editor(&frames);
+        const auto family = editor.addFont(QUrl::fromLocalFile(copy));
+        QVERIFY2(!family.isEmpty(), qPrintable(editor.state()["error"].toString()));
+        const auto stored = editor.state()["dataPath"].toString() + "/fonts/Test Font.ttf";
+        QVERIFY(QFileInfo::exists(stored));
+        QVERIFY(editor.fontFamilies().contains(family));
+        QFile::remove(stored);
+        QVERIFY(editor.addFont(QUrl::fromLocalFile(dir.filePath("grey.png"))).isEmpty());
+        QVERIFY(editor.state()["error"].toString().contains(".ttf"));
+    }
     void smoothSlowMotion() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

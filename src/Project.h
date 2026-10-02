@@ -39,6 +39,15 @@ struct Clip {
     double fadeIn = 0, fadeOut = 0;
     QString text, fontFamily = "Arial", textColor = "#ffffff";
     int fontSize = 72;
+    // Text style: weight and slant, alignment ("left", "center", "right"), letter spacing as a
+    // fraction of the font size, line spacing as a multiple of the line height, an outline
+    // (width as a fraction of the font size), a drop shadow (0..1) and a box behind each line
+    // (opacity 0..1).
+    bool bold = true, italic = false;
+    QString align = "center";
+    double letterSpacing = 0, lineSpacing = 1;
+    double outline = 0, textShadow = 1, background = 0;
+    QString outlineColor = "#000000", backgroundColor = "#000000";
     // Captions with word timing: the clip-local frame each word of `text` (split at white
     // space) starts on. "karaoke" colours the word being spoken in `highlightColor`; "word"
     // shows one word at a time. Without matching timing a caption renders plainly.

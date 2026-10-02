@@ -229,6 +229,27 @@ QJsonObject Project::json(const QString &base) const {
                       {"fontFamily", c.fontFamily},
                       {"textColor", c.textColor},
                       {"fontSize", c.fontSize}};
+        // Text style, stored when it differs from the default.
+        if (!c.bold)
+            o["bold"] = false;
+        if (c.italic)
+            o["italic"] = true;
+        if (c.align != "center")
+            o["align"] = c.align;
+        if (c.letterSpacing != 0)
+            o["letterSpacing"] = c.letterSpacing;
+        if (c.lineSpacing != 1)
+            o["lineSpacing"] = c.lineSpacing;
+        if (c.outline > 0) {
+            o["outline"] = c.outline;
+            o["outlineColor"] = c.outlineColor;
+        }
+        if (c.textShadow != 1)
+            o["textShadow"] = c.textShadow;
+        if (c.background > 0) {
+            o["background"] = c.background;
+            o["backgroundColor"] = c.backgroundColor;
+        }
         if (!c.titleStyle.isEmpty()) {
             o["titleStyle"] = c.titleStyle;
             o["accentColor"] = c.accentColor;
@@ -374,6 +395,16 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.fontFamily = j["fontFamily"].toString("Arial");
         c.textColor = j["textColor"].toString("#ffffff");
         c.fontSize = j["fontSize"].toInt(72);
+        c.bold = j["bold"].toBool(true);
+        c.italic = j["italic"].toBool(false);
+        c.align = j["align"].toString("center");
+        c.letterSpacing = j["letterSpacing"].toDouble(0);
+        c.lineSpacing = j["lineSpacing"].toDouble(1);
+        c.outline = j["outline"].toDouble(0);
+        c.outlineColor = j["outlineColor"].toString("#000000");
+        c.textShadow = j["textShadow"].toDouble(1);
+        c.background = j["background"].toDouble(0);
+        c.backgroundColor = j["backgroundColor"].toString("#000000");
         c.titleStyle = j["titleStyle"].toString();
         c.accentColor = j["accentColor"].toString("#64d8bc");
         c.effect = j["effect"].toString();
@@ -513,6 +544,12 @@ void Project::validate() const {
         require(bounded(c.fadeIn, 0, 3600) && bounded(c.fadeOut, 0, 3600) && c.fontSize >= 8 &&
                     c.fontSize <= 500 && c.text.size() <= 10000 && QColor(c.textColor).isValid(),
                 "Invalid text/fade value");
+        require(QStringList{"left", "center", "right"}.contains(c.align) &&
+                    bounded(c.letterSpacing, -0.1, 0.5) && bounded(c.lineSpacing, 0.7, 3) &&
+                    bounded(c.outline, 0, 0.25) && bounded(c.textShadow, 0, 1) &&
+                    bounded(c.background, 0, 1) && QColor(c.outlineColor).isValid() &&
+                    QColor(c.backgroundColor).isValid() && c.fontFamily.size() <= 200,
+                "Invalid text style");
         require((c.captionStyle.isEmpty() || c.captionStyle == "karaoke" ||
                  c.captionStyle == "word") &&
                     QColor(c.highlightColor).isValid() && c.wordStarts.size() <= 2000 &&

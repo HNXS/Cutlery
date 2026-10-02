@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <cmath>
 #include <QDir>
+#include <QFontDatabase>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -114,6 +115,39 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     connect(&m_saveTimer, &QTimer::timeout, this, &Editor::autosave);
     if (executable("ffmpeg").isEmpty() || executable("ffprobe").isEmpty())
         m_error = "FFmpeg/ffprobe not found. Use the portable package, or add both tools to PATH.";
+    // Fonts added in Cutlery live in the data folder, so they travel with a portable install.
+    for (const auto &file : QDir(m_data + "/fonts").entryInfoList({"*.ttf", "*.otf", "*.ttc"},
+                                                                 QDir::Files))
+        QFontDatabase::addApplicationFont(file.absoluteFilePath());
+}
+QStringList Editor::fontFamilies() const {
+    return QFontDatabase::families();
+}
+QString Editor::addFont(const QUrl &url) {
+    const auto source = url.isLocalFile() ? url.toLocalFile() : url.toString();
+    const QFileInfo info(source);
+    try {
+        if (!info.isFile() || !QStringList{"ttf", "otf", "ttc"}.contains(info.suffix().toLower()))
+            throw std::runtime_error("Choose a .ttf or .otf font file");
+        if (info.size() > 64 * 1024 * 1024)
+            throw std::runtime_error("The font file is too large");
+        QDir().mkpath(m_data + "/fonts");
+        const auto target = m_data + "/fonts/" + info.fileName();
+        if (!QFileInfo::exists(target) && !QFile::copy(source, target))
+            throw std::runtime_error("Cannot copy the font into the Cutlery data folder");
+        const int id = QFontDatabase::addApplicationFont(target);
+        const auto families = QFontDatabase::applicationFontFamilies(id);
+        if (id < 0 || families.isEmpty()) {
+            QFile::remove(target);
+            throw std::runtime_error("This file is not a usable font");
+        }
+        m_status = "Added font " + families.first();
+        emit changed();
+        return families.first();
+    } catch (const std::exception &e) {
+        fail(e.what());
+        return {};
+    }
 }
 Editor::~Editor() {
     if (m_dirty)
@@ -356,6 +390,17 @@ QVariantMap Editor::state() const {
             PROP(grain);
             PROP(lutStrength);
             PROP(slowMotion);
+            PROP(fontFamily);
+            PROP(bold);
+            PROP(italic);
+            PROP(align);
+            PROP(letterSpacing);
+            PROP(lineSpacing);
+            PROP(outline);
+            PROP(outlineColor);
+            PROP(textShadow);
+            PROP(background);
+            PROP(backgroundColor);
             selected["lut"] = c.lut;
             selected["lutName"] = QFileInfo(c.lut).completeBaseName();
             selected["lutMissing"] = !c.lut.isEmpty() && !QFileInfo(c.lut).isFile();
@@ -979,6 +1024,17 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(grain, toDouble);
         FIELD(lutStrength, toDouble);
         FIELD(slowMotion, toString);
+        FIELD(bold, toBool);
+        FIELD(italic, toBool);
+        FIELD(align, toString);
+        FIELD(letterSpacing, toDouble);
+        FIELD(lineSpacing, toDouble);
+        FIELD(outline, toDouble);
+        FIELD(outlineColor, toString);
+        FIELD(textShadow, toDouble);
+        FIELD(background, toDouble);
+        FIELD(backgroundColor, toString);
+        FIELD(fontFamily, toString);
         FIELD(fadeIn, toDouble);
         FIELD(fadeOut, toDouble);
         FIELD(reverse, toBool);

@@ -1320,6 +1320,130 @@ ApplicationWindow {
                                     placeholderText: "Text colour (#rrggbb)"
                                     onEditingFinished: editor.setClip("textColor", text)
                                 }
+                                // Typography: font, weight, alignment, spacing, outline, shadow, box.
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    ComboBox {
+                                        id: fontBox
+                                        objectName: "fontFamily"
+                                        Layout.fillWidth: true
+                                        editable: true
+                                        property var families: editor.fontFamilies()
+                                        model: families
+                                        currentIndex: families.indexOf(win.selection.fontFamily || "Arial")
+                                        onActivated: index => editor.setClip("fontFamily", families[index])
+                                        onAccepted: {
+                                            const i = families.findIndex(f => f.toLowerCase() === editText.toLowerCase());
+                                            if (i >= 0)
+                                                editor.setClip("fontFamily", families[i]);
+                                        }
+                                        delegate: ItemDelegate {
+                                            required property string modelData
+                                            required property int index
+                                            width: ListView.view ? ListView.view.width : 200
+                                            text: modelData
+                                            font.family: modelData
+                                            highlighted: fontBox.highlightedIndex === index
+                                        }
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Type to find a font. Fonts you add are kept in Cutlery's data folder."
+                                    }
+                                    Action {
+                                        objectName: "addFont"
+                                        text: "+ Font"
+                                        padding: 6
+                                        onClicked: fontFileDialog.open()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Add a .ttf or .otf font file"
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 4
+                                    Repeater {
+                                        model: [
+                                            { key: "bold", label: "B" },
+                                            { key: "italic", label: "I" }
+                                        ]
+                                        Button {
+                                            required property var modelData
+                                            objectName: "text-" + modelData.key
+                                            text: modelData.label
+                                            checkable: true
+                                            checked: win.selection[modelData.key] === true
+                                            font.bold: modelData.key === "bold"
+                                            font.italic: modelData.key === "italic"
+                                            implicitWidth: 34
+                                            onClicked: editor.setClip(modelData.key, checked)
+                                        }
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Repeater {
+                                        model: [
+                                            { key: "left", label: "⯇ Left" },
+                                            { key: "center", label: "Centre" },
+                                            { key: "right", label: "Right ⯈" }
+                                        ]
+                                        Button {
+                                            required property var modelData
+                                            objectName: "align-" + modelData.key
+                                            text: modelData.label
+                                            checkable: true
+                                            checked: (win.selection.align || "center") === modelData.key
+                                            padding: 4
+                                            onClicked: editor.setClip("align", modelData.key)
+                                        }
+                                    }
+                                }
+                                Repeater {
+                                    model: [
+                                        { key: "letterSpacing", name: "Letter spacing", lo: -0.1, hi: 0.5, def: 0 },
+                                        { key: "lineSpacing", name: "Line spacing", lo: 0.7, hi: 3, def: 1 },
+                                        { key: "outline", name: "Outline", lo: 0, hi: 0.25, def: 0 },
+                                        { key: "textShadow", name: "Shadow", lo: 0, hi: 1, def: 1 },
+                                        { key: "background", name: "Background box", lo: 0, hi: 1, def: 0 }
+                                    ]
+                                    RowLayout {
+                                        id: textStyleRow
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        Label {
+                                            text: textStyleRow.modelData.name
+                                            color: win.muted
+                                            Layout.preferredWidth: 95
+                                        }
+                                        Slider {
+                                            objectName: "text-" + textStyleRow.modelData.key
+                                            Layout.fillWidth: true
+                                            from: textStyleRow.modelData.lo
+                                            to: textStyleRow.modelData.hi
+                                            stepSize: .01
+                                            value: win.selection[textStyleRow.modelData.key] ?? textStyleRow.modelData.def
+                                            onPressedChanged: if (!pressed)
+                                                editor.setClip(textStyleRow.modelData.key, value)
+                                            onMoved: if (!pressed)
+                                                editor.setClip(textStyleRow.modelData.key, value)
+                                        }
+                                        // Outline and box colours.
+                                        Repeater {
+                                            model: textStyleRow.modelData.key === "outline" ? ["#000000", "#ffffff", "#ffd23f"] : textStyleRow.modelData.key === "background" ? ["#000000", "#ffffff", "#64d8bc"] : []
+                                            Rectangle {
+                                                required property string modelData
+                                                readonly property string colorKey: textStyleRow.modelData.key === "outline" ? "outlineColor" : "backgroundColor"
+                                                width: 16
+                                                height: 16
+                                                radius: 8
+                                                color: modelData
+                                                border.width: win.selection[colorKey] === modelData ? 3 : 1
+                                                border.color: win.selection[colorKey] === modelData ? win.mint : "#6481a0"
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    onClicked: editor.setClip(parent.colorKey, parent.modelData)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             // Presenter overlays: corner placement, shape, border, shadow, green screen.
                             ColumnLayout {
@@ -1979,6 +2103,18 @@ ApplicationWindow {
         id: relinkDialog
         title: "Choose replacement media"
         onAccepted: editor.relink(win.selection.assetId, selectedFile)
+    }
+    FileDialog {
+        id: fontFileDialog
+        title: "Add a font"
+        nameFilters: ["Fonts (*.ttf *.otf *.ttc)"]
+        onAccepted: {
+            const family = editor.addFont(selectedFile);
+            if (family.length > 0) {
+                fontBox.families = editor.fontFamilies();
+                editor.setClip("fontFamily", family);
+            }
+        }
     }
     FileDialog {
         id: lutDialog
