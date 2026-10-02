@@ -363,11 +363,11 @@ ApplicationWindow {
                 onTriggered: captionDialog.open()
             }
             MenuItem {
-                text: "Import SRT…"
+                text: "Import captions (SRT, VTT, ASS)…"
                 onTriggered: srtOpen.open()
             }
             MenuItem {
-                text: "Export titles/captions as SRT…"
+                text: "Export titles/captions (SRT, VTT, ASS)…"
                 onTriggered: srtSave.open()
             }
         }
@@ -2561,15 +2561,15 @@ ApplicationWindow {
     FileDialog {
         id: srtOpen
         title: "Import captions"
-        nameFilters: ["SubRip captions (*.srt)"]
+        nameFilters: ["Captions (*.srt *.vtt *.ass *.ssa)", "SubRip (*.srt)", "WebVTT (*.vtt)", "SubStation Alpha (*.ass *.ssa)"]
         onAccepted: editor.importSrt(selectedFile)
     }
     FileDialog {
         id: srtSave
         title: "Export captions"
         fileMode: FileDialog.SaveFile
-        defaultSuffix: "srt"
-        nameFilters: ["SubRip captions (*.srt)"]
+        defaultSuffix: ["srt", "vtt", "ass"][Math.max(0, selectedNameFilter.index)]
+        nameFilters: ["SubRip (*.srt)", "WebVTT for the web (*.vtt)", "Styled ASS subtitles (*.ass)"]
         onAccepted: editor.exportSrt(selectedFile)
     }
     // Remove pauses: silence detection on the selected clip's sound, then one ripple edit.

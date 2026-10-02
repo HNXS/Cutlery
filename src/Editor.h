@@ -176,6 +176,8 @@ class Editor final : public QObject {
     // Output size and file extension for export settings, for the export dialog.
     Q_INVOKABLE QVariantMap exportPreview(const QVariantMap &settings) const;
     Q_INVOKABLE void cancelJob();
+    // Captions from and to subtitle files; the format follows the suffix: .srt, .vtt, .ass
+    // (and .ssa for import).
     Q_INVOKABLE void importSrt(const QUrl &);
     Q_INVOKABLE bool exportSrt(const QUrl &);
     Q_INVOKABLE void clearError();

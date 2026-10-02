@@ -145,6 +145,79 @@ class EngineTest : public QObject {
         QCOMPARE(readUtf8File(dir.filePath("out.srt")), readUtf8File(input));
         e.save(QUrl::fromLocalFile(dir.filePath("captions.cutlery")));
     }
+    void subtitleFormats() {
+        // WebVTT: header, a note, identifiers, short and long times, cue settings, tags and
+        // entities.
+        const auto vtt = parseVtt(QString(QChar(0xfeff)) +
+                                  "WEBVTT - demo\r\nKind: captions\r\n\r\nNOTE written by hand\n\n"
+                                  "intro\n00:01.000 --> 00:02.500 align:start line:80%\n"
+                                  "<v Ann><b>Hi</b> &amp; welcome</v>\n\n"
+                                  "01:00:00.250 --> 01:00:01.000\nfirst\nsecond\n\n");
+        QCOMPARE(vtt.size(), 2);
+        QCOMPARE(vtt[0].start, 1.);
+        QCOMPARE(vtt[0].end, 2.5);
+        QCOMPARE(vtt[0].text, QString("Hi & welcome"));
+        QCOMPARE(vtt[1].start, 3600.25);
+        QCOMPARE(vtt[1].text, QString("first\nsecond"));
+        QVERIFY_EXCEPTION_THROWN(parseVtt("1\n00:00:01,000 --> 00:00:02,000\nx"), std::runtime_error);
+        QVERIFY_EXCEPTION_THROWN(parseVtt("WEBVTT\n\nnot a time\ntext"), std::runtime_error);
+        // ASS: the Format line decides the field order; commas in the text, override tags,
+        // line breaks and comments.
+        const auto ass = parseAss("[Script Info]\nTitle: x\n\n[V4+ Styles]\nFormat: Name\n"
+                                  "Style: Default\n\n[Events]\n"
+                                  "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+                                  "Comment: 0,0:00:00.00,0:00:09.00,Default,,0,0,0,,ignored\n"
+                                  "Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,later\n"
+                                  "Dialogue: 0,0:00:01.50,0:00:02.25,Default,,0,0,0,,{\\i1}Well,{\\i0} yes\\Nand\\hno\n");
+        QCOMPARE(ass.size(), 2);
+        QCOMPARE(ass[0].start, 1.5);
+        QCOMPARE(ass[0].end, 2.25);
+        QCOMPARE(ass[0].text, QString("Well, yes\nand no"));
+        QCOMPARE(ass[1].text, QString("later"));
+        QVERIFY_EXCEPTION_THROWN(parseAss("[Events]\nDialogue: 0,1:00,2:00,x"), std::runtime_error);
+        QVERIFY(parseSubtitles("1\n00:00:01,000 --> 00:00:02,000\nx\n", "SRT").size() == 1);
+
+        // Through the editor: each format round-trips the captions' timing and text.
+        for (const auto &suffix : {QString("vtt"), QString("ass"), QString("srt")}) {
+            FrameProvider frames;
+            Editor e(&frames);
+            QTemporaryDir dir;
+            const auto input = dir.filePath("in." + suffix);
+            QFile f(input);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(writeSubtitles({{0.5, 1.5, "Hello, {world} <&>"}, {2, 3.25, "two\nlines"}}, suffix)
+                        .toUtf8());
+            f.close();
+            e.importSrt(QUrl::fromLocalFile(input));
+            QVERIFY2(e.state()["error"].toString().isEmpty(), qPrintable(e.state()["error"].toString()));
+            QCOMPARE(e.project().clips.size(), 2);
+            QCOMPARE(e.project().clips[0].start, qint64(15));
+            QCOMPARE(e.project().clips[0].duration, qint64(30));
+            QCOMPARE(e.project().clips[0].text, QString("Hello, {world} <&>"));
+            QCOMPARE(e.project().clips[1].text, QString("two\nlines"));
+            const auto output = dir.filePath("out." + suffix);
+            QVERIFY(e.exportSrt(QUrl::fromLocalFile(output)));
+            const auto back = parseSubtitles(readUtf8File(output), suffix);
+            QCOMPARE(back.size(), 2);
+            QCOMPARE(back[1].start, 2.);
+            QVERIFY(std::abs(back[1].end - 98 / 30.) < 0.011); // 3.25 s rounds to frame 98 at 30 fps
+            QCOMPARE(back[0].text, QString("Hello, {world} <&>"));
+            // FFmpeg reads the file too (players and platforms use the same formats).
+            const auto ffmpeg = Editor::executable("ffmpeg");
+            if (!ffmpeg.isEmpty()) {
+                const auto converted = QString::fromUtf8(
+                    run(ffmpeg, {"-v", "error", "-i", output, "-f", "srt", "pipe:1"}));
+                QVERIFY2(converted.contains("00:00:02,000 --> 00:00:03,2") && converted.contains("lines"),
+                         qPrintable(converted));
+            }
+        }
+        // The ASS style uses the canvas size and the caption's font.
+        const auto styled = writeSubtitles({{0, 1, "x"}}, "ass", 1080, 1920, "Inter, Bold", 64);
+        QVERIFY(styled.contains("PlayResX: 1080\nPlayResY: 1920"));
+        QVERIFY(styled.contains("Style: Default,Inter Bold,64,"));
+        QVERIFY(styled.contains("Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,x\n"));
+        QVERIFY(writeSubtitles({{0, 1, "x"}}, "vtt").startsWith("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nx\n"));
+    }
     void remoteReferencesRejected() {
         QTemporaryDir dir;
         const auto path = dir.filePath("remote.m3u8");

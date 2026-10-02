@@ -27,6 +27,176 @@ QVector<Cue> parseSrt(QString text) {
     }
     return cues;
 }
+namespace {
+double clockSeconds(const QString &h, const QString &m, const QString &sec, const QString &fraction) {
+    return h.toInt() * 3600. + m.toInt() * 60. + sec.toInt() +
+           fraction.toInt() / std::pow(10., fraction.size());
+}
+QString cleanText(QString text) {
+    text.remove('\r');
+    if (text.startsWith(QChar(0xfeff)))
+        text.remove(0, 1);
+    return text;
+}
+} // namespace
+QVector<Cue> parseVtt(QString text) {
+    text = cleanText(text);
+    if (!text.startsWith("WEBVTT"))
+        throw std::runtime_error("Not a WebVTT file");
+    static const QRegularExpression stamp(
+        "^(?:(\\d{1,3}):)?(\\d{2}):(\\d{2})\\.(\\d{3})\\s+-->\\s+(?:(\\d{1,3}):)?(\\d{2}):(\\d{2})\\.(\\d{3})");
+    static const QRegularExpression tag("<[^>]*>");
+    QVector<Cue> cues;
+    const auto blocks = text.split(QRegularExpression("\\n\\s*\\n"), Qt::SkipEmptyParts);
+    for (const auto &block : blocks) {
+        auto lines = block.split('\n');
+        while (!lines.isEmpty() && lines.first().trimmed().isEmpty())
+            lines.removeFirst();
+        if (lines.isEmpty() || lines.first().startsWith("WEBVTT") || lines.first().startsWith("NOTE") ||
+            lines.first().startsWith("STYLE") || lines.first().startsWith("REGION"))
+            continue;
+        // An optional identifier line before the timing.
+        auto m = stamp.match(lines.first());
+        if (!m.hasMatch() && lines.size() > 1) {
+            lines.removeFirst();
+            m = stamp.match(lines.first());
+        }
+        if (!m.hasMatch())
+            throw std::runtime_error("Invalid WebVTT timing line");
+        lines.removeFirst();
+        auto body = lines.join('\n');
+        body.remove(tag);
+        body.replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ").replace("&amp;", "&");
+        body = body.trimmed();
+        if (!body.isEmpty())
+            cues.push_back({clockSeconds(m.captured(1), m.captured(2), m.captured(3), m.captured(4)),
+                            clockSeconds(m.captured(5), m.captured(6), m.captured(7), m.captured(8)),
+                            body});
+    }
+    return cues;
+}
+QVector<Cue> parseAss(QString text) {
+    text = cleanText(text);
+    static const QRegularExpression time("^(\\d+):(\\d{2}):(\\d{2})[.:](\\d{1,3})$");
+    static const QRegularExpression overrides("\\{[^}]*\\}");
+    QVector<Cue> cues;
+    bool events = false;
+    QStringList format;
+    for (const auto &raw : text.split('\n')) {
+        const auto line = raw.trimmed();
+        if (line.startsWith('[')) {
+            events = line.compare("[Events]", Qt::CaseInsensitive) == 0;
+            continue;
+        }
+        if (!events)
+            continue;
+        if (line.startsWith("Format:")) {
+            format.clear();
+            for (const auto &f : line.mid(7).split(','))
+                format << f.trimmed().toLower();
+            continue;
+        }
+        if (!line.startsWith("Dialogue:"))
+            continue;
+        if (format.isEmpty())
+            format = QStringList{"layer", "start", "end", "style", "name", "marginl",
+                                 "marginr", "marginv", "effect", "text"};
+        // The text is the last field and may contain commas.
+        const auto fields = line.mid(9).split(',');
+        if (fields.size() < format.size())
+            throw std::runtime_error("Invalid ASS dialogue line");
+        const auto field = [&](const QString &name) {
+            const auto i = format.indexOf(name);
+            if (i < 0)
+                throw std::runtime_error("ASS events without " + name.toStdString());
+            return i == format.size() - 1 ? fields.mid(i).join(',') : fields[i].trimmed();
+        };
+        const auto a = time.match(field("start")), b = time.match(field("end"));
+        if (!a.hasMatch() || !b.hasMatch())
+            throw std::runtime_error("Invalid ASS time");
+        // Escaped braces are text; unescaped ones hold override tags.
+        auto body = field("text");
+        body.replace("\\{", QChar(0xe000)).replace("\\}", QChar(0xe001));
+        body.remove(overrides);
+        body.replace(QChar(0xe000), '{').replace(QChar(0xe001), '}');
+        body.replace("\\N", "\n").replace("\\n", "\n").replace("\\h", " ");
+        body = body.trimmed();
+        // Centiseconds in ASS: "0:00:01.50" is 1.5 s.
+        auto seconds = [](const QRegularExpressionMatch &m) {
+            return clockSeconds(m.captured(1), m.captured(2), m.captured(3), m.captured(4));
+        };
+        if (!body.isEmpty())
+            cues.push_back({seconds(a), seconds(b), body});
+    }
+    std::stable_sort(cues.begin(), cues.end(), [](const Cue &x, const Cue &y) { return x.start < y.start; });
+    return cues;
+}
+QVector<Cue> parseSubtitles(const QString &text, const QString &suffix) {
+    const auto kind = suffix.toLower();
+    if (kind == "vtt")
+        return parseVtt(text);
+    if (kind == "ass" || kind == "ssa")
+        return parseAss(text);
+    return parseSrt(text);
+}
+QString writeSubtitles(const QVector<Cue> &cues, const QString &format, int width, int height,
+                       const QString &font, int fontSize) {
+    auto clock = [](double seconds, int digits, QChar separator, bool shortHours) {
+        const qint64 unit = digits == 3 ? 1000 : 100;
+        const auto t = qRound64(std::max(0., seconds) * unit);
+        return QString("%1:%2:%3%4%5")
+            .arg(t / (3600 * unit), shortHours ? 1 : 2, 10, QChar('0'))
+            .arg(t / (60 * unit) % 60, 2, 10, QChar('0'))
+            .arg(t / unit % 60, 2, 10, QChar('0'))
+            .arg(separator)
+            .arg(t % unit, digits, 10, QChar('0'));
+    };
+    QString out;
+    if (format == "vtt") {
+        out = "WEBVTT\n\n";
+        for (const auto &c : cues) {
+            auto body = c.text;
+            body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+            // A blank line would end the cue.
+            body.replace(QRegularExpression("\\n\\s*\\n"), "\n");
+            out += clock(c.start, 3, '.', false) + " --> " + clock(c.end, 3, '.', false) + "\n" +
+                   body + "\n\n";
+        }
+    } else if (format == "ass") {
+        out = QString("[Script Info]\nScriptType: v4.00+\nPlayResX: %1\nPlayResY: %2\n"
+                      "WrapStyle: 0\nScaledBorderAndShadow: yes\n\n"
+                      "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, "
+                      "SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, "
+                      "StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+                      "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+                      "Style: Default,%3,%4,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,"
+                      "100,100,0,0,1,%5,0,2,%6,%6,%7,1\n\n"
+                      "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, "
+                      "MarginV, Effect, Text\n")
+                  .arg(width)
+                  .arg(height)
+                  .arg(QString(font).remove(','))
+                  .arg(fontSize)
+                  .arg(std::max(1, fontSize / 16))
+                  .arg(width / 20)
+                  .arg(height / 12);
+        for (const auto &c : cues) {
+            auto body = c.text;
+            body.replace("{", "\\{").replace("}", "\\}").replace("\n", "\\N");
+            out += "Dialogue: 0," + clock(c.start, 2, '.', true) + "," + clock(c.end, 2, '.', true) +
+                   ",Default,,0,0,0,," + body + "\n";
+        }
+    } else {
+        int i = 0;
+        for (const auto &c : cues) {
+            auto body = c.text;
+            body.replace(QRegularExpression("\\n\\s*\\n"), "\n");
+            out += QString::number(++i) + "\n" + clock(c.start, 3, ',', false) + " --> " +
+                   clock(c.end, 3, ',', false) + "\n" + body + "\n\n";
+        }
+    }
+    return out;
+}
 QVector<Cue> groupWords(const QVector<Cue> &words, int maxChars, double pause) {
     QVector<Cue> lines;
     static const QRegularExpression sentenceEnd("[.!?…]$");

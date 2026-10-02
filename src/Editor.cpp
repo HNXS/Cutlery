@@ -3027,11 +3027,12 @@ void Editor::cancelJob() {
 }
 void Editor::importSrt(const QUrl &url) {
     try {
-        const auto cues = parseSrt(readUtf8File(localPath(url)));
+        const auto path = localPath(url);
+        const auto cues = parseSubtitles(readUtf8File(path), QFileInfo(path).suffix());
         mutate([&](Project &p) {
             if (p.trackSettings[p.tracks - 1].magnetic)
                 throw std::runtime_error("Turn off Magnet on the caption track before importing "
-                                         "SRT to preserve caption timing");
+                                         "captions to preserve their timing");
             for (const auto &cue : cues) {
                 Clip c;
                 c.id = newId();
@@ -3045,11 +3046,11 @@ void Editor::importSrt(const QUrl &url) {
                 c.fontSize = 48;
                 c.y = .32;
                 if (c.duration <= 0 || c.text.isEmpty())
-                    throw std::runtime_error("Empty or reversed SRT cue");
+                    throw std::runtime_error("Empty or reversed caption cue");
                 p.clips.push_back(c);
             }
             if (cues.isEmpty())
-                throw std::runtime_error("No SRT captions found");
+                throw std::runtime_error("No captions found");
         });
     } catch (const std::exception &e) {
         fail(e.what());
@@ -3058,33 +3059,36 @@ void Editor::importSrt(const QUrl &url) {
 bool Editor::exportSrt(const QUrl &url) {
     try {
         const auto path = localPath(url);
-        QString text;
-        int i = 0;
+        const auto suffix = QFileInfo(path).suffix().toLower();
+        const QString format = suffix == "vtt" ? "vtt" : suffix == "ass" ? "ass" : "srt";
         auto clips = m_project.clips;
         std::stable_sort(clips.begin(), clips.end(),
                          [](const Clip &a, const Clip &b) { return a.start < b.start; });
-        auto stamp = [&](qint64 frame) {
-            auto ms = qRound64(frameTime(frame, m_project.fpsN, m_project.fpsD).seconds() * 1000);
-            return QString("%1:%2:%3,%4")
-                .arg(ms / 3600000, 2, 10, QChar('0'))
-                .arg(ms / 60000 % 60, 2, 10, QChar('0'))
-                .arg(ms / 1000 % 60, 2, 10, QChar('0'))
-                .arg(ms % 1000, 3, 10, QChar('0'));
+        auto seconds = [&](qint64 frame) {
+            return frameTime(frame, m_project.fpsN, m_project.fpsD).seconds();
         };
+        QVector<Cue> cues;
+        const Clip *first = nullptr;
         for (const auto &c : clips)
             if (c.assetId.isEmpty() && c.effect.isEmpty() && c.graphic.isEmpty() && !c.hidden &&
-                !m_project.trackSettings[c.track].hidden)
-                text += QString::number(++i) + "\n" + stamp(c.start) + " --> " +
-                        stamp(c.start + c.duration) + "\n" + c.text + "\n\n";
-        if (!i)
+                !m_project.trackSettings[c.track].hidden) {
+                cues.push_back({seconds(c.start), seconds(c.start + c.duration), c.text});
+                if (!first)
+                    first = &c;
+            }
+        if (cues.isEmpty())
             throw std::runtime_error("No visible titles/captions to export");
+        // The ASS default style follows the first caption's font and size.
+        const auto text = writeSubtitles(
+            cues, format, m_project.width, m_project.height,
+            first->fontFamily.isEmpty() ? QString("Arial") : first->fontFamily, first->fontSize);
         QSaveFile f(path);
         if (!f.open(QIODevice::WriteOnly))
-            throw std::runtime_error("Cannot write SRT");
+            throw std::runtime_error("Cannot write the captions");
         const auto data = text.toUtf8();
         if (f.write(data) != data.size() || !f.commit())
-            throw std::runtime_error("Cannot save SRT");
-        m_status = "SRT saved";
+            throw std::runtime_error("Cannot save the captions");
+        m_status = format.toUpper() + " saved";
         emit changed();
         return true;
     } catch (const std::exception &e) {
