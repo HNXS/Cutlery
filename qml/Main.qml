@@ -680,6 +680,25 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         onClicked: editor.addTitle()
                     }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Action {
+                            objectName: "addBlurArea"
+                            text: "+ Blur area"
+                            Layout.fillWidth: true
+                            onClicked: editor.addEffect("blur")
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Blurs whatever lower tracks show inside a rectangle, e.g. private data in a screen recording"
+                        }
+                        Action {
+                            objectName: "addMosaicArea"
+                            text: "+ Mosaic area"
+                            Layout.fillWidth: true
+                            onClicked: editor.addEffect("pixelate")
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Pixelates whatever lower tracks show inside a rectangle, e.g. a face"
+                        }
+                    }
                     Caption {
                         text: "LOCAL FILES. YOUR STORY."
                         font.pixelSize: 9
@@ -1024,9 +1043,58 @@ ApplicationWindow {
                                 }
                                 Rule {}
                             }
+                            // Blur or mosaic area: what it does and how strongly. Move and resize it
+                            // in the preview; its position can be keyframed.
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                visible: win.selection.assetId === ""
+                                visible: (win.selection.effect || "") !== ""
+                                spacing: 4
+                                Caption {
+                                    text: "BLUR / MOSAIC AREA"
+                                }
+                                ComboBox {
+                                    objectName: "effectType"
+                                    Layout.fillWidth: true
+                                    readonly property var types: ["blur", "pixelate"]
+                                    model: ["Blur", "Mosaic (pixelate)"]
+                                    currentIndex: Math.max(0, types.indexOf(win.selection.effect || "blur"))
+                                    onActivated: editor.setClip("effect", types[currentIndex])
+                                }
+                                RowLayout {
+                                    Label {
+                                        text: "Strength"
+                                        color: win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    Label {
+                                        text: Math.round((win.selection.effectStrength || 0) * 100) + "%"
+                                        font.pixelSize: 10
+                                    }
+                                }
+                                Slider {
+                                    objectName: "effectStrength"
+                                    Layout.fillWidth: true
+                                    from: 0
+                                    to: 1
+                                    stepSize: .01
+                                    value: win.selection.effectStrength ?? .6
+                                    onPressedChanged: if (!pressed)
+                                        editor.setClip("effectStrength", value)
+                                    onMoved: if (!pressed)
+                                        editor.setClip("effectStrength", value)
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    font.pixelSize: 11
+                                    color: win.muted
+                                    text: "Drag the frame in the preview to place it and its corners to resize. Keyframe X/Y below to follow something moving. The area affects all tracks below it."
+                                }
+                                Rule {}
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                visible: win.selection.assetId === "" && (win.selection.effect || "") === ""
                                 Caption {
                                     text: "TITLE / CAPTION"
                                 }
@@ -1138,7 +1206,7 @@ ApplicationWindow {
                             // Presenter overlays: corner placement, shape, border, shadow, green screen.
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                visible: win.selection.audioOnly !== true && editor.clipBounds(win.s.selectedId).width !== undefined
+                                visible: win.selection.audioOnly !== true && (win.selection.effect || "") === "" && editor.clipBounds(win.s.selectedId).width !== undefined
                                 spacing: 6
                                 Caption {
                                     text: "PRESENTER OVERLAY"
@@ -1417,6 +1485,13 @@ ApplicationWindow {
                                         name: "Saturation",
                                         lo: 0,
                                         hi: 3,
+                                        step: .01
+                                    },
+                                    {
+                                        key: "blur",
+                                        name: "Blur",
+                                        lo: 0,
+                                        hi: 1,
                                         step: .01
                                     },
                                     {

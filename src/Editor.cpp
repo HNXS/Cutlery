@@ -158,7 +158,8 @@ QVariantList Editor::clips() const {
                               {"track", c.track},
                               {"start", c.start},
                               {"duration", c.duration},
-                              {"title", c.assetId.isEmpty()},
+                              {"title", c.assetId.isEmpty() && c.effect.isEmpty()},
+                              {"effect", c.effect},
                               {"audio", c.audioOnly || (a && a->kind == "audio")},
                               {"hasAudio", a && a->hasAudio},
                               {"sourceIn", c.sourceIn.seconds()},
@@ -306,6 +307,9 @@ QVariantMap Editor::state() const {
                         {"transitionLength", m_project.transitionLength(c)},
                         {"canTransition", m_project.previousAdjacent(c) != nullptr},
                         {"captionStyle", c.captionStyle},
+                        {"effect", c.effect},
+                        {"effectStrength", c.effectStrength},
+                        {"blur", c.blur},
                         {"highlightColor", c.highlightColor},
                         {"timedWords", c.timedWords()},
                         {"hasAudio", m_project.asset(c.assetId) &&
@@ -788,6 +792,24 @@ void Editor::addTitle() {
     });
     select(id);
 }
+void Editor::addEffect(const QString &effect) {
+    if (effect != "blur" && effect != "pixelate")
+        return fail("Unknown effect");
+    const auto id = newId();
+    mutate([&](Project &p) {
+        Clip c;
+        c.id = id;
+        c.name = effect == "blur" ? "Blur area" : "Mosaic area";
+        c.effect = effect;
+        c.track = p.tracks - 1;
+        p.requireEditable(c.track);
+        c.start = m_playhead;
+        c.duration = qRound64(5. * p.fpsN / p.fpsD);
+        p.clips.push_back(c);
+        p.move(c.id, c.track, c.start);
+    });
+    select(id);
+}
 void Editor::moveClip(const QString &id, qint64 frame, int track) {
     mutate([&](Project &p) { p.move(id, track, frame); });
 }
@@ -848,6 +870,12 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             c->text = v.toString();
         else if (key == "fontSize")
             c->fontSize = v.toInt();
+        else if (key == "effect")
+            c->effect = v.toString();
+        else if (key == "effectStrength")
+            c->effectStrength = v.toDouble();
+        else if (key == "blur")
+            c->blur = v.toDouble();
         else if (key == "captionStyle")
             c->captionStyle = v.toString();
         else if (key == "highlightColor")
@@ -1774,7 +1802,8 @@ bool Editor::exportSrt(const QUrl &url) {
                 .arg(ms % 1000, 3, 10, QChar('0'));
         };
         for (const auto &c : clips)
-            if (c.assetId.isEmpty() && !c.hidden && !m_project.trackSettings[c.track].hidden)
+            if (c.assetId.isEmpty() && c.effect.isEmpty() && !c.hidden &&
+                !m_project.trackSettings[c.track].hidden)
                 text += QString::number(++i) + "\n" + stamp(c.start) + " --> " +
                         stamp(c.start + c.duration) + "\n" + c.text + "\n\n";
         if (!i)

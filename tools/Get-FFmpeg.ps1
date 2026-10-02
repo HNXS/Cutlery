@@ -16,7 +16,7 @@ $version = (& $exe.FullName -version 2>&1 | Out-String)
 if ($LASTEXITCODE -ne 0) { throw 'FFmpeg failed to start' }
 if ($version -match '--enable-gpl|--enable-nonfree') { throw 'Expected an LGPL FFmpeg build' }
 $filters = (& $exe.FullName -hide_banner -filters 2>&1 | Out-String)
-foreach ($filter in @('overlay','lutrgb','hue','rotate','fade','atempo','amix','alimiter','colorchannelmixer','realtime','arealtime','xfade','tpad','sendcmd','afade','adelay','apad','settb','scale','trim','atrim','fps','reverse','areverse','crop','hflip','lut','format','colorkey','despill','blend','alphamerge','framerate','geq','drawbox','volume','ebur128','silencedetect')) {
+foreach ($filter in @('overlay','lutrgb','hue','rotate','fade','atempo','amix','alimiter','colorchannelmixer','realtime','arealtime','xfade','tpad','sendcmd','afade','adelay','apad','settb','scale','trim','atrim','fps','reverse','areverse','crop','hflip','lut','format','colorkey','despill','blend','alphamerge','framerate','geq','drawbox','volume','ebur128','silencedetect','gblur','pixelize','split')) {
     if ($filters -notmatch "\s$filter\s") { throw "Required FFmpeg filter missing: $filter" }
 }
 @{ url=$url; sha256=$sha256; version=$version; source='https://github.com/FFmpeg/FFmpeg/commit/ff48edd8b2'; build_recipe='https://github.com/BtbN/FFmpeg-Builds/tree/autobuild-2026-09-28-13-06' } | ConvertTo-Json | Set-Content "$Destination/manifest.json" -Encoding utf8

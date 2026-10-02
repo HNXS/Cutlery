@@ -244,9 +244,11 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         auto &n = info[i];
         n.clip = &c;
         n.asset = p.asset(c.assetId);
-        n.title = c.assetId.isEmpty();
+        n.title = c.assetId.isEmpty() && c.effect.isEmpty();
         n.image = n.title || (n.asset && n.asset->kind == "image");
-        n.video = o.video && (n.title || (n.asset && n.asset->kind != "audio")) && !c.audioOnly &&
+        n.video = o.video &&
+                  (n.title || !c.effect.isEmpty() || (n.asset && n.asset->kind != "audio")) &&
+                  !c.audioOnly &&
                   !p.trackSettings[c.track].hidden && !c.hidden;
         n.audio = o.audio && n.asset && n.asset->hasAudio && !c.muted && p.audioEnabled(c.track);
         index.insert(c.id, i);
@@ -406,6 +408,8 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         }
         if (c.saturation != 1)
             f += ",hue=s=" + num(c.saturation);
+        if (c.blur > 0)
+            f += ",gblur=sigma=" + num(c.blur * 30 * w / 1920.0 + 0.5);
         const auto matte = c.aiCutout && !n.image && n.asset ? o.mattes.value(n.asset->id)
                                                              : MatteSource{};
         if (!matte.path.isEmpty()) {
@@ -578,6 +582,44 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             // Inside one clip's own time: an ordinary clip, positioned on the canvas directly.
             auto &n = info[members.first()];
             const auto &c = *n.clip;
+            if (!c.effect.isEmpty()) {
+                // Effect area: blur or pixelate the picture composited so far, inside a
+                // rectangle that follows the clip's (possibly animated) position.
+                const double scale = c.valueAt("scale", 0);
+                const int rw = std::clamp(int(std::lround(width * c.effectWidth * scale / 2)) * 2, 2,
+                                          width / 2 * 2),
+                          rh = std::clamp(int(std::lround(height * c.effectHeight * scale / 2)) * 2,
+                                          2, height / 2 * 2);
+                const auto local =
+                    QString("(t*%1/%2+%3)").arg(p.fpsN).arg(p.fpsD).arg(from - c.start);
+                const auto x = QString("clip((%1-%2)/2+(%3)*%1,0,%1-%2)")
+                                   .arg(width)
+                                   .arg(rw)
+                                   .arg(curve(c, "x", local));
+                const auto y = QString("clip((%1-%2)/2+(%3)*%1,0,%1-%2)")
+                                   .arg(height)
+                                   .arg(rh)
+                                   .arg(curve(c, "y", local));
+                // Strength scales with the output size so previews look like the export.
+                const double unit = height / 1080.0;
+                const QString effect =
+                    c.effect == "pixelate"
+                        ? QString("pixelize=w=%1:h=%1").arg(std::max(2, int(std::lround((6 + c.effectStrength * 54) * unit))))
+                        : QString("gblur=sigma=%1:steps=3").arg(num((3 + c.effectStrength * 37) * unit));
+                const auto id = QString::number(serial++);
+                nodes << QString("[%1]split[base%2][src%2]").arg(visual, id);
+                nodes << QString("[src%1]crop=w=%2:h=%3:x='%4':y='%5',%6[fx%1]")
+                             .arg(id)
+                             .arg(rw)
+                             .arg(rh)
+                             .arg(x, y, effect);
+                nodes << QString("[base%1][fx%1]overlay=x='%2':y='%3':eof_action=pass:"
+                                 "repeatlast=0:format=auto:enable='gte(t,%4)*lt(t,%5)'[area%1]")
+                             .arg(id, x, y, num(secs(visibleStart - from) - half),
+                                  num(secs(visibleEnd - from) - half));
+                visual = "area" + id;
+                continue;
+            }
             if (n.title && !c.captionStyle.isEmpty() && c.timedWords() && !animatedGeometry(c) &&
                 c.rotation == 0 && c.scale == 1 && n.vPre == 0) {
                 const auto sprite = captionSprite(c, width, height, p.height);

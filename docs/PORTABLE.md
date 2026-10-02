@@ -10,7 +10,7 @@ Use Project → Recover autosave to load the last recovery snapshot, then Save A
 
 Keyboard bindings live in `data/shortcuts.json`. Edit them through Help → Keyboard shortcuts. Preserve this file when moving to a new portable build. Track controls are saved in the project: **L** prevents clip editing, **M** mutes audio, **S** solos audio (multiple solo tracks may play), and **V** hides picture. Hiding picture does not mute sound.
 
-Current builds save schema 8, which adds transitions, keyframes, overlay styles, AI cutout and timed captions; 0.4 and older cannot open it. Schemas 1–7 are read without changes. Version 0.3 and 0.4 save schema 3. Versions 0.1/0.2 cannot read schema 3; use Save As if you need to keep an old-version copy.
+Current builds save schema 9, which adds transitions, keyframes, overlay styles, AI cutout, timed captions and blur/mosaic areas; 0.4 and older cannot open it. Schemas 1–8 are read without changes. Version 0.3 and 0.4 save schema 3. Versions 0.1/0.2 cannot read schema 3; use Save As if you need to keep an old-version copy.
 
 The optional AI pack adds `models/` next to the executable (see [AI](AI.md)). AI results (background mattes, upscaled copies) are kept in `data/ai`; deleting them only means the processing runs again. Upscaled copies are large: about 3.5 GB per minute at 4K.
 
