@@ -244,6 +244,8 @@ QJsonObject Project::json(const QString &base) const {
         for (const auto &[k, field] : lookFields())
             if (c.*field != 0)
                 o[k] = c.*field;
+        if (!c.slowMotion.isEmpty())
+            o["slowMotion"] = c.slowMotion;
         if (!c.lut.isEmpty()) {
             o["lut"] = base.isEmpty() ? c.lut : QDir(base).relativeFilePath(c.lut);
             o["lutStrength"] = c.lutStrength;
@@ -381,6 +383,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.blur = j["blur"].toDouble(0);
         for (const auto &[k, field] : lookFields())
             c.*field = j[k].toDouble(0);
+        c.slowMotion = j["slowMotion"].toString();
         c.lut = j["lut"].toString();
         if (!c.lut.isEmpty())
             c.lut = QDir::cleanPath(QDir::isRelativePath(c.lut) ? QDir(base).absoluteFilePath(c.lut)
@@ -524,7 +527,8 @@ void Project::validate() const {
                     bounded(c.vibrance, -1, 1) && bounded(c.shadows, -1, 1) &&
                     bounded(c.highlights, -1, 1) && bounded(c.sharpen, 0, 1) &&
                     bounded(c.glow, 0, 1) && bounded(c.vignette, 0, 1) && bounded(c.grain, 0, 1) &&
-                    bounded(c.lutStrength, 0, 1) && c.lut.size() <= 4096,
+                    bounded(c.lutStrength, 0, 1) && c.lut.size() <= 4096 &&
+                    QStringList{"", "blend", "flow"}.contains(c.slowMotion),
                 "Invalid colour or look setting");
         require(QStringList{"", "lowerThird", "lowerThirdLine", "titleCard"}.contains(
                     c.titleStyle) &&

@@ -55,7 +55,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F049 | Glitch, shake, VHS, retro and film effects | Planned | Not implemented in this alpha. |
 | F050 | Distortion, edge, lens and stylize effects | Planned | Not implemented in this alpha. |
 | F051 | Motion blur | Planned | Not implemented in this alpha. |
-| F052 | Frame blending slow motion | Planned | Not implemented in this alpha. |
+| F052 | Frame blending slow motion | Implemented (alpha) | For clips slower than 1×: "Blend frames" (FFmpeg framerate, cross-fading neighbouring source frames, without blending across scene cuts) or "Optical flow" (minterpolate motion-compensated interpolation, slow to render); a little source around the range is decoded so preview frames match export. Not for reversed clips. |
 | F053 | Camera-like and pseudo-3D effects | Planned | Not implemented in this alpha. |
 | F054 | Dissolve, fade and dip to color | Implemented (alpha) | Two-clip dissolve and dip to black/white centred on a cut, with equal-power audio crossfades; clip fades as before. |
 | F055 | Wipe, slide, push and directional transitions | Partial | Wipe left/right, slide left/right/up/down, smooth left. No push. |

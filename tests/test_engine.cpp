@@ -1493,6 +1493,73 @@ class EngineTest : public QObject {
         QVERIFY(count(image, true, true) + count(image, false, true) == 0);
         QVERIFY(count(image, true, false) + count(image, false, false) > 50);
     }
+    void smoothSlowMotion() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // A white bar moving 8 px per frame over black: at half speed, an in-between frame shows
+        // the bar's trailing part fully (repeat) or half (blend).
+        const auto source = dir.filePath("flicker.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=black:s=128x72:r=30:d=1", "-f", "lavfi", "-i",
+                     "color=white:s=16x72:r=30:d=1", "-filter_complex", "[0][1]overlay=x=8*n:y=0", "-c:v", "ffv1", source});
+        Project p;
+        p.width = 128;
+        p.height = 72;
+        Asset a;
+        a.id = "v";
+        a.path = source;
+        a.kind = "video";
+        a.duration = 1;
+        a.width = 128;
+        a.height = 72;
+        p.assets = {a};
+        Clip c;
+        c.id = "c";
+        c.assetId = "v";
+        c.speed = Time(1, 2);
+        c.duration = 40;
+        p.clips = {c};
+        const auto graph = dir.filePath("graph.txt");
+        auto grey = [&](const QString &mode, qint64 frame, int x) {
+            auto project = p;
+            project.clips[0].slowMotion = mode;
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 128, 72, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return qGray(out.pixel(x, 36));
+        };
+        // While the bar passes x = 64, repeated frames are only black or white; blending
+        // produces grey in-between frames.
+        int repeated = 0, blended = 0;
+        for (qint64 f = 8; f < 24; ++f) {
+            const int r = grey("", f, 64), b = grey("blend", f, 64);
+            repeated += (r > 70 && r < 185);
+            blended += (b > 70 && b < 185);
+        }
+        QCOMPARE(repeated, 0);
+        QVERIFY2(blended >= 1, qPrintable(QString::number(blended)));
+        // Optical flow renders and the setting round-trips.
+        const int flow = grey("flow", 12, 64);
+        QVERIFY(flow >= 0 && flow <= 255);
+        p.clips[0].slowMotion = "blend";
+        QCOMPARE(Project::fromJson(p.json(), {}).clips[0].slowMotion, QString("blend"));
+        auto bad = p.json();
+        auto clips = bad["clips"].toArray();
+        auto o = clips[0].toObject();
+        o["slowMotion"] = "warp";
+        clips[0] = o;
+        bad["clips"] = clips;
+        QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, {}), std::runtime_error);
+    }
     void sceneDetection() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

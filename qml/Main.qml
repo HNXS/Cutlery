@@ -1032,6 +1032,25 @@ ApplicationWindow {
                                     }
                                 }
                             }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                visible: win.selection.video === true && (win.selection.speed ?? 1) < 1
+                                Label {
+                                    text: "Slow motion"
+                                    color: win.muted
+                                    Layout.fillWidth: true
+                                }
+                                ComboBox {
+                                    objectName: "slowMotion"
+                                    Layout.preferredWidth: 170
+                                    readonly property var modes: ["", "blend", "flow"]
+                                    model: ["Repeat frames", "Blend frames", "Optical flow (slow)"]
+                                    currentIndex: Math.max(0, modes.indexOf(win.selection.slowMotion || ""))
+                                    onActivated: index => editor.setClip("slowMotion", modes[index])
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "How in-between frames are made when the clip plays slower than it was filmed. Optical flow is smoothest but renders slowly."
+                                }
+                            }
                             ComboBox {
                                 Layout.fillWidth: true
                                 model: editor.trackList

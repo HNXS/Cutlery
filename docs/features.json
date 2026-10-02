@@ -1296,8 +1296,8 @@
     "status": "Planned",
     "acceptance": "Blend weights and boundary rules match golden sequence",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "For clips slower than 1×: \"Blend frames\" (FFmpeg framerate, cross-fading neighbouring source frames, without blending across scene cuts) or \"Optical flow\" (minterpolate motion-compensated interpolation, slow to render); a little source around the range is decoded so preview frames match export. Not for reversed clips."
   },
   {
     "id": "F053",

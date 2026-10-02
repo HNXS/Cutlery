@@ -355,6 +355,7 @@ QVariantMap Editor::state() const {
             PROP(vignette);
             PROP(grain);
             PROP(lutStrength);
+            PROP(slowMotion);
             selected["lut"] = c.lut;
             selected["lutName"] = QFileInfo(c.lut).completeBaseName();
             selected["lutMissing"] = !c.lut.isEmpty() && !QFileInfo(c.lut).isFile();
@@ -977,6 +978,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(vignette, toDouble);
         FIELD(grain, toDouble);
         FIELD(lutStrength, toDouble);
+        FIELD(slowMotion, toString);
         FIELD(fadeIn, toDouble);
         FIELD(fadeOut, toDouble);
         FIELD(reverse, toBool);

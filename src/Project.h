@@ -54,6 +54,9 @@ struct Clip {
     double effectStrength = 0.6, effectWidth = 0.3, effectHeight = 0.2;
     // Gaussian blur of the clip's own picture, 0..1.
     double blur = 0;
+    // In-between frames when the clip plays slower than its source: "" repeats frames, "blend"
+    // cross-fades neighbours, "flow" interpolates motion (slow to render).
+    QString slowMotion;
     // Colour: warmer/cooler, magenta/green, gentle saturation of muted colours, and lifted or
     // lowered shadows and highlights, each −1..1 with 0 unchanged.
     double temperature = 0, tint = 0, vibrance = 0, shadows = 0, highlights = 0;

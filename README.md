@@ -37,6 +37,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - Static transforms, equal-edge crop, horizontal flip, opacity, brightness/contrast/saturation, blur, clip fades.
 - **Copy and paste** clips (Ctrl+C/Ctrl+V, also between projects) and their look or all attributes (Ctrl+Alt+V) onto another clip.
 - **Audio-only export:** the mix as MP3, AAC (M4A) or WAV.
+- **Smooth slow motion:** clips slower than 1× can blend frames or interpolate motion (optical flow).
 - **Split at scene changes** (inspector): cuts a video clip into its shots in one step.
 - **Colour and look** (inspector): temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with adjustable strength; one-click looks (Warm, Cool, Cinematic, Vintage, Black & white, Punchy, Dreamy).
 - **Lower thirds and title cards** (library panel): name and role on a plate or beside an accent line, sliding in from the left, or a large centred heading. First text line = name/heading, further lines = role/subtitle; accent colour selectable.

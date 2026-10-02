@@ -427,6 +427,14 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         const qint64 begin = std::min(l0, c0), padStart = std::max<qint64>(0, c0 - l0),
                      padStop = std::max<qint64>(0, l1 - c1) + 1;
         const double seek = c.sourceIn.seconds() + (c.reverse ? d - secs(c1) : secs(c0)) * s;
+        // Smooth slow motion makes in-between frames from source neighbours, so it decodes a
+        // little source before and after the range, even for a single preview frame.
+        const auto up = c.aiUpscale && !n.image && n.asset ? o.upscaled.value(n.asset->id)
+                                                           : MatteSource{};
+        const bool smooth = s < 1 && !c.reverse && !n.image && !c.slowMotion.isEmpty();
+        const double pre = smooth ? std::clamp(seek - (up.path.isEmpty() ? 0. : up.start), 0., 0.2)
+                                  : 0,
+                     post = smooth ? 0.2 : 0;
         const qint64 base = n.vPre;
         // Source frames to clip-local frames: seek, speed, reverse, hold at the ends, then exact
         // frame timestamps, clip-local and shifted by the handle so none are negative. The AI
@@ -434,14 +442,26 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         // A matte arrives already aligned to the seek point and may end a little before the
         // picture (its last analysed frame), which it holds.
         auto timing = [&](const QString &source, bool reversible, bool matte = false) {
+            const bool around = smooth && !matte;
             QString t = source + (matte ? "trim=start=0:duration=" : "trim=duration=") +
-                        num(secs(c1 - c0) * s) + (matte ? "" : ",setpts=PTS-STARTPTS");
+                        num(secs(c1 - c0) * s + (around ? pre + post : 0)) +
+                        (matte ? "" : ",setpts=PTS-STARTPTS");
             if (c.reverse && reversible)
                 t += ",reverse";
             // Sampling 1/8 frame late resolves exact half-frame ties (2x speed, 60 fps sources)
             // the same way regardless of where decoding started, so stills, playback and export
             // agree.
-            t += ",setpts=PTS/" + num(s) + "+" + num(frame / 8) + "/TB,fps=" + fps;
+            t += ",setpts=" + (around ? "(PTS-" + num(pre) + "/TB)" : QString("PTS")) + "/" +
+                 num(s) + "+" + num(frame / 8) + "/TB";
+            // Slow motion: blended or motion-interpolated in-between frames instead of repeats;
+            // the extra source before the range is dropped afterwards.
+            if (around && c.slowMotion == "blend")
+                t += ",framerate=fps=" + fps;
+            else if (around && c.slowMotion == "flow")
+                t += ",minterpolate=fps=" + fps + ":mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1";
+            t += ",fps=" + fps;
+            if (around)
+                t += ",trim=start=0,setpts=PTS-STARTPTS";
             t += QString(",trim=end_frame=%1,tpad=start=%2:stop=%3:start_mode=clone:stop_mode=clone")
                      .arg(c1 - c0)
                      .arg(padStart)
@@ -459,15 +479,13 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             return t;
         };
         int in = 0;
-        if (const auto up = c.aiUpscale && !n.image && n.asset ? o.upscaled.value(n.asset->id)
-                                                               : MatteSource{};
-            !up.path.isEmpty()) {
+        if (!up.path.isEmpty()) {
             r.inputs << "-protocol_whitelist" << "file,pipe" << "-ss"
-                     << num(std::max(0., seek - up.start)) << "-i"
+                     << num(std::max(0., seek - pre - up.start)) << "-i"
                      << QFileInfo(up.path).absoluteFilePath();
             in = input++;
         } else
-            in = addInput(n, seek);
+            in = addInput(n, seek - pre);
         QString f = timing(QString("[%1:v:0]").arg(in), !n.image);
         const bool moving = animatedGeometry(c);
         // Animated geometry first fits the canvas at scale 1 and is resized per frame below;
