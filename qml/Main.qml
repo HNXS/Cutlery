@@ -2053,7 +2053,7 @@ ApplicationWindow {
                                     onActivated: index => {
                                         const preset = presets[index].values;
                                         if (preset) {
-                                            const values = { eqLow: 0, eqMid: 0, eqHigh: 0, lowCut: 0, compressor: 0, gate: 0, denoise: 0, deess: 0 };
+                                            const values = { eqLow: 0, eqMid: 0, eqHigh: 0, lowCut: 0, compressor: 0, gate: 0, denoise: 0, deess: 0, reverb: 0, echo: 0 };
                                             for (const k in preset)
                                                 values[k] = preset[k];
                                             editor.setClipValues(values);
@@ -2070,7 +2070,9 @@ ApplicationWindow {
                                         { key: "eqMid", name: "Presence (dB)", lo: -12, hi: 12, step: .5, tip: "Around 2.5 kHz, where speech is clear" },
                                         { key: "eqHigh", name: "Treble (dB)", lo: -12, hi: 12, step: .5, tip: "Above 8 kHz" },
                                         { key: "deess", name: "De-esser", lo: 0, hi: 1, step: .01, tip: "Softens sharp S sounds" },
-                                        { key: "compressor", name: "Compressor", lo: 0, hi: 1, step: .01, tip: "Evens out loud and quiet parts" }
+                                        { key: "compressor", name: "Compressor", lo: 0, hi: 1, step: .01, tip: "Evens out loud and quiet parts" },
+                                        { key: "reverb", name: "Reverb", lo: 0, hi: 1, step: .01, tip: "The sound of a room" },
+                                        { key: "echo", name: "Echo", lo: 0, hi: 1, step: .01, tip: "Repeats a third of a second apart" }
                                     ]
                                     RowLayout {
                                         id: soundRow
@@ -2234,6 +2236,80 @@ ApplicationWindow {
                                         onMoved: if (!pressed)
                                             editor.setClip("lutStrength", value)
                                     }
+                                }
+                            }
+                            // Style effects and camera movement of the clip's picture.
+                            ColumnLayout {
+                                objectName: "effectsSection"
+                                visible: win.selection.picture === true
+                                Layout.fillWidth: true
+                                spacing: 6
+                                Rule {}
+                                Caption { text: "EFFECTS" }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    ComboBox {
+                                        id: fxChoice
+                                        objectName: "fxChoice"
+                                        Layout.fillWidth: true
+                                        enabled: win.selection.locked !== true
+                                        readonly property var keys: ["", "shake", "glitch", "vhs", "film"]
+                                        model: ["No effect", "Camera shake", "Glitch", "VHS", "Old film"]
+                                        currentIndex: Math.max(0, keys.indexOf(win.selection.fx || ""))
+                                        onActivated: index => editor.setClip("fx", keys[index])
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "A style effect on the clip's picture"
+                                    }
+                                    Slider {
+                                        objectName: "fxStrength"
+                                        visible: !!win.selection.fx
+                                        Layout.preferredWidth: 90
+                                        from: 0
+                                        to: 1
+                                        stepSize: .01
+                                        value: win.selection.fxStrength ?? .5
+                                        enabled: win.selection.locked !== true
+                                        onPressedChanged: if (!pressed)
+                                            editor.setClip("fxStrength", value)
+                                        onMoved: if (!pressed)
+                                            editor.setClip("fxStrength", value)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Effect strength"
+                                    }
+                                }
+                                RowLayout {
+                                    visible: win.selection.video === true
+                                    Layout.fillWidth: true
+                                    Label {
+                                        text: "Motion blur"
+                                        color: Number(win.selection.motionBlur || 0) > 0 ? win.mint : win.muted
+                                        Layout.preferredWidth: 105
+                                    }
+                                    Slider {
+                                        objectName: "motionBlur"
+                                        Layout.fillWidth: true
+                                        from: 0
+                                        to: 1
+                                        stepSize: .01
+                                        value: Number(win.selection.motionBlur || 0)
+                                        enabled: win.selection.locked !== true
+                                        onPressedChanged: if (!pressed)
+                                            editor.setClip("motionBlur", value)
+                                        onMoved: if (!pressed)
+                                            editor.setClip("motionBlur", value)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Smears fast movement across frames"
+                                    }
+                                }
+                                CheckBox {
+                                    objectName: "stabilize"
+                                    visible: win.selection.video === true
+                                    text: "Stabilize"
+                                    checked: win.selection.stabilize === true
+                                    enabled: win.selection.locked !== true
+                                    onToggled: editor.setClip("stabilize", checked)
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Smooths a shaky hand-held camera; the edges are filled in"
                                 }
                             }
                             RowLayout {

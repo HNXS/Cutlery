@@ -2412,6 +2412,246 @@ class EngineTest : public QObject {
         bad["clips"] = clips;
         QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, {}), std::runtime_error);
     }
+    void styleEffects() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Still colour bars, and a white bar moving 8 px per frame over black.
+        const auto bars = dir.filePath("bars.mkv"), moving = dir.filePath("moving.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "smptebars=s=128x72:r=30:d=2", "-c:v",
+                     "ffv1", bars});
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=black:s=128x72:r=30:d=1", "-f",
+                     "lavfi", "-i", "color=white:s=16x72:r=30:d=1", "-filter_complex",
+                     "[0][1]overlay=x=8*n:y=0", "-c:v", "ffv1", moving});
+        Project p;
+        p.width = 128;
+        p.height = 72;
+        for (const auto &[id, path, seconds] :
+             {std::tuple{QString("bars"), bars, 2.}, std::tuple{QString("moving"), moving, 1.}}) {
+            Asset a;
+            a.id = id;
+            a.path = path;
+            a.kind = "video";
+            a.duration = seconds;
+            a.width = 128;
+            a.height = 72;
+            p.assets << a;
+        }
+        Clip clip;
+        clip.id = "c";
+        clip.assetId = "bars";
+        clip.duration = 60;
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Clip &c, qint64 frame) {
+            auto project = p;
+            project.clips = {c};
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 128, 72, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return out.convertToFormat(QImage::Format_RGB32);
+        };
+        // Mean absolute difference per channel between two pictures.
+        auto difference = [](const QImage &a, const QImage &b) {
+            double sum = 0;
+            for (int y = 0; y < a.height(); ++y)
+                for (int x = 0; x < a.width(); ++x) {
+                    const QColor u(a.pixel(x, y)), v(b.pixel(x, y));
+                    sum += std::abs(u.red() - v.red()) + std::abs(u.green() - v.green()) +
+                           std::abs(u.blue() - v.blue());
+                }
+            return sum / (3. * a.width() * a.height());
+        };
+        auto with = [&](auto change) {
+            auto c = clip;
+            change(c);
+            return c;
+        };
+        const auto plain = still(clip, 10);
+        QVERIFY(difference(plain, still(clip, 40)) < 1);
+        // Shake: the still picture moves over time.
+        const auto shake = with([](Clip &c) {
+            c.fx = "shake";
+            c.fxStrength = 1;
+        });
+        const double moved = difference(still(shake, 10), still(shake, 40));
+        QVERIFY2(moved > 4, qPrintable(QString::number(moved)));
+        // Glitch: some frames have their colour channels shifted apart, others are untouched,
+        // and the same frame looks the same every time.
+        const auto glitch = with([](Clip &c) {
+            c.fx = "glitch";
+            c.fxStrength = 1;
+        });
+        int shifted = 0, untouched = 0;
+        for (qint64 f = 1; f < 60; f += 3) {
+            const double d = difference(still(glitch, f), plain);
+            shifted += d > 3;
+            untouched += d < 1;
+        }
+        QVERIFY2(shifted >= 1 && untouched >= 1,
+                 qPrintable(QString("%1 %2").arg(shifted).arg(untouched)));
+        QCOMPARE(compileRender([&] { auto q = p; q.clips = {glitch}; return q; }(), "w", 128, 72, {}).graph,
+                 compileRender([&] { auto q = p; q.clips = {glitch}; return q; }(), "w", 128, 72, {}).graph);
+        // VHS: smeared colours and dark scanlines every third row.
+        const auto vhs = still(with([](Clip &c) {
+                                   c.fx = "vhs";
+                                   c.fxStrength = 1;
+                               }),
+                               10);
+        QVERIFY(difference(vhs, plain) > 5);
+        double lines = 0, rows = 0;
+        for (int x = 0; x < 16; ++x) // the light grey bar
+            for (int y = 3; y < 30; ++y)
+                (y % 3 == 0 ? lines : rows) += qGray(vhs.pixel(x, y)) / (y % 3 == 0 ? 1. : 2.);
+        QVERIFY2(lines < rows - 16 * 9 * 15, qPrintable(QString("%1 %2").arg(lines).arg(rows)));
+        // Old film: sepia on the light grey bar.
+        const auto film = QColor(still(with([](Clip &c) {
+                                           c.fx = "film";
+                                           c.fxStrength = 1;
+                                       }),
+                                       10)
+                                     .pixel(8, 20));
+        const QColor grey(plain.pixel(8, 20));
+        QVERIFY(std::abs(grey.red() - grey.blue()) < 10);
+        QVERIFY2(film.red() > film.blue() + 30, qPrintable(film.name()));
+        // No strength, no effect.
+        QVERIFY(difference(still(with([](Clip &c) {
+                                     c.fx = "film";
+                                     c.fxStrength = 0;
+                                 }),
+                                 10),
+                           plain) < 1);
+        // Stabilize renders and leaves a still picture about where it was.
+        const auto steady = still(with([](Clip &c) { c.stabilize = true; }), 10);
+        QVERIFY2(difference(steady, plain) < 8, qPrintable(QString::number(difference(steady, plain))));
+        // Motion blur: as the bar passes x = 64, frames show grey instead of only black or white,
+        // also in single-frame previews.
+        auto bar = clip;
+        bar.assetId = "moving";
+        bar.duration = 30;
+        int sharp = 0, smeared = 0;
+        for (qint64 f = 6; f < 12; ++f) {
+            const int g0 = qGray(still(bar, f).pixel(64, 36)),
+                      g1 = qGray(still(with([&](Clip &c) {
+                                           c = bar;
+                                           c.motionBlur = 1;
+                                       }),
+                                       f)
+                                     .pixel(64, 36));
+            sharp += g0 > 40 && g0 < 215;
+            smeared += g1 > 40 && g1 < 215;
+        }
+        QCOMPARE(sharp, 0);
+        QVERIFY2(smeared >= 2, qPrintable(QString::number(smeared)));
+
+        // Saved only when set; invalid values are refused.
+        auto saved = p;
+        saved.clips = {with([](Clip &c) {
+            c.fx = "vhs";
+            c.fxStrength = 0.7;
+            c.motionBlur = 0.4;
+            c.stabilize = true;
+            c.reverb = 0.3;
+            c.echo = 0.2;
+        })};
+        const auto json = saved.json();
+        const auto loaded = Project::fromJson(json, {}).clips[0];
+        QCOMPARE(loaded.fx, QString("vhs"));
+        QCOMPARE(loaded.fxStrength, 0.7);
+        QCOMPARE(loaded.motionBlur, 0.4);
+        QVERIFY(loaded.stabilize);
+        QCOMPARE(loaded.reverb, 0.3);
+        QCOMPARE(loaded.echo, 0.2);
+        saved.clips = {clip};
+        const auto bare = saved.json()["clips"].toArray()[0].toObject();
+        QVERIFY(!bare.contains("fx") && !bare.contains("fxStrength") && !bare.contains("stabilize") &&
+                !bare.contains("reverb"));
+        for (const auto &[key, value] : {std::pair{QString("fx"), QJsonValue("wobble")},
+                                         std::pair{QString("fxStrength"), QJsonValue(2)},
+                                         std::pair{QString("echo"), QJsonValue(-1)}}) {
+            auto bad = json;
+            auto clips = bad["clips"].toArray();
+            auto o = clips[0].toObject();
+            o[key] = value;
+            clips[0] = o;
+            bad["clips"] = clips;
+            QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, {}), std::runtime_error);
+        }
+    }
+    void reverbAndEcho() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // One short click, then silence.
+        const auto source = dir.filePath("click.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "aevalsrc='if(lt(t,0.02),0.8*sin(2*PI*1000*t),0)':d=2",
+                     "-ar", "48000", "-ac", "2", source});
+        Project p;
+        p.width = 128;
+        p.height = 72;
+        Asset a;
+        a.id = "s";
+        a.path = source;
+        a.kind = "audio";
+        a.duration = 2;
+        a.hasAudio = true;
+        p.assets = {a};
+        Clip c;
+        c.id = "c";
+        c.assetId = "s";
+        c.duration = 60;
+        const auto graph = dir.filePath("graph.txt");
+        auto render = [&](const Clip &clip, const QString &name) {
+            auto project = p;
+            project.clips = {clip};
+            RenderOptions options;
+            options.video = false;
+            const auto plan = compileRender(project, dir.filePath("work"), 128, 72, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            const auto out = dir.filePath(name + ".wav");
+            QStringList args{"-v", "error", "-y"};
+            args += plan.inputs;
+            args << "-filter_complex_script" << graph << "-map" << "[aout]" << out;
+            run(ffmpeg, args);
+            return out;
+        };
+        auto peak = [&](const QString &file, double from, double to) {
+            QProcess p;
+            p.start(ffmpeg, {"-hide_banner", "-nostats", "-ss", QString::number(from), "-t",
+                             QString::number(to - from), "-i", file, "-af", "volumedetect", "-f",
+                             "null", "-"});
+            p.waitForFinished(30000);
+            const auto m = QRegularExpression("max_volume: (-?[0-9.]+|-inf) dB")
+                               .match(QString::fromUtf8(p.readAllStandardError()));
+            return !m.hasMatch() || m.captured(1) == "-inf" ? -999. : m.captured(1).toDouble();
+        };
+        const auto plain = render(c, "plain");
+        QVERIFY(peak(plain, 0, 0.02) > -10);
+        QVERIFY(peak(plain, 0.05, 0.15) < -60);
+        auto x = c;
+        x.reverb = 1;
+        const auto room = render(x, "reverb");
+        QVERIFY2(peak(room, 0.05, 0.15) > -30, "reflections after the click");
+        QVERIFY(peak(room, 0.5, 1) < -60);
+        x = c;
+        x.echo = 1;
+        const auto echo = render(x, "echo");
+        QVERIFY2(peak(echo, 0.31, 0.36) > -20, "first repeat");
+        QVERIFY2(peak(echo, 0.63, 0.68) > -25, "second repeat");
+        QVERIFY(peak(echo, 0.1, 0.3) < -60);
+    }
     void sceneDetection() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

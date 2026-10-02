@@ -437,6 +437,12 @@ QVariantMap Editor::state() const {
             PROP(gate);
             PROP(denoise);
             PROP(deess);
+            PROP(fx);
+            PROP(fxStrength);
+            PROP(motionBlur);
+            PROP(stabilize);
+            PROP(reverb);
+            PROP(echo);
             PROP(slowMotion);
             PROP(fontFamily);
             PROP(graphic);
@@ -1158,6 +1164,12 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(gate, toDouble);
         FIELD(denoise, toDouble);
         FIELD(deess, toDouble);
+        FIELD(fx, toString);
+        FIELD(fxStrength, toDouble);
+        FIELD(motionBlur, toDouble);
+        FIELD(stabilize, toBool);
+        FIELD(reverb, toDouble);
+        FIELD(echo, toDouble);
         FIELD(slowMotion, toString);
         FIELD(bold, toBool);
         FIELD(italic, toBool);
@@ -1973,6 +1985,9 @@ void Editor::pasteAttributes(const QString &group) {
         c->grain = from.grain;
         c->lut = from.lut;
         c->lutStrength = from.lutStrength;
+        c->fx = from.fx;
+        c->fxStrength = from.fxStrength;
+        c->motionBlur = from.motionBlur;
         if (group == "look")
             return;
         c->scale = from.scale;
@@ -1991,6 +2006,8 @@ void Editor::pasteAttributes(const QString &group) {
         c->gate = from.gate;
         c->denoise = from.denoise;
         c->deess = from.deess;
+        c->reverb = from.reverb;
+        c->echo = from.echo;
         c->fadeIn = from.fadeIn;
         c->fadeOut = from.fadeOut;
         // Keyframes keep their clip-relative frames; those past the end of a shorter clip stay

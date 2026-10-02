@@ -547,7 +547,9 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                         : c.aiUpscale ? o.upscaled.value(n.asset->id)
                                       : MatteSource{};
         const bool smooth = s < 1 && !c.reverse && !n.image && !c.slowMotion.isEmpty();
-        const double pre = smooth ? std::clamp(seek - (up.path.isEmpty() ? 0. : up.start), 0., 0.2)
+        // Motion blur mixes each frame with the ones before it, so it decodes a little before too.
+        const bool blur = c.motionBlur > 0 && !n.image, history = smooth || (blur && !c.reverse);
+        const double pre = history ? std::clamp(seek - (up.path.isEmpty() ? 0. : up.start), 0., 0.2)
                                   : 0,
                      post = smooth ? 0.2 : 0;
         const qint64 base = n.vPre;
@@ -557,7 +559,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         // A matte arrives already aligned to the seek point and may end a little before the
         // picture (its last analysed frame), which it holds.
         auto timing = [&](const QString &source, bool reversible, bool matte = false) {
-            const bool around = smooth && !matte;
+            const bool around = history && !matte;
             QString t = source + (matte ? "trim=start=0:duration=" : "trim=duration=") +
                         num(secs(c1 - c0) * s + (around ? pre + post : 0)) +
                         (matte ? "" : ",setpts=PTS-STARTPTS");
@@ -575,6 +577,8 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             else if (around && c.slowMotion == "flow")
                 t += ",minterpolate=fps=" + fps + ":mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1";
             t += ",fps=" + fps;
+            if (blur && !matte)
+                t += ",tmix=frames=" + QString::number(2 + qRound(4 * c.motionBlur));
             if (around)
                 t += ",trim=start=0,setpts=PTS-STARTPTS";
             t += QString(",trim=end_frame=%1,tpad=start=%2:stop=%3:start_mode=clone:stop_mode=clone")
@@ -602,6 +606,9 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         } else
             in = addInput(n, seek - pre);
         QString f = timing(QString("[%1:v:0]").arg(in), !n.image);
+        // Camera shake is measured on the source picture, before scaling.
+        if (c.stabilize && !n.image)
+            f += ",deshake=rx=32:ry=32:edge=mirror";
         const bool moving = animatedGeometry(c);
         // Animated geometry first fits the canvas at scale 1 and is resized per frame below;
         // otherwise the clip is scaled once.
@@ -673,6 +680,54 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         if (c.grain > 0)
             // Luma grain that changes every frame, on a format that keeps alpha.
             f += QString(",format=yuva444p,noise=c0s=%1:c0f=t,format=rgba").arg(num(4 + 26 * c.grain));
+        // Style effects. Times in the chain are clip-local frames plus the handle.
+        const double fxk = c.fxStrength;
+        if (c.fx == "shake" && fxk > 0) {
+            // Zoom in a little and move the window along an irregular path.
+            const double a = 0.01 + 0.05 * fxk;
+            f += QString(",scale=trunc(iw*%1/2)*2:trunc(ih*%1/2)*2,"
+                         "crop=trunc(iw/%1/2)*2:trunc(ih/%1/2)*2:"
+                         "x='(iw-ow)/2*(1+sin(t*23)*cos(t*7.3))':"
+                         "y='(ih-oh)/2*(1+sin(t*17.7+1)*cos(t*5.1))'")
+                     .arg(num(1 + 2 * a));
+        } else if (c.fx == "glitch" && fxk > 0) {
+            // Colour channels jump apart in short, irregular bursts (the same each render).
+            const auto name = QString("rgbashift@glitch%1").arg(serial++);
+            QStringList commands;
+            const double step = 0.1;
+            const auto seed = qHash(c.id);
+            for (int i = 0; i * step < secs(c.duration); ++i) {
+                const auto h = qHash(i, seed);
+                if (h % 100 >= quint32(15 + 35 * fxk))
+                    continue;
+                const int shift = int(4 + h % 17 * fxk * 1.5) * ((h >> 8) % 2 ? 1 : -1);
+                const double t0 = secs(base) + i * step, t1 = t0 + step * (1 + (h >> 4) % 2);
+                commands << QString("%1-%2 [enter] %3 rh %4, [enter] %3 bh %5, [leave] %3 rh 0, "
+                                    "[leave] %3 bh 0")
+                                .arg(num(t0), num(t1), name)
+                                .arg(shift)
+                                .arg(-shift);
+            }
+            if (!commands.isEmpty())
+                f += QString(",sendcmd=c='%1',%2").arg(commands.join(";"), name);
+        } else if (c.fx == "vhs" && fxk > 0) {
+            const int shift = qRound(1 + 4 * fxk);
+            f += QString(",rgbashift=rh=%1:bh=%2,gblur=sigma=%3,hue=s=%4,format=yuva444p,"
+                         "noise=c0s=%5:c0f=t,format=rgba,"
+                         "drawgrid=w=iw:h=3:t=1:c=black@%6")
+                     .arg(shift)
+                     .arg(-shift)
+                     .arg(num(0.3 + 0.8 * fxk), num(1 - 0.3 * fxk), num(4 + 14 * fxk),
+                          num(0.08 + 0.2 * fxk));
+        } else if (c.fx == "film" && fxk > 0) {
+            // Sepia tone mixed in by strength, a light flicker and grain.
+            auto mix = [&](double sepia, double identity) { return num(fxk * sepia + (1 - fxk) * identity); };
+            f += QString(",colorchannelmixer=rr=%1:rg=%2:rb=%3:gr=%4:gg=%5:gb=%6:br=%7:bg=%8:bb=%9")
+                     .arg(mix(.393, 1), mix(.769, 0), mix(.189, 0), mix(.349, 0), mix(.686, 1),
+                          mix(.168, 0), mix(.272, 0), mix(.534, 0), mix(.131, 1));
+            f += QString(",hue=b='%1*sin(t*41)',format=yuva444p,noise=c0s=%2:c0f=t,format=rgba")
+                     .arg(num(0.06 * fxk), num(6 + 16 * fxk));
+        }
         const auto matte = c.aiCutout && !n.image && n.asset ? o.mattes.value(n.asset->id)
                                                              : MatteSource{};
         if (!matte.path.isEmpty()) {
@@ -1062,6 +1117,14 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             a += QString(",acompressor=threshold=%1:ratio=%2:attack=10:release=200:makeup=%3")
                      .arg(num(std::pow(10, (-12 - 18 * c.compressor) / 20)), num(2 + 6 * c.compressor),
                           num(std::pow(10, 9 * c.compressor / 20)));
+        if (c.reverb > 0)
+            // A small room: several short reflections that die away.
+            a += QString(",aecho=in_gain=1:out_gain=%1:delays=31|47|71|113:decays=%2|%3|%4|%5")
+                     .arg(num(1 - 0.15 * c.reverb), num(0.5 * c.reverb), num(0.42 * c.reverb),
+                          num(0.33 * c.reverb), num(0.25 * c.reverb));
+        if (c.echo > 0)
+            a += QString(",aecho=in_gain=1:out_gain=%1:delays=320|640:decays=%2|%3")
+                     .arg(num(1 - 0.2 * c.echo), num(0.5 * c.echo), num(0.25 * c.echo));
         if (c.fadeIn > 0)
             a += ",afade=t=in:st=" + num(k) + ":d=" + num(std::min(c.fadeIn, d));
         if (c.fadeOut > 0) {
