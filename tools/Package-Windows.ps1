@@ -53,7 +53,9 @@ Plugins=.
 QmlImports=qml' -replace '\\n',"`n" | Set-Content "$OutputDir/qt.conf" -Encoding utf8
 $commit = git -C $root rev-parse HEAD
 @{ application='Cutlery'; version='0.5.0'; commit=$commit; qt='6.8.3'; target='Windows x64'; mode='portable'; built_utc=(Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json | Set-Content "$OutputDir/build-manifest.json" -Encoding utf8
-Get-ChildItem $OutputDir -File -Recurse | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(),$_.FullName.Substring($OutputDir.Length+1) } | Set-Content "$OutputDir/SHA256SUMS.txt" -Encoding utf8
+# The listing is complete before SHA256SUMS.txt is written; an older one (from an earlier
+# packaging into the same folder) is not listed.
+@(Get-ChildItem $OutputDir -File -Recurse | Where-Object { $_.Name -ne 'SHA256SUMS.txt' }) | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(),$_.FullName.Substring($OutputDir.Length+1) } | Set-Content "$OutputDir/SHA256SUMS.txt" -Encoding utf8
 if ($Models) {
     # Separate download: models are large and optional. Unpack next to Cutlery.exe.
     New-Item -ItemType Directory -Force "$AiPackDir/models","$AiPackDir/licenses" | Out-Null
@@ -65,6 +67,6 @@ if ($Models) {
     Copy-Item "$root/licenses/Apache-2.0.txt" "$AiPackDir/licenses/U-2-Net-Apache-2.0.txt"
     Copy-Item "$root/licenses/Real-ESRGAN-BSD-3-Clause.txt","$root/licenses/Whisper-MIT.txt","$root/licenses/Silero-VAD-MIT.txt" "$AiPackDir/licenses"
     Copy-Item "$root/docs/AI.md" "$AiPackDir/README-AI.md"
-    Get-ChildItem $AiPackDir -File -Recurse | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(),$_.FullName.Substring((Resolve-Path $AiPackDir).Path.Length+1) } | Set-Content "$AiPackDir/SHA256SUMS.txt" -Encoding utf8
+    @(Get-ChildItem $AiPackDir -File -Recurse | Where-Object { $_.Name -ne 'SHA256SUMS.txt' }) | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(),$_.FullName.Substring((Resolve-Path $AiPackDir).Path.Length+1) } | Set-Content "$AiPackDir/SHA256SUMS.txt" -Encoding utf8
 }
 Write-Output $OutputDir
