@@ -5,6 +5,11 @@ on:
     paths-ignore: [docs/VALIDATION.md]
   pull_request:
   workflow_dispatch:
+    inputs:
+      upload:
+        description: Upload the portable build and AI pack (about 870 MB; counts against the Actions storage quota)
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -19,6 +24,11 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check the local build script parses
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/tools/Build-Local.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors; throw 'tools/Build-Local.ps1 has syntax errors' }
       - name: Install Qt 6.8.3
         run: |
           python -m pip install aqtinstall==3.3.0
@@ -149,21 +159,29 @@ jobs:
           & "$dist/whisper-cli.exe" -np -m tests/fixtures/whisper-for-tests-tiny.bin -f build/tone.wav
           if ($LASTEXITCODE -ne 0) { throw 'Deployed whisper-cli failed' }
           foreach ($dll in 'ggml-vulkan.dll', 'ggml-cpu-x64.dll', 'ggml-cpu-haswell.dll', 'vcomp140.dll') { if (!(Test-Path "$dist/$dll")) { throw "$dll missing from the package" } }
+      # The one-command local build (README/BUILDING) must keep working; the downloads and the
+      # build folder from the steps above are reused, so this mostly checks the script itself.
+      - name: Check the local build script
+        run: ./tools/Build-Local.ps1 -SkipTests -QtRoot $env:QT_ROOT_DIR
+      # Builds are uploaded only from a manual run with "upload" ticked: each one stores about
+      # 870 MB, more than the free Actions storage. Build locally with tools/Build-Local.ps1.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.event_name == 'workflow_dispatch' && inputs.upload
         with:
           name: Cutlery-0.5.0-win64-portable
           path: dist/Cutlery-0.5.0-win64-portable/
           if-no-files-found: error
-          # Each run stores about 870 MB; short retention keeps the repository's artifact quota.
-          retention-days: 14
+          retention-days: 3
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.event_name == 'workflow_dispatch' && inputs.upload
         with:
           name: Cutlery-0.5.0-AI-pack
           path: dist/Cutlery-0.5.0-AI-pack/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 3
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
           name: Windows-test-logs
           path: build/Testing/Temporary/
+          retention-days: 3
