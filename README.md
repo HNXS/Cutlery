@@ -76,6 +76,8 @@ Only finite local media files are supported. Source audio/video remain together 
 
 The current development build saves schema 11 (colour and look settings, LUTs); 0.5 cannot open it, and 0.4 and older cannot open schema 10. It reads all earlier schemas. Use **Save As** to preserve an older project copy.
 
+To build it yourself on Windows, run `./tools/Build-Local.ps1` (see [BUILDING](docs/BUILDING.md)).
+
 See the [release notes](docs/RELEASE_NOTES.md), [what remains](docs/ROADMAP.md), [drag/drop and magnetic tracks](docs/TIMELINE.md), [BUILDING](docs/BUILDING.md), [PORTABLE](docs/PORTABLE.md), [architecture](docs/ARCHITECTURE.md), [feature status](docs/FEATURE_STATUS.md), [offline AI](docs/AI.md), [the original blueprint](docs/BLUEPRINT.md), and [third-party notices](docs/THIRD_PARTY.md).
 
 ## Development

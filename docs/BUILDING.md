@@ -2,7 +2,49 @@
 
 ## Windows (supported distribution target)
 
-Use Visual Studio 2022 Desktop development with C++, CMake 3.24+, Python and Qt **6.8.3 msvc2022_64**, including Qt Multimedia. The CI workflow downloads that SDK with aqtinstall 3.3.0. No Qt account is required for those public SDK archives.
+### One command
+
+Install:
+
+- **Visual Studio 2022** (Community or Build Tools) with the workload "Desktop development with C++". This includes CMake.
+- **Python 3.9–3.12** from python.org, with "Add python.exe to PATH" ticked.
+- **Git for Windows.**
+
+Allow about 20 GB of disk space. Then, in PowerShell:
+
+```powershell
+git clone https://github.com/HNXS/Cutlery.git
+cd Cutlery
+./tools/Build-Local.ps1
+```
+
+If PowerShell refuses to run scripts, start it with `powershell -ExecutionPolicy Bypass -File tools/Build-Local.ps1`.
+
+The script does what CI does. It downloads the pinned dependencies into `.deps/` and checks each one's hash:
+
+- Qt 6.8.3 (via aqtinstall, no Qt account needed);
+- the LGPL FFmpeg build;
+- the recorded sound effects;
+- ONNX Runtime;
+- the AI models, converted in a private Python environment in `.deps/venv`;
+- whisper.cpp, compiled once (it needs the Vulkan SDK, which the script fetches).
+
+It then compiles, runs the tests and packages:
+
+- `dist/Cutlery-0.5.0-win64-portable` is the application. Copy the whole folder, not just the EXE.
+- `dist/Cutlery-0.5.0-AI-pack` is the optional AI pack. Copy its contents next to `Cutlery.exe`.
+
+The first run takes 30–60 minutes, mostly downloads and the one-time whisper.cpp build. Later runs reuse `.deps` and `build`, so they take a few minutes. Delete `.deps` to fetch everything again.
+
+Options:
+
+- `-SkipAi` builds without the AI worker, models and speech recognition. This is much faster, and the result is just the portable build.
+- `-SkipTests` packages without running the tests.
+- `-QtRoot <path>` uses a Qt 6.8.3 msvc2022_64 installation you already have.
+
+### By hand
+
+These are the same steps the script runs, for a build without the AI pack:
 
 ```powershell
 python -m pip install aqtinstall==3.3.0
@@ -10,13 +52,18 @@ python -m aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 --outputdir C:/
 $env:PATH = "C:/Qt/6.8.3/msvc2022_64/bin;" + $env:PATH
 $ff = ./tools/Get-FFmpeg.ps1
 $env:PATH = "$ff;" + $env:PATH
+$sounds = ./tools/Get-Sounds.ps1
 cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64
-cmake --build build --config Release --parallel 2
+cmake --build build --config Release --parallel
 ctest --test-dir build -C Release --output-on-failure
-./tools/Package-Windows.ps1 -QtRoot C:/Qt/6.8.3/msvc2022_64 -FFmpegBin $ff
+./tools/Package-Windows.ps1 -QtRoot C:/Qt/6.8.3/msvc2022_64 -FFmpegBin $ff -Sounds $sounds
 ```
 
-The package goes to `dist/Cutlery-0.5.0-win64-portable`. Copy the entire directory. Do not copy only the EXE. The GitHub Actions workflow repeats the build, tests, QML startup, deployment and a deployed-executable startup check without SDK paths.
+For the AI pack, see the order in `tools/Build-Local.ps1`: `Get-OnnxRuntime.ps1`, `Get-Models.ps1`, `Get-VulkanSdk.ps1` and `Get-Whisper.ps1`, plus the matching CMake and packaging options.
+
+### CI
+
+The GitHub Actions workflow repeats the build, tests, QML startup, deployment and a deployed-executable startup check without SDK paths. It also runs `Build-Local.ps1`. It uploads the packages only from a manual run with "upload" ticked: each run is about 870 MB, more than the free Actions storage of a private repository.
 
 ## Linux (development verification only)
 
