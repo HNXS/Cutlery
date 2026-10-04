@@ -4,14 +4,14 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 
 | ID | Feature | Alpha status | Current boundary |
 |---|---|---|---|
-| F001 | Create, open, recent projects and settings | Partial | Create/open/save and presets; no recent list. |
+| F001 | Create, open, recent projects and settings | Partial | Create/open/save and presets; Project → Open recent lists the last 10 projects opened or saved (kept in the data folder; missing ones are marked and dropped when chosen). No start screen or global settings dialog. |
 | F002 | Media bin, folders, collections and search | Partial | Flat media bin; no folders/search. |
 | F003 | Drag/drop and background media analysis | Partial | Library-to-track and local file drops, async probing and waveform analysis, partial-error reporting; no directory recursion or cancellable import queue. |
 | F004 | Nondestructive media references | Implemented (alpha) | Relative project references; originals never edited. |
 | F005 | Missing-media relink and replace | Partial | Validated source relinking; no batch relink. |
 | F006 | Collect Project and portable media bundle | Implemented (alpha) | Project → "Collect project and media…" copies every media file, LUT and font added in Cutlery that the project uses into an empty folder (media/, luts/, fonts/ with clashing names numbered) and saves <folder>.cutlery there with relative paths, in the background with progress. Opening a project loads the fonts beside it. Refuses projects with missing media; no trimming of unused source ranges. |
 | F007 | Project schema migrations | Implemented (alpha) | Reads schema 1/2 without moving clips; writes schema 3 with stable track IDs and snapping/magnetic modes. Older versions cannot read new saves. |
-| F008 | Atomic save, autosave and rolling backup | Partial | Atomic save and one recovery file; no rolling backups. |
+| F008 | Atomic save, autosave and rolling backup | Implemented (alpha) | Atomic save and one recovery file; each save keeps the previous project file as a version in the data folder (the newest 20 per project), and Project → Restore an earlier version… puts one back after keeping the current file as a version too. Backups are whole project files; media is not copied. |
 | F009 | Undo/redo and deep edit history | Partial | 60 whole-project snapshots; no deep history persistence. |
 | F010 | Crash and corrupted-cache recovery | Partial | Recovery snapshot only. |
 | F011 | Multiple open projects and project versions | Planned | Not implemented in this alpha. |
@@ -38,7 +38,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F032 | JKL shuttle and reverse audition | Partial | L plays forward and doubles to 2× and 4× on each press (FFmpeg real-time pacing at that speed, sound sped up with atempo, frames mapped by the faster clock); J scrubs backward at 1×, 2× and 4× (ten preview steps a second, stopping at the start); K pauses both; the transport shows the speed. Backward is a stepping preview without sound, not reverse playback. |
 | F033 | Constant speed 0.1x to 100x | Partial | 0.25–4x only, preserves pitch via atempo. |
 | F034 | Speed ramps and curve editor | Planned | Not implemented in this alpha. |
-| F035 | Reverse and freeze frames | Partial | Reverse only. |
+| F035 | Reverse and freeze frames | Partial | Reverse, and "Freeze frame here": the picture at the playhead becomes a still of 2 s with the clip's size, position and look; the clip and its detached audio are split there and the rest moves later. One undo step. No freeze of the whole composited frame or of reversed clips; the hold length is fixed in the button (any length via the API). |
 | F036 | Property keyframes and graph editor | Partial | Keyframes for scale, position, rotation, opacity and volume, with smooth (ease in/out) interpolation. Set at the playhead in the inspector, shown as timeline markers, kept attached through trim, split and speed changes. No graph editor or per-key easing choice in the UI. |
 | F037 | Frame-rate changes and mixed-rate sequences | Planned | Not implemented in this alpha. |
 | F038 | Scale, position, rotate, anchor and opacity | Partial | Scale/position/rotation/opacity; fixed center anchor. |
@@ -58,13 +58,13 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F052 | Frame blending slow motion | Implemented (alpha) | For clips slower than 1×: "Blend frames" (FFmpeg framerate, cross-fading neighbouring source frames, without blending across scene cuts) or "Optical flow" (minterpolate motion-compensated interpolation, slow to render); a little source around the range is decoded so preview frames match export. Not for reversed clips. |
 | F053 | Camera-like and pseudo-3D effects | Planned | Not implemented in this alpha. |
 | F054 | Dissolve, fade and dip to color | Implemented (alpha) | Two-clip dissolve and dip to black/white centred on a cut, with equal-power audio crossfades; clip fades as before. |
-| F055 | Wipe, slide, push and directional transitions | Partial | Wipe left/right, slide left/right/up/down, smooth left. No push. |
-| F056 | Zoom, spin, stretch and geometric transitions | Partial | Zoom in, circle open and radial. No spin or stretch. |
-| F057 | Blur, glitch and light transitions | Partial | Pixelize only. |
+| F055 | Wipe, slide, push and directional transitions | Implemented (alpha) | Wipe left/right/up/down, slide left/right/up/down, smooth left/right, push in from each side (cover) and reveal left/right (FFmpeg xfade). |
+| F056 | Zoom, spin, stretch and geometric transitions | Partial | Zoom in, circle open/close, radial and squeeze. No spin. |
+| F057 | Blur, glitch and light transitions | Partial | Pixelize, blur, fade through grey, pixel dissolve, wind, and dips to black or white. No glitch or light-leak transitions. |
 | F058 | Transition duration and curve editing | Partial | Duration 0.1–3 s in the inspector, limited by both clips. No easing curves. |
 | F059 | Audio extraction and linked source streams | Partial | Detach audio reuses source media on an independent track; no extraction to a standalone audio file or resync. |
 | F060 | Waveform generation and peak pyramids | Partial | Async bounded mono waveform overview cached by file fingerprint; follows trim/speed/reverse. No multilevel pyramid. |
-| F061 | Volume, gain, pan, mute and fades | Partial | Volume/mute/fades, no pan. |
+| F061 | Volume, gain, pan, mute and fades | Implemented (alpha) | Volume (keyframable), mute, fades, and pan per clip (balance −1 left to +1 right in the sound tools: the far side gets quieter). No pan keyframes. |
 | F062 | Multitrack mixing and channel layouts | Partial | 48 kHz stereo only. |
 | F063 | 5.1 and configurable audio routing | Planned | Not implemented in this alpha. |
 | F064 | Voice-over and audio recording | Partial | "● Voice-over" in the transport row records the default microphone to WAV (Qt Multimedia) in the data folder's recordings/ while the timeline plays from the playhead; stopping adds the recording at that frame on the lowest free non-magnetic track (or a new one). No input-device choice, level display during recording, count-in or punch-in; checked on CI only for the no-microphone path. |

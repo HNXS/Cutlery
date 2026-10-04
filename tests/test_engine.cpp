@@ -481,6 +481,60 @@ class EngineTest : public QObject {
         QCOMPARE(editor.project().clips.back().start, cut - qRound64(0.165 * 30));
         qunsetenv("CUTLERY_SOUNDS_DIR");
     }
+    void recentProjectsAndBackups() {
+        QTemporaryDir dir;
+        const auto path = dir.filePath("talk.cutlery");
+        {
+            FrameProvider frames;
+            Editor e(&frames);
+            e.addTitle();
+            QVERIFY(e.save(QUrl::fromLocalFile(path)));
+            // The first save has nothing to keep.
+            QVERIFY(e.backups().isEmpty());
+            e.addTitle();
+            QVERIFY(e.save());
+            e.addTitle();
+            QVERIFY(e.save());
+            const auto versions = e.backups();
+            QCOMPARE(versions.size(), 2);
+            // Newest first: the version with two titles, then the one with one.
+            const auto older = versions[1].toMap()["file"].toString();
+            QCOMPARE(loadProject(older).clips.size(), size_t(1));
+            QCOMPARE(loadProject(versions[0].toMap()["file"].toString()).clips.size(), size_t(2));
+            const auto recent = e.state()["recent"].toList();
+            QVERIFY(!recent.isEmpty());
+            QCOMPARE(recent[0].toMap()["path"].toString(), QFileInfo(path).absoluteFilePath());
+            QCOMPARE(recent[0].toMap()["name"].toString(), QString("talk"));
+            // Restoring puts the old version back and keeps the current one as a version.
+            QVERIFY(e.restoreBackup(older));
+            QCOMPARE(e.project().clips.size(), size_t(1));
+            QCOMPARE(loadProject(path).clips.size(), size_t(1));
+            QCOMPARE(e.backups().size(), 3);
+            QCOMPARE(loadProject(e.backups()[0].toMap()["file"].toString()).clips.size(), size_t(3));
+            // Only this project's backups can be restored.
+            QVERIFY(!e.restoreBackup(path));
+            QVERIFY(e.state()["error"].toString().contains("not a backup"));
+            e.clearError();
+            // At most 20 versions are kept.
+            for (int i = 0; i < 22; ++i) {
+                e.addTitle();
+                QVERIFY(e.save());
+            }
+            QCOMPARE(e.backups().size(), 20);
+        }
+        {
+            // The list survives a restart; a missing project is reported and dropped.
+            FrameProvider frames;
+            Editor e(&frames);
+            QCOMPARE(e.state()["recent"].toList()[0].toMap()["path"].toString(), QFileInfo(path).absoluteFilePath());
+            QVERIFY(e.openRecent(QFileInfo(path).absoluteFilePath()));
+            QVERIFY(QFile::rename(path, path + ".moved"));
+            QVERIFY(!e.openRecent(QFileInfo(path).absoluteFilePath()));
+            QVERIFY(e.state()["error"].toString().contains("no longer there"));
+            for (const auto &r : e.state()["recent"].toList())
+                QVERIFY(r.toMap()["path"].toString() != QFileInfo(path).absoluteFilePath());
+        }
+    }
     void remoteReferencesRejected() {
         QTemporaryDir dir;
         const auto path = dir.filePath("remote.m3u8");
