@@ -1,5 +1,16 @@
 # Validation record
 
+## Windows portable build — 2026-10-04, one-command local build (0.6 development)
+
+[GitHub Actions run 37190925371](https://github.com/HNXS/Cutlery/actions/runs/37190925371) on commit `690d17be44ce8379f44781d69e1fc0ac83289b89` passed every step, and uploaded nothing because uploads are now opt-in.
+
+What passed:
+
+- The usual build, tests, model and speech checks, packaging and the deployed smoke test.
+- **`tools/Build-Local.ps1 -SkipTests`**, run after those steps. It reused the downloads and build folder, created its own Python environment for the model conversion, compiled, packaged again into the existing `dist` folder (which needed the `SHA256SUMS.txt` fix in `Package-Windows.ps1`) and started the packaged application.
+
+Not verified: a first run on a clean PC, which includes the full Qt download, the first compilation of whisper.cpp with the Vulkan SDK, and the tests through the script.
+
 ## Windows portable build — 2026-10-02, sound effects library (0.6 development)
 
 [GitHub Actions run 37077970890](https://github.com/HNXS/Cutlery/actions/runs/37077970890) on commit `a9f20b637f5f7a885b2dba0b90d25b7a7a8fff48`: every build, test and check step passed. The artifact uploads failed: the older builds had been deleted, but GitHub recalculates the storage quota only every 6–12 hours.
