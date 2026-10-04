@@ -41,7 +41,7 @@ ApplicationWindow {
     property var libraryGesture: null
     property bool textEditing: activeFocusItem && typeof activeFocusItem.cursorPosition === "number"
     property bool showScopes: false
-    property bool shortcutsBlocked: openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
+    property bool shortcutsBlocked: openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
         enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
@@ -178,6 +178,10 @@ ApplicationWindow {
             openDialog.open();
         else if (action === "recover")
             editor.recover();
+        else if (action.startsWith("recent:"))
+            editor.openRecent(action.substring(7));
+        else if (action.startsWith("restore:"))
+            editor.restoreBackup(action.substring(8));
         else if (action === "close") {
             allowClose = true;
             win.close();
@@ -300,6 +304,25 @@ ApplicationWindow {
                 text: "Open…"
                 onTriggered: win.guarded("open")
             }
+            Menu {
+                id: recentMenu
+                objectName: "recentMenu"
+                title: "Open recent"
+                enabled: (win.s.recent || []).length > 0
+                Instantiator {
+                    model: win.s.recent || []
+                    delegate: MenuItem {
+                        required property var modelData
+                        text: modelData.name + (modelData.exists ? "" : " (missing)")
+                        enabled: modelData.exists
+                        onTriggered: win.guarded("recent:" + modelData.path)
+                        ToolTip.visible: hovered
+                        ToolTip.text: modelData.path
+                    }
+                    onObjectAdded: (index, object) => recentMenu.insertItem(index, object)
+                    onObjectRemoved: (index, object) => recentMenu.removeItem(object)
+                }
+            }
             MenuItem {
                 text: "Save"
                 onTriggered: win.saveProject()
@@ -322,6 +345,12 @@ ApplicationWindow {
             MenuItem {
                 text: "Project settings…"
                 onTriggered: settings.open()
+            }
+            MenuItem {
+                objectName: "restoreVersion"
+                text: "Restore an earlier version…"
+                enabled: win.s.path.length > 0
+                onTriggered: backupDialog.open()
             }
             MenuItem {
                 text: "Recover autosave"
@@ -1936,6 +1965,16 @@ ApplicationWindow {
                                 }
                             }
                             Action {
+                                objectName: "freezeFrame"
+                                Layout.fillWidth: true
+                                visible: win.selection.video === true && win.selection.reverse !== true
+                                enabled: win.selection.locked !== true && win.selection.playheadInside === true
+                                text: "Freeze frame here (2 s)"
+                                onClicked: editor.freezeFrame(2)
+                                ToolTip.visible: hovered
+                                ToolTip.text: win.selection.playheadInside ? "Holds the picture at the playhead for 2 seconds; the rest of the clip continues afterwards" : "Move the playhead into the clip first"
+                            }
+                            Action {
                                 objectName: "splitScenes"
                                 Layout.fillWidth: true
                                 visible: win.selection.video === true && win.selection.reverse !== true
@@ -2173,7 +2212,8 @@ ApplicationWindow {
                                         { key: "deess", name: "De-esser", lo: 0, hi: 1, step: .01, tip: "Softens sharp S sounds" },
                                         { key: "compressor", name: "Compressor", lo: 0, hi: 1, step: .01, tip: "Evens out loud and quiet parts" },
                                         { key: "reverb", name: "Reverb", lo: 0, hi: 1, step: .01, tip: "The sound of a room" },
-                                        { key: "echo", name: "Echo", lo: 0, hi: 1, step: .01, tip: "Repeats a third of a second apart" }
+                                        { key: "echo", name: "Echo", lo: 0, hi: 1, step: .01, tip: "Repeats a third of a second apart" },
+                                        { key: "pan", name: "Pan (L–R)", lo: -1, hi: 1, step: .05, tip: "Moves the sound to the left (−) or right (+)" }
                                     ]
                                     RowLayout {
                                         id: soundRow
@@ -2653,6 +2693,63 @@ ApplicationWindow {
         onAccepted: editor.exportSrt(selectedFile)
     }
     // Remove pauses: silence detection on the selected clip's sound, then one ripple edit.
+    // Earlier saved versions of the open project, newest first.
+    Dialog {
+        id: backupDialog
+        objectName: "backupDialog"
+        anchors.centerIn: parent
+        title: "Restore an earlier version"
+        modal: true
+        width: 420
+        property var list: []
+        onOpened: {
+            list = editor.backups();
+            backupList.currentIndex = list.length > 0 ? 0 : -1;
+        }
+        footer: DialogButtonBox {
+            Button {
+                objectName: "restoreBackup"
+                text: "Restore"
+                enabled: backupList.currentIndex >= 0
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+                onClicked: {
+                    const file = backupDialog.list[backupList.currentIndex].file;
+                    backupDialog.close();
+                    win.guarded("restore:" + file);
+                }
+            }
+            Button {
+                text: "Close"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                onClicked: backupDialog.close()
+            }
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: win.muted
+                text: backupDialog.list.length > 0 ? "Each save keeps the version before it (the last 20). Restoring keeps the current file as a version too." : "No earlier versions yet: they appear after the project is saved again."
+            }
+            ListView {
+                id: backupList
+                objectName: "backupList"
+                Layout.fillWidth: true
+                implicitHeight: 240
+                clip: true
+                model: backupDialog.list
+                delegate: ItemDelegate {
+                    required property var modelData
+                    required property int index
+                    width: backupList.width
+                    highlighted: ListView.isCurrentItem
+                    text: modelData.time + "   ·   " + Math.max(1, Math.round(modelData.bytes / 1024)) + " KB"
+                    onClicked: backupList.currentIndex = index
+                }
+            }
+        }
+    }
     // The sound effects library: listen, add at the playhead, or a swoosh on every transition.
     Dialog {
         id: soundDialog

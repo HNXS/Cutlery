@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <cmath>
 #include <QDateTime>
+#include <QTimeZone>
 #include <QDir>
 #include <QFontDatabase>
 #include <QThread>
@@ -15,7 +16,9 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QCryptographicHash>
 #include <QRegularExpression>
+#include <QSet>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -53,6 +56,13 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
                  ? app + "/data"
                  : QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     m_recovery = m_data + "/recovery.cutlery";
+    {
+        QFile recent(m_data + "/recent.json");
+        if (recent.open(QIODevice::ReadOnly) && recent.size() < 1024 * 1024)
+            for (const auto &v : QJsonDocument::fromJson(recent.readAll()).array())
+                if (v.isString() && m_recent.size() < 10)
+                    m_recent << v.toString();
+    }
     m_analysis = new MediaAnalysis(m_data + "/cache/waveforms", executable("ffmpeg"), this);
     m_thumbnails = new Thumbnails(m_data + "/cache/thumbnails", executable("ffmpeg"), this);
     m_encoders = new EncoderResolver(executable("ffmpeg"), this);
@@ -445,6 +455,7 @@ QVariantMap Editor::state() const {
             PROP(stabilize);
             PROP(reverb);
             PROP(echo);
+            PROP(pan);
             PROP(slowMotion);
             PROP(fontFamily);
             PROP(graphic);
@@ -553,6 +564,14 @@ QVariantMap Editor::state() const {
             {"canUndo", !m_undo.empty()},
             {"canRedo", !m_redo.empty()},
             {"hasRecovery", m_hasRecovery},
+            {"recent", [this] {
+                 QVariantList list;
+                 for (const auto &path : m_recent)
+                     list << QVariantMap{{"path", path},
+                                         {"name", QFileInfo(path).completeBaseName()},
+                                         {"exists", QFileInfo::exists(path)}};
+                 return list;
+             }()},
             {"dataPath", m_data},
             {"revision", m_revision}};
 }
@@ -648,6 +667,8 @@ bool Editor::openProject(const QUrl &url) {
         stopPlayback();
         m_previewUrl.clear();
         m_status = "Opened " + QFileInfo(path).fileName();
+        if (QFileInfo(path).absoluteFilePath() != QFileInfo(m_recovery).absoluteFilePath())
+            remember(path);
         // A collected project carries the fonts it uses.
         loadFonts(QFileInfo(path).dir().filePath("fonts"));
         m_previewTimer.start();
@@ -668,7 +689,10 @@ bool Editor::save(const QUrl &url) {
             throw std::runtime_error("Choose a project filename");
         auto p = m_project;
         p.name = QFileInfo(path).completeBaseName();
+        if (QFileInfo::exists(path))
+            backUp(path);
         saveProject(p, path);
+        remember(path);
         m_project = std::move(p);
         m_path = path;
         m_dirty = false;
@@ -676,6 +700,97 @@ bool Editor::save(const QUrl &url) {
         m_saveTimer.stop();
         QFile::remove(m_recovery);
         m_hasRecovery = false;
+        emit changed();
+        return true;
+    } catch (const std::exception &e) {
+        fail(QString::fromUtf8(e.what()));
+        return false;
+    }
+}
+void Editor::remember(const QString &path) {
+    const auto file = QFileInfo(path).absoluteFilePath();
+    m_recent.removeAll(file);
+    m_recent.prepend(file);
+    while (m_recent.size() > 10)
+        m_recent.removeLast();
+    saveRecent();
+}
+void Editor::saveRecent() {
+    QSaveFile f(m_data + "/recent.json");
+    const auto data = QJsonDocument(QJsonArray::fromStringList(m_recent)).toJson();
+    if (f.open(QIODevice::WriteOnly) && f.write(data) == data.size())
+        f.commit();
+}
+bool Editor::openRecent(const QString &path) {
+    if (!QFileInfo::exists(path)) {
+        m_recent.removeAll(path);
+        saveRecent();
+        fail("The project is no longer there: " + path);
+        return false;
+    }
+    return openProject(QUrl::fromLocalFile(path));
+}
+QString Editor::backupFolder(const QString &projectPath) const {
+    const auto key = QCryptographicHash::hash(QFileInfo(projectPath).absoluteFilePath().toUtf8(),
+                                              QCryptographicHash::Sha1)
+                         .toHex()
+                         .left(16);
+    return m_data + "/backups/" + QString::fromLatin1(key);
+}
+void Editor::backUp(const QString &projectPath) {
+    // A failed backup never stops the save itself.
+    const auto folder = backupFolder(projectPath);
+    if (!QDir().mkpath(folder))
+        return;
+    QFile name(folder + "/project.txt");
+    if (name.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        name.write(QFileInfo(projectPath).absoluteFilePath().toUtf8());
+    const auto stamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz");
+    auto target = folder + "/" + stamp + ".cutlery";
+    for (int i = 1; QFileInfo::exists(target); ++i)
+        target = folder + "/" + stamp + "-" + QString::number(i) + ".cutlery";
+    QFile::copy(projectPath, target);
+    auto files = QDir(folder).entryList({"*.cutlery"}, QDir::Files, QDir::Name);
+    while (files.size() > 20)
+        QFile::remove(folder + "/" + files.takeFirst());
+}
+QVariantList Editor::backups() const {
+    QVariantList list;
+    if (m_path.isEmpty())
+        return list;
+    const auto folder = backupFolder(m_path);
+    const auto files = QDir(folder).entryList({"*.cutlery"}, QDir::Files, QDir::Name | QDir::Reversed);
+    for (const auto &f : files) {
+        const auto time = QDateTime::fromString(f.left(19), "yyyyMMdd-HHmmss-zzz");
+        auto utc = time;
+        utc.setTimeZone(QTimeZone::utc());
+        list << QVariantMap{{"file", folder + "/" + f},
+                            {"time", utc.toLocalTime().toString("yyyy-MM-dd HH:mm:ss")},
+                            {"bytes", QFileInfo(folder + "/" + f).size()}};
+    }
+    return list;
+}
+bool Editor::restoreBackup(const QString &file) {
+    try {
+        if (m_path.isEmpty())
+            throw std::runtime_error("Open the project first");
+        const auto folder = QFileInfo(backupFolder(m_path)).absoluteFilePath();
+        if (QFileInfo(file).absolutePath() != folder || !QFileInfo::exists(file))
+            throw std::runtime_error("That is not a backup of this project");
+        // The version is checked before anything is replaced.
+        loadProject(file);
+        const auto path = m_path;
+        if (QFileInfo::exists(path))
+            backUp(path);
+        QFile::remove(path + ".restoring");
+        if (!QFile::copy(file, path + ".restoring"))
+            throw std::runtime_error("Cannot write next to the project");
+        QFile::remove(path);
+        if (!QFile::rename(path + ".restoring", path))
+            throw std::runtime_error("Cannot replace the project file");
+        if (!openProject(QUrl::fromLocalFile(path)))
+            return false;
+        m_status = "Restored the version from " + QFileInfo(file).completeBaseName().left(15);
         emit changed();
         return true;
     } catch (const std::exception &e) {
@@ -1173,6 +1288,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(stabilize, toBool);
         FIELD(reverb, toDouble);
         FIELD(echo, toDouble);
+        FIELD(pan, toDouble);
         FIELD(slowMotion, toString);
         FIELD(bold, toBool);
         FIELD(italic, toBool);
@@ -2123,6 +2239,7 @@ void Editor::pasteAttributes(const QString &group) {
         c->deess = from.deess;
         c->reverb = from.reverb;
         c->echo = from.echo;
+        c->pan = from.pan;
         c->fadeIn = from.fadeIn;
         c->fadeOut = from.fadeOut;
         // Keyframes keep their clip-relative frames; those past the end of a shorter clip stay
@@ -2568,6 +2685,94 @@ void Editor::markBeats(int every) {
     });
     m_beatThread->start();
     emit changed();
+}
+void Editor::freezeFrame(double seconds) {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || a->kind != "video" || c->audioOnly)
+        return fail("Select a video clip to freeze a frame of it");
+    if (c->reverse)
+        return fail("Reversed clips cannot be frozen; turn off Reverse first");
+    if (m_playhead < c->start || m_playhead >= c->start + c->duration)
+        return fail("Move the playhead into the clip to freeze that frame");
+    seconds = std::clamp(seconds, 0.1, 60.);
+    const double fps = double(m_project.fpsN) / m_project.fpsD;
+    const double source =
+        c->sourceIn.seconds() + (m_playhead - c->start) / fps * c->speed.seconds();
+    QDir().mkpath(m_data + "/freeze");
+    const auto still = m_data + "/freeze/" + newId() + ".png";
+    auto *p = new QProcess(this);
+    auto complete = [this, p, still, id = c->id, revision = m_revision, frame = m_playhead,
+                     seconds, fps](bool success) {
+        p->deleteLater();
+        QImage image;
+        if (!success || !image.load(still))
+            return fail("Could not read that frame of the clip");
+        if (revision != m_revision)
+            return fail("The clip changed while the frame was read; try again");
+        const auto length = std::max<qint64>(1, qRound64(seconds * fps));
+        QString added;
+        mutate([&](Project &project) {
+            const auto *original = project.clip(id);
+            if (!original)
+                throw std::runtime_error("The clip no longer exists");
+            const auto source = *original;
+            auto linked = project.linkedClips(id);
+            QSet<int> tracks{source.track};
+            for (const auto &other : linked)
+                tracks.insert(project.clip(other)->track);
+            for (const auto track : tracks)
+                project.requireEditable(track);
+            if (frame > source.start)
+                for (const auto &clipId : QStringList{id} + linked)
+                    project.split(clipId, frame);
+            // Everything from the playhead on these tracks moves later by the length of the still.
+            for (auto &x : project.clips)
+                if (tracks.contains(x.track) && x.start >= frame)
+                    x.start += length;
+            Asset a;
+            a.id = newId();
+            a.path = still;
+            a.name = "Freeze frame";
+            a.kind = "image";
+            a.width = image.width();
+            a.height = image.height();
+            a.duration = 5;
+            project.assets.push_back(a);
+            // The still keeps the clip's framing and look, but not its motion or sound.
+            Clip f = source;
+            f.id = newId();
+            f.assetId = a.id;
+            f.name = "Freeze frame";
+            f.start = frame;
+            f.duration = length;
+            f.sourceIn = Time(0, 1);
+            f.speed = Time(1, 1);
+            f.keyframes.clear();
+            f.transition.clear();
+            f.transitionFrames = 0;
+            f.fadeIn = f.fadeOut = 0;
+            f.aiCutout = f.aiUpscale = f.eyeContact = false;
+            f.slowMotion.clear();
+            project.clips.push_back(f);
+            added = f.id;
+        });
+        if (!added.isEmpty()) {
+            select(added);
+            m_status = QString("Froze the frame for %1 s").arg(seconds, 0, 'f', 1);
+            emit changed();
+        }
+    };
+    connect(p, &QProcess::finished, this, [complete](int code, QProcess::ExitStatus status) {
+        complete(code == 0 && status == QProcess::NormalExit);
+    });
+    connect(p, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart)
+            complete(false);
+    });
+    p->start(executable("ffmpeg"),
+             {"-hide_banner", "-nostdin", "-v", "error", "-y", "-ss", QString::number(source, 'f', 6),
+              "-i", a->path, "-map", "0:v:0", "-frames:v", "1", still});
 }
 void Editor::removePauses() {
     if (m_pauses.status != "ready" || m_pauses.revision != m_revision || m_pauses.ranges.isEmpty())

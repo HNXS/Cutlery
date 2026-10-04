@@ -96,6 +96,7 @@ struct Clip {
     bool stabilize = false;
     // Room reverb and a distinct echo, 0..1.
     double reverb = 0, echo = 0;
+    double pan = 0; // -1 left .. 1 right
     // Look: 0..1, 0 off.
     double sharpen = 0, glow = 0, vignette = 0, grain = 0;
     // A 3D LUT file (.cube or .3dl) mixed in at lutStrength (0..1). Missing files are skipped.

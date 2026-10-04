@@ -22,7 +22,7 @@
     "acceptance": "Create 1080p25 and 29.97 projects, reopen with exact settings",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Partial",
-    "alphaNotes": "Create/open/save and presets; no recent list."
+    "alphaNotes": "Create/open/save and presets; Project → Open recent lists the last 10 projects opened or saved (kept in the data folder; missing ones are marked and dropped when chosen). No start screen or global settings dialog."
   },
   {
     "id": "F002",
@@ -196,8 +196,8 @@
     "status": "Planned",
     "acceptance": "Kill process at each save stage; latest valid snapshot recovers",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Atomic save and one recovery file; no rolling backups."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Atomic save and one recovery file; each save keeps the previous project file as a version in the data folder (the newest 20 per project), and Project → Restore an earlier version… puts one back after keeping the current file as a version too. Backups are whole project files; media is not copied."
   },
   {
     "id": "F009",
@@ -872,7 +872,7 @@
     "acceptance": "Freeze yields selected frame; reverse does not decode entire source into RAM",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Partial",
-    "alphaNotes": "Reverse only."
+    "alphaNotes": "Reverse, and \"Freeze frame here\": the picture at the playhead becomes a still of 2 s with the clip's size, position and look; the clip and its detached audio are split there and the rest moves later. One undo step. No freeze of the whole composited frame or of reversed clips; the hold length is fixed in the button (any length via the API)."
   },
   {
     "id": "F036",
@@ -1371,8 +1371,8 @@
     "status": "Planned",
     "acceptance": "Aspect-ratio-independent paths; copy/paste and undo work",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Wipe left/right, slide left/right/up/down, smooth left. No push."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Wipe left/right/up/down, slide left/right/up/down, smooth left/right, push in from each side (cover) and reveal left/right (FFmpeg xfade)."
   },
   {
     "id": "F056",
@@ -1397,7 +1397,7 @@
     "acceptance": "No unintended black edges at supported parameter bounds",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Partial",
-    "alphaNotes": "Zoom in, circle open and radial. No spin or stretch."
+    "alphaNotes": "Zoom in, circle open/close, radial and squeeze. No spin."
   },
   {
     "id": "F057",
@@ -1422,7 +1422,7 @@
     "acceptance": "Preview/export agree with deterministic random seed",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Partial",
-    "alphaNotes": "Pixelize only."
+    "alphaNotes": "Pixelize, blur, fade through grey, pixel dissolve, wind, and dips to black or white. No glitch or light-leak transitions."
   },
   {
     "id": "F058",
@@ -1521,8 +1521,8 @@
     "status": "Planned",
     "acceptance": "Gain and fade fixtures have expected samples and no edit clicks",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Volume/mute/fades, no pan."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Volume (keyframable), mute, fades, and pan per clip (balance −1 left to +1 right in the sound tools: the far side gets quieter). No pan keyframes."
   },
   {
     "id": "F062",

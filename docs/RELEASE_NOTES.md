@@ -4,6 +4,10 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Freeze frame:** holds the picture at the playhead for 2 seconds; the rest of the clip and its sound continue afterwards.
+- **29 transitions:** new push, reveal, blur, fade through grey, squeeze, pixel dissolve, wind and more.
+- **Pan:** move a clip's sound left or right.
+- **Open recent** and **Restore an earlier version:** every save keeps the version before it (the last 20).
 - **Sound effects:** mouse click, double click, keyboard typing and swooshes made by Cutlery, plus recorded CC0 clicks, typing and whooshes; listen, add at the playhead, or a whoosh on every transition (loudest at the cut).
 - **Effects:** camera shake, glitch, VHS and old film with a strength slider; motion blur; stabilizing for shaky hand-held footage.
 - **Reverb and echo** per clip in the sound tools.

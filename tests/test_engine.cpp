@@ -481,6 +481,60 @@ class EngineTest : public QObject {
         QCOMPARE(editor.project().clips.back().start, cut - qRound64(0.165 * 30));
         qunsetenv("CUTLERY_SOUNDS_DIR");
     }
+    void recentProjectsAndBackups() {
+        QTemporaryDir dir;
+        const auto path = dir.filePath("talk.cutlery");
+        {
+            FrameProvider frames;
+            Editor e(&frames);
+            e.addTitle();
+            QVERIFY(e.save(QUrl::fromLocalFile(path)));
+            // The first save has nothing to keep.
+            QVERIFY(e.backups().isEmpty());
+            e.addTitle();
+            QVERIFY(e.save());
+            e.addTitle();
+            QVERIFY(e.save());
+            const auto versions = e.backups();
+            QCOMPARE(versions.size(), 2);
+            // Newest first: the version with two titles, then the one with one.
+            const auto older = versions[1].toMap()["file"].toString();
+            QCOMPARE(loadProject(older).clips.size(), size_t(1));
+            QCOMPARE(loadProject(versions[0].toMap()["file"].toString()).clips.size(), size_t(2));
+            const auto recent = e.state()["recent"].toList();
+            QVERIFY(!recent.isEmpty());
+            QCOMPARE(recent[0].toMap()["path"].toString(), QFileInfo(path).absoluteFilePath());
+            QCOMPARE(recent[0].toMap()["name"].toString(), QString("talk"));
+            // Restoring puts the old version back and keeps the current one as a version.
+            QVERIFY(e.restoreBackup(older));
+            QCOMPARE(e.project().clips.size(), size_t(1));
+            QCOMPARE(loadProject(path).clips.size(), size_t(1));
+            QCOMPARE(e.backups().size(), 3);
+            QCOMPARE(loadProject(e.backups()[0].toMap()["file"].toString()).clips.size(), size_t(3));
+            // Only this project's backups can be restored.
+            QVERIFY(!e.restoreBackup(path));
+            QVERIFY(e.state()["error"].toString().contains("not a backup"));
+            e.clearError();
+            // At most 20 versions are kept.
+            for (int i = 0; i < 22; ++i) {
+                e.addTitle();
+                QVERIFY(e.save());
+            }
+            QCOMPARE(e.backups().size(), 20);
+        }
+        {
+            // The list survives a restart; a missing project is reported and dropped.
+            FrameProvider frames;
+            Editor e(&frames);
+            QCOMPARE(e.state()["recent"].toList()[0].toMap()["path"].toString(), QFileInfo(path).absoluteFilePath());
+            QVERIFY(e.openRecent(QFileInfo(path).absoluteFilePath()));
+            QVERIFY(QFile::rename(path, path + ".moved"));
+            QVERIFY(!e.openRecent(QFileInfo(path).absoluteFilePath()));
+            QVERIFY(e.state()["error"].toString().contains("no longer there"));
+            for (const auto &r : e.state()["recent"].toList())
+                QVERIFY(r.toMap()["path"].toString() != QFileInfo(path).absoluteFilePath());
+        }
+    }
     void remoteReferencesRejected() {
         QTemporaryDir dir;
         const auto path = dir.filePath("remote.m3u8");
@@ -888,6 +942,26 @@ class EngineTest : public QObject {
         const auto left = half.pixelColor(10, 45), right = half.pixelColor(150, 45);
         QVERIFY2((left.red() > 200) != (right.red() > 200),
                  qPrintable(left.name() + " " + right.name()));
+        // Every transition renders, and some frame inside it differs from both clips' colours
+        // (a zoom, for instance, shows only the outgoing clip at its middle).
+        for (const auto &[type, name] : transitionTypes()) {
+            auto t = p;
+            t.clips[1].transition = type;
+            bool mixed = false;
+            for (qint64 f : {29, 31, 33}) {
+                const auto frame = still(t, f, true);
+                QVERIFY2(!frame.isNull(), qPrintable(type));
+                int reds = 0, blues = 0;
+                for (int y = 5; y < 90; y += 10)
+                    for (int x = 5; x < 160; x += 10) {
+                        const auto c = frame.pixelColor(x, y);
+                        reds += c.red() > 200 && c.blue() < 40;
+                        blues += c.blue() > 200 && c.red() < 40;
+                    }
+                mixed = mixed || (reds < 144 && blues < 144);
+            }
+            QVERIFY2(mixed, qPrintable(type));
+        }
         // Audio: equal-power crossfade keeps level steady, and the mix length is exact.
         RenderOptions sound;
         sound.video = false;
@@ -2987,6 +3061,19 @@ class EngineTest : public QObject {
         QVERIFY2(peak(echo, 0.31, 0.36) > -20, "first repeat");
         QVERIFY2(peak(echo, 0.63, 0.68) > -25, "second repeat");
         QVERIFY(peak(echo, 0.1, 0.3) < -60);
+        // Pan: fully left silences the right channel and keeps the left one.
+        x = c;
+        x.pan = -1;
+        const auto panned = render(x, "pan");
+        const auto right = dir.filePath("right.wav"), left = dir.filePath("left.wav");
+        run(ffmpeg, {"-v", "error", "-y", "-i", panned, "-af", "pan=mono|c0=c1", right});
+        run(ffmpeg, {"-v", "error", "-y", "-i", panned, "-af", "pan=mono|c0=c0", left});
+        QVERIFY(peak(right, 0, 0.05) < -80);
+        QVERIFY(std::abs(peak(left, 0, 0.05) - peak(plain, 0, 0.05)) < 1);
+        x.pan = 0.5;
+        const auto half = render(x, "half");
+        run(ffmpeg, {"-v", "error", "-y", "-i", half, "-af", "pan=mono|c0=c0", left});
+        QVERIFY(std::abs(peak(left, 0, 0.05) - (peak(plain, 0, 0.05) - 6.02)) < 1);
     }
     void beatDetection() {
         const auto ffmpeg = Editor::executable("ffmpeg");
@@ -3067,6 +3154,64 @@ class EngineTest : public QObject {
         editor.undo();
         QVERIFY(editor.project().markers.isEmpty());
         QVERIFY(editor.state()["error"].toString().isEmpty());
+    }
+    void freezeFrame() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // 2 s whose picture brightens frame by frame (grey level = 4 x frame), with sound.
+        const auto source = dir.filePath("ramp.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=black:s=160x90:r=30:d=2,geq=lum='4*N':cb=128:cr=128",
+                     "-f", "lavfi", "-i", "sine=f=440:d=2:sample_rate=48000", "-c:v", "ffv1", "-c:a",
+                     "pcm_s16le", "-shortest", source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        auto clips = editor.project().clips;
+        QCOMPARE(clips.size(), size_t(1));
+        const auto id = clips[0].id;
+        editor.select(id);
+        editor.detachAudio();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        editor.select(id);
+        editor.setClip("scale", 0.5);
+        editor.setClip("temperature", 0.4);
+        editor.seek(20);
+        editor.freezeFrame(1);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().clips.size() == 5, 15000);
+        QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+        const auto &p = editor.project();
+        const auto *still = p.clip(editor.state()["selectedId"].toString());
+        QVERIFY(still && still->name == "Freeze frame");
+        QCOMPARE(still->start, 20);
+        QCOMPARE(still->duration, 30);
+        QCOMPARE(still->scale, 0.5);
+        QCOMPARE(still->temperature, 0.4);
+        QCOMPARE(p.asset(still->assetId)->kind, QString("image"));
+        // The picture is the one at the playhead: grey level of frame 20.
+        QImage image(p.asset(still->assetId)->path);
+        QVERIFY(std::abs(qGray(image.pixel(80, 45)) - 80) < 8);
+        // The rest of the clip and of its detached audio now starts after the still.
+        int after = 0;
+        for (const auto &c : p.clips)
+            if (c.id != still->id && c.start == 50) {
+                ++after;
+                QCOMPARE(c.duration, 40);
+                QVERIFY(std::abs(c.sourceIn.seconds() - 20 / 30.) < 1e-6);
+            }
+        QCOMPARE(after, 2);
+        QCOMPARE(p.duration(), 90);
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        // Not outside the clip.
+        editor.select(id);
+        editor.setClip("start", 30);
+        editor.seek(10);
+        editor.freezeFrame(1);
+        QVERIFY(editor.state()["error"].toString().contains("playhead"));
     }
     void sceneDetection() {
         const auto ffmpeg = Editor::executable("ffmpeg");

@@ -71,6 +71,13 @@ class Editor final : public QObject {
     Q_INVOKABLE void newProject();
     Q_INVOKABLE bool openProject(const QUrl &);
     Q_INVOKABLE bool save(const QUrl &url = QUrl());
+    // Recently opened or saved projects, newest first (state "recent": path, name, exists).
+    Q_INVOKABLE bool openRecent(const QString &path);
+    // Earlier versions of the open project: each save keeps the previous file (the newest 20)
+    // in the data folder. Entries: file, time (ISO), bytes. Restoring backs up the current file
+    // first, puts the version back at the project's path and opens it.
+    Q_INVOKABLE QVariantList backups() const;
+    Q_INVOKABLE bool restoreBackup(const QString &file);
     Q_INVOKABLE void recover();
     Q_INVOKABLE void importMedia(const QList<QUrl> &);
     Q_INVOKABLE void dropFiles(const QList<QUrl> &, int track, qint64 frame);
@@ -217,6 +224,10 @@ class Editor final : public QObject {
     // `every`-th one (1, 2 or 4), asynchronously (state "beats": status finding|done|failed,
     // count, bpm). Existing markers stay; one undo step.
     Q_INVOKABLE void markBeats(int every = 1);
+    // Freeze frame: holds the selected video clip's picture at the playhead for `seconds`. The
+    // clip (and its detached audio) is split there and the rest moves later; the still keeps the
+    // clip's size, position and look. Runs FFmpeg in the background; one undo step.
+    Q_INVOKABLE void freezeFrame(double seconds = 2);
     // Sound effects: Cutlery's own (clicks, typing, swooshes) and those of an installed pack.
     // Each entry: id, name, category, seconds, licence, source, builtIn.
     Q_INVOKABLE QVariantList sounds() const;
@@ -279,6 +290,11 @@ class Editor final : public QObject {
     const Clip *videoBelow(const Clip &c) const;
     // The track nearest `home` with room for [start, start + length), or a new one on top.
     static int freeTrack(Project &, int home, qint64 start, qint64 length);
+    QStringList m_recent;
+    void remember(const QString &path);
+    void saveRecent();
+    QString backupFolder(const QString &projectPath) const;
+    void backUp(const QString &projectPath);
     QVector<Sound> soundList() const;
     // Places the sound's clip with its start at `frame`; returns false when one is there already.
     bool placeSound(Project &, const Sound &, qint64 frame);

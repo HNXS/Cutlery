@@ -1097,6 +1097,10 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                                                  .arg(p.fpsD)));
         else
             a += ",volume=" + num(c.volume);
+        if (c.pan != 0)
+            // Balance: the far side gets quieter, the near side keeps its level.
+            a += QString(",pan=stereo|c0=%1*c0|c1=%2*c1")
+                     .arg(num(c.pan > 0 ? 1 - c.pan : 1), num(c.pan < 0 ? 1 + c.pan : 1));
         // Sound: clean-up first (low cut, noise reduction, gate), then tone, then dynamics.
         if (c.lowCut > 0)
             a += ",highpass=f=" + num(c.lowCut) + ":poles=2";
