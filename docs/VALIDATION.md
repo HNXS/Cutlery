@@ -1,5 +1,23 @@
 # Validation record
 
+## Windows portable build — 2026-10-04, freeze frame, transitions, pan, recent projects and versions (0.6 development)
+
+[GitHub Actions run 37206990048](https://github.com/HNXS/Cutlery/actions/runs/37206990048) on commit `409ced2ed4c9fb00116f87cc66ea652fd76166ad` passed every step, including the local build script; nothing was uploaded.
+
+New coverage:
+
+- **`transitions`:** all 29 transition types render, and a frame inside each one differs from both clips.
+- **`reverbAndEcho`:** pan fully left silences the right channel; half pan lowers the far side by 6 dB.
+- **`freezeFrame`:**
+  - the still shows the frame at the playhead and keeps the clip's scale and look;
+  - the rest of the clip and of its detached audio starts after the still, at the right source offset;
+  - undo removes it all.
+- **`recentProjectsAndBackups`:**
+  - versions come newest first, with the right contents;
+  - restoring keeps the current file as a version;
+  - at most 20 versions are kept, and files from other folders are refused;
+  - the recent list survives a restart, and a missing project is dropped.
+
 ## Windows portable build — 2026-10-04, one-command local build (0.6 development)
 
 [GitHub Actions run 37190925371](https://github.com/HNXS/Cutlery/actions/runs/37190925371) on commit `690d17be44ce8379f44781d69e1fc0ac83289b89` passed every step, and uploaded nothing because uploads are now opt-in.
