@@ -7,7 +7,7 @@
 Install:
 
 - **Visual Studio 2022** (Community or Build Tools) with the workload "Desktop development with C++". This includes CMake.
-- **Python 3.10–3.12** from python.org, with "Add python.exe to PATH" ticked.
+- **Python 3.9–3.12** from python.org, with "Add python.exe to PATH" ticked.
 - **Git for Windows.**
 
 Allow about 20 GB of disk space. Then, in PowerShell:

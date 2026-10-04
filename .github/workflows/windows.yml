@@ -162,7 +162,10 @@ jobs:
       # The one-command local build (README/BUILDING) must keep working; the downloads and the
       # build folder from the steps above are reused, so this mostly checks the script itself.
       - name: Check the local build script
-        run: ./tools/Build-Local.ps1 -SkipTests -QtRoot $env:QT_ROOT_DIR
+        run: |
+          python --version
+          # The error message as an annotation, since job logs are not always at hand.
+          try { ./tools/Build-Local.ps1 -SkipTests -QtRoot $env:QT_ROOT_DIR } catch { Write-Output "::error::Build-Local.ps1: $($_.Exception.Message) at $($_.InvocationInfo.PositionMessage -replace '\r?\n', ' ')"; throw }
       # Builds are uploaded only from a manual run with "upload" ticked: each one stores about
       # 870 MB, more than the free Actions storage. Build locally with tools/Build-Local.ps1.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

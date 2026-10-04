@@ -5,7 +5,7 @@
 #   ./tools/Build-Local.ps1 -SkipAi      # without the AI worker, models and speech recognition
 #   ./tools/Build-Local.ps1 -SkipTests   # package without running the tests
 #
-# Needs Visual Studio 2022 (or its Build Tools) with "Desktop development with C++", Python 3.10 to
+# Needs Visual Studio 2022 (or its Build Tools) with "Desktop development with C++", Python 3.9 to
 # 3.12 and Git. Run it from PowerShell 7 (pwsh) or Windows PowerShell. Downloads are reused on later
 # runs; delete .deps to start over.
 param(
@@ -26,8 +26,9 @@ if (!(Get-Command git -ErrorAction SilentlyContinue)) { throw 'Git is not on PAT
 $python = Get-Command python -ErrorAction SilentlyContinue
 if (!$python) { throw 'Python is not on PATH: install Python 3.12 from python.org and tick "Add to PATH".' }
 $pyVersion = [version](& python -c "import sys; print('%d.%d' % sys.version_info[:2])")
-if ($pyVersion -lt [version]'3.10' -or $pyVersion -gt [version]'3.12') {
-    throw "Python $pyVersion found; the model conversion needs Python 3.10 to 3.12."
+# TensorFlow 2.17, used for the model conversion, supports Python 3.9 to 3.12.
+if ($pyVersion -lt [version]'3.9' -or $pyVersion -gt [version]'3.12') {
+    throw "Python $pyVersion found; the model conversion needs Python 3.9 to 3.12."
 }
 # Visual Studio's own CMake is used when none is on PATH.
 $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
