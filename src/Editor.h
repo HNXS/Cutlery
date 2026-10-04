@@ -217,6 +217,10 @@ class Editor final : public QObject {
     // `every`-th one (1, 2 or 4), asynchronously (state "beats": status finding|done|failed,
     // count, bpm). Existing markers stay; one undo step.
     Q_INVOKABLE void markBeats(int every = 1);
+    // Freeze frame: holds the selected video clip's picture at the playhead for `seconds`. The
+    // clip (and its detached audio) is split there and the rest moves later; the still keeps the
+    // clip's size, position and look. Runs FFmpeg in the background; one undo step.
+    Q_INVOKABLE void freezeFrame(double seconds = 2);
     // Sound effects: Cutlery's own (clicks, typing, swooshes) and those of an installed pack.
     // Each entry: id, name, category, seconds, licence, source, builtIn.
     Q_INVOKABLE QVariantList sounds() const;

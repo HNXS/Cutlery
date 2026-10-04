@@ -41,7 +41,15 @@ const QVector<QPair<QString, QString>> &transitionTypes() {
         {"slideright", "Slide right"}, {"slideup", "Slide up"},
         {"slidedown", "Slide down"},   {"smoothleft", "Smooth left"},
         {"zoomin", "Zoom in"},         {"circleopen", "Circle open"},
-        {"radial", "Radial"},          {"pixelize", "Pixelize"}};
+        {"radial", "Radial"},          {"pixelize", "Pixelize"},
+        {"wipeup", "Wipe up"},         {"wipedown", "Wipe down"},
+        {"coverleft", "Push in from right"}, {"coverright", "Push in from left"},
+        {"coverup", "Push in from below"},   {"coverdown", "Push in from above"},
+        {"revealleft", "Reveal left"}, {"revealright", "Reveal right"},
+        {"smoothright", "Smooth right"}, {"circleclose", "Circle close"},
+        {"hblur", "Blur"},             {"fadegrays", "Fade through grey"},
+        {"squeezeh", "Squeeze"},       {"dissolve", "Pixel dissolve"},
+        {"hlwind", "Wind"}};
     return types;
 }
 const QStringList &animatableProperties() {
@@ -73,7 +81,8 @@ const QVector<QPair<QString, double Clip::*>> &lookFields() {
         {"lowCut", &Clip::lowCut},           {"compressor", &Clip::compressor},
         {"gate", &Clip::gate},               {"denoise", &Clip::denoise},
         {"deess", &Clip::deess},             {"motionBlur", &Clip::motionBlur},
-        {"reverb", &Clip::reverb},           {"echo", &Clip::echo}};
+        {"reverb", &Clip::reverb},           {"echo", &Clip::echo},
+        {"pan", &Clip::pan}};
     return fields;
 }
 } // namespace
@@ -658,7 +667,7 @@ void Project::validate() const {
                 "Invalid sound setting");
         require(QStringList{"", "shake", "glitch", "vhs", "film"}.contains(c.fx) &&
                     bounded(c.fxStrength, 0, 1) && bounded(c.motionBlur, 0, 1) &&
-                    bounded(c.reverb, 0, 1) && bounded(c.echo, 0, 1),
+                    bounded(c.reverb, 0, 1) && bounded(c.echo, 0, 1) && bounded(c.pan, -1, 1),
                 "Invalid effect setting");
         require(QStringList{"", "lowerThird", "lowerThirdLine", "titleCard"}.contains(
                     c.titleStyle) &&

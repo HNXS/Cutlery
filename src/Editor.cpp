@@ -16,6 +16,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRegularExpression>
+#include <QSet>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -445,6 +446,7 @@ QVariantMap Editor::state() const {
             PROP(stabilize);
             PROP(reverb);
             PROP(echo);
+            PROP(pan);
             PROP(slowMotion);
             PROP(fontFamily);
             PROP(graphic);
@@ -1173,6 +1175,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(stabilize, toBool);
         FIELD(reverb, toDouble);
         FIELD(echo, toDouble);
+        FIELD(pan, toDouble);
         FIELD(slowMotion, toString);
         FIELD(bold, toBool);
         FIELD(italic, toBool);
@@ -2123,6 +2126,7 @@ void Editor::pasteAttributes(const QString &group) {
         c->deess = from.deess;
         c->reverb = from.reverb;
         c->echo = from.echo;
+        c->pan = from.pan;
         c->fadeIn = from.fadeIn;
         c->fadeOut = from.fadeOut;
         // Keyframes keep their clip-relative frames; those past the end of a shorter clip stay
@@ -2568,6 +2572,94 @@ void Editor::markBeats(int every) {
     });
     m_beatThread->start();
     emit changed();
+}
+void Editor::freezeFrame(double seconds) {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || a->kind != "video" || c->audioOnly)
+        return fail("Select a video clip to freeze a frame of it");
+    if (c->reverse)
+        return fail("Reversed clips cannot be frozen; turn off Reverse first");
+    if (m_playhead < c->start || m_playhead >= c->start + c->duration)
+        return fail("Move the playhead into the clip to freeze that frame");
+    seconds = std::clamp(seconds, 0.1, 60.);
+    const double fps = double(m_project.fpsN) / m_project.fpsD;
+    const double source =
+        c->sourceIn.seconds() + (m_playhead - c->start) / fps * c->speed.seconds();
+    QDir().mkpath(m_data + "/freeze");
+    const auto still = m_data + "/freeze/" + newId() + ".png";
+    auto *p = new QProcess(this);
+    auto complete = [this, p, still, id = c->id, revision = m_revision, frame = m_playhead,
+                     seconds, fps](bool success) {
+        p->deleteLater();
+        QImage image;
+        if (!success || !image.load(still))
+            return fail("Could not read that frame of the clip");
+        if (revision != m_revision)
+            return fail("The clip changed while the frame was read; try again");
+        const auto length = std::max<qint64>(1, qRound64(seconds * fps));
+        QString added;
+        mutate([&](Project &project) {
+            const auto *original = project.clip(id);
+            if (!original)
+                throw std::runtime_error("The clip no longer exists");
+            const auto source = *original;
+            auto linked = project.linkedClips(id);
+            QSet<int> tracks{source.track};
+            for (const auto &other : linked)
+                tracks.insert(project.clip(other)->track);
+            for (const auto track : tracks)
+                project.requireEditable(track);
+            if (frame > source.start)
+                for (const auto &clipId : QStringList{id} + linked)
+                    project.split(clipId, frame);
+            // Everything from the playhead on these tracks moves later by the length of the still.
+            for (auto &x : project.clips)
+                if (tracks.contains(x.track) && x.start >= frame)
+                    x.start += length;
+            Asset a;
+            a.id = newId();
+            a.path = still;
+            a.name = "Freeze frame";
+            a.kind = "image";
+            a.width = image.width();
+            a.height = image.height();
+            a.duration = 5;
+            project.assets.push_back(a);
+            // The still keeps the clip's framing and look, but not its motion or sound.
+            Clip f = source;
+            f.id = newId();
+            f.assetId = a.id;
+            f.name = "Freeze frame";
+            f.start = frame;
+            f.duration = length;
+            f.sourceIn = Time(0, 1);
+            f.speed = Time(1, 1);
+            f.keyframes.clear();
+            f.transition.clear();
+            f.transitionFrames = 0;
+            f.fadeIn = f.fadeOut = 0;
+            f.aiCutout = f.aiUpscale = f.eyeContact = false;
+            f.slowMotion.clear();
+            project.clips.push_back(f);
+            added = f.id;
+        });
+        if (!added.isEmpty()) {
+            select(added);
+            m_status = QString("Froze the frame for %1 s").arg(seconds, 0, 'f', 1);
+            emit changed();
+        }
+    };
+    connect(p, &QProcess::finished, this, [complete](int code, QProcess::ExitStatus status) {
+        complete(code == 0 && status == QProcess::NormalExit);
+    });
+    connect(p, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart)
+            complete(false);
+    });
+    p->start(executable("ffmpeg"),
+             {"-hide_banner", "-nostdin", "-v", "error", "-y", "-ss", QString::number(source, 'f', 6),
+              "-i", a->path, "-map", "0:v:0", "-frames:v", "1", still});
 }
 void Editor::removePauses() {
     if (m_pauses.status != "ready" || m_pauses.revision != m_revision || m_pauses.ranges.isEmpty())

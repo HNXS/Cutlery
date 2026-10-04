@@ -1936,6 +1936,16 @@ ApplicationWindow {
                                 }
                             }
                             Action {
+                                objectName: "freezeFrame"
+                                Layout.fillWidth: true
+                                visible: win.selection.video === true && win.selection.reverse !== true
+                                enabled: win.selection.locked !== true && win.selection.playheadInside === true
+                                text: "Freeze frame here (2 s)"
+                                onClicked: editor.freezeFrame(2)
+                                ToolTip.visible: hovered
+                                ToolTip.text: win.selection.playheadInside ? "Holds the picture at the playhead for 2 seconds; the rest of the clip continues afterwards" : "Move the playhead into the clip first"
+                            }
+                            Action {
                                 objectName: "splitScenes"
                                 Layout.fillWidth: true
                                 visible: win.selection.video === true && win.selection.reverse !== true
@@ -2173,7 +2183,8 @@ ApplicationWindow {
                                         { key: "deess", name: "De-esser", lo: 0, hi: 1, step: .01, tip: "Softens sharp S sounds" },
                                         { key: "compressor", name: "Compressor", lo: 0, hi: 1, step: .01, tip: "Evens out loud and quiet parts" },
                                         { key: "reverb", name: "Reverb", lo: 0, hi: 1, step: .01, tip: "The sound of a room" },
-                                        { key: "echo", name: "Echo", lo: 0, hi: 1, step: .01, tip: "Repeats a third of a second apart" }
+                                        { key: "echo", name: "Echo", lo: 0, hi: 1, step: .01, tip: "Repeats a third of a second apart" },
+                                        { key: "pan", name: "Pan (L–R)", lo: -1, hi: 1, step: .05, tip: "Moves the sound to the left (−) or right (+)" }
                                     ]
                                     RowLayout {
                                         id: soundRow
