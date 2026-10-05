@@ -1505,6 +1505,130 @@ class EngineTest : public QObject {
         QSKIP("Needs the AI worker and the AI pack's models (CUTLERY_TEST_MODELS)");
 #endif
     }
+    void reframeToVertical() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Red 16:9 video with a green bar in the middle, a small picture in a corner and a title.
+        const auto source = dir.filePath("wide.mkv"), corner = dir.filePath("corner.png");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "color=c=red:s=1280x720:r=25:d=2,drawbox=x=600:y=0:w=80:h=720:c=lime:t=fill",
+                     "-c:v", "ffv1", source});
+        QImage blue(64, 64, QImage::Format_RGB32);
+        blue.fill(Qt::blue);
+        QVERIFY(blue.save(corner));
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(1280, 720, 25, 1);
+        editor.reframe(720, 1280);
+        QVERIFY(editor.state()["error"].toString().contains("empty"));
+        editor.importMedia({QUrl::fromLocalFile(source), QUrl::fromLocalFile(corner)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        const auto &assets = editor.project().assets;
+        const auto video = assets[0].kind == "video" ? assets[0].id : assets[1].id,
+                   image = assets[0].kind == "video" ? assets[1].id : assets[0].id;
+        editor.seek(0);
+        editor.addAsset(video);
+        const auto wide = editor.state()["selectedId"].toString();
+        editor.seek(0);
+        editor.addAsset(image, 1);
+        const auto small = editor.state()["selectedId"].toString();
+        editor.setClipValues({{"scale", 0.2}, {"x", 0.3}, {"y", -0.3}});
+        editor.addTitle();
+        const auto title = editor.state()["selectedId"].toString();
+        editor.reframe(721, 1280);
+        QVERIFY(editor.state()["error"].toString().contains("even"));
+
+        editor.reframe(720, 1280);
+        QCOMPARE(editor.project().width, 720);
+        QCOMPARE(editor.project().height, 1280);
+        // 16:9 fits 720 × 405 in the tall canvas; zoomed by 1280 / 405 it fills it.
+        QVERIFY(std::abs(editor.project().clip(wide)->scale - 1280. / 405) < 0.001);
+        QCOMPARE(editor.project().clip(small)->scale, 0.2);
+        QCOMPARE(editor.project().clip(small)->x, 0.3);
+        QCOMPARE(editor.project().clip(title)->scale, 1.);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.state()["reframe"].toMap()["status"] == "done", 120000);
+        QVERIFY(editor.state()["reframe"].toMap()["clips"].toStringList().contains(wide));
+
+        // The picture covers the tall frame: red at the edges, the green bar in the middle.
+        RenderOptions options;
+        options.audio = false;
+        options.from = 10;
+        options.to = 11;
+        auto project = editor.project();
+        project.clips.erase(std::remove_if(project.clips.begin(), project.clips.end(),
+                                           [&](const Clip &c) { return c.id != wide; }),
+                            project.clips.end());
+        const auto plan = compileRender(project, dir.filePath("work"), 180, 320, options);
+        const auto graph = dir.filePath("graph.txt");
+        QFile g(graph);
+        QVERIFY(g.open(QIODevice::WriteOnly));
+        g.write(plan.graph.toUtf8());
+        g.close();
+        QImage still;
+        still.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+        QCOMPARE(still.size(), QSize(180, 320));
+        for (const auto &point : {QPoint(2, 2), QPoint(177, 317), QPoint(2, 317)}) {
+            const auto c = still.pixelColor(point);
+            QVERIFY2(c.red() > 200 && c.green() < 60, qPrintable(c.name()));
+        }
+        const auto middle = still.pixelColor(90, 160);
+        QVERIFY2(middle.green() > 200 && middle.red() < 60, qPrintable(middle.name()));
+        // One undo step brings back the wide canvas and the picture.
+        editor.undo();
+        QCOMPARE(editor.project().width, 1280);
+        QCOMPARE(editor.project().clip(wide)->scale, 1.);
+    }
+    void reframeFollowsFace() {
+#if defined(CUTLERY_AI_WORKER) && defined(CUTLERY_TEST_MODELS)
+        const QString models = CUTLERY_TEST_MODELS;
+        if (!QFileInfo::exists(models + "/face_detection_short_range.onnx"))
+            QSKIP("The face models are not in the test models folder");
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // The face moves from left to right, 300 px/s across 1280 px.
+        const auto source = dir.filePath("moving.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=1280x720:r=25:d=2", "-i",
+                     QString(CUTLERY_SOURCE_DIR) + "/tests/fixtures/face-straight.jpg",
+                     "-filter_complex", "[1]scale=480:-2[f];[0][f]overlay=x='100+t*300':y=100",
+                     "-c:v", "ffv1", source});
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+        qputenv("CUTLERY_AI_MODELS", models.toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        editor.configure(1280, 720, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto id = editor.state()["selectedId"].toString();
+        editor.reframe(720, 1280);
+        QCOMPARE(editor.state()["reframe"].toMap()["status"].toString(), QString("analysing"));
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["reframe"].toMap()["status"].toString(),
+                                  QString("done"), 120000);
+        QCOMPARE(editor.state()["reframe"].toMap()["faces"].toInt(), 1);
+        const auto *c = editor.project().clip(id);
+        QVERIFY(c->keyframes.value("x").size() >= 3);
+        // The picture is 3.16 canvas widths wide, so the face's 0.234 of the source width per
+        // second moves the picture 0.74 canvas widths per second the other way.
+        const double x0 = c->valueAt("x", 15), x1 = c->valueAt("x", 35);
+        QVERIFY2(std::abs((x1 - x0) + 0.234 * 3.16 * 20 / 25.) < 0.1,
+                 qPrintable(QString("%1 → %2").arg(x0).arg(x1)));
+        // The face sits in the middle of the tall frame: at 1 s its centre is at about 0.57 of
+        // the source width, so the picture moves 0.07 × 3.16 to the left.
+        QVERIFY2(std::abs(c->valueAt("x", 25) + 0.22) < 0.12,
+                 qPrintable(QString::number(c->valueAt("x", 25))));
+        // Reframing and following are separate undo steps; both undo back to the wide frame.
+        editor.undo();
+        QVERIFY(!editor.project().clip(id)->keyframes.contains("x"));
+        editor.undo();
+        QCOMPARE(editor.project().width, 1280);
+#else
+        QSKIP("Needs the AI worker and the AI pack's models (CUTLERY_TEST_MODELS)");
+#endif
+    }
     void aiCutout() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
@@ -3636,6 +3760,34 @@ class EngineTest : public QObject {
         e.clearError();
         e.selectAll();
         QCOMPARE(e.selection().size(), 3);
+        // An area: frames 50-150 on track 1 touch only C; tracks 0-1 from 0 to 120 touch A and C.
+        e.selectArea(50, 150, 1, 1, false);
+        QCOMPARE(e.selection(), QStringList{ids[2]});
+        e.selectArea(0, 120, 0, 1, false);
+        QCOMPARE(e.selection().size(), 2);
+        QVERIFY(e.selection().contains(ids[0]) && e.selection().contains(ids[2]));
+        e.selectArea(190, 260, 0, 0, true); // adds B
+        QCOMPARE(e.selection().size(), 3);
+        // Copy A and C, paste at 300: they keep their distance and tracks; the copies are
+        // selected; a group among copied clips becomes a new group of the copies.
+        e.select(ids[0]);
+        e.toggleSelect(ids[2]);
+        e.groupSelection();
+        e.select(ids[0]);
+        e.copy();
+        e.seek(300);
+        const auto before = e.project().clips.size();
+        e.paste();
+        QCOMPARE(e.project().clips.size(), before + 2);
+        const auto pasted = e.selection();
+        QCOMPARE(pasted.size(), 2);
+        const auto *pa = e.project().clip(pasted[0]), *pc = e.project().clip(pasted[1]);
+        QCOMPARE(std::min(pa->start, pc->start), e.state()["playhead"].toLongLong());
+        QCOMPARE(std::abs(pc->start - pa->start), 100);
+        QCOMPARE(pa->group, pc->group);
+        QVERIFY(pa->group != e.project().clip(ids[0])->group);
+        e.undo();
+        QCOMPARE(e.project().clips.size(), before);
     }
     void titlesThatBuildUp() {
         const auto ffmpeg = Editor::executable("ffmpeg");
@@ -3649,7 +3801,7 @@ class EngineTest : public QObject {
         t.text = "AB CD";
         t.fontSize = 120;
         t.duration = 60;
-        auto lit = [&](const Clip &clip, qint64 frame) {
+        auto picture = [&](const Clip &clip, qint64 frame) {
             auto project = p;
             project.clips = {clip};
             RenderOptions options;
@@ -3665,12 +3817,23 @@ class EngineTest : public QObject {
             g.close();
             QImage out;
             out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return out.convertToFormat(QImage::Format_RGB32);
+        };
+        // Bright pixels, and their centre.
+        auto centre = [&](const Clip &clip, qint64 frame) {
+            const auto out = picture(clip, frame);
             int count = 0;
+            double sx = 0, sy = 0;
             for (int y = 0; y < out.height(); ++y)
                 for (int x = 0; x < out.width(); ++x)
-                    count += qGray(out.pixel(x, y)) > 128;
-            return count;
+                    if (qGray(out.pixel(x, y)) > 128) {
+                        ++count;
+                        sx += x;
+                        sy += y;
+                    }
+            return std::tuple{count, count ? sx / count : 0., count ? sy / count : 0.};
         };
+        auto lit = [&](const Clip &clip, qint64 frame) { return std::get<0>(centre(clip, frame)); };
         const int whole = lit(t, 10);
         QVERIFY(whole > 500);
         // Typewriter over 1 s: one of four characters every quarter second.
@@ -3686,6 +3849,93 @@ class EngineTest : public QObject {
         words.textAnimation = "words";
         QVERIFY(std::abs(lit(words, 5) - two) < two / 10);
         QVERIFY(std::abs(lit(words, 20) - whole) < whole / 20);
+        // Letters that rise into place over 1 s (one line here): the first letter, still low,
+        // then the finished text.
+        auto rise = typed;
+        rise.textAnimation = "rise";
+        rise.text = "ABCD";
+        rise.fontSize = 60;
+        auto still = rise;
+        still.textAnimation.clear();
+        const auto [early, earlyX, earlyY] = centre(rise, 4);
+        const auto [done, doneX, doneY] = centre(rise, 40);
+        const auto [plain, plainX, plainY] = centre(still, 40);
+        QVERIFY2(early > 0 && early < done / 3 && earlyY > doneY + 3 && earlyX < doneX,
+                 qPrintable(QString("%1 %2 %3 / %4 %5 %6").arg(early).arg(earlyX).arg(earlyY)
+                                .arg(done).arg(doneX).arg(doneY)));
+        QVERIFY2(std::abs(done - plain) < plain / 20 && std::abs(doneY - plainY) < 0.5,
+                 qPrintable(QString("%1 vs %2").arg(done).arg(plain)));
+        // Played through from the middle of the animation: the frames follow on, ending with
+        // the finished text.
+        {
+            auto project = p;
+            project.clips = {rise};
+            RenderOptions options;
+            options.from = 5;
+            options.to = 45;
+            const auto plan = compileRender(project, dir.filePath("work"), 320, 180, options);
+            const auto graph = dir.filePath("graph.txt"), out = dir.filePath("rise.mp4");
+            QFile g(graph);
+            QVERIFY(g.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            g.write(plan.graph.toUtf8());
+            g.close();
+            run(ffmpeg, renderArguments(plan, graph, out, "", -1));
+            const auto frames = QString::fromUtf8(run(Editor::executable("ffprobe"),
+                {"-v", "error", "-count_frames", "-select_streams", "v", "-show_entries",
+                 "stream=nb_read_frames", "-of", "csv=p=0", out})).trimmed();
+            QCOMPARE(frames, QString("40"));
+            QImage last;
+            last.loadFromData(run(ffmpeg, {"-v", "error", "-sseof", "-0.05", "-i", out, "-frames:v",
+                                           "1", "-c:v", "png", "-f", "image2pipe", "pipe:1"}),
+                              "PNG");
+            int count = 0;
+            for (int y = 0; y < last.height(); ++y)
+                for (int x = 0; x < last.width(); ++x)
+                    count += qGray(last.pixel(x, y)) > 128;
+            QVERIFY2(std::abs(count - plain) < plain / 8, qPrintable(QString("%1 vs %2").arg(count).arg(plain)));
+        }
+        // Letters that grow: smaller first, then the finished text.
+        auto pop = rise;
+        pop.textAnimation = "pop";
+        QVERIFY(lit(pop, 4) < lit(pop, 20));
+        QVERIFY(std::abs(lit(pop, 40) - plain) < plain / 20);
+        // Letters flying in from the right: at first only the "A", to the right of its place.
+        auto fly = rise;
+        fly.textAnimation = "fly";
+        fly.align = "left";
+        auto a = still;
+        a.align = "left";
+        a.text = "A";
+        const double flyX = std::get<1>(centre(fly, 4)), aX = std::get<1>(centre(a, 4));
+        QVERIFY2(flyX > aX + 20, qPrintable(QString("%1 vs %2").arg(flyX).arg(aX)));
+        QVERIFY(std::abs(lit(fly, 40) - plain) < plain / 20);
+        // A gradient from white at the top to red at the bottom of the text.
+        auto gradient = t;
+        gradient.textShadow = 0;
+        gradient.gradientColor = "#ff0000";
+        const auto image = picture(gradient, 10);
+        int high = -1, low = -1;
+        for (int y = 0; y < image.height(); ++y)
+            for (int x = 0; x < image.width(); ++x)
+                if (qRed(image.pixel(x, y)) > 200) {
+                    if (high < 0)
+                        high = y;
+                    low = y;
+                }
+        QVERIFY(high >= 0 && low - high > 20);
+        auto green = [&](int y) {
+            int best = 0;
+            for (int x = 0; x < image.width(); ++x)
+                if (qRed(image.pixel(x, y)) > 200)
+                    best = std::max(best, qGreen(image.pixel(x, y)));
+            return best;
+        };
+        QVERIFY2(green(high + 2) > 180 && green(low - 2) < 80,
+                 qPrintable(QString("%1 %2").arg(green(high + 2)).arg(green(low - 2))));
+        p.clips = {gradient};
+        QCOMPARE(Project::fromJson(p.json(), {}).clips[0].gradientColor, QString("#ff0000"));
+        p.clips[0].gradientColor = "nope";
+        QVERIFY_EXCEPTION_THROWN(p.validate(), std::runtime_error);
         // Saved, and checked.
         p.clips = {typed};
         QCOMPARE(Project::fromJson(p.json(), {}).clips[0].textAnimation, QString("typewriter"));
@@ -3822,6 +4072,43 @@ class EngineTest : public QObject {
         QCOMPARE(editor.exportPreview({{"format", "h264"}})["audio"].toBool(), false);
         editor.exportWith(QUrl::fromLocalFile(dir.filePath("wrong.mp4")), {{"format", "mp3"}});
         QVERIFY(editor.state()["error"].toString().contains(".mp3"));
+
+        // The export queue: each job keeps the timeline as it was when queued, so editing on
+        // (here: deleting the clip) does not change what the queued exports contain.
+        const auto queued1 = dir.filePath("queue-1.wav"), second = dir.filePath("queue-2.mp3"),
+                   dropped = dir.filePath("queue-3.wav");
+        editor.queueExport(QUrl::fromLocalFile(queued1), {{"format", "wav"}});
+        editor.queueExport(QUrl::fromLocalFile(second), {{"format", "mp3"}});
+        editor.queueExport(QUrl::fromLocalFile(second), {{"format", "mp3"}});
+        QVERIFY(editor.state()["error"].toString().contains("queue already"));
+        editor.queueExport(QUrl::fromLocalFile(dir.filePath("queue.mp4")), {{"format", "wav"}});
+        QVERIFY(editor.state()["error"].toString().contains(".wav"));
+        editor.queueExport(QUrl::fromLocalFile(dropped), {{"format", "wav"}});
+        auto queue = editor.state()["exportQueue"].toList();
+        QCOMPARE(queue.size(), 3);
+        QCOMPARE(queue[0].toMap()["status"].toString(), QString("exporting"));
+        QCOMPARE(queue[1].toMap()["status"].toString(), QString("waiting"));
+        QCOMPARE(queue[1].toMap()["file"].toString(), QString("queue-2.mp3"));
+        editor.removeQueued(0); // running: stays
+        editor.removeQueued(2);
+        QCOMPARE(editor.state()["exportQueue"].toList().size(), 2);
+        editor.select(editor.project().clips.first().id);
+        editor.remove();
+        QVERIFY(editor.project().clips.empty());
+        QTRY_VERIFY_WITH_TIMEOUT(
+            [&] {
+                const auto q = editor.state()["exportQueue"].toList();
+                return q[0].toMap()["status"] == "done" && q[1].toMap()["status"] == "done";
+            }(),
+            60000);
+        QVERIFY(!QFileInfo::exists(dropped));
+        for (const auto &out : {queued1, second}) {
+            const auto probe = QString::fromUtf8(run(Editor::executable("ffprobe"),
+                                                     {"-v", "error", "-show_entries",
+                                                      "format=duration", "-of", "compact", out}));
+            const auto duration = QRegularExpression("duration=([0-9.]+)").match(probe);
+            QVERIFY2(std::abs(duration.captured(1).toDouble() - 2) < 0.1, qPrintable(probe));
+        }
     }
     void colourAndLook() {
         QCOMPARE(filterPath("C:/a b/it's,[x];y=z.cube"),

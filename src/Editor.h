@@ -117,6 +117,9 @@ class Editor final : public QObject {
     // deleting deletes them all.
     Q_INVOKABLE void toggleSelect(const QString &id);
     Q_INVOKABLE void selectAll();
+    // The clips in a timeline rectangle: frames [from, to) on tracks [low, high]. `add` keeps
+    // the current selection.
+    Q_INVOKABLE void selectArea(qint64 from, qint64 to, int low, int high, bool add);
     Q_INVOKABLE void groupSelection();
     Q_INVOKABLE void ungroupSelection();
     QStringList selection() const;
@@ -154,6 +157,10 @@ class Editor final : public QObject {
     // Analyses the faces first when needed (AI pack). State "follow": {status:
     // analysing|done|failed, keyframes, clipId}.
     Q_INVOKABLE void followFace();
+    // Changes the canvas to width × height (e.g. 9:16 for Shorts) and zooms every full-frame
+    // video and image to fill it; with the AI pack, videos then pan to keep the main face in
+    // the picture.
+    Q_INVOKABLE void reframe(int width, int height);
     // Imports the numbered image sequence that `firstImage` belongs to (e.g. shot_0001.png …)
     // at `fps`: FFmpeg turns it into a ProRes 4444 video (alpha kept) in the data folder's
     // sequences/, which is then imported like any video.
@@ -207,6 +214,12 @@ class Editor final : public QObject {
     Q_INVOKABLE void exportVideo(const QUrl &, const QString &profile);
     // settings: {format, quality, height}; see ExportSettings.
     Q_INVOKABLE void exportWith(const QUrl &, const QVariantMap &settings);
+    // Export queue: exports run one after another (state "exportQueue": file, label, status
+    // waiting|exporting|done|failed|cancelled). Cancelling the running export pauses the queue
+    // until startQueue().
+    Q_INVOKABLE void queueExport(const QUrl &, const QVariantMap &settings);
+    Q_INVOKABLE void removeQueued(int index);
+    Q_INVOKABLE void startQueue();
     // Output size and file extension for export settings, for the export dialog.
     Q_INVOKABLE QVariantMap exportPreview(const QVariantMap &settings) const;
     Q_INVOKABLE void cancelJob();
@@ -293,6 +306,7 @@ class Editor final : public QObject {
     QVariantMap m_loudness; // measurement of the running export, when normalising
     QVariantMap m_mixLoudness; // last analyzeLoudness() result
     qint64 m_exportFrom = 0, m_exportTo = -1; // frame range of the running export
+    Project m_exportProject; // the timeline being exported, as it was when the export started
     std::optional<Clip> m_clipboard;
     void loadFonts(const QString &folder);
     QHash<QString, QString> m_fontFiles; // family → file, for fonts added in Cutlery
@@ -300,6 +314,8 @@ class Editor final : public QObject {
     QVariantMap m_collect;
     QVariantMap m_conform;
     QVariantMap m_follow;
+    QVariantMap m_reframe; // {status: analysing|done|failed, clips: [ids], faces: count}
+    void applyReframe();
     double m_playRate = 1, m_shuttleRate = 1;
     QTimer m_reverseTimer;
     void applyFollowFace();
@@ -308,6 +324,17 @@ class Editor final : public QObject {
     // The track nearest `home` with room for [start, start + length), or a new one on top.
     static int freeTrack(Project &, int home, qint64 start, qint64 length);
     QStringList m_recent;
+    struct QueuedExport {
+        QUrl url;
+        QVariantMap settings;
+        Project project; // the timeline as it was when queued
+        QString status = "waiting";
+    };
+    QVector<QueuedExport> m_queue;
+    bool m_queuePaused = false;
+    QTimer m_queueTimer;
+    void advanceQueue();
+    void exportProject(const Project &, const QUrl &, const QVariantMap &settings);
     QStringList m_also; // selected besides m_selected
     void remember(const QString &path);
     void saveRecent();
@@ -322,6 +349,9 @@ class Editor final : public QObject {
     qint64 m_voiceStart = 0;
     QElapsedTimer m_voiceClock;
     std::optional<Asset> m_clipboardAsset;
+    // The other clips copied with m_clipboard, and their media.
+    QVector<Clip> m_clipboardMore;
+    QVector<Asset> m_clipboardMoreAssets;
     QProcess *m_loudnessProcess = nullptr;
     struct Pauses {
         QString clipId, status; // status: idle, finding, ready, failed

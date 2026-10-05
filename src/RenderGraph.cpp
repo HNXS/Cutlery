@@ -139,7 +139,7 @@ static QString curve(const Clip &c, const QString &property, const QString &fram
 }
 // The shadow offset and outline of a text, from the clip's style at a font pixel size.
 static void paintStyledPath(QPainter &paint, const Clip &c, const QPainterPath &path, double px,
-                            const QColor &fill) {
+                            const QBrush &fill) {
     paint.setPen(Qt::NoPen);
     if (c.textShadow > 0) {
         const double d = std::max(1., px / 24);
@@ -163,11 +163,12 @@ static QFont textFont(const Clip &c, int pixelSize) {
     return font;
 }
 // Draws the clip's text in `area` as its style describes: wrapped at spaces, aligned, centred
-// vertically, with line spacing, a rounded box behind each line, a shadow and an outline.
-// `visible` limits the drawing to that many characters (spaces not counted), for titles that
-// build up; the layout stays that of the whole text.
+// vertically, with line spacing, a rounded box behind each line, a shadow, an outline and a
+// colour gradient. `visible` limits the drawing to that many characters (spaces not counted),
+// for titles that build up; the layout stays that of the whole text. A `time` (clip-local
+// seconds) draws the letters of a "rise", "pop" or "fly" animation at that moment.
 static void paintText(QPainter &paint, const Clip &c, const QFont &font, const QRect &area,
-                      int visible = -1) {
+                      int visible = -1, double time = -1) {
     const QFontMetricsF m(font);
     QStringList lines;
     for (const auto &paragraph : c.text.split('\n')) {
@@ -184,9 +185,12 @@ static void paintText(QPainter &paint, const Clip &c, const QFont &font, const Q
     }
     const double px = font.pixelSize(), step = m.height() * c.lineSpacing,
                  pad = 0.25 * px;
-    double y = area.top() + (area.height() - (step * (lines.size() - 1) + m.height())) / 2;
+    const double top = area.top() + (area.height() - (step * (lines.size() - 1) + m.height())) / 2;
+    double y = top;
     QPainterPath path;
     QVector<QRectF> boxes;
+    // Letters one by one for the animations: the outline of each and its place in the text.
+    QVector<QPainterPath> letters;
     for (const auto &line : lines) {
         const double w = m.horizontalAdvance(line);
         const double x = c.align == "left"    ? area.left()
@@ -205,18 +209,69 @@ static void paintText(QPainter &paint, const Clip &c, const QFont &font, const Q
             path.addText(QPointF(x, y + m.ascent()), font, shown);
             boxes << QRectF(x - pad, y - pad * 0.3, m.horizontalAdvance(shown) + 2 * pad,
                             m.height() + pad * 0.6);
+            if (time >= 0)
+                for (int i = 0; i < shown.size(); ++i)
+                    if (!shown[i].isSpace()) {
+                        QPainterPath letter;
+                        letter.addText(QPointF(x + m.horizontalAdvance(shown.left(i)), y + m.ascent()),
+                                       font, QString(shown[i]));
+                        letters << letter;
+                    }
         }
         y += step;
     }
+    // The fill: one colour, or a gradient over the height of the whole text.
+    QBrush fill{QColor(c.textColor)};
+    if (!c.gradientColor.isEmpty()) {
+        QLinearGradient gradient(0, top, 0, y - step + m.height());
+        gradient.setColorAt(0, QColor(c.textColor));
+        gradient.setColorAt(1, QColor(c.gradientColor));
+        fill = QBrush(gradient);
+    }
+    // Each letter moves in over `d` seconds; the starts spread over the animation time.
+    const double total = c.textAnimationTime, d = std::min(0.6, total / 2);
+    auto progress = [&](int i) {
+        const double start = letters.size() > 1 ? (total - d) * i / (letters.size() - 1) : 0;
+        return std::clamp((time - start) / d, 0., 1.);
+    };
     if (c.background > 0) {
         QColor box(c.backgroundColor);
         box.setAlphaF(c.background);
         paint.setPen(Qt::NoPen);
         paint.setBrush(box);
+        // Animated text: the boxes fade in with the first letter.
+        paint.setOpacity(time >= 0 && !letters.isEmpty() ? progress(0) : 1);
         for (const auto &b : boxes)
             paint.drawRoundedRect(b, pad * 0.6, pad * 0.6);
+        paint.setOpacity(1);
     }
-    paintStyledPath(paint, c, path, px, QColor(c.textColor));
+    if (time < 0 || letters.isEmpty()) {
+        paintStyledPath(paint, c, path, px, fill);
+        return;
+    }
+    for (int i = 0; i < letters.size(); ++i) {
+        const double p = progress(i);
+        if (p <= 0)
+            continue;
+        const double ease = 1 - std::pow(1 - p, 3);
+        const auto centre = letters[i].boundingRect().center();
+        QTransform t;
+        double opacity = ease;
+        if (c.textAnimation == "rise") {
+            t.translate(0, (1 - ease) * 0.8 * px);
+        } else if (c.textAnimation == "fly") {
+            t.translate((1 - ease) * area.width() * 0.5, 0);
+        } else { // pop: grows from nothing, overshoots a little and settles
+            const double k = 1.7, q = p - 1, grow = 1 + (k + 1) * q * q * q + k * q * q;
+            t.translate(centre.x(), centre.y());
+            t.scale(std::max(0.01, grow), std::max(0.01, grow));
+            t.translate(-centre.x(), -centre.y());
+            opacity = std::min(1., p * 3);
+        }
+        paint.setOpacity(opacity);
+        paintStyledPath(paint, c, t.map(letters[i]), px, fill);
+    }
+    paint.setOpacity(1);
 }
 // A graphic clip's shape filling `box` on a canvas `height` pixels high.
 static void paintGraphic(QPainter &paint, const Clip &c, const QRectF &box, int height) {
@@ -1016,7 +1071,91 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                           visibleStart - from, visibleEnd - visibleStart);
                 continue;
             }
-            if (n.title && !c.textAnimation.isEmpty() && c.graphic.isEmpty() &&
+            if (n.title && QStringList{"rise", "pop", "fly"}.contains(c.textAnimation) &&
+                c.graphic.isEmpty() && c.titleStyle.isEmpty() && c.captionStyle.isEmpty() &&
+                !c.text.isEmpty() && !animatedGeometry(c) && c.rotation == 0 && c.scale == 1 &&
+                n.vPre == 0) {
+                // Letters that move in: a picture per frame of the animation (only those the
+                // rendered range needs), as an image sequence; after the animation the last
+                // picture, the finished text, is held.
+                const auto font = textFont(c, qRound(c.fontSize * double(height) / p.height));
+                const QRect rect(width / 15, height / 12, width * 13 / 15, height * 5 / 6);
+                const double px = font.pixelSize();
+                // Rows the finished text covers, with room below for rising letters.
+                QImage full(width, height, QImage::Format_ARGB32_Premultiplied);
+                full.fill(Qt::transparent);
+                {
+                    QPainter paint(&full);
+                    paint.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
+                    paintText(paint, c, font, rect);
+                }
+                int top = height, bottom = -1;
+                for (int y = 0; y < height; ++y) {
+                    const auto *line = reinterpret_cast<const QRgb *>(full.constScanLine(y));
+                    for (int x = 0; x < width; ++x)
+                        if (qAlpha(line[x]) > 0) {
+                            top = std::min(top, y);
+                            bottom = y;
+                            break;
+                        }
+                }
+                if (bottom >= 0) {
+                    top = std::max(0, top - int(std::ceil(0.15 * px)));
+                    bottom = std::min(height - 1, bottom + int(std::ceil(0.9 * px)));
+                    const int band = bottom - top + 1;
+                    const double rate = std::min(double(p.fpsN) / p.fpsD, 60.);
+                    const int last = int(std::ceil(c.textAnimationTime * rate));
+                    const qint64 l0 = visibleStart - c.start, l1 = visibleEnd - c.start;
+                    const int k0 = std::min(last, int(std::floor(secs(l0) * rate))),
+                              k1 = std::min(last, int(std::ceil(secs(l1) * rate)));
+                    const auto folder = QDir(work).filePath(QString("letters-%1").arg(serial++));
+                    QDir(folder).removeRecursively(); // a sequence takes every numbered file
+                    if (!QDir().mkpath(folder))
+                        throw std::runtime_error("Cannot write title render asset");
+                    for (int k = k0; k <= k1; ++k) {
+                        QImage frame(width, band, QImage::Format_ARGB32_Premultiplied);
+                        frame.fill(Qt::transparent);
+                        {
+                            QPainter paint(&frame);
+                            paint.setRenderHints(QPainter::Antialiasing |
+                                                 QPainter::TextAntialiasing);
+                            paint.translate(0, -top);
+                            paintText(paint, c, font, rect, -1, k == last ? -1 : k / rate);
+                        }
+                        if (!frame.save(QString("%1/%2.png").arg(folder).arg(k - k0, 5, 10,
+                                                                               QChar('0'))))
+                            throw std::runtime_error("Cannot write title render asset");
+                    }
+                    r.inputs << "-framerate" << num(rate) << "-i" << folder + "/%05d.png";
+                    // Clip-local timestamps: the first picture is frame k0 of the animation.
+                    QString f = QString("[%1:v:0]setpts='PTS+%2/TB',fps=%3/%4,"
+                                        "tpad=stop_mode=clone:stop_duration=%5,"
+                                        "trim=start=%6:end=%7,format=rgba")
+                                    .arg(input++)
+                                    .arg(num(k0 / rate))
+                                    .arg(p.fpsN)
+                                    .arg(p.fpsD)
+                                    .arg(num(secs(l1) + 1))
+                                    .arg(num(secs(l0)), num(secs(l1)));
+                    if (c.opacity != 1)
+                        f += ",colorchannelmixer=aa=" + num(c.opacity);
+                    const double d = secs(c.duration);
+                    if (c.fadeIn > 0)
+                        f += QString(",fade=t=in:st=0:d=%1:alpha=1").arg(num(std::min(c.fadeIn, d)));
+                    if (c.fadeOut > 0) {
+                        const auto fd = std::min(c.fadeOut, d);
+                        f += QString(",fade=t=out:st=%1:d=%2:alpha=1").arg(num(d - fd), num(fd));
+                    }
+                    composite(f + ",setpts=PTS-STARTPTS",
+                              QString("x=%1:y=%2")
+                                  .arg(qRound(c.x * width))
+                                  .arg(top + qRound(c.y * height)),
+                              visibleStart - from, visibleEnd - visibleStart);
+                    continue;
+                }
+            }
+            if (n.title && (c.textAnimation == "typewriter" || c.textAnimation == "words") &&
+                c.graphic.isEmpty() &&
                 c.titleStyle.isEmpty() && c.captionStyle.isEmpty() && !c.text.isEmpty() &&
                 !animatedGeometry(c) && c.rotation == 0 && c.scale == 1 && n.vPre == 0) {
                 // A title that builds up: one band per step (a character or a word), stacked

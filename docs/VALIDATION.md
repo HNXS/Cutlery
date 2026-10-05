@@ -1,5 +1,19 @@
 # Validation record
 
+## Windows portable build — 2026-10-05, rubber band, export queue, reframing, letter animations (0.6 development)
+
+[GitHub Actions run 37324201212](https://github.com/HNXS/Cutlery/actions/runs/37324201212) on commit `09ebdc5b7e3ef0e64de74c5092791e671bd44ed3` passed every step.
+
+New coverage:
+
+- **Engine tests:**
+  - `multipleSelectionAndGroups`: rubber-band selection takes the clips it touches and their groups; copy and paste of several clips keeps their spacing and gives pasted groups new ids.
+  - `clipboardAndAudioExport`: the export queue rejects duplicates and wrong extensions, keeps a running job, and renders each job from the timeline as it was when queued, after the clip was deleted.
+  - `reframeToVertical`: a 16:9 video fills a 9:16 canvas, edge to edge with no black bars; titles and a corner picture keep their place; one undo step restores the wide canvas.
+  - `reframeFollowsFace` (AI pack): a face moving across the frame gives position keyframes that follow it at the expected speed and keep it centred.
+  - `titlesThatBuildUp`: letters rise from below, pop up and fly in from the right, and end as the finished text; a playthrough from the middle of the animation has every frame; gradient text runs from white at the top to red at the bottom.
+- **Interface:** dragging over empty timeline selects clips; the export dialog lists queued jobs and removes a waiting one; Reframe for… gives 1080 × 1920 and 1080 × 1350.
+
 ## Windows portable build — 2026-10-05, multiple selection and groups, titles that build up, pan keyframes (0.6 development)
 
 [GitHub Actions run 37303368450](https://github.com/HNXS/Cutlery/actions/runs/37303368450) on commit `379eb83b66a4bd46aa86c159f0dea623833d5df7` passed every step on its second attempt. The first attempt stopped while installing Qt, a download from the Qt mirror, before any test ran.

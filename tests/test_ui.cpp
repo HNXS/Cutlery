@@ -405,6 +405,25 @@ class UiTest : public QObject {
         QVERIFY(result && findItem(window->contentItem(), "measureLoudness"));
         QVERIFY(result->property("text").toString().contains("Integrated loudness"));
         QVERIFY(findItem(window->contentItem(), "levelMeter"));
+        // Export now or add to the queue; queued jobs are listed with their state.
+        QVERIFY(findItem(window->contentItem(), "exportNow")->isVisible());
+        QVERIFY(findItem(window->contentItem(), "addToQueue")->isVisible());
+        editor.queueExport(QUrl::fromLocalFile(dir.filePath("a.wav")), {{"format", "wav"}});
+        editor.queueExport(QUrl::fromLocalFile(dir.filePath("b.wav")), {{"format", "wav"}});
+        QTRY_VERIFY(findItem(window->contentItem(), "queued-1"));
+        auto *removeSecond = findItem(window->contentItem(), "removeQueued-1");
+        QVERIFY(removeSecond && removeSecond->isEnabled());
+        QVERIFY(!findItem(window->contentItem(), "removeQueued-0")->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(removeSecond, "clicked"));
+        QTRY_VERIFY(!findItem(window->contentItem(), "queued-1"));
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        // Reframe for…: the shorter side stays, the canvas takes the new shape.
+        QVERIFY(window->findChild<QObject *>("reframe-9x16"));
+        QVERIFY(QMetaObject::invokeMethod(window, "reframeTo", Q_ARG(QVariant, 9), Q_ARG(QVariant, 16)));
+        QCOMPARE(editor.project().width, 1080);
+        QCOMPARE(editor.project().height, 1920);
+        QVERIFY(QMetaObject::invokeMethod(window, "reframeTo", Q_ARG(QVariant, 4), Q_ARG(QVariant, 5)));
+        QCOMPARE(editor.project().height, 1350);
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void presenterControls() {
@@ -597,6 +616,19 @@ class UiTest : public QObject {
         altDrag(clipA, qRound(10 * pixelsPerFrame), Qt::NoModifier);
         QTRY_VERIFY(editor.project().clip(a)->start > startA);
         QCOMPARE(editor.project().clip(c)->start - startC, editor.project().clip(a)->start - startA);
+        // A rectangle drawn from the empty track above into track 0 selects the clips it touches.
+        editor.select(QString());
+        clipA = findItem(window->contentItem(), "clip-" + a);
+        auto *clipB2 = findItem(window->contentItem(), "clip-" + b);
+        QVERIFY(clipA && clipB2);
+        const auto from = clipA->mapToScene(QPointF(10, -40)).toPoint(),
+                   to = center(clipB2);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, from);
+        QTest::mouseMove(window, from + QPoint(10, 10), 20);
+        QTest::mouseMove(window, (from + to) / 2, 20);
+        QTest::mouseMove(window, to, 20);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, to);
+        QTRY_VERIFY(editor.selection().contains(a) && editor.selection().contains(b));
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
     }
     void lookControls() {

@@ -84,6 +84,8 @@ struct Clip {
     // word after another, all of them within textAnimationTime seconds from the clip's start.
     QString textAnimation;
     double textAnimationTime = 1.5;
+    // A second text colour: the letters fade from textColor at the top to this at the bottom.
+    QString gradientColor;
     // Effect area clips (no media, no text) blur or pixelate whatever lower tracks show inside a
     // rectangle of effectWidth × effectHeight canvas fractions at scale 1, centred at x/y.
     QString effect; // "", "blur", "pixelate"

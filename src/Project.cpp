@@ -61,7 +61,7 @@ const QStringList &animatableProperties() {
 // Valid range of each animatable property, shared with static-value validation.
 static std::pair<double, double> propertyRange(const QString &p) {
     if (p == "scale")
-        return {0.1, 3};
+        return {0.1, 5};
     if (p == "x" || p == "y")
         return {-2, 2};
     if (p == "rotation")
@@ -299,6 +299,8 @@ QJsonObject Project::json(const QString &base) const {
             o["background"] = c.background;
             o["backgroundColor"] = c.backgroundColor;
         }
+        if (!c.gradientColor.isEmpty())
+            o["gradientColor"] = c.gradientColor;
         if (!c.textAnimation.isEmpty()) {
             o["textAnimation"] = c.textAnimation;
             o["textAnimationTime"] = c.textAnimationTime;
@@ -510,6 +512,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.titleStyle = j["titleStyle"].toString();
         c.textAnimation = j["textAnimation"].toString();
         c.textAnimationTime = j["textAnimationTime"].toDouble(1.5);
+        c.gradientColor = j["gradientColor"].toString();
         c.accentColor = j["accentColor"].toString("#64d8bc");
         c.effect = j["effect"].toString();
         c.effectStrength = j["effectStrength"].toDouble(0.6);
@@ -633,7 +636,7 @@ void Project::validate() const {
         auto bounded = [](double x, double lo, double hi) {
             return std::isfinite(x) && x >= lo && x <= hi;
         };
-        require(bounded(c.scale, 0.1, 3) && bounded(c.x, -2, 2) && bounded(c.y, -2, 2) &&
+        require(bounded(c.scale, 0.1, 5) && bounded(c.x, -2, 2) && bounded(c.y, -2, 2) &&
                     bounded(c.rotation, -360, 360),
                 "Invalid transform");
         require(bounded(c.opacity, 0, 1) && bounded(c.volume, 0, 4) &&
@@ -709,8 +712,10 @@ void Project::validate() const {
                     c.titleStyle) &&
                     QColor(c.accentColor).isValid(),
                 "Invalid title style");
-        require(QStringList{"", "typewriter", "words"}.contains(c.textAnimation) &&
-                    bounded(c.textAnimationTime, 0.1, 60),
+        require(QStringList{"", "typewriter", "words", "rise", "pop", "fly"}.contains(
+                    c.textAnimation) &&
+                    bounded(c.textAnimationTime, 0.1, 60) &&
+                    (c.gradientColor.isEmpty() || QColor(c.gradientColor).isValid()),
                 "Invalid text animation");
         if (const auto *a = asset(c.assetId); a && !a->endless())
             require(c.sourceIn.seconds() +

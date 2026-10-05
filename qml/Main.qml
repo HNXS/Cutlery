@@ -36,6 +36,15 @@ ApplicationWindow {
             height: 0,
             loudness: -14
         })
+    // The canvas at the aspect w:h, keeping the shorter side (even sizes).
+    function reframeTo(w, h) {
+        const side = Math.min(win.s.width, win.s.height);
+        if (w <= h)
+            editor.reframe(side, Math.round(side * h / w / 2) * 2);
+        else
+            editor.reframe(Math.round(side * w / h / 2) * 2, side);
+    }
+    property bool queueExport: false // the export file dialog adds to the queue instead
     property string pendingAction: ""
     property bool allowClose: false
     property var libraryGesture: null
@@ -351,6 +360,28 @@ ApplicationWindow {
             MenuItem {
                 text: "Project settings…"
                 onTriggered: settings.open()
+            }
+            // A new canvas shape; pictures zoom to fill it and, with the AI pack, follow faces.
+            Menu {
+                id: reframeMenu
+                title: "Reframe for…"
+                enabled: win.s.duration > 0 && (win.s.reframe || {}).status !== "analysing"
+                Instantiator {
+                    model: [
+                        { label: "Shorts, Reels, TikTok (9:16)", w: 9, h: 16 },
+                        { label: "Instagram post (4:5)", w: 4, h: 5 },
+                        { label: "Square (1:1)", w: 1, h: 1 },
+                        { label: "Widescreen (16:9)", w: 16, h: 9 }
+                    ]
+                    delegate: MenuItem {
+                        required property var modelData
+                        objectName: "reframe-" + modelData.w + "x" + modelData.h
+                        text: modelData.label
+                        onTriggered: win.reframeTo(modelData.w, modelData.h)
+                    }
+                    onObjectAdded: (index, object) => reframeMenu.insertItem(index, object)
+                    onObjectRemoved: (index, object) => reframeMenu.removeItem(object)
+                }
             }
             MenuItem {
                 objectName: "restoreVersion"
@@ -1539,12 +1570,12 @@ ApplicationWindow {
                                     ComboBox {
                                         objectName: "textAnimation"
                                         Layout.fillWidth: true
-                                        readonly property var kinds: ["", "typewriter", "words"]
-                                        model: ["Appears at once", "Typewriter", "Word by word"]
+                                        readonly property var kinds: ["", "typewriter", "words", "rise", "pop", "fly"]
+                                        model: ["Appears at once", "Typewriter", "Word by word", "Letters rise", "Letters pop up", "Letters fly in"]
                                         currentIndex: Math.max(0, kinds.indexOf(win.selection.textAnimation || ""))
                                         onActivated: editor.setClip("textAnimation", kinds[currentIndex])
                                         ToolTip.visible: hovered
-                                        ToolTip.text: "Lets the text build up from the start of the clip"
+                                        ToolTip.text: "Lets the text build up from the start of the clip, letter by letter or word by word"
                                     }
                                     SpinBox {
                                         objectName: "textAnimationTime"
@@ -1654,11 +1685,25 @@ ApplicationWindow {
                                         onValueModified: editor.setClip("fontSize", value)
                                     }
                                 }
-                                TextField {
+                                RowLayout {
                                     Layout.fillWidth: true
-                                    text: win.selection.textColor || "#ffffff"
-                                    placeholderText: "Text colour (#rrggbb)"
-                                    onEditingFinished: editor.setClip("textColor", text)
+                                    TextField {
+                                        Layout.fillWidth: true
+                                        text: win.selection.textColor || "#ffffff"
+                                        placeholderText: "Text colour (#rrggbb)"
+                                        onEditingFinished: editor.setClip("textColor", text)
+                                    }
+                                    // A second colour turns the letters into a top-to-bottom gradient.
+                                    TextField {
+                                        objectName: "gradientColor"
+                                        Layout.fillWidth: true
+                                        visible: !win.selection.titleStyle && !win.selection.captionStyle
+                                        text: win.selection.gradientColor || ""
+                                        placeholderText: "Gradient to (#rrggbb)"
+                                        onEditingFinished: editor.setClip("gradientColor", text.trim())
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "The letters fade from the text colour at the top to this colour at the bottom. Leave empty for one colour."
+                                    }
                                 }
                                 // Typography: font, weight, alignment, spacing, outline, shadow, box.
                                 RowLayout {
@@ -2120,7 +2165,7 @@ ApplicationWindow {
                                         key: "scale",
                                         name: "Scale",
                                         lo: .1,
-                                        hi: 3,
+                                        hi: 5,
                                         step: .01
                                     },
                                     {
@@ -2705,7 +2750,7 @@ ApplicationWindow {
         readonly property string extension: editor.exportPreview(win.exportChoice).extension || "mp4"
         defaultSuffix: extension
         nameFilters: [extension.toUpperCase() + " (*." + extension + ")"]
-        onAccepted: editor.exportWith(selectedFile, win.exportChoice)
+        onAccepted: win.queueExport ? editor.queueExport(selectedFile, win.exportChoice) : editor.exportWith(selectedFile, win.exportChoice)
     }
     FileDialog {
         id: relinkDialog
@@ -3207,7 +3252,32 @@ ApplicationWindow {
         title: "Export video"
         modal: true
         width: 480
-        standardButtons: Dialog.Ok | Dialog.Cancel
+        footer: DialogButtonBox {
+            Button {
+                objectName: "exportNow"
+                text: "Export…"
+                enabled: !win.s.busy
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+                onClicked: exportSettings.choose(false)
+            }
+            Button {
+                objectName: "addToQueue"
+                text: "Add to queue…"
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+                onClicked: exportSettings.choose(true)
+            }
+            Button {
+                text: "Close"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+        }
+        function choose(queue) {
+            win.exportChoice = Object.assign({}, current, { range: exportRange.visible && exportRange.currentIndex === 1 ? "inout" : "all" });
+            win.queueExport = queue;
+            exportDialog.open();
+            if (!queue)
+                close();
+        }
         readonly property var formats: [
             { id: "h264", label: "H.264 · MP4 (plays everywhere)" },
             { id: "hevc", label: "HEVC / H.265 · MP4 (smaller files)" },
@@ -3360,10 +3430,48 @@ ApplicationWindow {
                 font.pixelSize: 11
                 text: exportSettings.preview.audio ? "Output: the timeline's sound only, 48 kHz stereo · ." + exportSettings.preview.extension + (exportSettings.preview.extension === "wav" ? " (24-bit at Maximum quality, otherwise 16-bit)" : "") + "." : "Output " + (exportSettings.preview.width || 0) + " × " + (exportSettings.preview.height || 0) + " · ." + (exportSettings.preview.extension || "mp4") + ". Cutlery uses your graphics card's encoder (NVIDIA, AMD or Intel) when available, otherwise Windows' encoder; AV1, VP9 and ProRes also work in software. Higher resolutions re-render each source at that size with sharp Lanczos scaling, so 4K sources stay 4K."
             }
-        }
-        onAccepted: {
-            win.exportChoice = Object.assign({}, current, { range: exportRange.visible && exportRange.currentIndex === 1 ? "inout" : "all" });
-            exportDialog.open();
+            // The export queue: each job renders the timeline as it was when it was added, one
+            // after the other, so you can queue several formats and keep editing.
+            Label {
+                Layout.columnSpan: 2
+                visible: win.s.exportQueue.length > 0
+                text: "Export queue" + (win.s.queuePaused ? " (paused after a cancelled export)" : "")
+                font.bold: true
+            }
+            Repeater {
+                model: win.s.exportQueue
+                delegate: RowLayout {
+                    required property var modelData
+                    required property int index
+                    Layout.columnSpan: 2
+                    Layout.fillWidth: true
+                    objectName: "queued-" + index
+                    Label {
+                        Layout.fillWidth: true
+                        elide: Text.ElideMiddle
+                        text: modelData.file + "  ·  " + modelData.label
+                    }
+                    Label {
+                        text: ({ waiting: "Waiting", exporting: "Exporting " + Math.round(win.s.progress * 100) + " %", done: "Done", failed: "Failed", cancelled: "Cancelled" })[modelData.status] || modelData.status
+                        color: modelData.status === "failed" || modelData.status === "cancelled" ? "#e06c75" : modelData.status === "done" ? "#98c379" : win.muted
+                    }
+                    ToolButton {
+                        objectName: "removeQueued-" + index
+                        text: "✕"
+                        enabled: modelData.status !== "exporting"
+                        onClicked: editor.removeQueued(index)
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Remove from the queue"
+                    }
+                }
+            }
+            Button {
+                Layout.columnSpan: 2
+                objectName: "startQueue"
+                visible: win.s.queuePaused && win.s.exportQueue.some(q => q.status === "waiting")
+                text: "Continue the queue"
+                onClicked: editor.startQueue()
+            }
         }
     }
     Dialog {

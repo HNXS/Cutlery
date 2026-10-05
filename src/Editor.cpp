@@ -101,6 +101,8 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
         m_previewTimer.start();
         if (m_follow.value("status") == "analysing")
             applyFollowFace();
+        if (m_reframe.value("status") == "analysing")
+            applyReframe();
         placeCaptions(); // when every transcript of a caption request is ready
     });
     connect(m_thumbnails, &Thumbnails::changed, this, [this] {
@@ -117,6 +119,11 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     m_previewTimer.setSingleShot(true);
     m_previewTimer.setInterval(180);
     connect(&m_previewTimer, &QTimer::timeout, this, &Editor::requestPreview);
+    m_queueTimer.setInterval(500);
+    connect(&m_queueTimer, &QTimer::timeout, this, [this] {
+        advanceQueue();
+        emit changed();
+    });
     m_playback = new Playback(this);
     connect(m_playback, &Playback::frameChanged, this, &Editor::playbackChanged);
     connect(m_playback, &Playback::finished, this, [this] {
@@ -405,6 +412,7 @@ QVariantMap Editor::state() const {
                         {"text", c.text},
                         {"fontSize", c.fontSize},
                         {"textColor", c.textColor},
+                        {"gradientColor", c.gradientColor},
                         {"transition", c.transition},
                         {"transitionFrames", c.transitionFrames},
                         {"transitionLength", m_project.transitionLength(c)},
@@ -530,6 +538,20 @@ QVariantMap Editor::state() const {
             {"selected", selected},
             {"selectedId", m_selected},
             {"selectedIds", selection()},
+            {"exportQueue", [this] {
+                 QVariantList list;
+                 for (const auto &q : m_queue) {
+                     const auto s = q.settings;
+                     list << QVariantMap{{"file", QFileInfo(localPath(q.url)).fileName()},
+                                         {"label", s.value("format").toString().toUpper() + " · " +
+                                                       s.value("quality").toString() +
+                                                       (s.value("height").toInt() > 0 ? " · " + QString::number(s.value("height").toInt()) + "p" : QString()) +
+                                                       (s.value("range") == "inout" ? " · in/out" : QString())},
+                                         {"status", q.status}};
+                 }
+                 return list;
+             }()},
+            {"queuePaused", m_queuePaused},
             {"playhead", m_playhead},
             {"duration", m_project.duration()},
             {"fps", double(m_project.fpsN) / m_project.fpsD},
@@ -554,6 +576,7 @@ QVariantMap Editor::state() const {
             {"beats", m_beats},
             {"collect", m_collect},
             {"follow", m_follow},
+            {"reframe", m_reframe},
             {"conform", m_conform},
             {"markers", [this] {
                  QVariantList list;
@@ -1403,6 +1426,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             c->highlightColor = v.toString();
         else if (key == "textColor")
             c->textColor = v.toString();
+        else if (key == "gradientColor")
+            c->gradientColor = v.toString();
         else if (key == "transition") {
             c->transition = v.toString();
             // New transitions start at half a second, like a typical dissolve.
@@ -2356,6 +2381,190 @@ void Editor::applyFollowFace() {
     m_status = QString("Following a face with %1 keyframes").arg(count);
     emit changed();
 }
+// The source seconds a clip shows, for face analysis.
+static std::pair<double, double> sourceRange(const Clip &c, double fps) {
+    const double s = c.speed.seconds();
+    return {c.sourceIn.seconds(), c.sourceIn.seconds() + c.duration / fps * s};
+}
+void Editor::reframe(int width, int height) {
+    if (width < 16 || height < 16 || width % 2 || height % 2)
+        return fail("Choose an even width and height");
+    if (m_project.clips.empty())
+        return fail("The timeline is empty");
+    QStringList reframed, faces;
+    if (!mutate([&](Project &p) {
+        const int oldWidth = p.width, oldHeight = p.height;
+        p.width = width;
+        p.height = height;
+        for (auto &c : p.clips) {
+            const auto *a = p.asset(c.assetId);
+            // Only pictures that filled the old canvas; titles, graphics and pictures in
+            // a corner keep their place.
+            const bool full = a && (a->kind == "video" || a->kind == "image") &&
+                              !c.audioOnly && c.effect.isEmpty() && c.graphic.isEmpty() &&
+                              c.shape != "circle" && std::abs(c.scale - 1) < 1e-6 &&
+                              std::abs(c.x) < 1e-6 && std::abs(c.y) < 1e-6 &&
+                              std::abs(c.rotation) < 1e-6 && !c.keyframes.contains("x") &&
+                              !c.keyframes.contains("y") && !c.keyframes.contains("scale");
+            if (!full || p.trackSettings.value(c.track).locked)
+                continue;
+            // Zoom so the picture covers the canvas, centred.
+            const auto fit = p.pictureSize(c, width, height);
+            c.scale = std::min(5., std::max(width / fit.width(), height / fit.height()));
+            reframed << c.id;
+            if (a->kind == "video" && !c.reverse)
+                faces << c.id;
+        }
+        if (reframed.isEmpty() && oldWidth == width && oldHeight == height)
+            throw std::runtime_error("Nothing to reframe");
+    }))
+        return;
+    m_reframe = {{"status", "done"}, {"clips", reframed}, {"faces", 0}};
+    m_status = QString("Reframed to %1 × %2: %3 clips centred").arg(width).arg(height).arg(
+        reframed.size());
+    if (!faces.isEmpty() && !m_ai->available("faces")) {
+        m_status += ". The AI pack keeps faces in the picture.";
+    } else if (!faces.isEmpty()) {
+        // Analyse the source range each clip shows; clips of one file share the result.
+        const double fps = double(m_project.fpsN) / m_project.fpsD;
+        QHash<QString, std::pair<double, double>> ranges;
+        for (const auto &id : faces) {
+            const auto *c = m_project.clip(id);
+            const auto [from, to] = sourceRange(*c, fps);
+            auto &r = ranges[c->assetId];
+            r = ranges.contains(c->assetId) && r.second > r.first
+                    ? std::pair{std::min(r.first, from), std::max(r.second, to)}
+                    : std::pair{from, to};
+        }
+        for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+            const auto *a = m_project.asset(it.key());
+            const auto r = m_ai->result("faces", *a);
+            const double from = std::max(0., it->first - 0.5),
+                         to = std::min(a->duration, it->second + 0.5);
+            if (!r.path.isEmpty() && r.start <= from + 0.01 && r.end >= to - 0.01)
+                continue;
+            m_ai->start("faces", *a, r.path.isEmpty() ? from : std::min(from, r.start),
+                        r.path.isEmpty() ? to : std::max(to, r.end));
+        }
+        m_reframe = {{"status", "analysing"}, {"clips", faces}, {"faces", 0}};
+        m_status = "Finding faces to reframe…";
+        if (!m_ai->busy())
+            applyReframe();
+    }
+    emit changed();
+}
+void Editor::applyReframe() {
+    // Wait until every file's analysis has ended.
+    const auto ids = m_reframe.value("clips").toStringList();
+    for (const auto &id : ids)
+        if (const auto *c = m_project.clip(id))
+            if (const auto *a = m_project.asset(c->assetId)) {
+                const auto st = m_ai->status("faces", *a).value("status").toString();
+                if (st == "queued" || st == "running")
+                    return;
+            }
+    const double fps = double(m_project.fpsN) / m_project.fpsD;
+    QHash<QString, QVector<Keyframe>> xs, ys;
+    for (const auto &id : ids) {
+        const auto *c = m_project.clip(id);
+        const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+        if (!a)
+            continue;
+        const auto r = m_ai->result("faces", *a);
+        QFile file(r.path);
+        if (r.path.isEmpty() || !file.open(QIODevice::ReadOnly | QIODevice::Text))
+            continue;
+        struct Box {
+            double x, y, w, h;
+        };
+        QHash<qint64, QVector<Box>> frames;
+        for (const auto &line :
+             QString::fromUtf8(file.readAll()).split('\n', Qt::SkipEmptyParts)) {
+            const auto f = line.split(' ');
+            if (f.size() == 6)
+                frames[qRound64(f[0].toDouble() * r.rate)]
+                    << Box{f[1].toDouble(), f[2].toDouble(), f[3].toDouble(), f[4].toDouble()};
+        }
+        // The main face's centre (source fractions) at each analysed moment: the largest face,
+        // or the one closest to the last when it is still there, so the frame does not jump
+        // between people.
+        const double s = c->speed.seconds();
+        const qint64 step = std::max<qint64>(1, qRound64(fps / r.rate));
+        QVector<std::pair<qint64, QPointF>> path;
+        std::optional<QPointF> last;
+        for (qint64 local = 0; local < c->duration; local += step) {
+            const double source = c->sourceIn.seconds() + local / fps * s;
+            const auto list = frames.value(qRound64((source - r.start) * r.rate));
+            const Box *best = nullptr;
+            for (const auto &b : list) {
+                const QPointF centre(b.x + b.w / 2, b.y + b.h / 2);
+                if (last && QLineF(centre, *last).length() < 0.15) {
+                    best = &b;
+                    break;
+                }
+                if (!best || b.w * b.h > best->w * best->h)
+                    best = &b;
+            }
+            if (best) {
+                last = QPointF(best->x + best->w / 2, best->y + best->h / 2);
+                path << std::pair{local, *last};
+            }
+        }
+        if (path.isEmpty())
+            continue;
+        // A calm camera: a moving average over up to a second either side (shrunk near the
+        // ends so it stays centred), sampled every half second.
+        const int reach = std::max(1, int(std::round(r.rate)));
+        const auto size = m_project.pictureSize(*c, m_project.width * c->scale,
+                                                m_project.height * c->scale);
+        const double extentX = size.width() / m_project.width,
+                     extentY = size.height() / m_project.height;
+        const int every = std::max(1, int(std::round(r.rate / 2)));
+        auto &kx = xs[id];
+        auto &ky = ys[id];
+        for (int i = 0; i < path.size(); i += every) {
+            const int k = std::min({reach, i, int(path.size()) - 1 - i});
+            QPointF sum;
+            for (int j = i - k; j <= i + k; ++j)
+                sum += path[j].second;
+            auto centre = sum / (2 * k + 1);
+            if (c->flip)
+                centre.setX(1 - centre.x());
+            // Put the face in the middle, as far as the picture still covers the canvas.
+            const double limitX = std::max(0., (extentX - 1) / 2),
+                         limitY = std::max(0., (extentY - 1) / 2);
+            kx << Keyframe{path[i].first, std::clamp(-(centre.x() - 0.5) * extentX, -limitX, limitX),
+                           false};
+            // Faces sit in the upper part of a frame; vertical moves only when there is room.
+            ky << Keyframe{path[i].first,
+                           std::clamp(-(centre.y() - 0.4) * extentY, -limitY, limitY), false};
+        }
+    }
+    int count = 0;
+    if (!xs.isEmpty())
+        mutate([&](Project &p) {
+            for (auto it = xs.begin(); it != xs.end(); ++it) {
+                auto *c = p.clip(it.key());
+                if (!c || p.trackSettings.value(c->track).locked)
+                    continue;
+                // A single keyframe is just a position.
+                if (it->size() == 1) {
+                    c->x = it->first().value;
+                    c->y = ys[it.key()].first().value;
+                } else {
+                    c->keyframes["x"] = *it;
+                    if (std::any_of(ys[it.key()].begin(), ys[it.key()].end(),
+                                    [](const Keyframe &k) { return std::abs(k.value) > 1e-6; }))
+                        c->keyframes["y"] = ys[it.key()];
+                }
+                ++count;
+            }
+        });
+    m_reframe = {{"status", "done"}, {"clips", ids}, {"faces", count}};
+    m_status = count ? QString("Reframed: %1 of %2 clips follow a face").arg(count).arg(ids.size())
+                     : QString("Reframed; no faces found, the pictures stay centred");
+    emit changed();
+}
 void Editor::copy() {
     const auto *c = m_project.clip(m_selected);
     if (!c)
@@ -2363,29 +2572,85 @@ void Editor::copy() {
     m_clipboard = *c;
     const auto *a = m_project.asset(c->assetId);
     m_clipboardAsset = a ? std::optional<Asset>(*a) : std::nullopt;
-    m_status = "Copied " + c->name;
+    m_clipboardMore.clear();
+    m_clipboardMoreAssets.clear();
+    for (const auto &id : selection())
+        if (id != m_selected) {
+            const auto *x = m_project.clip(id);
+            m_clipboardMore << *x;
+            if (const auto *xa = m_project.asset(x->assetId))
+                m_clipboardMoreAssets << *xa;
+        }
+    m_status = m_clipboardMore.isEmpty()
+                   ? "Copied " + c->name
+                   : QString("Copied %1 clips").arg(m_clipboardMore.size() + 1);
     emit changed();
 }
 void Editor::paste() {
     if (!m_clipboard)
         return;
-    const auto id = newId();
+    QStringList added;
     mutate([&](Project &p) {
-        auto copy = *m_clipboard;
-        copy.id = id;
-        copy.transition.clear();
-        copy.transitionFrames = 0;
-        if (m_clipboardAsset && !p.asset(m_clipboardAsset->id))
-            p.assets.push_back(*m_clipboardAsset);
-        // Timing is in frames: a clip from a project with another frame rate keeps its length.
-        // The clip goes to its own track when that is free at the playhead (magnetic tracks make
-        // room), otherwise to the nearest free track above or below, or to a new track on top.
-        copy.start = m_playhead;
-        copy.track = freeTrack(p, std::min(copy.track, p.tracks - 1), copy.start, copy.duration);
-        p.clips.push_back(copy);
-        p.move(copy.id, copy.track, copy.start);
+        auto clips = QVector<Clip>{*m_clipboard} + m_clipboardMore;
+        auto assets = m_clipboardMoreAssets;
+        if (m_clipboardAsset)
+            assets.prepend(*m_clipboardAsset);
+        for (const auto &a : assets)
+            if (!p.asset(a.id))
+                p.assets.push_back(a);
+        // The earliest copied clip lands at the playhead; the others keep their distance to it.
+        qint64 earliest = clips.first().start;
+        for (const auto &c : clips)
+            earliest = std::min(earliest, c.start);
+        // New links and groups, so the copies stay together but apart from the originals.
+        QHash<QString, QString> renamed;
+        auto rename = [&](const QString &key) {
+            if (key.isEmpty() || key == "none")
+                return key;
+            if (!renamed.contains(key))
+                renamed[key] = newId();
+            return renamed[key];
+        };
+        for (auto copy : clips) {
+            copy.id = newId();
+            copy.transition.clear();
+            copy.transitionFrames = 0;
+            copy.link = rename(copy.link);
+            copy.group = rename(copy.group);
+            // Timing is in frames: a clip from a project with another frame rate keeps its
+            // length. A clip goes to its own track when that is free there (magnetic tracks make
+            // room), otherwise to the nearest free track above or below, or to a new track.
+            copy.start = m_playhead + (copy.start - earliest);
+            copy.track = freeTrack(p, std::min(copy.track, p.tracks - 1), copy.start, copy.duration);
+            p.clips.push_back(copy);
+            p.move(copy.id, copy.track, copy.start);
+            added << copy.id;
+        }
     });
-    select(id);
+    if (added.isEmpty())
+        return;
+    m_selected = added.takeFirst();
+    m_also = added;
+    emit changed();
+}
+void Editor::selectArea(qint64 from, qint64 to, int low, int high, bool add) {
+    if (!add) {
+        m_selected.clear();
+        m_also.clear();
+    }
+    auto current = selection();
+    for (const auto &c : m_project.clips)
+        if (c.track >= low && c.track <= high && c.start < to && c.start + c.duration > from &&
+            !current.contains(c.id)) {
+            current << c.id;
+            if (!c.group.isEmpty())
+                for (const auto &x : m_project.clips)
+                    if (x.group == c.group && !current.contains(x.id))
+                        current << x.id;
+        }
+    m_selected = current.isEmpty() ? QString() : current.takeFirst();
+    m_also = current;
+    emit changed();
 }
 void Editor::pasteAttributes(const QString &group) {
     if (!m_clipboard || (group != "look" && group != "all"))
@@ -3237,7 +3502,73 @@ QVariantMap Editor::exportPreview(const QVariantMap &settings) const {
         return {};
     }
 }
+void Editor::queueExport(const QUrl &url, const QVariantMap &settings) {
+    try {
+        const auto output = localPath(url);
+        const auto s = exportSettings(settings);
+        if (QFileInfo::exists(output))
+            throw std::runtime_error("That output file already exists. Choose a new filename.");
+        if (QFileInfo(output).suffix().compare(formatExtension(s.format), Qt::CaseInsensitive))
+            throw std::runtime_error(
+                ("Use a ." + formatExtension(s.format) + " filename for this format").toStdString());
+        for (const auto &q : m_queue)
+            if (q.status == "waiting" && localPath(q.url) == output)
+                throw std::runtime_error("That file is in the queue already");
+        m_queue.push_back({url, settings, m_project});
+        m_queuePaused = false;
+        m_status = "Added to the export queue: " + QFileInfo(output).fileName();
+        advanceQueue();
+        emit changed();
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
+void Editor::removeQueued(int index) {
+    if (index < 0 || index >= m_queue.size() || m_queue[index].status == "exporting")
+        return;
+    m_queue.remove(index);
+    emit changed();
+}
+void Editor::startQueue() {
+    m_queuePaused = false;
+    advanceQueue();
+    emit changed();
+}
+void Editor::advanceQueue() {
+    // The running export finished: its file tells whether it worked.
+    for (auto &q : m_queue)
+        if (q.status == "exporting" && !m_busy) {
+            if (QFileInfo::exists(localPath(q.url)))
+                q.status = "done";
+            else if (m_cancelled) {
+                q.status = "cancelled";
+                m_queuePaused = true;
+            } else
+                q.status = "failed";
+        }
+    if (m_busy || m_queuePaused) {
+        if (m_busy && !m_queueTimer.isActive())
+            m_queueTimer.start();
+        return;
+    }
+    for (auto &q : m_queue)
+        if (q.status == "waiting") {
+            q.status = "exporting";
+            exportProject(q.project, q.url, q.settings);
+            if (!m_busy && !QFileInfo::exists(localPath(q.url)))
+                q.status = "failed";
+            else
+                m_queueTimer.start();
+            if (q.status == "failed")
+                continue; // try the next one
+            return;
+        }
+    m_queueTimer.stop();
+}
 void Editor::exportWith(const QUrl &url, const QVariantMap &settings) {
+    exportProject(m_project, url, settings);
+}
+void Editor::exportProject(const Project &project, const QUrl &url, const QVariantMap &settings) {
     if (m_busy)
         return;
     try {
@@ -3248,7 +3579,7 @@ void Editor::exportWith(const QUrl &url, const QVariantMap &settings) {
         if (QFileInfo(output).suffix().compare(formatExtension(s.format), Qt::CaseInsensitive))
             throw std::runtime_error(
                 ("Use a ." + formatExtension(s.format) + " filename for this format").toStdString());
-        if (m_project.clips.empty())
+        if (project.clips.empty())
             throw std::runtime_error("The timeline is empty");
         // The in/out range, or the whole timeline.
         const auto range = settings.value("range", "all").toString();
@@ -3257,16 +3588,17 @@ void Editor::exportWith(const QUrl &url, const QVariantMap &settings) {
         m_exportFrom = 0;
         m_exportTo = -1;
         if (range == "inout") {
-            if (m_project.inPoint < 0 && m_project.outPoint < 0)
+            if (project.inPoint < 0 && project.outPoint < 0)
                 throw std::runtime_error("Set an in or out point first (I / O)");
-            m_exportFrom = std::max<qint64>(0, m_project.inPoint);
-            m_exportTo = m_project.outPoint >= 0 ? std::min(m_project.outPoint, m_project.duration())
+            m_exportFrom = std::max<qint64>(0, project.inPoint);
+            m_exportTo = project.outPoint >= 0 ? std::min(project.outPoint, project.duration())
                                                  : -1;
-            if (m_exportFrom >= (m_exportTo >= 0 ? m_exportTo : m_project.duration()))
+            if (m_exportFrom >= (m_exportTo >= 0 ? m_exportTo : project.duration()))
                 throw std::runtime_error("The in/out range is outside the timeline");
         }
-        const auto size = exportSize(m_project, s.height);
-        const double fps = double(m_project.fpsN) / m_project.fpsD;
+        const auto size = exportSize(project, s.height);
+        const double fps = double(project.fpsN) / project.fpsD;
+        m_exportProject = project;
         m_resumeTimer.stop();
         stopPlayback();
         m_busy = true;
@@ -3363,7 +3695,7 @@ void Editor::measureLoudness(const QString &output, QSize size, const Encoder &e
         options.measureLoudness = true;
         options.from = m_exportFrom;
         options.to = m_exportTo;
-        const auto plan = compileRender(m_project, work->path(), size.width(), size.height(),
+        const auto plan = compileRender(m_exportProject, work->path(), size.width(), size.height(),
                                         options);
         const auto graph = work->filePath("measure.txt");
         writeGraph(graph, plan.graph);
@@ -3443,7 +3775,7 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
         }
         addAiMedia(options);
         const auto plan =
-            compileRender(m_project, work->path(), size.width(), size.height(), options);
+            compileRender(m_exportProject, work->path(), size.width(), size.height(), options);
         const auto graph = work->filePath("graph.txt");
         writeGraph(graph, plan.graph);
         const QString temp =
