@@ -401,6 +401,55 @@ class UiTest : public QObject {
         QTRY_COMPARE(list->property("count").toInt(), 0);
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void startScreenAndPreferences() {
+        QTemporaryDir dir;
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        auto *start = findItem(window->contentItem(), "startScreen");
+        QVERIFY(start && !start->isVisible());
+        // Shown at launch (main.cpp sets this when no project is opened).
+        window->setProperty("startScreen", true);
+        QTRY_VERIFY(start->isVisible());
+        QVERIFY(findItem(window->contentItem(), "startFormat-5"));
+        // Choosing "Vertical 9:16" starts a project in that shape and closes the screen.
+        auto *vertical = findItem(window->contentItem(), "startFormat-2");
+        QVERIFY(vertical);
+        QVERIFY(QMetaObject::invokeMethod(vertical, "clicked"));
+        QCOMPARE(editor.project().width, 1080);
+        QCOMPARE(editor.project().height, 1920);
+        QTRY_VERIFY(!start->isVisible());
+        QVERIFY(!window->property("startScreen").toBool());
+        // Preferences: the dialog shows and saves the app-wide settings.
+        auto *dialog = window->findChild<QObject *>("preferencesDialog");
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        auto *format = findItem(window->contentItem(), "prefFormat");
+        QTRY_VERIFY(format && format->isVisible());
+        QCOMPARE(format->property("currentIndex").toInt(), 0); // Full HD
+        format->setProperty("currentIndex", 4);                 // square
+        findItem(window->contentItem(), "prefBackups")->setProperty("value", 5);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
+        auto prefs = editor.state()["preferences"].toMap();
+        QCOMPARE(prefs["width"].toInt(), 1080);
+        QCOMPARE(prefs["height"].toInt(), 1080);
+        QCOMPARE(prefs["backups"].toInt(), 5);
+        editor.setPreferences({{"width", 1920}, {"height", 1080}, {"backups", 20}});
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void exportDialog() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;

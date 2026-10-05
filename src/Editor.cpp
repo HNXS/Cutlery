@@ -65,6 +65,8 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
                 if (v.isString() && m_recent.size() < 10)
                     m_recent << v.toString();
     }
+    loadPreferences();
+    applyPreferences(m_project);
     m_analysis = new MediaAnalysis(m_data + "/cache/waveforms", executable("ffmpeg"), this);
     m_thumbnails = new Thumbnails(m_data + "/cache/thumbnails", executable("ffmpeg"), this);
     m_encoders = new EncoderResolver(executable("ffmpeg"), this);
@@ -618,6 +620,7 @@ QVariantMap Editor::state() const {
                  return list;
              }()},
             {"dataPath", m_data},
+            {"preferences", m_prefs},
             {"revision", m_revision}};
 }
 void Editor::fail(const QString &error) {
@@ -674,6 +677,7 @@ void Editor::newProject() {
     cancelJob();
     m_saveTimer.stop();
     m_project = Project{};
+    applyPreferences(m_project);
     m_path.clear();
     m_selected.clear();
     m_undo.clear();
@@ -752,6 +756,79 @@ bool Editor::save(const QUrl &url) {
         return false;
     }
 }
+// App-wide settings, kept in the data folder: the format of new projects, how long imported
+// pictures last, how many earlier versions are kept and whether the start screen shows.
+static QVariantMap defaultPreferences() {
+    return {{"width", 1920},     {"height", 1080},  {"fpsN", 30},
+            {"fpsD", 1},         {"stillSeconds", 5.}, {"backups", 20},
+            {"startScreen", true}};
+}
+// The valid preferences in `values`, over `base`; throws on an invalid value.
+static QVariantMap checkedPreferences(const QVariantMap &base, const QVariantMap &values) {
+    auto p = base;
+    for (auto it = values.begin(); it != values.end(); ++it) {
+        if (!p.contains(it.key()))
+            throw std::runtime_error(("Unknown setting: " + it.key()).toStdString());
+        p[it.key()] = it.value();
+    }
+    const int w = p["width"].toInt(), h = p["height"].toInt(), n = p["fpsN"].toInt(),
+              d = p["fpsD"].toInt();
+    if (w < 64 || h < 64 || w > 7680 || h > 7680 || w % 2 || h % 2)
+        throw std::runtime_error("The size of new projects must be even, 64–7680 px");
+    if (n <= 0 || d <= 0 || d > 1001 || double(n) / d < 1 || double(n) / d > 120)
+        throw std::runtime_error("The frame rate must be 1–120 fps");
+    const double still = p["stillSeconds"].toDouble();
+    if (!(still >= 0.5 && still <= 60))
+        throw std::runtime_error("Pictures last 0.5–60 seconds");
+    const int backups = p["backups"].toInt();
+    if (backups < 0 || backups > 100)
+        throw std::runtime_error("Keep 0–100 earlier versions");
+    return {{"width", w},
+            {"height", h},
+            {"fpsN", n},
+            {"fpsD", d},
+            {"stillSeconds", still},
+            {"backups", backups},
+            {"startScreen", p["startScreen"].toBool()}};
+}
+void Editor::loadPreferences() {
+    m_prefs = defaultPreferences();
+    QFile file(m_data + "/settings.json");
+    if (!file.open(QIODevice::ReadOnly) || file.size() > 64 * 1024)
+        return;
+    // A broken or outdated file falls back to the defaults, setting by setting.
+    const auto stored = QJsonDocument::fromJson(file.readAll()).object().toVariantMap();
+    for (auto it = stored.begin(); it != stored.end(); ++it)
+        try {
+            m_prefs = checkedPreferences(m_prefs, {{it.key(), it.value()}});
+        } catch (const std::exception &) {
+        }
+}
+void Editor::applyPreferences(Project &p) const {
+    p.width = m_prefs.value("width").toInt();
+    p.height = m_prefs.value("height").toInt();
+    p.fpsN = m_prefs.value("fpsN").toInt();
+    p.fpsD = m_prefs.value("fpsD").toInt();
+}
+void Editor::setPreferences(const QVariantMap &values) {
+    try {
+        const auto next = checkedPreferences(m_prefs, values);
+        QDir().mkpath(m_data);
+        QSaveFile f(m_data + "/settings.json");
+        const auto data = QJsonDocument(QJsonObject::fromVariantMap(next)).toJson();
+        if (!f.open(QIODevice::WriteOnly) || f.write(data) != data.size() || !f.commit())
+            throw std::runtime_error("Cannot save the settings in " + m_data.toStdString());
+        m_prefs = next;
+        // An untouched new project takes the new format at once.
+        if (m_path.isEmpty() && m_project.clips.empty() && m_project.assets.empty() && !m_dirty)
+            applyPreferences(m_project);
+        m_status = "Settings saved";
+        emit projectChanged();
+        emit changed();
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
 void Editor::remember(const QString &path) {
     const auto file = QFileInfo(path).absoluteFilePath();
     m_recent.removeAll(file);
@@ -783,6 +860,9 @@ QString Editor::backupFolder(const QString &projectPath) const {
     return m_data + "/backups/" + QString::fromLatin1(key);
 }
 void Editor::backUp(const QString &projectPath) {
+    const int keep = m_prefs.value("backups").toInt();
+    if (keep <= 0)
+        return;
     // A failed backup never stops the save itself.
     const auto folder = backupFolder(projectPath);
     if (!QDir().mkpath(folder))
@@ -796,7 +876,7 @@ void Editor::backUp(const QString &projectPath) {
         target = folder + "/" + stamp + "-" + QString::number(i) + ".cutlery";
     QFile::copy(projectPath, target);
     auto files = QDir(folder).entryList({"*.cutlery"}, QDir::Files, QDir::Name);
-    while (files.size() > 20)
+    while (files.size() > keep)
         QFile::remove(folder + "/" + files.takeFirst());
 }
 QVariantList Editor::backups() const {
@@ -1104,7 +1184,7 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                 // An animated GIF plays in a loop, like a sticker.
                 a.loops = ext == "gif" && a.kind == "video";
                 if (still) {
-                    a.duration = 5;
+                    a.duration = m_prefs.value("stillSeconds").toDouble();
                     a.frameRate = 0;
                     a.variableRate = false;
                 }

@@ -124,6 +124,10 @@ int main(int argc, char **argv) {
         editor.seek(60);
     } else if (args.size() > 1 && !args[1].startsWith("--"))
         editor.openProject(QUrl::fromLocalFile(args[1]));
+    else if (!args.contains("--smoke-test") && !args.contains("--screenshot") &&
+             editor.state()["preferences"].toMap()["startScreen"].toBool())
+        // Started without a project: offer new formats, recent projects and recovery first.
+        engine.rootObjects().first()->setProperty("startScreen", true);
     const auto shot = args.indexOf("--screenshot");
     if (shot >= 0 && shot + 1 < args.size())
         QTimer::singleShot(5000, &app, [&] {

@@ -76,6 +76,9 @@ class Editor final : public QObject {
     Q_INVOKABLE void detachAudio();
     Q_INVOKABLE qint64 adjacentCut(bool forward) const;
     Q_INVOKABLE void newProject();
+    // App-wide settings (state "preferences"): width, height, fpsN, fpsD of new projects,
+    // stillSeconds of imported pictures, backups kept per project, startScreen. Saved at once.
+    Q_INVOKABLE void setPreferences(const QVariantMap &values);
     Q_INVOKABLE bool openProject(const QUrl &);
     Q_INVOKABLE bool save(const QUrl &url = QUrl());
     // Recently opened or saved projects, newest first (state "recent": path, name, exists).
@@ -333,6 +336,9 @@ class Editor final : public QObject {
     // The track nearest `home` with room for [start, start + length), or a new one on top.
     static int freeTrack(Project &, int home, qint64 start, qint64 length);
     QStringList m_recent;
+    QVariantMap m_prefs;
+    void loadPreferences();
+    void applyPreferences(Project &) const;
     struct QueuedExport {
         QUrl url;
         QVariantMap settings;

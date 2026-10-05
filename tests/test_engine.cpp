@@ -481,6 +481,61 @@ class EngineTest : public QObject {
         QCOMPARE(editor.project().clips.back().start, cut - qRound64(0.165 * 30));
         qunsetenv("CUTLERY_SOUNDS_DIR");
     }
+    void appPreferences() {
+        QTemporaryDir dir;
+        FrameProvider frames;
+        auto reset = [](Editor &e) {
+            e.setPreferences({{"width", 1920}, {"height", 1080}, {"fpsN", 30}, {"fpsD", 1},
+                              {"stillSeconds", 5.}, {"backups", 20}, {"startScreen", true}});
+        };
+        {
+            Editor e(&frames);
+            reset(e);
+            auto prefs = e.state()["preferences"].toMap();
+            QCOMPARE(prefs["width"].toInt(), 1920);
+            QCOMPARE(prefs["backups"].toInt(), 20);
+            // Invalid values change nothing.
+            e.setPreferences({{"width", 1081}});
+            QVERIFY(e.state()["error"].toString().contains("even"));
+            e.setPreferences({{"fpsN", 500}});
+            QVERIFY(e.state()["error"].toString().contains("frame rate"));
+            e.setPreferences({{"colour", "red"}});
+            QVERIFY(e.state()["error"].toString().contains("Unknown"));
+            QCOMPARE(e.state()["preferences"].toMap()["width"].toInt(), 1920);
+            // An untouched new project takes the new format at once; later new projects too.
+            e.setPreferences({{"width", 1080}, {"height", 1920}, {"fpsN", 25},
+                              {"stillSeconds", 2.5}, {"backups", 0}, {"startScreen", false}});
+            QCOMPARE(e.project().width, 1080);
+            QCOMPARE(e.project().fpsN, 25);
+            e.addTitle();
+            e.newProject();
+            QCOMPARE(e.project().height, 1920);
+            // Pictures last the set time.
+            QImage image(64, 64, QImage::Format_RGB32);
+            image.fill(Qt::blue);
+            QVERIFY(image.save(dir.filePath("still.png")));
+            e.importMedia({QUrl::fromLocalFile(dir.filePath("still.png"))});
+            QTRY_VERIFY_WITH_TIMEOUT(e.project().assets.size() == 1, 15000);
+            e.addAsset(e.project().assets.first().id);
+            QCOMPARE(e.project().clips.first().duration, qint64(62)); // 2.5 s at 25 fps
+            // No earlier versions are kept.
+            QVERIFY(e.save(QUrl::fromLocalFile(dir.filePath("p.cutlery"))));
+            e.addTitle();
+            QVERIFY(e.save());
+            QVERIFY(e.backups().isEmpty());
+        }
+        {
+            // Saved for the next start.
+            Editor e(&frames);
+            const auto prefs = e.state()["preferences"].toMap();
+            QCOMPARE(prefs["height"].toInt(), 1920);
+            QCOMPARE(prefs["stillSeconds"].toDouble(), 2.5);
+            QCOMPARE(prefs["startScreen"].toBool(), false);
+            QCOMPARE(e.project().width, 1080);
+            reset(e);
+            QCOMPARE(e.project().width, 1920);
+        }
+    }
     void recentProjectsAndBackups() {
         QTemporaryDir dir;
         const auto path = dir.filePath("talk.cutlery");

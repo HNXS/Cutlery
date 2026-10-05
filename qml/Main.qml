@@ -50,7 +50,22 @@ ApplicationWindow {
     property var libraryGesture: null
     property bool textEditing: activeFocusItem && typeof activeFocusItem.cursorPosition === "number"
     property bool showScopes: false
-    property bool shortcutsBlocked: openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
+    // Set at launch without a project: the start screen shows until a project has content.
+    property bool startScreen: false
+    // Canvas formats offered for new projects.
+    readonly property var projectFormats: [
+        { w: 1920, h: 1080, label: "Full HD 16:9", hint: "YouTube, presentations" },
+        { w: 3840, h: 2160, label: "4K UHD 16:9", hint: "Sharp masters" },
+        { w: 1080, h: 1920, label: "Vertical 9:16", hint: "Shorts, Reels, TikTok" },
+        { w: 1080, h: 1350, label: "Portrait 4:5", hint: "Instagram feed" },
+        { w: 1080, h: 1080, label: "Square 1:1", hint: "Social posts" },
+        { w: 1280, h: 720, label: "HD 16:9", hint: "Small and fast" }
+    ]
+    readonly property var frameRates: [
+        { n: 24, d: 1, label: "24" }, { n: 25, d: 1, label: "25" }, { n: 30, d: 1, label: "30" },
+        { n: 50, d: 1, label: "50" }, { n: 60, d: 1, label: "60" }, { n: 30000, d: 1001, label: "29.97" }
+    ]
+    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
         enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
@@ -360,6 +375,11 @@ ApplicationWindow {
             MenuItem {
                 text: "Project settings…"
                 onTriggered: settings.open()
+            }
+            MenuItem {
+                objectName: "preferencesItem"
+                text: "Preferences…"
+                onTriggered: preferencesDialog.open()
             }
             // A new canvas shape; pictures zoom to fill it and, with the AI pack, follow faces.
             Menu {
@@ -2853,6 +2873,146 @@ ApplicationWindow {
             }
         }
     }
+    // The start screen: a new project in a chosen format, a recent project, or the autosave.
+    Rectangle {
+        id: startPage
+        objectName: "startScreen"
+        anchors.fill: parent
+        z: 50
+        visible: win.startScreen && win.s.duration === 0 && editor.assets.length === 0 && !win.s.path
+        color: "#f00f1419"
+        readonly property var prefs: win.s.preferences || ({})
+        function begin(format) {
+            editor.configure(format.w, format.h, prefs.fpsN || 30, prefs.fpsD || 1);
+            win.startScreen = false;
+        }
+        MouseArea {
+            anchors.fill: parent // keeps clicks off the editor below
+        }
+        ColumnLayout {
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 64, 760)
+            spacing: 18
+            Label {
+                text: "Start a project"
+                font.pixelSize: 26
+                font.bold: true
+            }
+            Label {
+                text: "Choose the shape of the video. You can change it later under Project → Reframe for…"
+                color: win.muted
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 3
+                columnSpacing: 12
+                rowSpacing: 12
+                Repeater {
+                    model: win.projectFormats
+                    delegate: Rectangle {
+                        id: formatTile
+                        required property var modelData
+                        required property int index
+                        objectName: "startFormat-" + index
+                        signal clicked
+                        onClicked: startPage.begin(modelData)
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 92
+                        radius: 8
+                        color: tileMouse.containsMouse ? "#2a3640" : "#1d252e"
+                        border.color: modelData.w === startPage.prefs.width && modelData.h === startPage.prefs.height ? win.mint : "#34404c"
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 12
+                            // The canvas shape, to scale.
+                            Item {
+                                Layout.preferredWidth: 48
+                                Layout.preferredHeight: 48
+                                Rectangle {
+                                    anchors.centerIn: parent
+                                    width: 44 * Math.min(1, formatTile.modelData.w / formatTile.modelData.h)
+                                    height: 44 * Math.min(1, formatTile.modelData.h / formatTile.modelData.w)
+                                    radius: 3
+                                    color: "transparent"
+                                    border.color: win.mint
+                                    border.width: 2
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 3
+                                Label {
+                                    text: formatTile.modelData.label
+                                    font.bold: true
+                                }
+                                Label {
+                                    text: formatTile.modelData.w + " × " + formatTile.modelData.h + " · " + formatTile.modelData.hint
+                                    color: win.muted
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                            }
+                        }
+                        MouseArea {
+                            id: tileMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: formatTile.clicked()
+                        }
+                    }
+                }
+            }
+            RowLayout {
+                spacing: 10
+                Action {
+                    text: "Open project…"
+                    onClicked: win.guarded("open")
+                }
+                Action {
+                    objectName: "startRecover"
+                    visible: win.s.hasRecovery
+                    text: "Recover autosave"
+                    onClicked: win.guarded("recover")
+                }
+                Item {
+                    Layout.fillWidth: true
+                }
+                CheckBox {
+                    objectName: "startScreenAgain"
+                    text: "Show at start"
+                    checked: startPage.prefs.startScreen !== false
+                    onToggled: editor.setPreferences({ startScreen: checked })
+                }
+            }
+            Label {
+                visible: (win.s.recent || []).length > 0
+                text: "Recent projects"
+                color: win.muted
+            }
+            Repeater {
+                model: (win.s.recent || []).slice(0, 6)
+                delegate: ItemDelegate {
+                    required property var modelData
+                    required property int index
+                    objectName: "startRecent-" + index
+                    Layout.fillWidth: true
+                    enabled: modelData.exists
+                    text: modelData.name + (modelData.exists ? "" : " (missing)") + "    " + modelData.path
+                    onClicked: win.guarded("recent:" + modelData.path)
+                }
+            }
+            Action {
+                objectName: "startEmpty"
+                text: "Skip"
+                onClicked: win.startScreen = false
+            }
+        }
+    }
     FileDialog {
         id: importDialog
         title: "Import local media"
@@ -3026,6 +3186,76 @@ ApplicationWindow {
                     onClicked: backupList.currentIndex = index
                 }
             }
+        }
+    }
+    // App-wide settings: the format of new projects, picture length, earlier versions kept and
+    // the start screen.
+    Dialog {
+        id: preferencesDialog
+        objectName: "preferencesDialog"
+        anchors.centerIn: parent
+        title: "Preferences"
+        modal: true
+        width: 400
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        readonly property var prefs: win.s.preferences || ({})
+        onAboutToShow: {
+            prefFormat.currentIndex = Math.max(0, win.projectFormats.findIndex(f => f.w === prefs.width && f.h === prefs.height));
+            prefRate.currentIndex = Math.max(0, win.frameRates.findIndex(r => r.n === prefs.fpsN && r.d === prefs.fpsD));
+            prefStill.value = Math.round((prefs.stillSeconds || 5) * 10);
+            prefBackups.value = prefs.backups ?? 20;
+            prefStart.checked = prefs.startScreen !== false;
+        }
+        GridLayout {
+            anchors.fill: parent
+            columns: 2
+            columnSpacing: 12
+            rowSpacing: 10
+            Label { text: "New projects" }
+            ComboBox {
+                id: prefFormat
+                objectName: "prefFormat"
+                Layout.fillWidth: true
+                model: win.projectFormats.map(f => f.label + " · " + f.w + " × " + f.h)
+            }
+            Label { text: "Frame rate" }
+            ComboBox {
+                id: prefRate
+                objectName: "prefRate"
+                Layout.fillWidth: true
+                model: win.frameRates.map(r => r.label + " fps")
+            }
+            Label { text: "Pictures last" }
+            SpinBox {
+                id: prefStill
+                objectName: "prefStill"
+                from: 5
+                to: 600
+                editable: true
+                textFromValue: (v) => (v / 10).toFixed(1) + " s"
+                valueFromText: (t) => Math.round(parseFloat(t) * 10)
+                ToolTip.visible: hovered
+                ToolTip.text: "Length of a still image when it is added to the timeline"
+            }
+            Label { text: "Earlier versions" }
+            SpinBox {
+                id: prefBackups
+                objectName: "prefBackups"
+                from: 0
+                to: 100
+                ToolTip.visible: hovered
+                ToolTip.text: "Copies kept per project when you save (Project → Restore an earlier version); 0 keeps none"
+            }
+            CheckBox {
+                id: prefStart
+                objectName: "prefStart"
+                Layout.columnSpan: 2
+                text: "Show the start screen when Cutlery opens"
+            }
+        }
+        onAccepted: {
+            const f = win.projectFormats[prefFormat.currentIndex], r = win.frameRates[prefRate.currentIndex];
+            editor.setPreferences({ width: f.w, height: f.h, fpsN: r.n, fpsD: r.d, stillSeconds: prefStill.value / 10, backups: prefBackups.value, startScreen: prefStart.checked });
         }
     }
     // Names a new folder (optionally moving one medium into it) or renames one.
