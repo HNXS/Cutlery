@@ -456,6 +456,8 @@ QVariantMap Editor::state() const {
             PROP(reverb);
             PROP(echo);
             PROP(pan);
+            PROP(anchorX);
+            PROP(anchorY);
             PROP(slowMotion);
             PROP(fontFamily);
             PROP(graphic);
@@ -1206,8 +1208,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             c->sourceIn = Time(qRound64(t * 1000000), 1000000);
         } else if (key == "speed") {
             const auto speed = v.toDouble();
-            if (!std::isfinite(speed) || speed < .25 || speed > 4)
-                throw std::runtime_error("Speed must be 0.25–4x");
+            if (!std::isfinite(speed) || speed < .1 || speed > 10)
+                throw std::runtime_error("Speed must be 0.1–10x");
             auto old = c->speed;
             c->speed = Time(qRound64(speed * 1000), 1000);
             c->scaleKeyframes(old.seconds() / c->speed.seconds());
@@ -1289,6 +1291,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(reverb, toDouble);
         FIELD(echo, toDouble);
         FIELD(pan, toDouble);
+        FIELD(anchorX, toDouble);
+        FIELD(anchorY, toDouble);
         FIELD(slowMotion, toString);
         FIELD(bold, toBool);
         FIELD(italic, toBool);
@@ -1350,8 +1354,15 @@ QVariantMap Editor::clipBounds(const QString &id) const {
     const double scale = c->valueAt("scale", local);
     const auto size = m_project.pictureSize(*c, m_project.width * scale,
                                             m_project.height * scale);
-    return {{"x", 0.5 + c->valueAt("x", local) - size.width() / m_project.width / 2},
-            {"y", 0.5 + c->valueAt("y", local) - size.height() / m_project.height / 2},
+    const auto shift = Project::anchorShift(
+        *c, m_project.pictureSize(*c, m_project.width, m_project.height), scale,
+        c->valueAt("rotation", local));
+    return {{"x", 0.5 + c->valueAt("x", local) + shift.x() / m_project.width -
+                      size.width() / m_project.width / 2},
+            {"y", 0.5 + c->valueAt("y", local) + shift.y() / m_project.height -
+                      size.height() / m_project.height / 2},
+            {"anchorX", c->anchorX},
+            {"anchorY", c->anchorY},
             {"width", size.width() / m_project.width},
             {"height", size.height() / m_project.height},
             {"rotation", c->valueAt("rotation", local)},
@@ -2222,6 +2233,8 @@ void Editor::pasteAttributes(const QString &group) {
         if (group == "look")
             return;
         c->scale = from.scale;
+        c->anchorX = from.anchorX;
+        c->anchorY = from.anchorY;
         c->x = from.x;
         c->y = from.y;
         c->rotation = from.rotation;

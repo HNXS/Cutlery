@@ -843,13 +843,30 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         return f + ",setpts=PTS-STARTPTS";
     };
     // `offset` is the clip-local frame shown at overlay time zero, for animated positions.
+    // An anchor away from the centre moves the centre as the picture scales and turns, so the
+    // anchor point stays put (see Project::anchorShift).
     auto overlayPosition = [&](const Clip &c, qint64 offset) {
+        const bool anchored = (c.anchorX != 0.5 || c.anchorY != 0.5) && c.titleStyle.isEmpty();
+        const auto base = p.pictureSize(c, width, height);
         if (animatedGeometry(c)) {
             const auto local = QString("(t*%1/%2+%3)").arg(p.fpsN).arg(p.fpsD).arg(offset);
-            return QString("x='(W-w)/2+(%1)*W':y='(H-h)/2+(%2)*H'")
-                .arg(curve(c, "x", local), curve(c, "y", local));
+            QString sx, sy;
+            if (anchored) {
+                const auto dx = num((c.anchorX - 0.5) * base.width()),
+                           dy = num((c.anchorY - 0.5) * base.height()),
+                           s = "(" + curve(c, "scale", local) + ")",
+                           a = "((" + curve(c, "rotation", local) + ")*PI/180)";
+                sx = QString("+%1-%3*(cos(%4)*%1-sin(%4)*%2)").arg(dx, dy, s, a);
+                sy = QString("+%2-%3*(sin(%4)*%1+cos(%4)*%2)").arg(dx, dy, s, a);
+            }
+            return QString("x='(W-w)/2+(%1)*W%3':y='(H-h)/2+(%2)*H%4'")
+                .arg(curve(c, "x", local), curve(c, "y", local), sx, sy);
         }
-        return QString("x=(W-w)/2+%1*W:y=(H-h)/2+%2*H").arg(num(c.x), num(c.y));
+        if (!anchored)
+            return QString("x=(W-w)/2+%1*W:y=(H-h)/2+%2*H").arg(num(c.x), num(c.y));
+        const auto shift = Project::anchorShift(c, base, c.scale, c.rotation);
+        return QString("x=(W-w)/2+%1*W+(%3):y=(H-h)/2+%2*H+(%4)")
+            .arg(num(c.x), num(c.y), num(shift.x()), num(shift.y()));
     };
     // Composites a zero-based stream onto the picture for window frames [place, place + length).
     auto composite = [&](const QString &stream, const QString &position, qint64 place,

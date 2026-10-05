@@ -3213,6 +3213,126 @@ class EngineTest : public QObject {
         editor.freezeFrame(1);
         QVERIFY(editor.state()["error"].toString().contains("playhead"));
     }
+    void anchorPointAndSpeedRange() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        QImage red(320, 180, QImage::Format_RGB32);
+        red.fill(QColor(220, 0, 0));
+        QVERIFY(red.save(dir.filePath("red.png")));
+        Project p;
+        p.width = 320;
+        p.height = 180;
+        Asset a;
+        a.id = "red";
+        a.path = dir.filePath("red.png");
+        a.kind = "image";
+        a.duration = 5;
+        a.width = 320;
+        a.height = 180;
+        p.assets = {a};
+        Clip c;
+        c.id = "c";
+        c.assetId = "red";
+        c.duration = 30;
+        c.scale = 0.5;
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Clip &clip, qint64 frame) {
+            auto project = p;
+            project.clips = {clip};
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 320, 180, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return out.convertToFormat(QImage::Format_RGB32);
+        };
+        auto isRed = [](const QImage &i, int x, int y) { return QColor(i.pixel(x, y)).red() > 150; };
+        // Centre anchor: half size in the middle.
+        auto centred = still(c, 5);
+        QVERIFY(!isRed(centred, 10, 10) && isRed(centred, 160, 90));
+        // Top-left anchor: the top-left corner stays at the canvas corner.
+        auto topLeft = c;
+        topLeft.anchorX = topLeft.anchorY = 0;
+        auto corner = still(topLeft, 5);
+        QVERIFY(isRed(corner, 5, 5) && isRed(corner, 150, 80) && !isRed(corner, 175, 95));
+        // Animated: zooming out towards the bottom-right corner keeps that corner in place.
+        auto zoom = c;
+        zoom.anchorX = zoom.anchorY = 1;
+        zoom.scale = 1;
+        zoom.keyframes["scale"] = {{0, 1, false}, {20, 0.5, false}};
+        auto end = still(zoom, 25);
+        QVERIFY(isRed(end, 314, 174) && isRed(end, 170, 100) && !isRed(end, 150, 80));
+        auto start = still(zoom, 0);
+        QVERIFY(isRed(start, 5, 5) && isRed(start, 314, 174));
+        // The shift itself, with rotation: a quarter turn around the top-left corner.
+        QSizeF base(320, 180);
+        auto shift = Project::anchorShift(topLeft, base, 1, 90);
+        // Centre offset (160, 90) from the anchor turns to (-90, 160).
+        QVERIFY(std::abs(shift.x() - (-160 - 90)) < 1e-6 && std::abs(shift.y() - (-90 + 160)) < 1e-6);
+        QCOMPARE(Project::anchorShift(c, base, 0.3, 45), QPointF());
+        // Saved only when moved; refused outside the picture.
+        p.clips = {topLeft};
+        const auto json = p.json();
+        QCOMPARE(Project::fromJson(json, {}).clips[0].anchorX, 0.);
+        p.clips = {c};
+        QVERIFY(!p.json()["clips"].toArray()[0].toObject().contains("anchor"));
+        auto bad = json;
+        auto clips = bad["clips"].toArray();
+        auto o = clips[0].toObject();
+        o["anchor"] = QJsonArray{1.5, 0};
+        clips[0] = o;
+        bad["clips"] = clips;
+        QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, {}), std::runtime_error);
+
+        // Speed from 0.1x to 10x: a 10x clip shows every tenth source frame and its sound is
+        // a tenth as long.
+        const auto ramp = dir.filePath("ramp.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=black:s=320x180:r=30:d=4,geq=lum='2*N':cb=128:cr=128",
+                     "-f", "lavfi", "-i", "sine=f=440:d=4:sample_rate=48000", "-c:v", "ffv1", "-c:a",
+                     "pcm_s16le", "-shortest", ramp});
+        Asset v;
+        v.id = "ramp";
+        v.path = ramp;
+        v.kind = "video";
+        v.duration = 4;
+        v.width = 320;
+        v.height = 180;
+        v.hasAudio = true;
+        p.assets = {v};
+        Clip fast;
+        fast.id = "fast";
+        fast.assetId = "ramp";
+        fast.speed = Time(10, 1);
+        fast.duration = 12;
+        const auto frame = still(fast, 5);
+        QVERIFY2(std::abs(qGray(frame.pixel(160, 90)) - 100) < 10, qPrintable(QString::number(qGray(frame.pixel(160, 90)))));
+        p.clips = {fast};
+        RenderOptions sound;
+        sound.video = false;
+        auto plan = compileRender(p, dir.filePath("work"), 320, 180, sound);
+        {
+            QFile g(graph);
+            QVERIFY(g.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            g.write(plan.graph.toUtf8());
+        }
+        QCOMPARE(run(ffmpeg, streamArguments(plan, graph, false)).size(), qsizetype(48000 * 4 * 12 / 30));
+        Clip slow = fast;
+        slow.speed = Time(1, 10);
+        slow.duration = 30;
+        p.clips = {slow};
+        p.validate();
+        slow.speed = Time(1, 20);
+        p.clips = {slow};
+        QVERIFY_EXCEPTION_THROWN(p.validate(), std::runtime_error);
+    }
     void sceneDetection() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

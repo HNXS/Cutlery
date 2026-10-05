@@ -2,6 +2,8 @@
 #include <QRegularExpression>
 #include <QColor>
 #include <algorithm>
+#include <cmath>
+#include <numbers>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -176,6 +178,12 @@ QSizeF Project::pictureSize(const Clip &c, double boxWidth, double boxHeight) co
         return {boxHeight * aspect, boxHeight};
     return {boxWidth, boxWidth / aspect};
 }
+QPointF Project::anchorShift(const Clip &c, QSizeF base, double scale, double rotation) {
+    // The anchor stays where it is at scale 1 without rotation; the centre moves around it.
+    const double dx = (c.anchorX - 0.5) * base.width(), dy = (c.anchorY - 0.5) * base.height();
+    const double a = rotation * std::numbers::pi / 180, cs = std::cos(a), sn = std::sin(a);
+    return {dx - scale * (cs * dx - sn * dy), dy - scale * (sn * dx + cs * dy)};
+}
 const Clip *Project::previousAdjacent(const Clip &c) const {
     const Clip *found = nullptr;
     for (const auto &x : clips)
@@ -258,6 +266,8 @@ QJsonObject Project::json(const QString &base) const {
                       {"fontFamily", c.fontFamily},
                       {"textColor", c.textColor},
                       {"fontSize", c.fontSize}};
+        if (c.anchorX != 0.5 || c.anchorY != 0.5)
+            o["anchor"] = QJsonArray{c.anchorX, c.anchorY};
         // Text style, stored when it differs from the default.
         if (!c.bold)
             o["bold"] = false;
@@ -460,6 +470,12 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.hidden = j["hidden"].toBool();
         c.reverse = j["reverse"].toBool();
         c.flip = j["flip"].toBool();
+        if (j.contains("anchor")) {
+            const auto anchor = j["anchor"].toArray();
+            require(anchor.size() == 2, "Invalid anchor");
+            c.anchorX = anchor[0].toDouble(-1);
+            c.anchorY = anchor[1].toDouble(-1);
+        }
         c.text = j["text"].toString();
         c.fontFamily = j["fontFamily"].toString("Arial");
         c.textColor = j["textColor"].toString("#ffffff");
@@ -593,7 +609,7 @@ void Project::validate() const {
         require(c.start >= 0 && c.start <= 100000000 && c.duration > 0 &&
                     c.duration <= 100000000 - c.start && c.track >= 0 && c.track < tracks,
                 "Invalid clip range/track");
-        require(c.sourceIn.n >= 0 && c.speed.seconds() >= 0.25 && c.speed.seconds() <= 4,
+        require(c.sourceIn.n >= 0 && c.speed.seconds() >= 0.1 && c.speed.seconds() <= 10,
                 "Invalid source time/speed");
         auto bounded = [](double x, double lo, double hi) {
             return std::isfinite(x) && x >= lo && x <= hi;
@@ -667,7 +683,8 @@ void Project::validate() const {
                 "Invalid sound setting");
         require(QStringList{"", "shake", "glitch", "vhs", "film"}.contains(c.fx) &&
                     bounded(c.fxStrength, 0, 1) && bounded(c.motionBlur, 0, 1) &&
-                    bounded(c.reverb, 0, 1) && bounded(c.echo, 0, 1) && bounded(c.pan, -1, 1),
+                    bounded(c.reverb, 0, 1) && bounded(c.echo, 0, 1) && bounded(c.pan, -1, 1) &&
+                    bounded(c.anchorX, 0, 1) && bounded(c.anchorY, 0, 1),
                 "Invalid effect setting");
         require(QStringList{"", "lowerThird", "lowerThirdLine", "titleCard"}.contains(
                     c.titleStyle) &&

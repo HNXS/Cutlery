@@ -2,6 +2,7 @@
 #include "RationalTime.h"
 #include <QJsonObject>
 #include <QMap>
+#include <QPointF>
 #include <QSizeF>
 #include <QString>
 #include <QVector>
@@ -43,6 +44,9 @@ struct Clip {
     Time sourceIn, speed{1};
     bool muted = false, hidden = false, reverse = false, flip = false, audioOnly = false;
     double scale = 1, x = 0, y = 0, rotation = 0, opacity = 1, volume = 1;
+    // The point of the picture that scaling and rotation keep in place, as fractions of its
+    // width and height (0.5, 0.5: the centre).
+    double anchorX = 0.5, anchorY = 0.5;
     double brightness = 0, contrast = 1, saturation = 1, crop = 0;
     double fadeIn = 0, fadeOut = 0;
     QString text, fontFamily = "Arial", textColor = "#ffffff";
@@ -180,6 +184,9 @@ struct Project {
     // Size of a clip's picture fitted into a box at scale 1, before styling. Circles use the
     // centre square; equal-edge crop keeps the aspect ratio.
     QSizeF pictureSize(const Clip &c, double boxWidth, double boxHeight) const;
+    // How far the anchor point moves the picture's centre, in canvas pixels, for a picture of
+    // `base` size at scale 1 shown at `scale` and `rotation` degrees (clockwise).
+    static QPointF anchorShift(const Clip &c, QSizeF base, double scale, double rotation);
     // The clip a transition into `c` comes from, or nullptr when `c` does not start at a cut.
     const Clip *previousAdjacent(const Clip &c) const;
     // Effective transition length into `c` in frames (0 when inactive), limited by both clips.
