@@ -28,6 +28,12 @@ struct Asset {
     bool loops = false;
     // The media library folder it is in; empty for the top level.
     QString folder;
+    // A nested sequence: the project it holds (absolute media paths). Its picture and sound are
+    // rendered by the editor into `path`, a cache file named after this content.
+    QJsonObject nested;
+    bool isNested() const {
+        return !nested.isEmpty();
+    }
     // Images and looping animations have no end; their clips are not limited by the source.
     bool endless() const {
         return kind == "image" || loops;

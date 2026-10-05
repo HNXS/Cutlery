@@ -254,6 +254,9 @@ QJsonObject Project::json(const QString &base) const {
             o["loops"] = true;
         if (!a.folder.isEmpty())
             o["folder"] = a.folder;
+        // Media paths inside a nested sequence are stored relative to the project file too.
+        if (a.isNested())
+            o["nested"] = Project::fromJson(a.nested, {}).json(base);
         aa.append(o);
     }
     for (const auto &c : clips) {
@@ -411,6 +414,13 @@ QJsonObject Project::json(const QString &base) const {
     return o;
 }
 Project Project::fromJson(const QJsonObject &o, const QString &base) {
+    // Nested sequences hold projects; a bounded depth keeps a crafted file from recursing on.
+    static thread_local int depth = 0;
+    require(depth < 16, "Nested sequences are nested too deeply");
+    ++depth;
+    struct Leave {
+        ~Leave() { --depth; }
+    } leave;
     require(o["format"] == "cutlery" &&
                 (o["schemaVersion"].toInt() >= 1 && o["schemaVersion"].toInt() <= 11),
             "Unsupported project format/version. Original left unchanged.");
@@ -476,6 +486,10 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         a.variableRate = j["variableRate"].toBool(false);
         a.loops = j["loops"].toBool(false) && a.kind == "video";
         a.folder = j["folder"].toString();
+        if (j["nested"].isObject()) {
+            a.nested = Project::fromJson(j["nested"].toObject(), base).json();
+            a.kind = "video";
+        }
         p.assets.push_back(a);
     }
     for (auto v : o["clips"].toArray()) {

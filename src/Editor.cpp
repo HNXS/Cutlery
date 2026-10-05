@@ -214,7 +214,8 @@ Editor::~Editor() {
             t->wait();
             delete t;
         }
-    for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess, m_sceneProcess})
+    for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess, m_sceneProcess,
+                    m_nestedProcess})
         if (p) {
             p->disconnect(this);
             p->kill();
@@ -228,7 +229,8 @@ QVariantList Editor::assets() const {
     for (const auto &a : m_project.assets)
         result << QVariantMap{
             {"id", a.id},     {"name", a.name},        {"path", a.path},
-            {"kind", a.kind}, {"seconds", a.duration}, {"missing", !QFileInfo::exists(a.path)},
+            {"kind", a.kind}, {"seconds", a.duration},
+            {"missing", !a.isNested() && !QFileInfo::exists(a.path)}, {"nested", a.isNested()},
             {"folder", a.folder}, {"used", std::any_of(m_project.clips.begin(), m_project.clips.end(),
                                                        [&](const Clip &c) { return c.assetId == a.id; })}};
     return result;
@@ -252,6 +254,7 @@ QVariantList Editor::clips() const {
         const auto *a = m_project.asset(c.assetId);
         result << QVariantMap{{"id", c.id},
                               {"assetId", c.assetId},
+                              {"nested", a && a->isNested()},
                               {"name", c.name},
                               {"linked", !m_project.linkedClips(c.id).isEmpty()},
                               {"grouped", !c.group.isEmpty()},
@@ -396,6 +399,7 @@ QVariantMap Editor::state() const {
         if (c.id == m_selected) {
             selected = {{"id", c.id},
                         {"assetId", c.assetId},
+                        {"nested", m_project.asset(c.assetId) && m_project.asset(c.assetId)->isNested()},
                         {"audioOnly", c.audioOnly},
                         {"picture", !c.audioOnly && m_project.asset(c.assetId) &&
                                         m_project.asset(c.assetId)->kind != "audio"},
@@ -558,6 +562,15 @@ QVariantMap Editor::state() const {
              }()},
             {"queuePaused", m_queuePaused},
             {"folders", m_project.folders},
+            {"nesting", [this] {
+                 // The way down from the main timeline: names of the open nested sequences.
+                 QStringList names;
+                 for (const auto &f : m_nest)
+                     if (const auto *a = f.parent.asset(f.assetId))
+                         names << a->name;
+                 return names;
+             }()},
+            {"nestedRendering", m_nestedProcess != nullptr},
             {"importFolder", m_project.folders.contains(m_importFolder) ? m_importFolder : QString()},
             {"playhead", m_playhead},
             {"duration", m_project.duration()},
@@ -645,6 +658,7 @@ void Editor::edited() {
         m_selected.clear();
     m_previewTimer.start();
     m_saveTimer.start();
+    renderNested();
     m_analysis->setAssets(m_project.assets);
     m_thumbnails->setAssets(m_project.assets);
     emit projectChanged();
@@ -678,6 +692,7 @@ void Editor::newProject() {
     cancelJob();
     m_saveTimer.stop();
     m_project = Project{};
+    m_nest.clear();
     applyPreferences(m_project);
     m_path.clear();
     m_selected.clear();
@@ -706,6 +721,7 @@ bool Editor::openProject(const QUrl &url) {
         cancelJob();
         m_saveTimer.stop();
         m_project = std::move(p);
+        m_nest.clear();
         m_path = path;
         m_undo.clear();
         m_redo.clear();
@@ -722,6 +738,7 @@ bool Editor::openProject(const QUrl &url) {
         // A collected project carries the fonts it uses.
         loadFonts(QFileInfo(path).dir().filePath("fonts"));
         m_previewTimer.start();
+        renderNested();
         m_analysis->setAssets(m_project.assets);
         m_thumbnails->setAssets(m_project.assets);
         emit projectChanged();
@@ -737,13 +754,17 @@ bool Editor::save(const QUrl &url) {
         const auto path = url.isEmpty() ? m_path : localPath(url);
         if (path.isEmpty())
             throw std::runtime_error("Choose a project filename");
-        auto p = m_project;
+        // Inside a nested sequence the whole project is saved, with the sequence as it is now.
+        auto p = wholeProject();
         p.name = QFileInfo(path).completeBaseName();
         if (QFileInfo::exists(path))
             backUp(path);
         saveProject(p, path);
         remember(path);
-        m_project = std::move(p);
+        if (m_nest.isEmpty())
+            m_project = std::move(p);
+        else
+            m_nest.first().parent.name = p.name;
         m_path = path;
         m_dirty = false;
         m_status = "Project saved";
@@ -926,7 +947,7 @@ bool Editor::restoreBackup(const QString &file) {
 }
 void Editor::autosave() {
     try {
-        saveProject(m_project, m_recovery);
+        saveProject(wholeProject(), m_recovery);
         m_hasRecovery = true;
     } catch (const std::exception &e) {
         fail("Recovery save failed: " + QString::fromUtf8(e.what()));
@@ -2124,21 +2145,31 @@ void Editor::collectProject(const QUrl &folderUrl) {
             mapped[key] = to;
             return to;
         };
-        auto project = m_project;
-        for (auto &a : project.assets) {
-            if (!QFileInfo(a.path).isFile())
-                throw std::runtime_error(("Missing media: " + a.name +
-                                          ". Relink it before collecting the project.")
-                                             .toStdString());
-            a.path = target(a.path, "media");
-        }
+        auto project = wholeProject();
         QSet<QString> families;
-        for (auto &c : project.clips) {
-            if (!c.lut.isEmpty() && QFileInfo(c.lut).isFile())
-                c.lut = target(c.lut, "luts");
-            if (c.assetId.isEmpty())
-                families.insert(c.fontFamily);
-        }
+        // Media, LUTs and fonts of the project and of the nested sequences inside it.
+        std::function<void(Project &)> collect = [&](Project &p) {
+            for (auto &a : p.assets) {
+                if (a.isNested()) {
+                    auto child = Project::fromJson(a.nested, {});
+                    collect(child);
+                    a.nested = child.json();
+                    continue; // its picture is rendered again from the collected media
+                }
+                if (!QFileInfo(a.path).isFile())
+                    throw std::runtime_error(("Missing media: " + a.name +
+                                              ". Relink it before collecting the project.")
+                                                 .toStdString());
+                a.path = target(a.path, "media");
+            }
+            for (auto &c : p.clips) {
+                if (!c.lut.isEmpty() && QFileInfo(c.lut).isFile())
+                    c.lut = target(c.lut, "luts");
+                if (c.assetId.isEmpty())
+                    families.insert(c.fontFamily);
+            }
+        };
+        collect(project);
         for (const auto &family : families)
             if (m_fontFiles.contains(family))
                 target(m_fontFiles[family], "fonts");
@@ -2784,6 +2815,323 @@ void Editor::setImportFolder(const QString &folder) {
     m_importFolder = next;
     emit changed();
 }
+// Nested sequences ---------------------------------------------------------------------------
+QString Editor::nestedPath(const QJsonObject &content) const {
+    const auto key = QCryptographicHash::hash(QJsonDocument(content).toJson(QJsonDocument::Compact),
+                                              QCryptographicHash::Sha1)
+                         .toHex()
+                         .left(20);
+    return m_data + "/cache/nested/" + QString::fromLatin1(key) + ".mov";
+}
+// Puts `child` into the nested asset `assetId` of `parent`: its content, length and cache file.
+// Clips of it that now run past its end are shortened.
+void Editor::storeNested(Project &parent, const QString &assetId, const Project &child) const {
+    for (auto &a : parent.assets)
+        if (a.id == assetId) {
+            a.nested = child.json();
+            a.path = nestedPath(a.nested);
+            a.duration = std::max(child.seconds(), double(child.fpsD) / child.fpsN);
+            a.width = child.width;
+            a.height = child.height;
+            a.frameRate = double(child.fpsN) / child.fpsD;
+            const double fps = double(parent.fpsN) / parent.fpsD;
+            for (auto &c : parent.clips)
+                if (c.assetId == assetId) {
+                    const double room = (a.duration - c.sourceIn.seconds()) / c.speed.seconds();
+                    c.duration = std::max<qint64>(1, std::min<qint64>(c.duration, qint64(room * fps)));
+                    if (c.sourceIn.seconds() >= a.duration)
+                        c.sourceIn = Time(0, 1);
+                }
+        }
+}
+// The project for previews and playback: a nested sequence still being rendered shows as a
+// note instead of its picture and sound.
+Project Editor::viewable() const {
+    auto p = m_project;
+    for (auto &c : p.clips)
+        if (const auto *a = p.asset(c.assetId); a && a->isNested() && !QFileInfo::exists(a->path)) {
+            c.assetId.clear();
+            c.text = "Rendering the nested sequence…";
+            c.fontSize = std::max(24, p.height / 20);
+            c.keyframes.clear();
+        }
+    return p;
+}
+Project Editor::wholeProject() const {
+    auto project = m_project;
+    for (int i = int(m_nest.size()) - 1; i >= 0; --i) {
+        auto parent = m_nest[i].parent;
+        storeNested(parent, m_nest[i].assetId, project);
+        project = std::move(parent);
+    }
+    return project;
+}
+void Editor::nestSelection() {
+    const auto ids = selection();
+    if (ids.isEmpty())
+        return fail("Select the clips to nest");
+    QString nestedClip;
+    mutate([&](Project &p) {
+        QVector<Clip> inside;
+        qint64 from = std::numeric_limits<qint64>::max(), to = 0;
+        int low = p.tracks, high = 0;
+        for (const auto &id : ids) {
+            const auto *c = p.clip(id);
+            p.requireEditable(c->track);
+            inside << *c;
+            from = std::min(from, c->start);
+            to = std::max(to, c->start + c->duration);
+            low = std::min(low, c->track);
+            high = std::max(high, c->track);
+        }
+        // The nested sequence: same canvas and rate, its own tracks from the lowest one used.
+        Project child;
+        child.name = QString("Nested %1").arg(
+            std::count_if(p.assets.begin(), p.assets.end(), [](const Asset &a) { return a.isNested(); }) + 1);
+        child.width = p.width;
+        child.height = p.height;
+        child.fpsN = p.fpsN;
+        child.fpsD = p.fpsD;
+        child.tracks = high - low + 1;
+        child.trackSettings = p.trackSettings.mid(low, child.tracks);
+        for (auto &t : child.trackSettings)
+            t.locked = t.solo = false;
+        for (auto c : inside) {
+            c.start -= from;
+            c.track -= low;
+            child.clips << c;
+            if (const auto *a = p.asset(c.assetId); a && !child.asset(a->id)) {
+                auto copy = *a;
+                copy.folder.clear();
+                child.assets << copy;
+            }
+        }
+        child.validate();
+        p.clips.erase(std::remove_if(p.clips.begin(), p.clips.end(),
+                                     [&](const Clip &c) { return ids.contains(c.id); }),
+                      p.clips.end());
+        Asset a;
+        a.id = newId();
+        a.name = child.name;
+        a.kind = "video";
+        a.hasAudio = true;
+        p.assets << a;
+        storeNested(p, a.id, child);
+        Clip c;
+        c.id = newId();
+        c.assetId = a.id;
+        c.name = a.name;
+        c.track = low;
+        c.start = from;
+        c.duration = to - from;
+        nestedClip = c.id;
+        p.clips << c;
+    });
+    if (!nestedClip.isEmpty()) {
+        select(nestedClip);
+        m_status = QString("Nested %1 clips; double-click to open the sequence").arg(ids.size());
+        emit changed();
+    }
+}
+void Editor::openNested(const QString &clipId) {
+    const auto *c = m_project.clip(clipId.isEmpty() ? m_selected : clipId);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || !a->isNested())
+        return fail("Select a nested sequence");
+    try {
+        auto child = Project::fromJson(a->nested, {});
+        m_nest << NestFrame{m_project, a->id, m_undo, m_redo, c->id, m_playhead};
+        stopPlayback();
+        m_project = std::move(child);
+        m_undo.clear();
+        m_redo.clear();
+        m_selected.clear();
+        m_also.clear();
+        // Where the playhead was inside the clip.
+        const double fps = double(m_project.fpsN) / m_project.fpsD,
+                     parentFps = double(m_nest.last().parent.fpsN) / m_nest.last().parent.fpsD;
+        m_playhead = std::clamp<qint64>(
+            qint64((c->sourceIn.seconds() + (m_playhead - c->start) / parentFps * c->speed.seconds()) * fps),
+            0, std::max<qint64>(0, m_project.duration() - 1));
+        ++m_revision;
+        m_status = "Editing the nested sequence " + a->name;
+        m_previewTimer.start();
+        renderNested();
+        m_analysis->setAssets(m_project.assets);
+        m_thumbnails->setAssets(m_project.assets);
+        emit projectChanged();
+        emit changed();
+    } catch (const std::exception &e) {
+        m_nest.clear();
+        fail(e.what());
+    }
+}
+void Editor::closeNested() {
+    if (m_nest.isEmpty())
+        return;
+    if (m_project.clips.empty())
+        return fail("A nested sequence needs at least one clip; delete its clip on the timeline above instead");
+    stopPlayback();
+    const auto frame = m_nest.takeLast();
+    const auto child = m_project;
+    m_project = frame.parent;
+    m_undo = frame.undo;
+    m_redo = frame.redo;
+    m_playhead = frame.playhead;
+    m_selected = frame.clipId;
+    m_also.clear();
+    ++m_revision;
+    const auto *a = m_project.asset(frame.assetId);
+    const bool changedInside = a && a->nested != child.json();
+    // Any change inside is one undo step out here.
+    if (changedInside)
+        mutate([&](Project &p) { storeNested(p, frame.assetId, child); });
+    m_status = changedInside ? "Back on the timeline; rendering the changed sequence…"
+                             : "Back on the timeline";
+    m_previewTimer.start();
+    renderNested();
+    m_analysis->setAssets(m_project.assets);
+    m_thumbnails->setAssets(m_project.assets);
+    emit projectChanged();
+    emit changed();
+}
+void Editor::unnest() {
+    const auto *selected = m_project.clip(m_selected);
+    const auto *a = selected ? m_project.asset(selected->assetId) : nullptr;
+    if (!a || !a->isNested())
+        return fail("Select a nested sequence");
+    const auto id = selected->id;
+    mutate([&](Project &p) {
+        const auto c = *p.clip(id);
+        const auto *asset = p.asset(c.assetId);
+        const auto child = Project::fromJson(asset->nested, {});
+        if (c.sourceIn.seconds() != 0 || c.speed.seconds() != 1 || !c.keyframes.isEmpty() ||
+            child.fpsN * p.fpsD != p.fpsN * child.fpsD)
+            throw std::runtime_error("Only a nested sequence at normal speed, from its start, "
+                                     "without keyframes and at the timeline's frame rate can be "
+                                     "taken apart");
+        if (c.track + child.tracks > p.tracks)
+            throw std::runtime_error(QString("Taking it apart needs %1 tracks from this one; add "
+                                             "tracks first")
+                                         .arg(child.tracks)
+                                         .toStdString());
+        for (int t = 0; t < child.tracks; ++t)
+            p.requireEditable(c.track + t);
+        p.clips.erase(std::remove_if(p.clips.begin(), p.clips.end(),
+                                     [&](const Clip &x) { return x.id == id; }),
+                      p.clips.end());
+        for (const auto &x : child.assets)
+            if (!p.asset(x.id))
+                p.assets << x;
+        // Its clips, within the part of the sequence the clip showed.
+        for (auto x : child.clips) {
+            if (x.start >= c.duration)
+                continue;
+            x.start += c.start;
+            x.track += c.track;
+            x.duration = std::min(x.duration, c.start + c.duration - x.start);
+            p.clips << x;
+        }
+        // The sequence leaves the library when nothing else uses it.
+        if (std::none_of(p.clips.begin(), p.clips.end(),
+                         [&](const Clip &x) { return x.assetId == c.assetId; }))
+            p.assets.erase(std::remove_if(p.assets.begin(), p.assets.end(),
+                                          [&](const Asset &x) { return x.id == c.assetId; }),
+                           p.assets.end());
+    });
+}
+// Renders nested sequences whose cache file is missing, one at a time, innermost first.
+void Editor::renderNested() {
+    if (m_nestedProcess)
+        return;
+    // The cache files belong to this computer: point nested media at them.
+    std::function<void(Project &)> repoint = [&](Project &p) {
+        for (auto &a : p.assets)
+            if (a.isNested())
+                a.path = nestedPath(a.nested);
+    };
+    repoint(m_project);
+    std::function<std::optional<QJsonObject>(const Project &)> pending =
+        [&](const Project &p) -> std::optional<QJsonObject> {
+        for (const auto &a : p.assets)
+            if (a.isNested()) {
+                try {
+                    if (auto inner = pending(Project::fromJson(a.nested, {})))
+                        return inner;
+                } catch (const std::exception &) {
+                    continue;
+                }
+                if (!QFileInfo::exists(nestedPath(a.nested)) && !m_nestedFailed.contains(nestedPath(a.nested)))
+                    return a.nested;
+            }
+        return std::nullopt;
+    };
+    const auto next = pending(m_project);
+    if (!next)
+        return;
+    const auto output = nestedPath(*next);
+    try {
+        auto child = Project::fromJson(*next, {});
+        repoint(child);
+        if (child.clips.empty())
+            throw std::runtime_error("empty");
+        auto work = std::make_shared<QTemporaryDir>(m_data + "/cache/nested-XXXXXX");
+        if (!work->isValid() || !QDir().mkpath(QFileInfo(output).absolutePath()))
+            throw std::runtime_error("Cannot create a work folder");
+        RenderOptions options;
+        options.highQuality = true;
+        options.pixelFormat = "yuv422p10le";
+        const auto plan = compileRender(child, work->path(), child.width, child.height, options);
+        const auto graph = work->filePath("graph.txt");
+        writeGraph(graph, plan.graph);
+        Encoder prores;
+        prores.name = "prores_ks";
+        prores.videoArguments = {"-c:v", "prores_ks", "-profile:v", "2"};
+        prores.audioArguments = {"-c:a", "pcm_s16le", "-ar", "48000"};
+        prores.pixelFormat = "yuv422p10le";
+        prores.extension = "mov";
+        const auto temp = work->filePath("nested.mov");
+        auto *process = new QProcess(this);
+        m_nestedProcess = process;
+        auto log = std::make_shared<QByteArray>();
+        connect(process, &QProcess::readyReadStandardError, this, [process, log] {
+            *log += process->readAllStandardError();
+            if (log->size() > 64000)
+                *log = log->right(32000);
+        });
+        auto complete = [this, process, work, temp, output, log](bool success) {
+            process->deleteLater();
+            m_nestedProcess = nullptr;
+            if (success && QFile::rename(temp, output)) {
+                // The picture of every clip using it changes.
+                m_analysis->setAssets(m_project.assets);
+                m_thumbnails->setAssets(m_project.assets);
+                ++m_revision;
+                m_previewTimer.start();
+                emit projectChanged();
+            } else {
+                m_nestedFailed << output;
+                fail("Rendering a nested sequence failed: " +
+                     QString::fromUtf8(*log).trimmed().right(300));
+            }
+            renderNested();
+            emit changed();
+        };
+        connect(process, &QProcess::finished, this,
+                [complete](int code, QProcess::ExitStatus status) {
+                    complete(code == 0 && status == QProcess::NormalExit);
+                });
+        connect(process, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+            if (e == QProcess::FailedToStart)
+                complete(false);
+        });
+        process->start(executable("ffmpeg"), exportArguments(plan, graph, temp, prores));
+        emit changed();
+    } catch (const std::exception &e) {
+        m_nestedFailed << output;
+        renderNested();
+    }
+}
 void Editor::copy() {
     const auto *c = m_project.clip(m_selected);
     if (!c)
@@ -2978,7 +3326,7 @@ void Editor::requestPreview() {
         options.to = m_playhead + 1;
         addAiMedia(options);
         // Only the playhead frame is compiled, so the cost does not grow with its position.
-        const auto plan = compileRender(m_project, work->path(), size.width(), size.height(),
+        const auto plan = compileRender(viewable(), work->path(), size.width(), size.height(),
                                         options);
         const auto graph = work->filePath("graph.txt");
         writeGraph(graph, plan.graph);
@@ -3610,11 +3958,11 @@ void Editor::play() {
         options.audio = false;
         addAiMedia(options);
         request.video =
-            compileRender(m_project, work->path(), size.width(), size.height(), options);
+            compileRender(viewable(), work->path(), size.width(), size.height(), options);
         options.audio = true;
         options.video = false;
         request.audio =
-            compileRender(m_project, work->path(), size.width(), size.height(), options);
+            compileRender(viewable(), work->path(), size.width(), size.height(), options);
         request.videoGraph = work->filePath("video.txt");
         request.audioGraph = work->filePath("audio.txt");
         writeGraph(request.videoGraph, request.video.graph);
@@ -3727,6 +4075,8 @@ QVariantMap Editor::exportPreview(const QVariantMap &settings) const {
 }
 void Editor::queueExport(const QUrl &url, const QVariantMap &settings) {
     try {
+        if (!m_nest.isEmpty())
+            throw std::runtime_error("Go back to the main timeline to export");
         const auto output = localPath(url);
         const auto s = exportSettings(settings);
         if (QFileInfo::exists(output))
@@ -3795,6 +4145,11 @@ void Editor::exportProject(const Project &project, const QUrl &url, const QVaria
     if (m_busy)
         return;
     try {
+        if (!m_nest.isEmpty())
+            throw std::runtime_error("Go back to the main timeline to export");
+        for (const auto &a : project.assets)
+            if (a.isNested() && !QFileInfo::exists(a.path))
+                throw std::runtime_error("Wait until the nested sequences are rendered");
         const auto output = localPath(url);
         const auto s = exportSettings(settings);
         if (QFileInfo::exists(output))
@@ -3866,7 +4221,7 @@ void Editor::analyzeLoudness() {
         RenderOptions options;
         options.video = false;
         options.measureLoudness = true;
-        const auto plan = compileRender(m_project, work->path(), 320, 180, options);
+        const auto plan = compileRender(viewable(), work->path(), 320, 180, options);
         const auto graph = work->filePath("measure.txt");
         writeGraph(graph, plan.graph);
         auto *p = new QProcess(this);

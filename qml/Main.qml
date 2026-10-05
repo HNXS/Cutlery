@@ -442,6 +442,29 @@ ApplicationWindow {
                 enabled: (win.s.selectedIds || []).length > 0
                 onTriggered: editor.ungroupSelection()
             }
+            MenuSeparator {}
+            MenuItem {
+                objectName: "nestClips"
+                text: "Nest selected clips"
+                enabled: (win.s.selectedIds || []).length > 0
+                onTriggered: editor.nestSelection()
+            }
+            MenuItem {
+                text: "Open nested sequence"
+                enabled: !!(win.selection && win.selection.nested)
+                onTriggered: editor.openNested()
+            }
+            MenuItem {
+                text: "Take nested sequence apart"
+                enabled: !!(win.selection && win.selection.nested)
+                onTriggered: editor.unnest()
+            }
+            MenuItem {
+                text: "Back to the enclosing timeline"
+                enabled: (win.s.nesting || []).length > 0
+                onTriggered: editor.closeNested()
+            }
+            MenuSeparator {}
             MenuItem {
                 text: "Split at playhead"
                 enabled: win.s.selectedId.length > 0
@@ -2855,6 +2878,30 @@ ApplicationWindow {
             Layout.fillWidth: true
             height: 1
             color: "#34404b"
+        }
+        // Inside a nested sequence: where we are, and the way back.
+        Rectangle {
+            objectName: "nestingBar"
+            Layout.fillWidth: true
+            visible: (win.s.nesting || []).length > 0
+            implicitHeight: 36
+            color: "#28403a"
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                spacing: 10
+                Action {
+                    objectName: "closeNested"
+                    text: "← Back"
+                    onClicked: editor.closeNested()
+                }
+                Label {
+                    Layout.fillWidth: true
+                    elide: Text.ElideMiddle
+                    text: "Main timeline  ›  " + (win.s.nesting || []).join("  ›  ") + "  —  changes apply when you go back"
+                }
+            }
         }
         Timeline {
             id: timelinePanel

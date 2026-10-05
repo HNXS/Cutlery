@@ -451,6 +451,49 @@ class UiTest : public QObject {
         editor.setPreferences({{"width", 1920}, {"height", 1080}, {"backups", 20}});
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void nestedSequenceUi() {
+        QTemporaryDir dir;
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.configure(320, 180, 25, 1);
+        editor.addTitle();
+        const auto first = editor.state()["selectedId"].toString();
+        editor.seek(200);
+        editor.addTitle();
+        editor.toggleSelect(first);
+        editor.nestSelection();
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        const auto nested = editor.project().clips.first().id;
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        auto *bar = findItem(window->contentItem(), "nestingBar");
+        QVERIFY(bar && !bar->isVisible());
+        // Double-clicking the nested clip opens it; the bar leads back.
+        QQuickItem *clip = nullptr;
+        QTRY_VERIFY((clip = findItem(window->contentItem(), "clip-" + nested)));
+        QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, center(clip));
+        QTRY_VERIFY(bar->isVisible());
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        auto *back = findItem(window->contentItem(), "closeNested");
+        QVERIFY(QMetaObject::invokeMethod(back, "clicked"));
+        QTRY_VERIFY(!bar->isVisible());
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["nestedRendering"].toBool(), 30000);
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void exportDialog() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;

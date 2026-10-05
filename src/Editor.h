@@ -135,6 +135,12 @@ class Editor final : public QObject {
     // the current selection.
     Q_INVOKABLE void selectArea(qint64 from, qint64 to, int low, int high, bool add);
     Q_INVOKABLE void groupSelection();
+    // Nested sequences: the selected clips become one clip holding them as a sequence of their
+    // own; it can be opened to edit (and closed again), or taken apart.
+    Q_INVOKABLE void nestSelection();
+    Q_INVOKABLE void openNested(const QString &clipId = {});
+    Q_INVOKABLE void closeNested();
+    Q_INVOKABLE void unnest();
     Q_INVOKABLE void ungroupSelection();
     QStringList selection() const;
     Q_INVOKABLE void split();
@@ -329,7 +335,23 @@ class Editor final : public QObject {
     QVariantMap m_conform;
     QVariantMap m_follow;
     QString m_importFolder;
-    QVariantMap m_reframe; // {status: analysing|done|failed, clips: [ids], faces: count}
+    QVariantMap m_reframe;
+    // The timelines above the open nested sequence, outermost first, with their undo history.
+    struct NestFrame {
+        Project parent;
+        QString assetId;
+        QVector<Project> undo, redo;
+        QString clipId;
+        qint64 playhead = 0;
+    };
+    QVector<NestFrame> m_nest;
+    QProcess *m_nestedProcess = nullptr;
+    QStringList m_nestedFailed; // cache files that could not be rendered this session
+    QString nestedPath(const QJsonObject &content) const;
+    void storeNested(Project &parent, const QString &assetId, const Project &child) const;
+    Project wholeProject() const;
+    Project viewable() const;
+    void renderNested(); // {status: analysing|done|failed, clips: [ids], faces: count}
     void applyReframe();
     double m_playRate = 1, m_shuttleRate = 1;
     QTimer m_reverseTimer;

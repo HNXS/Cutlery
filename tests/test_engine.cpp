@@ -3844,6 +3844,111 @@ class EngineTest : public QObject {
         e.undo();
         QCOMPARE(e.project().clips.size(), before);
     }
+    void nestedSequences() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("red.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=red:s=320x180:r=25:d=2", "-f",
+                     "lavfi", "-i", "sine=d=2", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest",
+                     source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.seek(0);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto red = editor.state()["selectedId"].toString();
+        editor.seek(10);
+        editor.addTitle();
+        const auto title = editor.state()["selectedId"].toString();
+        editor.setClip("duration", 30);
+        const int titleTrack = editor.project().clip(title)->track;
+        editor.select(red);
+        editor.toggleSelect(title);
+        // Nest: one clip over the same stretch, on the lowest track, holding both.
+        editor.nestSelection();
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        const auto nested = editor.project().clips.first();
+        const auto *asset = editor.project().asset(nested.assetId);
+        QVERIFY(asset && asset->isNested());
+        QCOMPARE(nested.start, qint64(0));
+        QCOMPARE(nested.duration, qint64(50));
+        QCOMPARE(nested.track, 0);
+        QCOMPARE(Project::fromJson(asset->nested, {}).clips.size(), size_t(2));
+        // Rendered in the background into the cache, then used like a video.
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["nestedRendering"].toBool() &&
+                                     QFileInfo::exists(editor.project().asset(nested.assetId)->path),
+                                 60000);
+        QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+        {
+            RenderOptions options;
+            options.audio = false;
+            options.from = 20;
+            options.to = 21;
+            const auto plan = compileRender(editor.project(), dir.filePath("work"), 320, 180, options);
+            QFile g(dir.filePath("graph.txt"));
+            QVERIFY(g.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage still;
+            still.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            const auto corner = still.pixelColor(4, 4);
+            QVERIFY2(corner.red() > 200 && corner.green() < 60, qPrintable(corner.name()));
+            int white = 0;
+            for (int y = 0; y < still.height(); ++y)
+                for (int x = 0; x < still.width(); ++x)
+                    white += qGray(still.pixel(x, y)) > 200;
+            QVERIFY2(white > 50, "the title is in the nested picture");
+        }
+        // Open it: its own timeline and undo history; exporting waits for the way back.
+        editor.openNested(nested.id);
+        QCOMPARE(editor.state()["nesting"].toStringList(), QStringList{"Nested 1"});
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        QCOMPARE(editor.project().clip(title)->track, titleTrack);
+        QVERIFY(!editor.state()["canUndo"].toBool());
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("out.mp4")), {{"format", "h264"}});
+        QVERIFY(editor.state()["error"].toString().contains("main timeline"));
+        editor.select(title);
+        editor.remove();
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        // Saving from inside saves the whole project, with the sequence as it is now.
+        const auto file = dir.filePath("nested.cutlery");
+        QVERIFY(editor.save(QUrl::fromLocalFile(file)));
+        {
+            const auto saved = loadProject(file);
+            QCOMPARE(saved.clips.size(), size_t(1));
+            const auto *a = saved.asset(nested.assetId);
+            QVERIFY(a && a->isNested());
+            QCOMPARE(Project::fromJson(a->nested, {}).clips.size(), size_t(1));
+            QFile raw(file);
+            QVERIFY(raw.open(QIODevice::ReadOnly));
+            QVERIFY(raw.readAll().contains("\"path\": \"red.mkv\""));
+        }
+        // Back: one undo step out here brings the title back into the sequence.
+        editor.closeNested();
+        QVERIFY(editor.state()["nesting"].toStringList().isEmpty());
+        QCOMPARE(Project::fromJson(editor.project().asset(nested.assetId)->nested, {}).clips.size(),
+                 size_t(1));
+        editor.undo();
+        QCOMPARE(Project::fromJson(editor.project().asset(nested.assetId)->nested, {}).clips.size(),
+                 size_t(2));
+        // Taken apart: the clips are back where they were, and the sequence leaves the library.
+        editor.select(nested.id);
+        editor.unnest();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        QCOMPARE(editor.project().clip(title)->start, qint64(10));
+        QCOMPARE(editor.project().clip(title)->track, titleTrack);
+        QCOMPARE(editor.project().clip(red)->duration, qint64(50));
+        QCOMPARE(editor.project().assets.size(), size_t(1));
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        editor.select(nested.id);
+        editor.setClip("speed", 2.0);
+        editor.unnest();
+        QVERIFY(editor.state()["error"].toString().contains("normal speed"));
+    }
     void relinkMissingFromFolder() {
         QTemporaryDir dir;
         QImage image(32, 32, QImage::Format_RGB32);
