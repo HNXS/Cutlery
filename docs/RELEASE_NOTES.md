@@ -4,6 +4,7 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Find missing media at once:** when files have moved, "Find in a folder…" in the library relinks every missing file found by name in that folder or below.
 - **Start screen and preferences:** Cutlery opens with a choice of video shapes (16:9, 4K, 9:16, 4:5, 1:1), your recent projects and the autosave. Project → Preferences… sets the format of new projects, how long pictures last and how many earlier versions are kept.
 - **Media folders and search:** sort media into folders (right-click a file), show only videos, audio or images, and search by name. New imports go into the folder on show. Titles, shapes and sounds are now in the "Add" tab beside "Media", which leaves the library more room.
 - **Reframe for Shorts:** Project → Reframe for… turns a 16:9 edit into 9:16 (or 4:5, 1:1): the pictures zoom to fill the tall frame, and with the AI pack the picture pans to keep the speaker's face in the middle. Save As first to keep the wide version. Clips can now be zoomed up to 5×.

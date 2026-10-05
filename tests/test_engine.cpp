@@ -3844,6 +3844,47 @@ class EngineTest : public QObject {
         e.undo();
         QCOMPARE(e.project().clips.size(), before);
     }
+    void relinkMissingFromFolder() {
+        QTemporaryDir dir;
+        QImage image(32, 32, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        for (const auto &name : {"found/a/clip.png", "found/b/clip.png", "found/deep/er/logo.PNG"}) {
+            QVERIFY(QDir().mkpath(QFileInfo(dir.filePath(name)).absolutePath()));
+            QVERIFY(image.save(dir.filePath(name), "PNG"));
+        }
+        // A project whose media was in a folder that has moved.
+        Project p;
+        for (const auto &old : {"old/a/clip.png", "old/logo.png", "old/gone.png"}) {
+            Asset a;
+            a.id = QFileInfo(old).baseName();
+            a.path = dir.filePath(old);
+            a.name = QFileInfo(old).fileName();
+            a.kind = "image";
+            a.width = a.height = 32;
+            a.duration = 5;
+            p.assets.push_back(a);
+        }
+        const auto file = dir.filePath("moved.cutlery");
+        saveProject(p, file);
+        FrameProvider frames;
+        Editor editor(&frames);
+        QVERIFY(editor.openProject(QUrl::fromLocalFile(file)));
+        const auto listed = editor.assets();
+        QCOMPARE(std::count_if(listed.begin(), listed.end(),
+                               [](const QVariant &a) { return a.toMap()["missing"].toBool(); }),
+                 3);
+        editor.relinkFolder(QUrl::fromLocalFile(dir.filePath("found")));
+        // The clip from folder "a" (not "b"), the logo whatever the case and depth; one left.
+        QCOMPARE(editor.project().asset("clip")->path, QDir::cleanPath(dir.filePath("found/a/clip.png")));
+        QCOMPARE(editor.project().asset("logo")->path,
+                 QDir::cleanPath(dir.filePath("found/deep/er/logo.PNG")));
+        QCOMPARE(editor.project().asset("gone")->path, QDir::cleanPath(dir.filePath("old/gone.png")));
+        QVERIFY(editor.state()["status"].toString().contains("2 of 3"));
+        editor.undo();
+        QVERIFY(!QFileInfo::exists(editor.project().asset("clip")->path));
+        editor.relinkFolder(QUrl::fromLocalFile(dir.filePath("nothing-here")));
+        QVERIFY(editor.state()["error"].toString().contains("folder"));
+    }
     void mediaFolders() {
         QTemporaryDir dir;
         auto image = [&](const QString &name) {

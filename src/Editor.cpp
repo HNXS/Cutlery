@@ -6,6 +6,7 @@
 #include <QDateTime>
 #include <QTimeZone>
 #include <QDir>
+#include <QDirIterator>
 #include <QFontDatabase>
 #include <QThread>
 #include <QAudioInput>
@@ -1079,6 +1080,65 @@ void Editor::relink(const QString &id, const QUrl &url) {
         return;
     }
     probeFile(url, id);
+}
+void Editor::relinkFolder(const QUrl &url) {
+    const auto root = localPath(url);
+    if (!QFileInfo(root).isDir())
+        return fail("Choose a folder");
+    QVector<int> missing;
+    for (int i = 0; i < m_project.assets.size(); ++i)
+        if (!QFileInfo::exists(m_project.assets[i].path))
+            missing << i;
+    if (missing.isEmpty()) {
+        m_status = "No media is missing";
+        emit changed();
+        return;
+    }
+    // Every file in the folder and below it by name (at most 50000 files).
+    QMultiHash<QString, QString> files;
+    QDirIterator it(root, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    for (int count = 0; it.hasNext() && count < 50000; ++count) {
+        const auto path = it.next();
+        files.insert(QFileInfo(path).fileName().toLower(), path);
+    }
+    // A file of the same name; among several, the one whose folders match the old path's best.
+    auto parts = [](const QString &path) {
+        return QDir::fromNativeSeparators(path).toLower().split('/', Qt::SkipEmptyParts);
+    };
+    QHash<QString, QString> found; // asset id → new path
+    for (int i : missing) {
+        const auto &a = m_project.assets[i];
+        const auto old = parts(a.path);
+        QString best;
+        int bestScore = -1;
+        for (const auto &candidate : files.values(QFileInfo(a.path).fileName().toLower())) {
+            const auto now = parts(candidate);
+            int score = 0;
+            while (score < old.size() && score < now.size() &&
+                   old[old.size() - 1 - score] == now[now.size() - 1 - score])
+                ++score;
+            if (score > bestScore || (score == bestScore && candidate < best)) {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+        if (!best.isEmpty())
+            found[a.id] = QDir::cleanPath(best);
+    }
+    if (!found.isEmpty())
+        mutate([&](Project &p) {
+            for (auto &a : p.assets)
+                if (found.contains(a.id))
+                    a.path = found[a.id];
+        });
+    const auto left = missing.size() - found.size();
+    m_status = left == 0 ? QString("Relinked %1 media files").arg(found.size())
+                         : QString("Relinked %1 of %2 media files; %3 still missing")
+                               .arg(found.size())
+                               .arg(missing.size())
+                               .arg(left);
+    emit projectChanged();
+    emit changed();
 }
 QString rasterizeSvg(const QString &svg, const QString &folder, int longest) {
     QSvgRenderer renderer(svg);

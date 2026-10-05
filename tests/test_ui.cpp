@@ -369,6 +369,7 @@ class UiTest : public QObject {
         auto *list = findItem(window->contentItem(), "mediaLibrary");
         QVERIFY(list);
         QTRY_COMPARE(list->property("count").toInt(), 3);
+        QVERIFY(!findItem(window->contentItem(), "missingMedia")->isVisible());
         // Search words narrow the list, in any order and case.
         auto *search = findItem(window->contentItem(), "librarySearch");
         search->setProperty("text", "beach");

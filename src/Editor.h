@@ -102,6 +102,9 @@ class Editor final : public QObject {
     Q_INVOKABLE bool insertAsset(const QString &assetId, int track, qint64 frame);
     Q_INVOKABLE qint64 placement(int track, qint64 frame, const QString &exclude = {}) const;
     Q_INVOKABLE void relink(const QString &assetId, const QUrl &);
+    // Finds every missing media file by name in a folder and those below it, and relinks them
+    // all in one undo step; where several match, the one in the most similar folders wins.
+    Q_INVOKABLE void relinkFolder(const QUrl &folder);
     Q_INVOKABLE void addAsset(const QString &assetId, int track = 0);
     Q_INVOKABLE void addTitle();
     // A title template ("lowerThird", "lowerThirdLine", "titleCard") at the playhead.

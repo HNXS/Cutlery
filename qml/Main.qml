@@ -65,7 +65,7 @@ ApplicationWindow {
         { n: 24, d: 1, label: "24" }, { n: 25, d: 1, label: "25" }, { n: 30, d: 1, label: "30" },
         { n: 50, d: 1, label: "50" }, { n: 60, d: 1, label: "60" }, { n: 30000, d: 1001, label: "29.97" }
     ]
-    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
+    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
         enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
@@ -701,6 +701,36 @@ ApplicationWindow {
                                             text: "Delete folder (keeps its media)"
                                             onTriggered: editor.removeFolder(libraryView.folder)
                                         }
+                                    }
+                                }
+                            }
+                            // Missing media: find all of it at once in a folder.
+                            Rectangle {
+                                objectName: "missingMedia"
+                                readonly property int count: editor.assets.filter(a => a.missing).length
+                                visible: count > 0
+                                Layout.fillWidth: true
+                                implicitHeight: missingRow.implicitHeight + 16
+                                radius: 7
+                                color: "#3a2a24"
+                                border.color: "#da886e"
+                                ColumnLayout {
+                                    id: missingRow
+                                    anchors.fill: parent
+                                    anchors.margins: 8
+                                    spacing: 6
+                                    Label {
+                                        text: parent.parent.count === 1 ? "1 media file is missing." : parent.parent.count + " media files are missing."
+                                        wrapMode: Text.Wrap
+                                        Layout.fillWidth: true
+                                    }
+                                    Action {
+                                        objectName: "findMissing"
+                                        text: "Find in a folder…"
+                                        Layout.fillWidth: true
+                                        onClicked: relinkFolderDialog.open()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Looks for files of the same names in the folder and the folders inside it"
                                     }
                                 }
                             }
@@ -3050,6 +3080,11 @@ ApplicationWindow {
     }
     // Collect: copies the project and everything it uses into a new folder, e.g. to archive it or
     // move it to another computer.
+    FolderDialog {
+        id: relinkFolderDialog
+        title: "Find missing media in this folder"
+        onAccepted: editor.relinkFolder(selectedFolder)
+    }
     FolderDialog {
         id: collectDialog
         title: "Collect project into an empty folder"
