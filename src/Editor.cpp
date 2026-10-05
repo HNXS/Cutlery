@@ -225,7 +225,9 @@ QVariantList Editor::assets() const {
     for (const auto &a : m_project.assets)
         result << QVariantMap{
             {"id", a.id},     {"name", a.name},        {"path", a.path},
-            {"kind", a.kind}, {"seconds", a.duration}, {"missing", !QFileInfo::exists(a.path)}};
+            {"kind", a.kind}, {"seconds", a.duration}, {"missing", !QFileInfo::exists(a.path)},
+            {"folder", a.folder}, {"used", std::any_of(m_project.clips.begin(), m_project.clips.end(),
+                                                       [&](const Clip &c) { return c.assetId == a.id; })}};
     return result;
 }
 // Distinct keyframe positions of a clip, for the timeline markers.
@@ -552,6 +554,8 @@ QVariantMap Editor::state() const {
                  return list;
              }()},
             {"queuePaused", m_queuePaused},
+            {"folders", m_project.folders},
+            {"importFolder", m_project.folders.contains(m_importFolder) ? m_importFolder : QString()},
             {"playhead", m_playhead},
             {"duration", m_project.duration()},
             {"fps", double(m_project.fpsN) / m_project.fpsD},
@@ -1111,15 +1115,20 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                     for (const auto &clip : p.clips)
                         if (clip.assetId == replaceId)
                             p.requireEditable(clip.track);
-                    if (replaceId.isEmpty())
+                    if (replaceId.isEmpty()) {
+                        // Into the library folder on show, if it still exists.
+                        if (p.folders.contains(m_importFolder))
+                            a.folder = m_importFolder;
                         p.assets.push_back(a);
-                    else
+                    } else
                         for (auto &asset : p.assets)
                             if (asset.id == replaceId) {
                                 if (asset.kind != a.kind)
                                     throw std::runtime_error(
                                         "Replacement must have the same media type");
+                                const auto folder = asset.folder;
                                 asset = a;
+                                asset.folder = folder;
                             }
                     if (drop) {
                         int track = -1;
@@ -2565,6 +2574,76 @@ void Editor::applyReframe() {
                      : QString("Reframed; no faces found, the pictures stay centred");
     emit changed();
 }
+void Editor::addFolder(const QString &name) {
+    const auto folder = name.trimmed();
+    if (folder.isEmpty())
+        return fail("Name the folder");
+    if (m_project.folders.contains(folder))
+        return fail("There is a folder of that name already");
+    if (mutate([&](Project &p) { p.folders << folder; }))
+        m_importFolder = folder;
+    emit changed();
+}
+void Editor::renameFolder(const QString &from, const QString &to) {
+    const auto name = to.trimmed();
+    if (name == from)
+        return;
+    if (name.isEmpty())
+        return fail("Name the folder");
+    if (m_project.folders.contains(name))
+        return fail("There is a folder of that name already");
+    if (mutate([&](Project &p) {
+            const auto i = p.folders.indexOf(from);
+            if (i < 0)
+                throw std::runtime_error("No such folder");
+            p.folders[i] = name;
+            for (auto &a : p.assets)
+                if (a.folder == from)
+                    a.folder = name;
+        }) &&
+        m_importFolder == from)
+        m_importFolder = name;
+    emit changed();
+}
+void Editor::removeFolder(const QString &name) {
+    // The media stays in the library, at the top level.
+    mutate([&](Project &p) {
+        p.folders.removeAll(name);
+        for (auto &a : p.assets)
+            if (a.folder == name)
+                a.folder.clear();
+    });
+    if (m_importFolder == name)
+        m_importFolder.clear();
+    emit changed();
+}
+void Editor::moveToFolder(const QStringList &assetIds, const QString &folder) {
+    mutate([&](Project &p) {
+        if (!folder.isEmpty() && !p.folders.contains(folder))
+            throw std::runtime_error("No such folder");
+        for (auto &a : p.assets)
+            if (assetIds.contains(a.id))
+                a.folder = folder;
+    });
+}
+void Editor::removeAssets(const QStringList &assetIds) {
+    // Only media no clip uses; the files on disk stay.
+    mutate([&](Project &p) {
+        for (const auto &c : p.clips)
+            if (assetIds.contains(c.assetId))
+                throw std::runtime_error("Media used on the timeline cannot be removed");
+        p.assets.erase(std::remove_if(p.assets.begin(), p.assets.end(),
+                                      [&](const Asset &a) { return assetIds.contains(a.id); }),
+                       p.assets.end());
+    });
+}
+void Editor::setImportFolder(const QString &folder) {
+    const auto next = m_project.folders.contains(folder) ? folder : QString();
+    if (next == m_importFolder)
+        return;
+    m_importFolder = next;
+    emit changed();
+}
 void Editor::copy() {
     const auto *c = m_project.clip(m_selected);
     if (!c)
@@ -2595,9 +2674,13 @@ void Editor::paste() {
         auto assets = m_clipboardMoreAssets;
         if (m_clipboardAsset)
             assets.prepend(*m_clipboardAsset);
-        for (const auto &a : assets)
-            if (!p.asset(a.id))
+        for (auto a : assets)
+            if (!p.asset(a.id)) {
+                // Another project's folder may not exist here.
+                if (!p.folders.contains(a.folder))
+                    a.folder.clear();
                 p.assets.push_back(a);
+            }
         // The earliest copied clip lands at the playhead; the others keep their distance to it.
         qint64 earliest = clips.first().start;
         for (const auto &c : clips)

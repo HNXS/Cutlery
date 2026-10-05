@@ -87,6 +87,14 @@ class Editor final : public QObject {
     Q_INVOKABLE bool restoreBackup(const QString &file);
     Q_INVOKABLE void recover();
     Q_INVOKABLE void importMedia(const QList<QUrl> &);
+    // Media library folders. New imports go into the import folder (the one on show).
+    Q_INVOKABLE void addFolder(const QString &name);
+    Q_INVOKABLE void renameFolder(const QString &from, const QString &to);
+    Q_INVOKABLE void removeFolder(const QString &name);
+    Q_INVOKABLE void moveToFolder(const QStringList &assetIds, const QString &folder);
+    Q_INVOKABLE void setImportFolder(const QString &folder);
+    // Takes media no clip uses out of the library (the files stay on disk).
+    Q_INVOKABLE void removeAssets(const QStringList &assetIds);
     Q_INVOKABLE void dropFiles(const QList<QUrl> &, int track, qint64 frame);
     Q_INVOKABLE bool insertAsset(const QString &assetId, int track, qint64 frame);
     Q_INVOKABLE qint64 placement(int track, qint64 frame, const QString &exclude = {}) const;
@@ -314,6 +322,7 @@ class Editor final : public QObject {
     QVariantMap m_collect;
     QVariantMap m_conform;
     QVariantMap m_follow;
+    QString m_importFolder;
     QVariantMap m_reframe; // {status: analysing|done|failed, clips: [ids], faces: count}
     void applyReframe();
     double m_playRate = 1, m_shuttleRate = 1;

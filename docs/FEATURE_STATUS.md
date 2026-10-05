@@ -5,7 +5,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | ID | Feature | Alpha status | Current boundary |
 |---|---|---|---|
 | F001 | Create, open, recent projects and settings | Partial | Create/open/save and presets; Project → Open recent lists the last 10 projects opened or saved (kept in the data folder; missing ones are marked and dropped when chosen). No start screen or global settings dialog. |
-| F002 | Media bin, folders, collections and search | Partial | Flat media bin; no folders/search. |
+| F002 | Media bin, folders, collections and search | Implemented (alpha) | The library tab shows all media, or only videos, audio or images, or one folder; a search box narrows it by name (every word must match, any order and case). Folders are created, renamed and deleted (their media stays) in the library; media is moved by right-click, new imports go into the folder on show, and folders are saved with the project. Unused media can be removed from the library. Titles, graphics and sounds moved to a separate Add tab so the list has room. No nested folders or saved smart collections. |
 | F003 | Drag/drop and background media analysis | Partial | Library-to-track and local file drops, async probing and waveform analysis, partial-error reporting; no directory recursion or cancellable import queue. |
 | F004 | Nondestructive media references | Implemented (alpha) | Relative project references; originals never edited. |
 | F005 | Missing-media relink and replace | Partial | Validated source relinking; no batch relink. |

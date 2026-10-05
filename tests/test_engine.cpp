@@ -3789,6 +3789,75 @@ class EngineTest : public QObject {
         e.undo();
         QCOMPARE(e.project().clips.size(), before);
     }
+    void mediaFolders() {
+        QTemporaryDir dir;
+        auto image = [&](const QString &name) {
+            QImage i(64, 36, QImage::Format_RGB32);
+            i.fill(Qt::red);
+            const auto path = dir.filePath(name);
+            if (!i.save(path))
+                throw std::runtime_error("Cannot save test image");
+            return QUrl::fromLocalFile(path);
+        };
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.addFolder("  ");
+        QVERIFY(editor.state()["error"].toString().contains("Name"));
+        editor.addFolder("B-roll");
+        QCOMPARE(editor.state()["importFolder"].toString(), QString("B-roll"));
+        editor.addFolder("B-roll");
+        QVERIFY(editor.state()["error"].toString().contains("already"));
+        // Imports go into the folder on show.
+        editor.importMedia({image("beach.png")});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        QCOMPARE(editor.project().assets[0].folder, QString("B-roll"));
+        editor.setImportFolder("");
+        editor.importMedia({image("logo.png")});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        const auto beach = editor.project().assets[0].id, logo = editor.project().assets[1].id;
+        QVERIFY(editor.project().assets[1].folder.isEmpty());
+        QCOMPARE(editor.assets()[0].toMap()["folder"].toString(), QString("B-roll"));
+        // Rename: the media follows; move; saved and loaded.
+        editor.addFolder("Graphics");
+        editor.renameFolder("B-roll", "Outdoor");
+        QCOMPARE(editor.project().folders, (QStringList{"Outdoor", "Graphics"}));
+        QCOMPARE(editor.project().asset(beach)->folder, QString("Outdoor"));
+        editor.renameFolder("Outdoor", "Graphics");
+        QVERIFY(editor.state()["error"].toString().contains("already"));
+        editor.moveToFolder({logo}, "Graphics");
+        QCOMPARE(editor.project().asset(logo)->folder, QString("Graphics"));
+        editor.moveToFolder({logo}, "Nowhere");
+        QVERIFY(editor.state()["error"].toString().contains("No such folder"));
+        const auto loaded = Project::fromJson(editor.project().json(), {});
+        QCOMPARE(loaded.folders, editor.project().folders);
+        QCOMPARE(loaded.asset(logo)->folder, QString("Graphics"));
+        auto bad = loaded;
+        bad.assets[0].folder = "Missing";
+        QVERIFY_EXCEPTION_THROWN(bad.validate(), std::runtime_error);
+        bad = loaded;
+        bad.folders << "Graphics";
+        QVERIFY_EXCEPTION_THROWN(bad.validate(), std::runtime_error);
+        // Deleting a folder keeps its media at the top level; one undo step brings it back.
+        editor.removeFolder("Graphics");
+        QCOMPARE(editor.project().folders, QStringList{"Outdoor"});
+        QVERIFY(editor.project().asset(logo)->folder.isEmpty());
+        editor.undo();
+        QCOMPARE(editor.project().asset(logo)->folder, QString("Graphics"));
+        // Only unused media can be removed from the library.
+        editor.addAsset(beach);
+        QVERIFY(editor.assets()[0].toMap()["used"].toBool());
+        editor.removeAssets({beach});
+        QVERIFY(editor.state()["error"].toString().contains("timeline"));
+        editor.removeAssets({logo});
+        QCOMPARE(editor.project().assets.size(), size_t(1));
+        // Pasted into a project without that folder, the media lands at the top level.
+        editor.select(editor.project().clips.first().id);
+        editor.copy();
+        editor.newProject();
+        editor.paste();
+        QCOMPARE(editor.project().assets.size(), size_t(1));
+        QVERIFY(editor.project().assets[0].folder.isEmpty());
+    }
     void titlesThatBuildUp() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

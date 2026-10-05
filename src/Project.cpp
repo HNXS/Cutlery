@@ -252,6 +252,8 @@ QJsonObject Project::json(const QString &base) const {
             o["variableRate"] = true;
         if (a.loops)
             o["loops"] = true;
+        if (!a.folder.isEmpty())
+            o["folder"] = a.folder;
         aa.append(o);
     }
     for (const auto &c : clips) {
@@ -400,6 +402,8 @@ QJsonObject Project::json(const QString &base) const {
                 {"frame", QString::number(m.frame)}, {"name", m.name}, {"color", m.color}});
         o["markers"] = mm;
     }
+    if (!folders.isEmpty())
+        o["folders"] = QJsonArray::fromStringList(folders);
     if (inPoint >= 0)
         o["inPoint"] = QString::number(inPoint);
     if (outPoint >= 0)
@@ -426,6 +430,8 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         p.markers.push_back({m["frame"].toString().toLongLong(), m["name"].toString(),
                              m["color"].toString("#ffd23f")});
     }
+    for (const auto &v : o["folders"].toArray())
+        p.folders << v.toString();
     p.inPoint = o.contains("inPoint") ? o["inPoint"].toString().toLongLong() : -1;
     p.outPoint = o.contains("outPoint") ? o["outPoint"].toString().toLongLong() : -1;
     p.trackSettings.clear();
@@ -469,6 +475,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         a.frameRate = j["frameRate"].toDouble(0);
         a.variableRate = j["variableRate"].toBool(false);
         a.loops = j["loops"].toBool(false) && a.kind == "video";
+        a.folder = j["folder"].toString();
         p.assets.push_back(a);
     }
     for (auto v : o["clips"].toArray()) {
@@ -598,6 +605,17 @@ void Project::validate() const {
                     markers[i].name.size() <= 200 && QColor(markers[i].color).isValid() &&
                     (i == 0 || markers[i - 1].frame < markers[i].frame),
                 "Invalid marker");
+    require(folders.size() <= 200 &&
+                std::all_of(folders.begin(), folders.end(),
+                            [&](const QString &f) {
+                                return !f.trimmed().isEmpty() && f == f.trimmed() &&
+                                       f.size() <= 80 && folders.count(f) == 1;
+                            }) &&
+                std::all_of(assets.begin(), assets.end(),
+                            [&](const Asset &a) {
+                                return a.folder.isEmpty() || folders.contains(a.folder);
+                            }),
+            "Invalid media folder");
     require(inPoint >= -1 && outPoint >= -1 && inPoint <= 100000000 && outPoint <= 100000000 &&
                 (inPoint < 0 || outPoint < 0 || inPoint < outPoint),
             "Invalid in/out range");

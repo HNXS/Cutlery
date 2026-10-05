@@ -54,7 +54,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - **Colour and look** (inspector): temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with adjustable strength; one-click looks (Warm, Cool, Cinematic, Vintage, Black & white, Punchy, Dreamy).
 - **Effects** (inspector): camera shake, glitch, VHS and old film with a strength; motion blur; stabilizing for shaky footage.
 - **Scopes:** histogram, waveform and vectorscope over the viewer.
-- **Multiple selection and groups** (Ctrl+click, rubber band, Ctrl+G; copy and paste several clips), an **export queue**, **reframing to 9:16** that follows faces, titles that type, rise, pop or fly in letter by letter, gradient text, pan keyframes.
+- **Media folders and search**, **multiple selection and groups** (Ctrl+click, rubber band, Ctrl+G; copy and paste several clips), an **export queue**, **reframing to 9:16** that follows faces, titles that type, rise, pop or fly in letter by letter, gradient text, pan keyframes.
 - **Slip, slide and roll** (Alt+drag in the timeline), linked picture and sound, anchor point for zoom and rotation, looping GIFs and SVG graphics, speed 0.1–10×.
 - **Freeze frame**, 29 transitions, pan, recent projects and earlier versions of a project (each save keeps the previous one).
 - **Sound effects:** mouse clicks, keyboard typing and whooshes to listen to and add at the playhead; a whoosh on every transition in one click. Cutlery's own sounds plus recorded CC0 sounds in the portable build.
