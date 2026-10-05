@@ -3333,6 +3333,77 @@ class EngineTest : public QObject {
         p.clips = {slow};
         QVERIFY_EXCEPTION_THROWN(p.validate(), std::runtime_error);
     }
+    void gifAndSvgOverlays() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // A 1 s GIF that alternates red and green four times a second.
+        const auto gif = dir.filePath("blink.gif");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "color=black:s=64x64:r=4:d=1,format=rgb24,geq=r='255*eq(mod(N,2),0)':g='255*eq(mod(N,2),1)':b=0",
+                     gif});
+        // An SVG: a blue circle on nothing, twice as wide as tall.
+        const auto svg = dir.filePath("badge.svg");
+        {
+            QFile f(svg);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            // A plain string: moc reads "//" inside raw strings as a comment.
+            f.write("<svg xmlns=\"http:/" "/www.w3.org/2000/svg\" viewBox=\"0 0 100 50\">"
+                    "<circle cx=\"50\" cy=\"25\" r=\"20\" fill=\"#0000ff\"/></svg>");
+        }
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(gif), QUrl::fromLocalFile(svg)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+        const auto &assets = editor.project().assets;
+        const auto blink = std::find_if(assets.begin(), assets.end(), [](const Asset &a) { return a.name == "blink.gif"; });
+        const auto badge = std::find_if(assets.begin(), assets.end(), [](const Asset &a) { return a.kind == "image"; });
+        QVERIFY(blink != assets.end() && badge != assets.end());
+        QVERIFY(blink->loops && blink->kind == "video");
+        QVERIFY(std::abs(blink->duration - 1) < 0.1);
+        // The SVG became a sharp transparent picture keeping its name and shape.
+        QCOMPARE(badge->name, QString("badge.png"));
+        QImage picture(badge->path);
+        QCOMPARE(picture.size(), QSize(2048, 1024));
+        QVERIFY(qAlpha(picture.pixel(5, 5)) == 0);
+        const QColor centre = picture.pixelColor(1024, 512);
+        QVERIFY(centre.blue() > 240 && centre.alpha() == 255);
+        QVERIFY_EXCEPTION_THROWN(rasterizeSvg(gif, dir.path()), std::runtime_error);
+        // A looping clip can be longer than its GIF and keeps alternating.
+        editor.addAsset(blink->id);
+        const auto id = editor.project().clips.back().id;
+        editor.select(id);
+        editor.setClip("duration", 120);
+        QCOMPARE(editor.project().clip(id)->duration, 120);
+        QCOMPARE(editor.trimBounds(id)["last"].toLongLong() > 120, true);
+        const auto json = editor.project().json();
+        QVERIFY(Project::fromJson(json, {}).assets[0].loops || Project::fromJson(json, {}).assets[1].loops);
+        auto colour = [&](qint64 frame) {
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(editor.project(), dir.filePath("work"), 160, 90, options);
+            const auto graph = dir.filePath("graph.txt");
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return out.pixelColor(80, 45);
+        };
+        // 4 frames a second: picture n = floor(t * 4), red when even.
+        for (const auto &[frame, red] : {std::pair{qint64(61), true}, std::pair{qint64(69), false},
+                                         std::pair{qint64(106), true}, std::pair{qint64(113), false}}) {
+            const auto c = colour(frame);
+            QVERIFY2(red ? (c.red() > 200 && c.green() < 60) : (c.green() > 200 && c.red() < 60),
+                     qPrintable(QString("frame %1: %2").arg(frame).arg(c.name())));
+        }
+    }
     void sceneDetection() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

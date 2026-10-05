@@ -508,6 +508,9 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         r.inputs << "-protocol_whitelist" << "file,pipe";
         if (n.image)
             r.inputs << "-loop" << "1" << "-framerate" << fps;
+        else if (n.asset && n.asset->loops)
+            // Repeats endlessly; the start point is cut in the filter graph (see videoChain).
+            r.inputs << "-stream_loop" << "-1";
         else
             r.inputs << "-ss" << num(std::max(0., seek));
         r.inputs << "-i" << QFileInfo(file).absoluteFilePath();
@@ -516,7 +519,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
     // Clip-local seconds where source media exists; images and titles never run out.
     auto available = [&](const Info &n) {
         const auto &c = *n.clip;
-        if (n.image)
+        if (n.image || (n.asset && n.asset->loops))
             return std::pair{-1e12, 1e12};
         const double s = c.speed.seconds(), in = c.sourceIn.seconds(), d = secs(c.duration),
                      media = n.asset->duration;
@@ -605,7 +608,14 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             in = input++;
         } else
             in = addInput(n, seek - pre);
-        QString f = timing(QString("[%1:v:0]").arg(in), !n.image);
+        auto source = QString("[%1:v:0]").arg(in);
+        if (up.path.isEmpty() && n.asset && n.asset->loops && n.asset->duration > 0)
+            // A looping animation starts a whole number of loops before the seek point. Frames
+            // are made regular first, so the cut keeps the picture shown at that moment (an
+            // input seek would drop a long-held frame that began before it).
+            source += QString("fps=%1,trim=start=%2,")
+                          .arg(fps, num(std::fmod(std::max(0., seek - pre), n.asset->duration)));
+        QString f = timing(source, !n.image);
         // Camera shake is measured on the source picture, before scaling.
         if (c.stabilize && !n.image)
             f += ",deshake=rx=32:ry=32:edge=mirror";

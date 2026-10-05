@@ -19,6 +19,8 @@
 #include <QCryptographicHash>
 #include <QRegularExpression>
 #include <QSet>
+#include <QSvgRenderer>
+#include <QPainter>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -275,7 +277,7 @@ QVariantMap Editor::trimBounds(const QString &id) const {
     for (const auto &c : m_project.clips)
         if (c.id == id) {
             qint64 first = 0, last = qint64(86400. * m_project.fpsN / m_project.fpsD);
-            if (const auto *a = m_project.asset(c.assetId); a && a->kind != "image") {
+            if (const auto *a = m_project.asset(c.assetId); a && !a->endless()) {
                 const double rate = double(m_project.fpsN) / m_project.fpsD / c.speed.seconds();
                 const auto head =
                     std::max(qint64(0), qint64(std::floor(c.sourceIn.seconds() * rate + 1e-6)));
@@ -893,12 +895,44 @@ void Editor::relink(const QString &id, const QUrl &url) {
     }
     probeFile(url, id);
 }
+QString rasterizeSvg(const QString &svg, const QString &folder, int longest) {
+    QSvgRenderer renderer(svg);
+    if (!renderer.isValid())
+        throw std::runtime_error("Cannot read this SVG file");
+    QSizeF size = renderer.viewBoxF().size();
+    if (size.isEmpty())
+        size = renderer.defaultSize();
+    if (size.isEmpty())
+        throw std::runtime_error("The SVG file has no size");
+    size.scale(longest, longest, Qt::KeepAspectRatio);
+    QImage image(std::max(1, qRound(size.width())), std::max(1, qRound(size.height())),
+                 QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing);
+    renderer.render(&painter);
+    painter.end();
+    // One folder per source file and version, so the picture keeps the file's name.
+    QFile source(svg);
+    if (!source.open(QIODevice::ReadOnly))
+        throw std::runtime_error("Cannot read this SVG file");
+    const auto key = QCryptographicHash::hash(source.readAll(), QCryptographicHash::Sha1).toHex().left(12);
+    const auto dir = folder + "/" + QString::fromLatin1(key);
+    QDir().mkpath(dir);
+    const auto png = dir + "/" + QFileInfo(svg).completeBaseName() + ".png";
+    if (!image.save(png, "PNG"))
+        throw std::runtime_error("Cannot write the picture of the SVG file");
+    return png;
+}
 void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_ptr<DropBatch> drop) {
     QString path;
     try {
         path = localPath(url);
         if (!QFileInfo(path).isFile())
             throw std::runtime_error("Media file does not exist");
+        // Vector graphics become a sharp, transparent picture that is imported instead.
+        if (QFileInfo(path).suffix().compare("svg", Qt::CaseInsensitive) == 0)
+            path = rasterizeSvg(path, m_data + "/svg");
     } catch (const std::exception &e) {
         m_importErrors << QString::fromUtf8(e.what()) + ": " + url.fileName();
         fail(e.what());
@@ -962,6 +996,8 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                 const bool still =
                     QStringList{"png", "jpg", "jpeg", "bmp", "webp", "tif", "tiff"}.contains(ext);
                 a.kind = still ? "image" : (a.width > 0 ? "video" : "audio");
+                // An animated GIF plays in a loop, like a sticker.
+                a.loops = ext == "gif" && a.kind == "video";
                 if (still) {
                     a.duration = 5;
                     a.frameRate = 0;

@@ -24,6 +24,9 @@ class QMediaRecorder;
 #include <memory>
 
 namespace cutlery {
+// Draws an SVG file at `longest` pixels on its longer side into a transparent PNG in `folder`
+// and returns the PNG's path. Throws when the file cannot be read or written.
+QString rasterizeSvg(const QString &svg, const QString &folder, int longest = 2048);
 class FrameProvider final : public QQuickImageProvider {
   public:
     FrameProvider() : QQuickImageProvider(QQuickImageProvider::Image) {}

@@ -246,6 +246,8 @@ QJsonObject Project::json(const QString &base) const {
             o["frameRate"] = a.frameRate;
         if (a.variableRate)
             o["variableRate"] = true;
+        if (a.loops)
+            o["loops"] = true;
         aa.append(o);
     }
     for (const auto &c : clips) {
@@ -452,6 +454,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         a.hasAudio = j["audio"].toBool();
         a.frameRate = j["frameRate"].toDouble(0);
         a.variableRate = j["variableRate"].toBool(false);
+        a.loops = j["loops"].toBool(false) && a.kind == "video";
         p.assets.push_back(a);
     }
     for (auto v : o["clips"].toArray()) {
@@ -690,7 +693,7 @@ void Project::validate() const {
                     c.titleStyle) &&
                     QColor(c.accentColor).isValid(),
                 "Invalid title style");
-        if (const auto *a = asset(c.assetId); a && a->kind != "image")
+        if (const auto *a = asset(c.assetId); a && !a->endless())
             require(c.sourceIn.seconds() +
                             frameTime(c.duration, fpsN, fpsD).seconds() * c.speed.seconds() <=
                         a->duration + 0.002,

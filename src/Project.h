@@ -24,6 +24,12 @@ struct Asset {
     // (variable frame rate, typical of phone and screen recordings).
     double frameRate = 0;
     bool variableRate = false;
+    // Animated GIFs repeat, so their clips can be any length.
+    bool loops = false;
+    // Images and looping animations have no end; their clips are not limited by the source.
+    bool endless() const {
+        return kind == "image" || loops;
+    }
 };
 // Variable frame rate: the nominal and average rates of a stream differ by more than 1 %.
 bool isVariableRate(double nominal, double average);

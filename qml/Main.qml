@@ -2616,7 +2616,7 @@ ApplicationWindow {
         id: importDialog
         title: "Import local media"
         fileMode: FileDialog.OpenFiles
-        nameFilters: ["Media files (*.mp4 *.mov *.mkv *.webm *.avi *.mp3 *.wav *.m4a *.aac *.flac *.ogg *.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff)", "All files (*)"]
+        nameFilters: ["Media files (*.mp4 *.mov *.mkv *.webm *.avi *.mp3 *.wav *.m4a *.aac *.flac *.ogg *.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.gif *.svg)", "All files (*)"]
         onAccepted: editor.importMedia(selectedFiles)
     }
     FileDialog {
