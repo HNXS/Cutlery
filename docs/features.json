@@ -571,8 +571,8 @@
     "status": "Planned",
     "acceptance": "Locked track cannot change via ripple or group operation",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Track lock, audio mute/solo and picture hide; no clip groups."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Track lock, audio mute/solo and picture hide; multiple selection (Ctrl+click, Ctrl+A) that moves and deletes together, and clip groups (Ctrl+G, Ctrl+Shift+G) that are selected, moved and deleted as one. No rubber-band selection or nested groups."
   },
   {
     "id": "F024",
@@ -1522,7 +1522,7 @@
     "acceptance": "Gain and fade fixtures have expected samples and no edit clicks",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Implemented (alpha)",
-    "alphaNotes": "Volume (keyframable), mute, fades, and pan per clip (balance −1 left to +1 right in the sound tools: the far side gets quieter). No pan keyframes."
+    "alphaNotes": "Volume and pan per clip, both keyframable (pan as balance −1 left to +1 right), mute and fades."
   },
   {
     "id": "F062",
@@ -2046,8 +2046,8 @@
     "status": "Planned",
     "acceptance": "Emoji/ligatures do not split incorrectly; editable animation exports",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Planned",
-    "alphaNotes": "Not implemented in this alpha."
+    "alphaStatus": "Partial",
+    "alphaNotes": "Plain titles can build up from the clip's start: typewriter (one character after another) or word by word, finished after a set time (0.1–30 s). No per-character motion, scaling or colour animation."
   },
   {
     "id": "F083",
@@ -4247,7 +4247,7 @@
     "acceptance": "All destructive edits undoable and reachable without pointer",
     "source": "Attachment 2, named section",
     "alphaStatus": "Partial",
-    "alphaNotes": "31 customizable commands, conflict checks and portable settings; no command search or complete CapCut keymap."
+    "alphaNotes": "44 customizable commands, conflict checks and portable settings; no command search or complete CapCut keymap."
   },
   {
     "id": "F171",

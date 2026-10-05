@@ -4,6 +4,9 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Several clips at once:** Ctrl+click to select more clips, which then move and delete together; Ctrl+G groups them, Ctrl+Shift+G ungroups, Ctrl+A selects all.
+- **Titles that build up:** typewriter or word by word.
+- **Pan keyframes:** move the sound from left to right over time.
 - **Slip, slide and roll:** Alt+drag a clip to slip, Alt+Shift+drag to slide, Alt+drag the edge between two clips to roll the cut.
 - **Linked picture and sound:** detached audio moves and trims with its video until you unlink it.
 - **Anchor point:** zoom and rotate around a corner or edge, also with keyframes.

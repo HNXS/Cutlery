@@ -55,7 +55,7 @@ const QVector<QPair<QString, QString>> &transitionTypes() {
     return types;
 }
 const QStringList &animatableProperties() {
-    static const QStringList properties{"scale", "x", "y", "rotation", "opacity", "volume"};
+    static const QStringList properties{"scale", "x", "y", "rotation", "opacity", "volume", "pan"};
     return properties;
 }
 // Valid range of each animatable property, shared with static-value validation.
@@ -68,6 +68,8 @@ static std::pair<double, double> propertyRange(const QString &p) {
         return {-360, 360};
     if (p == "opacity")
         return {0, 1};
+    if (p == "pan")
+        return {-1, 1};
     return {0, 4}; // volume
 }
 namespace {
@@ -106,6 +108,8 @@ double Clip::staticValue(const QString &p) const {
         return rotation;
     if (p == "opacity")
         return opacity;
+    if (p == "pan")
+        return pan;
     return volume;
 }
 double Clip::valueAt(const QString &p, double frame) const {
@@ -294,6 +298,10 @@ QJsonObject Project::json(const QString &base) const {
         if (c.background > 0) {
             o["background"] = c.background;
             o["backgroundColor"] = c.backgroundColor;
+        }
+        if (!c.textAnimation.isEmpty()) {
+            o["textAnimation"] = c.textAnimation;
+            o["textAnimationTime"] = c.textAnimationTime;
         }
         if (!c.titleStyle.isEmpty()) {
             o["titleStyle"] = c.titleStyle;
@@ -500,6 +508,8 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.background = j["background"].toDouble(0);
         c.backgroundColor = j["backgroundColor"].toString("#000000");
         c.titleStyle = j["titleStyle"].toString();
+        c.textAnimation = j["textAnimation"].toString();
+        c.textAnimationTime = j["textAnimationTime"].toDouble(1.5);
         c.accentColor = j["accentColor"].toString("#64d8bc");
         c.effect = j["effect"].toString();
         c.effectStrength = j["effectStrength"].toDouble(0.6);
@@ -699,6 +709,9 @@ void Project::validate() const {
                     c.titleStyle) &&
                     QColor(c.accentColor).isValid(),
                 "Invalid title style");
+        require(QStringList{"", "typewriter", "words"}.contains(c.textAnimation) &&
+                    bounded(c.textAnimationTime, 0.1, 60),
+                "Invalid text animation");
         if (const auto *a = asset(c.assetId); a && !a->endless())
             require(c.sourceIn.seconds() +
                             frameTime(c.duration, fpsN, fpsD).seconds() * c.speed.seconds() <=

@@ -469,6 +469,8 @@ QVariantMap Editor::state() const {
             PROP(reverb);
             PROP(echo);
             PROP(pan);
+            PROP(textAnimation);
+            PROP(textAnimationTime);
             PROP(anchorX);
             PROP(anchorY);
             PROP(slowMotion);
@@ -1444,6 +1446,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(reverb, toDouble);
         FIELD(echo, toDouble);
         FIELD(pan, toDouble);
+        FIELD(textAnimation, toString);
+        FIELD(textAnimationTime, toDouble);
         FIELD(anchorX, toDouble);
         FIELD(anchorY, toDouble);
         FIELD(slowMotion, toString);
@@ -1572,6 +1576,8 @@ void Editor::toggleKeyframe(const QString &property) {
                     c->rotation = value;
                 else if (property == "opacity")
                     c->opacity = value;
+                else if (property == "pan")
+                    c->pan = value;
                 else
                     c->volume = value;
             }

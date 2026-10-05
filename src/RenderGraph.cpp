@@ -164,7 +164,10 @@ static QFont textFont(const Clip &c, int pixelSize) {
 }
 // Draws the clip's text in `area` as its style describes: wrapped at spaces, aligned, centred
 // vertically, with line spacing, a rounded box behind each line, a shadow and an outline.
-static void paintText(QPainter &paint, const Clip &c, const QFont &font, const QRect &area) {
+// `visible` limits the drawing to that many characters (spaces not counted), for titles that
+// build up; the layout stays that of the whole text.
+static void paintText(QPainter &paint, const Clip &c, const QFont &font, const QRect &area,
+                      int visible = -1) {
     const QFontMetricsF m(font);
     QStringList lines;
     for (const auto &paragraph : c.text.split('\n')) {
@@ -189,9 +192,19 @@ static void paintText(QPainter &paint, const Clip &c, const QFont &font, const Q
         const double x = c.align == "left"    ? area.left()
                          : c.align == "right" ? area.right() + 1 - w
                                               : area.left() + (area.width() - w) / 2;
-        if (!line.isEmpty()) {
-            path.addText(QPointF(x, y + m.ascent()), font, line);
-            boxes << QRectF(x - pad, y - pad * 0.3, w + 2 * pad, m.height() + pad * 0.6);
+        auto shown = line;
+        if (visible >= 0) {
+            int end = 0;
+            for (int count = 0; end < line.size() && count < visible; ++end)
+                count += !line[end].isSpace();
+            visible -= int(std::count_if(line.begin(), line.begin() + end,
+                                         [](QChar ch) { return !ch.isSpace(); }));
+            shown = line.left(end);
+        }
+        if (!shown.isEmpty()) {
+            path.addText(QPointF(x, y + m.ascent()), font, shown);
+            boxes << QRectF(x - pad, y - pad * 0.3, m.horizontalAdvance(shown) + 2 * pad,
+                            m.height() + pad * 0.6);
         }
         y += step;
     }
@@ -1003,6 +1016,99 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                           visibleStart - from, visibleEnd - visibleStart);
                 continue;
             }
+            if (n.title && !c.textAnimation.isEmpty() && c.graphic.isEmpty() &&
+                c.titleStyle.isEmpty() && c.captionStyle.isEmpty() && !c.text.isEmpty() &&
+                !animatedGeometry(c) && c.rotation == 0 && c.scale == 1 && n.vPre == 0) {
+                // A title that builds up: one band per step (a character or a word), stacked
+                // in one picture; a crop shows the band for the clip-local time.
+                const auto font = textFont(c, qRound(c.fontSize * double(height) / p.height));
+                const QRect rect(width / 15, height / 12, width * 13 / 15, height * 5 / 6);
+                auto drawn = [&](int visible) {
+                    QImage img(width, height, QImage::Format_ARGB32_Premultiplied);
+                    img.fill(Qt::transparent);
+                    QPainter paint(&img);
+                    paint.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
+                    paintText(paint, c, font, rect, visible);
+                    return img;
+                };
+                // Rows the whole text covers, outline and shadow included.
+                const auto full = drawn(-1);
+                int top = height, bottom = -1;
+                for (int y = 0; y < height; ++y) {
+                    const auto *line = reinterpret_cast<const QRgb *>(full.constScanLine(y));
+                    for (int x = 0; x < width; ++x)
+                        if (qAlpha(line[x]) > 0) {
+                            top = std::min(top, y);
+                            bottom = y;
+                            break;
+                        }
+                }
+                // Characters shown at each step: one more character, or the next whole word.
+                QVector<int> counts;
+                if (c.textAnimation == "words") {
+                    int total = 0;
+                    for (const auto &word : c.text.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts))
+                        counts << (total += int(word.size()));
+                } else {
+                    const int total = int(std::count_if(c.text.begin(), c.text.end(),
+                                                        [](QChar ch) { return !ch.isSpace(); }));
+                    for (int i = 1; i <= total; ++i)
+                        counts << i;
+                }
+                const int band = bottom - top + 1;
+                // At most 32000 rows: long texts reveal a few characters per step.
+                const int stride =
+                    counts.isEmpty() || bottom < 0
+                        ? 1
+                        : int(std::ceil(double(band) * counts.size() / 32000));
+                QVector<int> steps;
+                for (int i = stride - 1; i < counts.size(); i += stride)
+                    steps << counts[i];
+                if (!counts.isEmpty() && (steps.isEmpty() || steps.last() != counts.last()))
+                    steps << counts.last();
+                if (bottom >= 0 && !steps.isEmpty()) {
+                    QImage strip(width, band * int(steps.size()), QImage::Format_ARGB32_Premultiplied);
+                    strip.fill(Qt::transparent);
+                    {
+                        QPainter paint(&strip);
+                        for (int i = 0; i < steps.size(); ++i)
+                            paint.drawImage(QPoint(0, i * band), drawn(steps[i]),
+                                            QRect(0, top, width, band));
+                    }
+                    const auto file = QDir(work).filePath(QString("build-%1.png").arg(serial++));
+                    if (!strip.save(file))
+                        throw std::runtime_error("Cannot write title render asset");
+                    r.inputs << "-loop" << "1" << "-framerate" << fps << "-i" << file;
+                    const qint64 l0 = visibleStart - c.start, l1 = visibleEnd - c.start;
+                    const int count = int(steps.size());
+                    QString f = QString("[%1:v:0]trim=end_frame=%2,settb=%3/%4,setpts=N+%5,"
+                                        "crop=w=%6:h=%7:x=0:y='%7*min(%8,floor(t*%9))',format=rgba")
+                                    .arg(input++)
+                                    .arg(l1 - l0)
+                                    .arg(p.fpsD)
+                                    .arg(p.fpsN)
+                                    .arg(l0)
+                                    .arg(width)
+                                    .arg(band)
+                                    .arg(count - 1)
+                                    .arg(num(count / c.textAnimationTime));
+                    if (c.opacity != 1)
+                        f += ",colorchannelmixer=aa=" + num(c.opacity);
+                    const double d = secs(c.duration);
+                    if (c.fadeIn > 0)
+                        f += QString(",fade=t=in:st=0:d=%1:alpha=1").arg(num(std::min(c.fadeIn, d)));
+                    if (c.fadeOut > 0) {
+                        const auto fd = std::min(c.fadeOut, d);
+                        f += QString(",fade=t=out:st=%1:d=%2:alpha=1").arg(num(d - fd), num(fd));
+                    }
+                    composite(f + ",setpts=PTS-STARTPTS",
+                              QString("x=%1:y=%2")
+                                  .arg(qRound(c.x * width))
+                                  .arg(top + qRound(c.y * height)),
+                              visibleStart - from, visibleEnd - visibleStart);
+                    continue;
+                }
+            }
             if (n.title && !c.captionStyle.isEmpty() && c.timedWords() && !animatedGeometry(c) &&
                 c.rotation == 0 && c.scale == 1 && n.vPre == 0) {
                 const auto sprite = captionSprite(c, width, height, p.height);
@@ -1124,7 +1230,12 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                                                  .arg(p.fpsD)));
         else
             a += ",volume=" + num(c.volume);
-        if (c.pan != 0)
+        if (c.keyframes.contains("pan")) {
+            // Animated balance, evaluated per sample from the clip-local frame.
+            const auto p0 = "(" + curve(c, "pan", QString("((t-%1)*%2/%3)").arg(num(k)).arg(p.fpsN).arg(p.fpsD)) + ")";
+            a += QString(",aeval=exprs='val(0)*if(gt(%1,0),1-%1,1)|val(1)*if(lt(%1,0),1+%1,1)':c=same")
+                     .arg(p0);
+        } else if (c.pan != 0)
             // Balance: the far side gets quieter, the near side keeps its level.
             a += QString(",pan=stereo|c0=%1*c0|c1=%2*c1")
                      .arg(num(c.pan > 0 ? 1 - c.pan : 1), num(c.pan < 0 ? 1 + c.pan : 1));

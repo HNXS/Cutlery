@@ -1532,6 +1532,34 @@ ApplicationWindow {
                                     currentIndex: Math.max(0, styles.indexOf(win.selection.titleStyle || ""))
                                     onActivated: editor.setClip("titleStyle", styles[currentIndex])
                                 }
+                                // Plain titles can build up character by character or word by word.
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    visible: (win.selection.titleStyle || "") === "" && (win.selection.captionStyle || "") === "" && !win.selection.graphic
+                                    ComboBox {
+                                        objectName: "textAnimation"
+                                        Layout.fillWidth: true
+                                        readonly property var kinds: ["", "typewriter", "words"]
+                                        model: ["Appears at once", "Typewriter", "Word by word"]
+                                        currentIndex: Math.max(0, kinds.indexOf(win.selection.textAnimation || ""))
+                                        onActivated: editor.setClip("textAnimation", kinds[currentIndex])
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Lets the text build up from the start of the clip"
+                                    }
+                                    SpinBox {
+                                        objectName: "textAnimationTime"
+                                        visible: !!win.selection.textAnimation
+                                        from: 1
+                                        to: 300
+                                        value: Math.round((win.selection.textAnimationTime ?? 1.5) * 10)
+                                        editable: true
+                                        textFromValue: (v) => (v / 10).toFixed(1) + " s"
+                                        valueFromText: (t) => Math.round(parseFloat(t) * 10)
+                                        onValueModified: editor.setClip("textAnimationTime", value / 10)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Time until the whole text is shown"
+                                    }
+                                }
                                 RowLayout {
                                     visible: (win.selection.titleStyle || "") !== ""
                                     Label {
@@ -2166,6 +2194,13 @@ ApplicationWindow {
                                         step: .01
                                     },
                                     {
+                                        key: "pan",
+                                        name: "Pan (left − / right +)",
+                                        lo: -1,
+                                        hi: 1,
+                                        step: .05
+                                    },
+                                    {
                                         key: "fadeIn",
                                         name: "Fade in (sec)",
                                         lo: 0,
@@ -2183,7 +2218,7 @@ ApplicationWindow {
                                 ColumnLayout {
                                     id: propertyRow
                                     required property var modelData
-                                    readonly property bool animatable: ["scale", "x", "y", "rotation", "opacity", "volume"].indexOf(modelData.key) >= 0
+                                    readonly property bool animatable: ["scale", "x", "y", "rotation", "opacity", "volume", "pan"].indexOf(modelData.key) >= 0
                                     readonly property bool animated: animatable && ((win.selection.keyframeCount || {})[modelData.key] || 0) > 0
                                     // Animated properties show their value at the playhead.
                                     readonly property real current: animated ? win.selection.animated[modelData.key] : Number(win.selection[modelData.key] ?? 0)
@@ -2270,8 +2305,7 @@ ApplicationWindow {
                                         { key: "deess", name: "De-esser", lo: 0, hi: 1, step: .01, tip: "Softens sharp S sounds" },
                                         { key: "compressor", name: "Compressor", lo: 0, hi: 1, step: .01, tip: "Evens out loud and quiet parts" },
                                         { key: "reverb", name: "Reverb", lo: 0, hi: 1, step: .01, tip: "The sound of a room" },
-                                        { key: "echo", name: "Echo", lo: 0, hi: 1, step: .01, tip: "Repeats a third of a second apart" },
-                                        { key: "pan", name: "Pan (L–R)", lo: -1, hi: 1, step: .05, tip: "Moves the sound to the left (−) or right (+)" }
+                                        { key: "echo", name: "Echo", lo: 0, hi: 1, step: .01, tip: "Repeats a third of a second apart" }
                                     ]
                                     RowLayout {
                                         id: soundRow

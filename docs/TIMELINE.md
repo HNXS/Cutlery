@@ -6,6 +6,8 @@ Drop files from Windows Explorer directly onto a track to import and insert them
 
 Drag the body of a video, audio, image or title clip to move it along a track or between tracks. Drag its edges to trim instead. Near the timeline viewport edges, the view scrolls during a drag. Press Escape to cancel. Locked tracks reject insertion, moves and trimming.
 
+Ctrl+click a clip to add it to the selection or take it out again; dragging any selected clip moves them all, and Delete removes them all. Ctrl+G groups the selected clips, so clicking one selects the group; Ctrl+Shift+G ungroups. The transition button of a cut sits on the clips' top edge.
+
 Hold **Alt** for edits that keep everything around the clip in place:
 
 - **Slip:** Alt+drag the body to show an earlier part of the source (drag right) or a later part (drag left), at the same position and length.

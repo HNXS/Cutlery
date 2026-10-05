@@ -80,6 +80,10 @@ struct Clip {
     // The first text line is the name or headline, further lines the role or subtitle.
     QString titleStyle;
     QString accentColor = "#64d8bc";
+    // Plain titles can build up: "typewriter" shows one character after another, "words" one
+    // word after another, all of them within textAnimationTime seconds from the clip's start.
+    QString textAnimation;
+    double textAnimationTime = 1.5;
     // Effect area clips (no media, no text) blur or pixelate whatever lower tracks show inside a
     // rectangle of effectWidth × effectHeight canvas fractions at scale 1, centred at x/y.
     QString effect; // "", "blur", "pixelate"
