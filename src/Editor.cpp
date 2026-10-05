@@ -1479,6 +1479,18 @@ qint64 Editor::adjacentKeyframe(bool forward) const {
         }
     return target;
 }
+void Editor::slipClip(const QString &id, qint64 frames) {
+    if (frames != 0)
+        mutate([&](Project &p) { p.slip(id, frames); });
+}
+void Editor::rollCut(const QString &id, qint64 frames) {
+    if (frames != 0)
+        mutate([&](Project &p) { p.roll(id, frames); });
+}
+void Editor::slideClip(const QString &id, qint64 frames) {
+    if (frames != 0)
+        mutate([&](Project &p) { p.slide(id, frames); });
+}
 void Editor::split() {
     mutate([&](Project &p) { p.split(m_selected, m_playhead); });
 }

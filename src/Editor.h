@@ -66,6 +66,10 @@ class Editor final : public QObject {
     Q_INVOKABLE qint64 snap(qint64 frame, qint64 threshold, const QString &exclude,
                             qint64 length = 0) const;
     Q_INVOKABLE void trimClip(const QString &id, qint64 start, qint64 end);
+    // Slip, roll and slide by a number of frames; see Project. One undo step each.
+    Q_INVOKABLE void slipClip(const QString &id, qint64 frames);
+    Q_INVOKABLE void rollCut(const QString &id, qint64 frames);
+    Q_INVOKABLE void slideClip(const QString &id, qint64 frames);
     Q_INVOKABLE void addTrack();
     Q_INVOKABLE void removeTrack(int track);
     Q_INVOKABLE void setTrack(int track, const QString &key, const QVariant &value);

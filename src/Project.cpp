@@ -874,6 +874,64 @@ void Project::trim(const QString &id, qint64 start, qint64 end) {
         packTrack(c->track, order);
     // Caller validates the complete candidate before committing an undo step.
 }
+namespace {
+// A clip's new timeline range with its source following the picture, as in a trim, but
+// without touching other clips.
+void setRange(Project &p, Clip &c, qint64 start, qint64 end) {
+    require(start >= 0 && end - start >= 1, "Every clip must keep at least one frame");
+    const auto delta = c.reverse ? c.start + c.duration - end : start - c.start;
+    if (const auto *a = p.asset(c.assetId); a && a->kind != "image")
+        c.sourceIn = c.sourceIn + frameTime(delta, p.fpsN, p.fpsD) * c.speed;
+    c.shiftKeyframes(c.start - start);
+    c.start = start;
+    c.duration = end - start;
+}
+Clip *touching(Project &p, const Clip &c, bool after) {
+    for (auto &x : p.clips)
+        if (x.id != c.id && x.track == c.track &&
+            (after ? x.start == c.start + c.duration : x.start + x.duration == c.start))
+            return &x;
+    return nullptr;
+}
+} // namespace
+void Project::slip(const QString &id, qint64 frames) {
+    auto *c = clip(id);
+    require(c != nullptr, "No such clip");
+    const auto *a = asset(c->assetId);
+    require(a && a->kind != "image", "Only video and audio clips can slip");
+    for (const auto &clipId : linkedClips(id) + QStringList{id}) {
+        auto *x = clip(clipId);
+        requireEditable(x->track);
+        x->sourceIn = x->sourceIn + frameTime(frames, fpsN, fpsD) * x->speed;
+    }
+    require(clip(id)->sourceIn.n >= 0, "The source has no earlier picture to show");
+}
+void Project::roll(const QString &id, qint64 frames) {
+    auto *left = clip(id);
+    require(left != nullptr, "No such clip");
+    auto *right = touching(*this, *left, true);
+    require(right != nullptr, "Roll needs a clip right after this one");
+    requireEditable(left->track);
+    setRange(*this, *left, left->start, left->start + left->duration + frames);
+    setRange(*this, *right, right->start + frames, right->start + right->duration);
+}
+void Project::slide(const QString &id, qint64 frames) {
+    auto *c = clip(id);
+    require(c != nullptr, "No such clip");
+    requireEditable(c->track);
+    auto *before = touching(*this, *c, false);
+    auto *after = touching(*this, *c, true);
+    require(c->start + frames >= 0, "The clip cannot start before the timeline");
+    if (before)
+        setRange(*this, *before, before->start, before->start + before->duration + frames);
+    if (after)
+        setRange(*this, *after, after->start + frames, after->start + after->duration);
+    c->start += frames;
+    for (const auto &x : clips)
+        require(x.id == c->id || x.track != c->track || x.start + x.duration <= c->start ||
+                    x.start >= c->start + c->duration,
+                "There is no room to slide the clip there");
+}
 QVector<QString> Project::trackOrder(int track, const QString &exclude) const {
     QVector<const Clip *> ordered;
     for (const auto &c : clips)

@@ -3404,6 +3404,100 @@ class EngineTest : public QObject {
                      qPrintable(QString("frame %1: %2").arg(frame).arg(c.name())));
         }
     }
+    void slipRollAndSlide() {
+        // Three touching clips from a 10 s source: A 0-30 (source 1 s), B 30-60 (source 3 s),
+        // C 60-90 (source 5 s).
+        Project p;
+        Asset a;
+        a.id = "v";
+        a.path = "v.mkv";
+        a.kind = "video";
+        a.duration = 10;
+        a.width = 160;
+        a.height = 90;
+        a.hasAudio = true;
+        p.assets = {a};
+        auto make = [](const QString &id, qint64 start, double in) {
+            Clip c;
+            c.id = id;
+            c.assetId = "v";
+            c.start = start;
+            c.duration = 30;
+            c.sourceIn = Time(qRound64(in * 1000), 1000);
+            return c;
+        };
+        p.clips = {make("a", 0, 1), make("b", 30, 3), make("c", 60, 5)};
+        auto at = [](const Project &q, const QString &id) { return *q.clip(id); };
+        // Slip: B shows half a second later; nothing moves.
+        auto slipped = p;
+        slipped.slip("b", 15);
+        slipped.validate();
+        QCOMPARE(at(slipped, "b").sourceIn.seconds(), 3.5);
+        QCOMPARE(at(slipped, "b").start, 30);
+        QCOMPARE(at(slipped, "a").sourceIn.seconds(), 1.);
+        // Not before the start of the source.
+        auto early = p;
+        QVERIFY_EXCEPTION_THROWN(early.slip("a", -40), std::runtime_error);
+        // Roll: the A|B cut moves 6 frames later.
+        auto rolled = p;
+        rolled.roll("a", 6);
+        rolled.validate();
+        QCOMPARE(at(rolled, "a").duration, 36);
+        QCOMPARE(at(rolled, "b").start, 36);
+        QCOMPARE(at(rolled, "b").duration, 24);
+        QCOMPARE(at(rolled, "b").sourceIn.seconds(), 3.2);
+        QCOMPARE(rolled.duration(), 90);
+        QVERIFY_EXCEPTION_THROWN(rolled.roll("c", 5), std::runtime_error); // nothing after C
+        // Slide: B moves 3 frames later; A grows, C shrinks at its start; B keeps its source.
+        auto slid = p;
+        slid.slide("b", 3);
+        slid.validate();
+        QCOMPARE(at(slid, "a").duration, 33);
+        QCOMPARE(at(slid, "b").start, 33);
+        QCOMPARE(at(slid, "b").sourceIn.seconds(), 3.);
+        QCOMPARE(at(slid, "c").start, 63);
+        QCOMPARE(at(slid, "c").duration, 27);
+        QCOMPARE(at(slid, "c").sourceIn.seconds(), 5.1);
+        QCOMPARE(slid.duration(), 90);
+        // Sliding past a neighbour's whole length is refused.
+        auto far = p;
+        QVERIFY_EXCEPTION_THROWN(far.slide("b", 30), std::runtime_error);
+        // Without neighbours a clip slides into free space only.
+        Project gap = p;
+        gap.clips = {make("a", 0, 1), make("b", 40, 3), make("c", 80, 5)};
+        auto moved = gap;
+        moved.slide("b", -5);
+        QCOMPARE(at(moved, "b").start, 35);
+        QVERIFY_EXCEPTION_THROWN(gap.slide("b", -15), std::runtime_error);
+
+        // Through the editor: one undo step each; detached audio slips along.
+        FrameProvider frames;
+        Editor e(&frames);
+        QTemporaryDir dir;
+        const auto source = dir.filePath("tone.mkv");
+        run(Editor::executable("ffmpeg"), {"-v", "error", "-f", "lavfi", "-i", "color=gray:s=160x90:r=30:d=4", "-f", "lavfi",
+                                           "-i", "sine=d=4", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest", source});
+        e.configure(160, 90, 30, 1);
+        e.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(e.project().assets.size() == 1, 15000);
+        e.addAsset(e.project().assets.first().id);
+        const auto id = e.project().clips.first().id;
+        e.select(id);
+        e.setClip("duration", 60);
+        e.setClip("sourceIn", 1.0);
+        e.detachAudio();
+        QCOMPARE(e.project().clips.size(), size_t(2));
+        e.slipClip(id, 15);
+        QVERIFY2(e.state()["error"].toString().isEmpty(), qPrintable(e.state()["error"].toString()));
+        for (const auto &c : e.project().clips)
+            QCOMPARE(c.sourceIn.seconds(), 1.5);
+        e.undo();
+        for (const auto &c : e.project().clips)
+            QCOMPARE(c.sourceIn.seconds(), 1.);
+        e.slipClip(id, 200); // past the end of the 4 s source
+        QVERIFY(!e.state()["error"].toString().isEmpty());
+        QCOMPARE(e.project().clip(id)->sourceIn.seconds(), 1.);
+    }
     void sceneDetection() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

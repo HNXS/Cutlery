@@ -213,6 +213,14 @@ struct Project {
     void addTrack(const QString &name = {});
     void removeTrack(int track);
     void trim(const QString &id, qint64 start, qint64 end);
+    // Edits that keep the clips around them in place (the caller validates the result):
+    // Slip shows a later (positive) or earlier part of the source in the same place and length;
+    // detached audio of the clip slips with it.
+    void slip(const QString &id, qint64 frames);
+    // Roll moves the cut between this clip and the one right after it on its track.
+    void roll(const QString &id, qint64 frames);
+    // Slide moves the clip; the touching clips before and after it grow or shrink to match.
+    void slide(const QString &id, qint64 frames);
     QVector<QString> trackOrder(int track, const QString &exclude = {}) const;
     void packTrack(int track, const QVector<QString> &order);
     qint64 placement(int track, qint64 frame, const QString &exclude = {}) const;

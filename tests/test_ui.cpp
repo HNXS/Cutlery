@@ -512,6 +512,81 @@ class UiTest : public QObject {
         QCOMPARE(editor.project().clip(lower.id)->titleStyle, QString("titleCard"));
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void slipSlideAndRollDrags() {
+        QTemporaryDir dir;
+        const auto video = dir.filePath("clip.mkv");
+        QProcess generate;
+        generate.start(Editor::executable("ffmpeg"),
+                       {"-v", "error", "-f", "lavfi", "-i", "color=gray:size=160x90:rate=30:duration=4",
+                        "-c:v", "ffv1", video});
+        QVERIFY(generate.waitForFinished(15000));
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(video)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        // Three touching 1 s clips, each starting 1 s into the source.
+        const auto asset = editor.project().assets.first().id;
+        for (int i = 0; i < 3; ++i) {
+            editor.addAsset(asset);
+            editor.select(editor.project().clips.back().id);
+            editor.setClip("duration", 30);
+            editor.setClip("sourceIn", 1.0);
+            editor.setClip("start", 30 * i);
+        }
+        const auto a = editor.project().clips[0].id, b = editor.project().clips[1].id;
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this, [&](const QList<QQmlError> &errors) {
+            for (const auto &e : errors)
+                warnings << e.toString();
+        });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        window->requestActivate();
+        QTest::qWait(150);
+        // Pressed near the top: the transition button covers the middle of a cut.
+        auto altDrag = [&](QQuickItem *item, int dx, Qt::KeyboardModifiers modifiers) {
+            const auto from = item->mapToScene(QPointF(item->width() / 2, 6)).toPoint(),
+                       to = from + QPoint(dx, 0);
+            QTest::mousePress(window, Qt::LeftButton, modifiers, from);
+            QTest::mouseMove(window, from + QPoint(dx / 4, 0), 20);
+            QTest::mouseMove(window, from + QPoint(dx / 2, 0), 20);
+            QTest::mouseMove(window, to, 20);
+            QTest::mouseRelease(window, Qt::LeftButton, modifiers, to);
+            QTest::qWait(30);
+        };
+        const double pixelsPerFrame = 48. / 30;
+        auto *clipB = findItem(window->contentItem(), "clip-" + b);
+        QVERIFY(clipB);
+        // Alt+drag on B to the left by 10 frames: B shows 10 frames later in its source.
+        altDrag(clipB, -qRound(10 * pixelsPerFrame), Qt::AltModifier);
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+        QTRY_VERIFY(std::abs(editor.project().clip(b)->sourceIn.seconds() - (1 + 10 / 30.)) < 0.05);
+        QCOMPARE(editor.project().clip(b)->start, 30);
+        // Alt+Shift+drag: B slides 6 frames right; A grows to meet it. (Clip items are made
+        // again after each edit.)
+        clipB = findItem(window->contentItem(), "clip-" + b);
+        QVERIFY(clipB);
+        altDrag(clipB, qRound(6 * pixelsPerFrame), Qt::AltModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(std::abs(editor.project().clip(b)->start - 36) <= 1);
+        QCOMPARE(editor.project().clip(a)->duration, editor.project().clip(b)->start);
+        // Alt+drag A's end edge: the A|B cut rolls 4 frames earlier.
+        const auto cut = editor.project().clip(b)->start;
+        auto *endA = findItem(window->contentItem(), "trimEnd-" + a);
+        QVERIFY(endA);
+        altDrag(endA, -qRound(4 * pixelsPerFrame), Qt::AltModifier);
+        QTRY_VERIFY(std::abs(editor.project().clip(b)->start - (cut - 4)) <= 1);
+        QCOMPARE(editor.project().clip(a)->duration, editor.project().clip(b)->start);
+        QCOMPARE(editor.project().duration(), 90);
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+    }
     void lookControls() {
         QTemporaryDir dir;
         QImage picture(160, 90, QImage::Format_RGB32);
