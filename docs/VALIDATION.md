@@ -1,5 +1,43 @@
 # Validation record
 
+## Windows portable build — 2026-10-05, media folders, start screen, relink from a folder, nested sequences (0.6 development)
+
+[GitHub Actions run 37370014194](https://github.com/HNXS/Cutlery/actions/runs/37370014194) on commit `20eacc6b5da5b769e1e78a252f7fbe5aca40cd73` passed every step.
+
+The same code had failed once before, on commit `0911802`, in run 37363562214, attempt 2. Its first attempt found no runner. In attempt 2 a test failed in "Test model and actual media rendering". The failing check could not be identified, because only the job log names it. CI now reports each failing check as an annotation, so a repeat will show which test it is.
+
+New coverage:
+
+- **Engine tests:**
+  - `mediaFolders`:
+    - folders are created, renamed and deleted (their media stays);
+    - imports go into the folder on show;
+    - media can be moved between folders;
+    - folders are saved and checked on load;
+    - only unused media can be removed;
+    - pasted media lands at the top level.
+  - `appPreferences`:
+    - invalid settings are refused;
+    - new projects take the default format;
+    - still images take the set length;
+    - "0 earlier versions" keeps none;
+    - the settings survive a restart.
+  - `relinkMissingFromFolder`:
+    - missing files are found by name, in any case and at any depth;
+    - among duplicates, the one in the most similar folder wins;
+    - all are relinked in one undo step.
+  - `nestedSequences`:
+    - nesting puts the clips into one clip, rendered in the background and showing the nested picture;
+    - the sequence opens with its own undo history and exports wait while it is open;
+    - saving from inside writes the whole project, with relative paths;
+    - going back is one undo step;
+    - taking it apart restores the clips;
+    - only normal-speed sequences can be taken apart.
+- **Interface:**
+  - library search, kind and folder views;
+  - the start screen opens a 9:16 project, and the preferences dialog saves its settings;
+  - double-clicking a nested clip opens it, and Back returns.
+
 ## Windows portable build — 2026-10-05, rubber band, export queue, reframing, letter animations (0.6 development)
 
 [GitHub Actions run 37324201212](https://github.com/HNXS/Cutlery/actions/runs/37324201212) on commit `09ebdc5b7e3ef0e64de74c5092791e671bd44ed3` passed every step.

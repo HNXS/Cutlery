@@ -76,6 +76,9 @@ class Editor final : public QObject {
     Q_INVOKABLE void detachAudio();
     Q_INVOKABLE qint64 adjacentCut(bool forward) const;
     Q_INVOKABLE void newProject();
+    // App-wide settings (state "preferences"): width, height, fpsN, fpsD of new projects,
+    // stillSeconds of imported pictures, backups kept per project, startScreen. Saved at once.
+    Q_INVOKABLE void setPreferences(const QVariantMap &values);
     Q_INVOKABLE bool openProject(const QUrl &);
     Q_INVOKABLE bool save(const QUrl &url = QUrl());
     // Recently opened or saved projects, newest first (state "recent": path, name, exists).
@@ -87,10 +90,21 @@ class Editor final : public QObject {
     Q_INVOKABLE bool restoreBackup(const QString &file);
     Q_INVOKABLE void recover();
     Q_INVOKABLE void importMedia(const QList<QUrl> &);
+    // Media library folders. New imports go into the import folder (the one on show).
+    Q_INVOKABLE void addFolder(const QString &name);
+    Q_INVOKABLE void renameFolder(const QString &from, const QString &to);
+    Q_INVOKABLE void removeFolder(const QString &name);
+    Q_INVOKABLE void moveToFolder(const QStringList &assetIds, const QString &folder);
+    Q_INVOKABLE void setImportFolder(const QString &folder);
+    // Takes media no clip uses out of the library (the files stay on disk).
+    Q_INVOKABLE void removeAssets(const QStringList &assetIds);
     Q_INVOKABLE void dropFiles(const QList<QUrl> &, int track, qint64 frame);
     Q_INVOKABLE bool insertAsset(const QString &assetId, int track, qint64 frame);
     Q_INVOKABLE qint64 placement(int track, qint64 frame, const QString &exclude = {}) const;
     Q_INVOKABLE void relink(const QString &assetId, const QUrl &);
+    // Finds every missing media file by name in a folder and those below it, and relinks them
+    // all in one undo step; where several match, the one in the most similar folders wins.
+    Q_INVOKABLE void relinkFolder(const QUrl &folder);
     Q_INVOKABLE void addAsset(const QString &assetId, int track = 0);
     Q_INVOKABLE void addTitle();
     // A title template ("lowerThird", "lowerThirdLine", "titleCard") at the playhead.
@@ -121,6 +135,12 @@ class Editor final : public QObject {
     // the current selection.
     Q_INVOKABLE void selectArea(qint64 from, qint64 to, int low, int high, bool add);
     Q_INVOKABLE void groupSelection();
+    // Nested sequences: the selected clips become one clip holding them as a sequence of their
+    // own; it can be opened to edit (and closed again), or taken apart.
+    Q_INVOKABLE void nestSelection();
+    Q_INVOKABLE void openNested(const QString &clipId = {});
+    Q_INVOKABLE void closeNested();
+    Q_INVOKABLE void unnest();
     Q_INVOKABLE void ungroupSelection();
     QStringList selection() const;
     Q_INVOKABLE void split();
@@ -314,7 +334,24 @@ class Editor final : public QObject {
     QVariantMap m_collect;
     QVariantMap m_conform;
     QVariantMap m_follow;
-    QVariantMap m_reframe; // {status: analysing|done|failed, clips: [ids], faces: count}
+    QString m_importFolder;
+    QVariantMap m_reframe;
+    // The timelines above the open nested sequence, outermost first, with their undo history.
+    struct NestFrame {
+        Project parent;
+        QString assetId;
+        QVector<Project> undo, redo;
+        QString clipId;
+        qint64 playhead = 0;
+    };
+    QVector<NestFrame> m_nest;
+    QProcess *m_nestedProcess = nullptr;
+    QStringList m_nestedFailed; // cache files that could not be rendered this session
+    QString nestedPath(const QJsonObject &content) const;
+    void storeNested(Project &parent, const QString &assetId, const Project &child) const;
+    Project wholeProject() const;
+    Project viewable() const;
+    void renderNested(); // {status: analysing|done|failed, clips: [ids], faces: count}
     void applyReframe();
     double m_playRate = 1, m_shuttleRate = 1;
     QTimer m_reverseTimer;
@@ -324,6 +361,9 @@ class Editor final : public QObject {
     // The track nearest `home` with room for [start, start + length), or a new one on top.
     static int freeTrack(Project &, int home, qint64 start, qint64 length);
     QStringList m_recent;
+    QVariantMap m_prefs;
+    void loadPreferences();
+    void applyPreferences(Project &) const;
     struct QueuedExport {
         QUrl url;
         QVariantMap settings;

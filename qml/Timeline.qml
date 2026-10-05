@@ -785,7 +785,8 @@ FocusScope {
                                         clipRect.operation = 0;
                                         root.clearDrag();
                                     }
-                                    onDoubleClicked: root.seekRequested(clipRect.modelData.start)
+                                    // A nested sequence opens; other clips move the playhead to their start.
+                                    onDoubleClicked: clipRect.modelData.nested ? editor.openNested(clipRect.modelData.id) : root.seekRequested(clipRect.modelData.start)
                                 }
                                 // Keyframes: click to jump the playhead there.
                                 Repeater {

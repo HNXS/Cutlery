@@ -50,7 +50,22 @@ ApplicationWindow {
     property var libraryGesture: null
     property bool textEditing: activeFocusItem && typeof activeFocusItem.cursorPosition === "number"
     property bool showScopes: false
-    property bool shortcutsBlocked: openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
+    // Set at launch without a project: the start screen shows until a project has content.
+    property bool startScreen: false
+    // Canvas formats offered for new projects.
+    readonly property var projectFormats: [
+        { w: 1920, h: 1080, label: "Full HD 16:9", hint: "YouTube, presentations" },
+        { w: 3840, h: 2160, label: "4K UHD 16:9", hint: "Sharp masters" },
+        { w: 1080, h: 1920, label: "Vertical 9:16", hint: "Shorts, Reels, TikTok" },
+        { w: 1080, h: 1350, label: "Portrait 4:5", hint: "Instagram feed" },
+        { w: 1080, h: 1080, label: "Square 1:1", hint: "Social posts" },
+        { w: 1280, h: 720, label: "HD 16:9", hint: "Small and fast" }
+    ]
+    readonly property var frameRates: [
+        { n: 24, d: 1, label: "24" }, { n: 25, d: 1, label: "25" }, { n: 30, d: 1, label: "30" },
+        { n: 50, d: 1, label: "50" }, { n: 60, d: 1, label: "60" }, { n: 30000, d: 1001, label: "29.97" }
+    ]
+    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
         enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
@@ -361,6 +376,11 @@ ApplicationWindow {
                 text: "Project settings…"
                 onTriggered: settings.open()
             }
+            MenuItem {
+                objectName: "preferencesItem"
+                text: "Preferences…"
+                onTriggered: preferencesDialog.open()
+            }
             // A new canvas shape; pictures zoom to fill it and, with the AI pack, follow faces.
             Menu {
                 id: reframeMenu
@@ -422,6 +442,29 @@ ApplicationWindow {
                 enabled: (win.s.selectedIds || []).length > 0
                 onTriggered: editor.ungroupSelection()
             }
+            MenuSeparator {}
+            MenuItem {
+                objectName: "nestClips"
+                text: "Nest selected clips"
+                enabled: (win.s.selectedIds || []).length > 0
+                onTriggered: editor.nestSelection()
+            }
+            MenuItem {
+                text: "Open nested sequence"
+                enabled: !!(win.selection && win.selection.nested)
+                onTriggered: editor.openNested()
+            }
+            MenuItem {
+                text: "Take nested sequence apart"
+                enabled: !!(win.selection && win.selection.nested)
+                onTriggered: editor.unnest()
+            }
+            MenuItem {
+                text: "Back to the enclosing timeline"
+                enabled: (win.s.nesting || []).length > 0
+                onTriggered: editor.closeNested()
+            }
+            MenuSeparator {}
             MenuItem {
                 text: "Split at playhead"
                 enabled: win.s.selectedId.length > 0
@@ -599,290 +642,451 @@ ApplicationWindow {
                     anchors.fill: parent
                     anchors.margins: 16
                     spacing: 14
-                    RowLayout {
+                    TabBar {
+                        id: leftTabs
+                        objectName: "leftTabs"
                         Layout.fillWidth: true
-                        Caption {
-                            text: "MEDIA LIBRARY"
+                        TabButton {
+                            text: "Media  " + editor.assets.length
                         }
-                        Item {
-                            Layout.fillWidth: true
-                        }
-                        Label {
-                            text: editor.assets.length
-                            color: win.muted
+                        TabButton {
+                            objectName: "addTab"
+                            text: "Add"
                         }
                     }
-                    Action {
-                        text: win.s.importing ? "Reading media…" : "+ Import media"
-                        Layout.fillWidth: true
-                        enabled: !win.s.importing
-                        onClicked: importDialog.open()
-                    }
-                    Label {
-                        text: "Drag media onto any track.\nDrop files here to import them."
-                        color: win.muted
-                        font.pixelSize: 11
-                        wrapMode: Text.Wrap
-                        Layout.fillWidth: true
-                    }
-                    RowLayout {
-                        Label {
-                            text: "Append to"
-                            color: win.muted
-                        }
-                        ComboBox {
-                            model: editor.trackList
-                            textRole: "name"
-                            currentIndex: Math.min(win.targetTrack, win.s.tracks - 1)
-                            onActivated: win.targetTrack = currentIndex
-                            Layout.fillWidth: true
-                        }
-                    }
-                    ListView {
-                        objectName: "mediaLibrary"
-                        ScrollBar.vertical: ScrollBar {}
+                    StackLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        clip: true
-                        spacing: 8
-                        model: editor.assets
-                        delegate: Rectangle {
-                            id: mediaTile
-                            required property var modelData
-                            objectName: "asset-" + modelData.id
-                            property string assetId: modelData.id
-                            property real mediaDuration: modelData.seconds
-                            Component.onDestruction: {
-                                if (win.libraryGesture === mediaMouse)
-                                    win.libraryGesture = null;
+                        currentIndex: leftTabs.currentIndex
+                        ColumnLayout {
+                            spacing: 12
+                            Action {
+                                text: win.s.importing ? "Reading media…" : "+ Import media"
+                                Layout.fillWidth: true
+                                enabled: !win.s.importing
+                                onClicked: importDialog.open()
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Or drop files here. Drag media onto any track; right-click it to sort it into folders."
                             }
-                            width: ListView.view.width
-                            height: 76
-                            radius: 7
-                            color: mediaMouse.containsMouse ? "#2a3640" : "#222b34"
-                            border.color: modelData.missing ? "#da886e" : "#34404c"
+                            // What the library shows: everything, one kind of media, or a folder; then a
+                            // name search within that.
                             RowLayout {
-                                anchors.fill: parent
-                                anchors.margins: 10
-                                spacing: 10
-                                Rectangle {
-                                    id: poster
-                                    property var strip: ({})
-                                    function refresh() {
-                                        strip = mediaTile.modelData.kind === "audio" ? ({}) : editor.thumbnails(mediaTile.modelData.id);
+                                Layout.fillWidth: true
+                                spacing: 6
+                                ComboBox {
+                                    id: libraryView
+                                    objectName: "libraryView"
+                                    Layout.fillWidth: true
+                                    readonly property var kinds: [
+                                        { key: "", label: "All media" },
+                                        { key: "video", label: "Videos" },
+                                        { key: "audio", label: "Audio" },
+                                        { key: "image", label: "Images" }
+                                    ]
+                                    readonly property var folders: win.s.folders || []
+                                    // The folder on show, or "" for the media kinds.
+                                    readonly property string folder: currentIndex >= kinds.length ? folders[currentIndex - kinds.length] || "" : ""
+                                    model: kinds.map(k => k.label).concat(folders.map(f => "▸ " + f))
+                                    onFolderChanged: Qt.callLater(() => editor.setImportFolder(libraryView.folder))
+                                    property string knownFolders: ""
+                                    onFoldersChanged: {
+                                        // Keep showing the folder after a rename or when one is added.
+                                        const list = JSON.stringify(folders);
+                                        if (list === knownFolders)
+                                            return;
+                                        knownFolders = list;
+                                        // After the model has been rebuilt, which resets the choice.
+                                        const keep = currentIndex;
+                                        Qt.callLater(() => {
+                                            const i = folders.indexOf(win.s.importFolder || "");
+                                            currentIndex = i >= 0 ? kinds.length + i : keep < kinds.length ? keep : 0;
+                                        });
                                     }
-                                    Component.onCompleted: refresh()
-                                    Connections {
-                                        target: editor
-                                        function onThumbnailsChanged() {
-                                            poster.refresh();
+                                }
+                                ToolButton {
+                                    objectName: "addFolder"
+                                    text: "+ Folder"
+                                    onClicked: folderDialog.ask("", "")
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "New folder; media imported while it is on show goes into it"
+                                }
+                                ToolButton {
+                                    text: "⋯"
+                                    visible: libraryView.folder !== ""
+                                    onClicked: folderMenu.popup()
+                                    Menu {
+                                        id: folderMenu
+                                        MenuItem {
+                                            text: "Rename folder…"
+                                            onTriggered: folderDialog.ask(libraryView.folder, libraryView.folder)
+                                        }
+                                        MenuItem {
+                                            text: "Delete folder (keeps its media)"
+                                            onTriggered: editor.removeFolder(libraryView.folder)
                                         }
                                     }
-                                    Layout.preferredWidth: poster.strip.status === "ready" ? 75 : 38
-                                    Layout.preferredHeight: 42
-                                    radius: 5
-                                    clip: true
-                                    color: modelData.kind === "audio" ? "#344c4e" : "#354255"
-                                    // Poster frame: the tile from the middle of the media.
-                                    Image {
-                                        anchors.fill: parent
-                                        visible: poster.strip.status === "ready"
-                                        source: visible ? poster.strip.url : ""
-                                        sourceClipRect: visible ? Qt.rect(Math.floor(poster.strip.count / 2) * poster.strip.tileWidth, 0, poster.strip.tileWidth, poster.strip.tileHeight) : Qt.rect(0, 0, 0, 0)
-                                        fillMode: Image.PreserveAspectCrop
-                                        asynchronous: true
-                                    }
-                                    Label {
-                                        anchors.centerIn: parent
-                                        visible: poster.strip.status !== "ready"
-                                        text: modelData.kind === "audio" ? "♫" : modelData.kind === "image" ? "▧" : "▶"
-                                        color: win.mint
-                                        font.pixelSize: 20
-                                    }
-                                }
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 5
-                                    Label {
-                                        text: modelData.name
-                                        elide: Text.ElideMiddle
-                                        Layout.fillWidth: true
-                                        font.bold: true
-                                    }
-                                    Label {
-                                        text: modelData.missing ? "Missing • relink in inspector" : modelData.kind.toUpperCase() + "  ·  " + modelData.seconds.toFixed(1) + "s"
-                                        font.pixelSize: 10
-                                        color: win.muted
-                                    }
                                 }
                             }
+                            // Missing media: find all of it at once in a folder.
                             Rectangle {
-                                id: libraryDrag
-                                parent: win.contentItem
-                                z: 1000
-                                width: 180
-                                height: 42
+                                objectName: "missingMedia"
+                                readonly property int count: editor.assets.filter(a => a.missing).length
+                                visible: count > 0
+                                Layout.fillWidth: true
+                                implicitHeight: missingRow.implicitHeight + 16
                                 radius: 7
-                                color: "#28564c"
-                                border.color: win.mint
-                                opacity: .92
-                                visible: mediaMouse.dragging
-                                Drag.active: mediaMouse.dragging
-                                Drag.source: mediaTile
-                                Drag.keys: ["cutlery/asset"]
-                                Drag.supportedActions: Qt.CopyAction
-                                Drag.proposedAction: Qt.CopyAction
-                                Drag.hotSpot.x: 12
-                                Drag.hotSpot.y: 12
-                                Label {
+                                color: "#3a2a24"
+                                border.color: "#da886e"
+                                ColumnLayout {
+                                    id: missingRow
                                     anchors.fill: parent
-                                    anchors.margins: 10
-                                    text: mediaTile.modelData.name
-                                    elide: Text.ElideRight
+                                    anchors.margins: 8
+                                    spacing: 6
+                                    Label {
+                                        text: parent.parent.count === 1 ? "1 media file is missing." : parent.parent.count + " media files are missing."
+                                        wrapMode: Text.Wrap
+                                        Layout.fillWidth: true
+                                    }
+                                    Action {
+                                        objectName: "findMissing"
+                                        text: "Find in a folder…"
+                                        Layout.fillWidth: true
+                                        onClicked: relinkFolderDialog.open()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Looks for files of the same names in the folder and the folders inside it"
+                                    }
                                 }
                             }
-                            MouseArea {
-                                id: mediaMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                preventStealing: true
-                                enabled: !mediaTile.modelData.missing
-                                cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
-                                property bool dragging: false
-                                property bool cancelled: false
-                                property point pressedAt
-                                function cancelDrag() {
-                                    cancelled = true;
-                                    libraryDrag.Drag.cancel();
-                                    dragging = false;
-                                    win.libraryGesture = null;
+                            TextField {
+                                id: librarySearch
+                                objectName: "librarySearch"
+                                Layout.fillWidth: true
+                                placeholderText: "Search media by name"
+                                selectByMouse: true
+                            }
+                            RowLayout {
+                                Label {
+                                    text: "Append to"
+                                    color: win.muted
                                 }
-                                onPressed: function (mouse) {
-                                    const p = mapToItem(win.contentItem, mouse.x, mouse.y);
-                                    pressedAt = p;
-                                    cancelled = false;
-                                    win.libraryGesture = mediaMouse;
-                                    libraryDrag.x = p.x - 12;
-                                    libraryDrag.y = p.y - 12;
+                                ComboBox {
+                                    model: editor.trackList
+                                    textRole: "name"
+                                    currentIndex: Math.min(win.targetTrack, win.s.tracks - 1)
+                                    onActivated: win.targetTrack = currentIndex
+                                    Layout.fillWidth: true
                                 }
-                                onPositionChanged: function (mouse) {
-                                    if (!pressed || cancelled)
-                                        return;
-                                    const p = mapToItem(win.contentItem, mouse.x, mouse.y);
-                                    libraryDrag.x = p.x - 12;
-                                    libraryDrag.y = p.y - 12;
-                                    if (Math.abs(p.x - pressedAt.x) + Math.abs(p.y - pressedAt.y) > 6)
-                                        dragging = true;
+                            }
+                            ListView {
+                                id: mediaList
+                                objectName: "mediaLibrary"
+                                ScrollBar.vertical: ScrollBar {}
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                spacing: 8
+                                // The library filtered by the view and the search words (all must match).
+                                model: {
+                                    const kind = libraryView.currentIndex >= 0 && libraryView.currentIndex < libraryView.kinds.length ? libraryView.kinds[libraryView.currentIndex].key : "";
+                                    const folder = libraryView.folder;
+                                    const words = librarySearch.text.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+                                    return editor.assets.filter(a => (folder === "" || a.folder === folder) && (kind === "" || a.kind === kind) && words.every(w => a.name.toLowerCase().indexOf(w) >= 0));
                                 }
-                                onReleased: {
-                                    if (dragging)
-                                        libraryDrag.Drag.drop();
-                                    dragging = false;
-                                    win.libraryGesture = null;
+                                delegate: Rectangle {
+                                    id: mediaTile
+                                    required property var modelData
+                                    objectName: "asset-" + modelData.id
+                                    property string assetId: modelData.id
+                                    property real mediaDuration: modelData.seconds
+                                    Component.onDestruction: {
+                                        if (win.libraryGesture === mediaMouse)
+                                            win.libraryGesture = null;
+                                    }
+                                    width: ListView.view.width
+                                    height: 76
+                                    radius: 7
+                                    color: mediaMouse.containsMouse ? "#2a3640" : "#222b34"
+                                    border.color: modelData.missing ? "#da886e" : "#34404c"
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 10
+                                        spacing: 10
+                                        Rectangle {
+                                            id: poster
+                                            property var strip: ({})
+                                            function refresh() {
+                                                strip = mediaTile.modelData.kind === "audio" ? ({}) : editor.thumbnails(mediaTile.modelData.id);
+                                            }
+                                            Component.onCompleted: refresh()
+                                            Connections {
+                                                target: editor
+                                                function onThumbnailsChanged() {
+                                                    poster.refresh();
+                                                }
+                                            }
+                                            Layout.preferredWidth: poster.strip.status === "ready" ? 75 : 38
+                                            Layout.preferredHeight: 42
+                                            radius: 5
+                                            clip: true
+                                            color: modelData.kind === "audio" ? "#344c4e" : "#354255"
+                                            // Poster frame: the tile from the middle of the media.
+                                            Image {
+                                                anchors.fill: parent
+                                                visible: poster.strip.status === "ready"
+                                                source: visible ? poster.strip.url : ""
+                                                sourceClipRect: visible ? Qt.rect(Math.floor(poster.strip.count / 2) * poster.strip.tileWidth, 0, poster.strip.tileWidth, poster.strip.tileHeight) : Qt.rect(0, 0, 0, 0)
+                                                fillMode: Image.PreserveAspectCrop
+                                                asynchronous: true
+                                            }
+                                            Label {
+                                                anchors.centerIn: parent
+                                                visible: poster.strip.status !== "ready"
+                                                text: modelData.kind === "audio" ? "♫" : modelData.kind === "image" ? "▧" : "▶"
+                                                color: win.mint
+                                                font.pixelSize: 20
+                                            }
+                                        }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 5
+                                            Label {
+                                                text: modelData.name
+                                                elide: Text.ElideMiddle
+                                                Layout.fillWidth: true
+                                                font.bold: true
+                                            }
+                                            Label {
+                                                text: modelData.missing ? "Missing • relink in inspector" : modelData.kind.toUpperCase() + "  ·  " + modelData.seconds.toFixed(1) + "s" + (modelData.folder && libraryView.folder === "" ? "  ·  ▸ " + modelData.folder : "")
+                                                font.pixelSize: 10
+                                                color: win.muted
+                                                elide: Text.ElideRight
+                                                Layout.fillWidth: true
+                                            }
+                                        }
+                                    }
+                                    Rectangle {
+                                        id: libraryDrag
+                                        parent: win.contentItem
+                                        z: 1000
+                                        width: 180
+                                        height: 42
+                                        radius: 7
+                                        color: "#28564c"
+                                        border.color: win.mint
+                                        opacity: .92
+                                        visible: mediaMouse.dragging
+                                        Drag.active: mediaMouse.dragging
+                                        Drag.source: mediaTile
+                                        Drag.keys: ["cutlery/asset"]
+                                        Drag.supportedActions: Qt.CopyAction
+                                        Drag.proposedAction: Qt.CopyAction
+                                        Drag.hotSpot.x: 12
+                                        Drag.hotSpot.y: 12
+                                        Label {
+                                            anchors.fill: parent
+                                            anchors.margins: 10
+                                            text: mediaTile.modelData.name
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                    MouseArea {
+                                        id: mediaMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        preventStealing: true
+                                        enabled: !mediaTile.modelData.missing
+                                        cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                                        property bool dragging: false
+                                        property bool cancelled: false
+                                        property point pressedAt
+                                        function cancelDrag() {
+                                            cancelled = true;
+                                            libraryDrag.Drag.cancel();
+                                            dragging = false;
+                                            win.libraryGesture = null;
+                                        }
+                                        onPressed: function (mouse) {
+                                            const p = mapToItem(win.contentItem, mouse.x, mouse.y);
+                                            pressedAt = p;
+                                            cancelled = false;
+                                            win.libraryGesture = mediaMouse;
+                                            libraryDrag.x = p.x - 12;
+                                            libraryDrag.y = p.y - 12;
+                                        }
+                                        onPositionChanged: function (mouse) {
+                                            if (!pressed || cancelled)
+                                                return;
+                                            const p = mapToItem(win.contentItem, mouse.x, mouse.y);
+                                            libraryDrag.x = p.x - 12;
+                                            libraryDrag.y = p.y - 12;
+                                            if (Math.abs(p.x - pressedAt.x) + Math.abs(p.y - pressedAt.y) > 6)
+                                                dragging = true;
+                                        }
+                                        onReleased: {
+                                            if (dragging)
+                                                libraryDrag.Drag.drop();
+                                            dragging = false;
+                                            win.libraryGesture = null;
+                                        }
+                                        onCanceled: cancelDrag()
+                                        onDoubleClicked: editor.addAsset(modelData.id, Math.min(win.targetTrack, win.s.tracks - 1))
+                                    }
+                                    // Right-click: move to a folder, or take unused media out of the library.
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        acceptedButtons: Qt.RightButton
+                                        onClicked: assetMenu.popup()
+                                    }
+                                    Menu {
+                                        id: assetMenu
+                                        objectName: "assetMenu-" + mediaTile.modelData.id
+                                        Menu {
+                                            id: moveMenu
+                                            title: "Move to folder"
+                                            enabled: (win.s.folders || []).length > 0
+                                            MenuItem {
+                                                text: "Top level"
+                                                enabled: !!mediaTile.modelData.folder
+                                                onTriggered: editor.moveToFolder([mediaTile.modelData.id], "")
+                                            }
+                                            Instantiator {
+                                                model: win.s.folders || []
+                                                delegate: MenuItem {
+                                                    required property string modelData
+                                                    text: modelData
+                                                    enabled: modelData !== mediaTile.modelData.folder
+                                                    onTriggered: editor.moveToFolder([mediaTile.modelData.id], modelData)
+                                                }
+                                                onObjectAdded: (index, object) => moveMenu.insertItem(index + 1, object)
+                                                onObjectRemoved: (index, object) => moveMenu.removeItem(object)
+                                            }
+                                        }
+                                        MenuItem {
+                                            text: "New folder with this media…"
+                                            onTriggered: folderDialog.ask("", "", mediaTile.modelData.id)
+                                        }
+                                        MenuItem {
+                                            text: mediaTile.modelData.used ? "Remove from library (used on the timeline)" : "Remove from library"
+                                            enabled: !mediaTile.modelData.used
+                                            onTriggered: editor.removeAssets([mediaTile.modelData.id])
+                                        }
+                                    }
                                 }
-                                onCanceled: cancelDrag()
-                                onDoubleClicked: editor.addAsset(modelData.id, Math.min(win.targetTrack, win.s.tracks - 1))
+                                Label {
+                                    anchors.centerIn: parent
+                                    visible: editor.assets.length > 0 && mediaList.count === 0
+                                    text: librarySearch.text.length > 0 ? "No media matches." : "Nothing here yet.\nImport media while this is on show,\nor right-click media to move it here."
+                                    horizontalAlignment: Text.AlignHCenter
+                                    color: win.muted
+                                    lineHeight: 1.5
+                                }
+                                Label {
+                                    anchors.centerIn: parent
+                                    visible: editor.assets.length === 0
+                                    text: "A blank canvas.\nBring your footage."
+                                    horizontalAlignment: Text.AlignHCenter
+                                    color: win.muted
+                                    lineHeight: 1.5
+                                }
                             }
                         }
-                        Label {
-                            anchors.centerIn: parent
-                            visible: editor.assets.length === 0
-                            text: "A blank canvas.\nBring your footage."
-                            horizontalAlignment: Text.AlignHCenter
-                            color: win.muted
-                            lineHeight: 1.5
-                        }
-                    }
-                    Rule {}
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Action {
-                            text: "+ Add title"
-                            Layout.fillWidth: true
-                            onClicked: editor.addTitle()
-                        }
-                        // Sound effects: clicks, typing and swooshes for tutorials and screen videos.
-                        Action {
-                            objectName: "openSounds"
-                            text: "♪ Sounds…"
-                            Layout.fillWidth: true
-                            onClicked: soundDialog.open()
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Sound effects: mouse clicks, keyboard typing and whooshes, free to use"
-                        }
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Action {
-                            objectName: "addLowerThird"
-                            text: "+ Lower third"
-                            Layout.fillWidth: true
-                            onClicked: editor.addTitleTemplate("lowerThird")
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Name and role in the lower left; slides in, fades out"
-                        }
-                        Action {
-                            objectName: "addTitleCard"
-                            text: "+ Title card"
-                            Layout.fillWidth: true
-                            onClicked: editor.addTitleTemplate("titleCard")
-                            ToolTip.visible: hovered
-                            ToolTip.text: "A large centred heading with a subtitle, e.g. for chapters"
-                        }
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Action {
-                            objectName: "addBlurArea"
-                            text: "+ Blur area"
-                            Layout.fillWidth: true
-                            onClicked: editor.addEffect("blur")
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Blurs whatever lower tracks show inside a rectangle, e.g. private data in a screen recording"
-                        }
-                        Action {
-                            objectName: "addMosaicArea"
-                            text: "+ Mosaic area"
-                            Layout.fillWidth: true
-                            onClicked: editor.addEffect("pixelate")
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Pixelates whatever lower tracks show inside a rectangle, e.g. a face"
-                        }
-                        // Shapes for tutorials and explainers.
-                        Action {
-                            objectName: "addShape"
-                            text: "+ Shape ▾"
-                            Layout.fillWidth: true
-                            onClicked: shapeMenu.popup()
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Arrow, circle, speech bubble, box or line"
-                            Menu {
-                                id: shapeMenu
-                                MenuItem {
-                                    objectName: "addGraphic-arrow"
-                                    text: "➜  Arrow"
-                                    onTriggered: editor.addGraphic("arrow")
+                        // Titles, graphics, effect areas and sounds.
+                        ColumnLayout {
+                            spacing: 12
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Action {
+                                    text: "+ Add title"
+                                    Layout.fillWidth: true
+                                    onClicked: editor.addTitle()
                                 }
-                                MenuItem {
-                                    objectName: "addGraphic-ellipse"
-                                    text: "◯  Circle"
-                                    onTriggered: editor.addGraphic("ellipse")
+                                // Sound effects: clicks, typing and swooshes for tutorials and screen videos.
+                                Action {
+                                    objectName: "openSounds"
+                                    text: "♪ Sounds…"
+                                    Layout.fillWidth: true
+                                    onClicked: soundDialog.open()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Sound effects: mouse clicks, keyboard typing and whooshes, free to use"
                                 }
-                                MenuItem {
-                                    objectName: "addGraphic-bubble"
-                                    text: "🗨  Speech bubble"
-                                    onTriggered: editor.addGraphic("bubble")
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Action {
+                                    objectName: "addLowerThird"
+                                    text: "+ Lower third"
+                                    Layout.fillWidth: true
+                                    onClicked: editor.addTitleTemplate("lowerThird")
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Name and role in the lower left; slides in, fades out"
                                 }
-                                MenuItem {
-                                    objectName: "addGraphic-rectangle"
-                                    text: "▭  Box"
-                                    onTriggered: editor.addGraphic("rectangle")
+                                Action {
+                                    objectName: "addTitleCard"
+                                    text: "+ Title card"
+                                    Layout.fillWidth: true
+                                    onClicked: editor.addTitleTemplate("titleCard")
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "A large centred heading with a subtitle, e.g. for chapters"
                                 }
-                                MenuItem {
-                                    objectName: "addGraphic-line"
-                                    text: "―  Line"
-                                    onTriggered: editor.addGraphic("line")
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Action {
+                                    objectName: "addBlurArea"
+                                    text: "+ Blur area"
+                                    Layout.fillWidth: true
+                                    onClicked: editor.addEffect("blur")
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Blurs whatever lower tracks show inside a rectangle, e.g. private data in a screen recording"
                                 }
+                                Action {
+                                    objectName: "addMosaicArea"
+                                    text: "+ Mosaic area"
+                                    Layout.fillWidth: true
+                                    onClicked: editor.addEffect("pixelate")
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Pixelates whatever lower tracks show inside a rectangle, e.g. a face"
+                                }
+                                // Shapes for tutorials and explainers.
+                                Action {
+                                    objectName: "addShape"
+                                    text: "+ Shape ▾"
+                                    Layout.fillWidth: true
+                                    onClicked: shapeMenu.popup()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Arrow, circle, speech bubble, box or line"
+                                    Menu {
+                                        id: shapeMenu
+                                        MenuItem {
+                                            objectName: "addGraphic-arrow"
+                                            text: "➜  Arrow"
+                                            onTriggered: editor.addGraphic("arrow")
+                                        }
+                                        MenuItem {
+                                            objectName: "addGraphic-ellipse"
+                                            text: "◯  Circle"
+                                            onTriggered: editor.addGraphic("ellipse")
+                                        }
+                                        MenuItem {
+                                            objectName: "addGraphic-bubble"
+                                            text: "🗨  Speech bubble"
+                                            onTriggered: editor.addGraphic("bubble")
+                                        }
+                                        MenuItem {
+                                            objectName: "addGraphic-rectangle"
+                                            text: "▭  Box"
+                                            onTriggered: editor.addGraphic("rectangle")
+                                        }
+                                        MenuItem {
+                                            objectName: "addGraphic-line"
+                                            text: "―  Line"
+                                            onTriggered: editor.addGraphic("line")
+                                        }
+                                    }
+                                }
+                            }
+                            Item {
+                                Layout.fillHeight: true
                             }
                         }
                     }
@@ -2675,6 +2879,30 @@ ApplicationWindow {
             height: 1
             color: "#34404b"
         }
+        // Inside a nested sequence: where we are, and the way back.
+        Rectangle {
+            objectName: "nestingBar"
+            Layout.fillWidth: true
+            visible: (win.s.nesting || []).length > 0
+            implicitHeight: 36
+            color: "#28403a"
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                spacing: 10
+                Action {
+                    objectName: "closeNested"
+                    text: "← Back"
+                    onClicked: editor.closeNested()
+                }
+                Label {
+                    Layout.fillWidth: true
+                    elide: Text.ElideMiddle
+                    text: "Main timeline  ›  " + (win.s.nesting || []).join("  ›  ") + "  —  changes apply when you go back"
+                }
+            }
+        }
         Timeline {
             id: timelinePanel
             objectName: "timelinePanel"
@@ -2722,6 +2950,146 @@ ApplicationWindow {
             }
         }
     }
+    // The start screen: a new project in a chosen format, a recent project, or the autosave.
+    Rectangle {
+        id: startPage
+        objectName: "startScreen"
+        anchors.fill: parent
+        z: 50
+        visible: win.startScreen && win.s.duration === 0 && editor.assets.length === 0 && !win.s.path
+        color: "#f00f1419"
+        readonly property var prefs: win.s.preferences || ({})
+        function begin(format) {
+            editor.configure(format.w, format.h, prefs.fpsN || 30, prefs.fpsD || 1);
+            win.startScreen = false;
+        }
+        MouseArea {
+            anchors.fill: parent // keeps clicks off the editor below
+        }
+        ColumnLayout {
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 64, 760)
+            spacing: 18
+            Label {
+                text: "Start a project"
+                font.pixelSize: 26
+                font.bold: true
+            }
+            Label {
+                text: "Choose the shape of the video. You can change it later under Project → Reframe for…"
+                color: win.muted
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 3
+                columnSpacing: 12
+                rowSpacing: 12
+                Repeater {
+                    model: win.projectFormats
+                    delegate: Rectangle {
+                        id: formatTile
+                        required property var modelData
+                        required property int index
+                        objectName: "startFormat-" + index
+                        signal clicked
+                        onClicked: startPage.begin(modelData)
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 92
+                        radius: 8
+                        color: tileMouse.containsMouse ? "#2a3640" : "#1d252e"
+                        border.color: modelData.w === startPage.prefs.width && modelData.h === startPage.prefs.height ? win.mint : "#34404c"
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 12
+                            // The canvas shape, to scale.
+                            Item {
+                                Layout.preferredWidth: 48
+                                Layout.preferredHeight: 48
+                                Rectangle {
+                                    anchors.centerIn: parent
+                                    width: 44 * Math.min(1, formatTile.modelData.w / formatTile.modelData.h)
+                                    height: 44 * Math.min(1, formatTile.modelData.h / formatTile.modelData.w)
+                                    radius: 3
+                                    color: "transparent"
+                                    border.color: win.mint
+                                    border.width: 2
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 3
+                                Label {
+                                    text: formatTile.modelData.label
+                                    font.bold: true
+                                }
+                                Label {
+                                    text: formatTile.modelData.w + " × " + formatTile.modelData.h + " · " + formatTile.modelData.hint
+                                    color: win.muted
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                            }
+                        }
+                        MouseArea {
+                            id: tileMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: formatTile.clicked()
+                        }
+                    }
+                }
+            }
+            RowLayout {
+                spacing: 10
+                Action {
+                    text: "Open project…"
+                    onClicked: win.guarded("open")
+                }
+                Action {
+                    objectName: "startRecover"
+                    visible: win.s.hasRecovery
+                    text: "Recover autosave"
+                    onClicked: win.guarded("recover")
+                }
+                Item {
+                    Layout.fillWidth: true
+                }
+                CheckBox {
+                    objectName: "startScreenAgain"
+                    text: "Show at start"
+                    checked: startPage.prefs.startScreen !== false
+                    onToggled: editor.setPreferences({ startScreen: checked })
+                }
+            }
+            Label {
+                visible: (win.s.recent || []).length > 0
+                text: "Recent projects"
+                color: win.muted
+            }
+            Repeater {
+                model: (win.s.recent || []).slice(0, 6)
+                delegate: ItemDelegate {
+                    required property var modelData
+                    required property int index
+                    objectName: "startRecent-" + index
+                    Layout.fillWidth: true
+                    enabled: modelData.exists
+                    text: modelData.name + (modelData.exists ? "" : " (missing)") + "    " + modelData.path
+                    onClicked: win.guarded("recent:" + modelData.path)
+                }
+            }
+            Action {
+                objectName: "startEmpty"
+                text: "Skip"
+                onClicked: win.startScreen = false
+            }
+        }
+    }
     FileDialog {
         id: importDialog
         title: "Import local media"
@@ -2759,6 +3127,11 @@ ApplicationWindow {
     }
     // Collect: copies the project and everything it uses into a new folder, e.g. to archive it or
     // move it to another computer.
+    FolderDialog {
+        id: relinkFolderDialog
+        title: "Find missing media in this folder"
+        onAccepted: editor.relinkFolder(selectedFolder)
+    }
     FolderDialog {
         id: collectDialog
         title: "Collect project into an empty folder"
@@ -2895,6 +3268,112 @@ ApplicationWindow {
                     onClicked: backupList.currentIndex = index
                 }
             }
+        }
+    }
+    // App-wide settings: the format of new projects, picture length, earlier versions kept and
+    // the start screen.
+    Dialog {
+        id: preferencesDialog
+        objectName: "preferencesDialog"
+        anchors.centerIn: parent
+        title: "Preferences"
+        modal: true
+        width: 400
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        readonly property var prefs: win.s.preferences || ({})
+        onAboutToShow: {
+            prefFormat.currentIndex = Math.max(0, win.projectFormats.findIndex(f => f.w === prefs.width && f.h === prefs.height));
+            prefRate.currentIndex = Math.max(0, win.frameRates.findIndex(r => r.n === prefs.fpsN && r.d === prefs.fpsD));
+            prefStill.value = Math.round((prefs.stillSeconds || 5) * 10);
+            prefBackups.value = prefs.backups ?? 20;
+            prefStart.checked = prefs.startScreen !== false;
+        }
+        GridLayout {
+            anchors.fill: parent
+            columns: 2
+            columnSpacing: 12
+            rowSpacing: 10
+            Label { text: "New projects" }
+            ComboBox {
+                id: prefFormat
+                objectName: "prefFormat"
+                Layout.fillWidth: true
+                model: win.projectFormats.map(f => f.label + " · " + f.w + " × " + f.h)
+            }
+            Label { text: "Frame rate" }
+            ComboBox {
+                id: prefRate
+                objectName: "prefRate"
+                Layout.fillWidth: true
+                model: win.frameRates.map(r => r.label + " fps")
+            }
+            Label { text: "Pictures last" }
+            SpinBox {
+                id: prefStill
+                objectName: "prefStill"
+                from: 5
+                to: 600
+                editable: true
+                textFromValue: (v) => (v / 10).toFixed(1) + " s"
+                valueFromText: (t) => Math.round(parseFloat(t) * 10)
+                ToolTip.visible: hovered
+                ToolTip.text: "Length of a still image when it is added to the timeline"
+            }
+            Label { text: "Earlier versions" }
+            SpinBox {
+                id: prefBackups
+                objectName: "prefBackups"
+                from: 0
+                to: 100
+                ToolTip.visible: hovered
+                ToolTip.text: "Copies kept per project when you save (Project → Restore an earlier version); 0 keeps none"
+            }
+            CheckBox {
+                id: prefStart
+                objectName: "prefStart"
+                Layout.columnSpan: 2
+                text: "Show the start screen when Cutlery opens"
+            }
+        }
+        onAccepted: {
+            const f = win.projectFormats[prefFormat.currentIndex], r = win.frameRates[prefRate.currentIndex];
+            editor.setPreferences({ width: f.w, height: f.h, fpsN: r.n, fpsD: r.d, stillSeconds: prefStill.value / 10, backups: prefBackups.value, startScreen: prefStart.checked });
+        }
+    }
+    // Names a new folder (optionally moving one medium into it) or renames one.
+    Dialog {
+        id: folderDialog
+        objectName: "folderDialog"
+        property string renaming: ""
+        property string assetId: ""
+        function ask(from, name, asset) {
+            renaming = from;
+            assetId = asset || "";
+            folderName.text = name;
+            open();
+            folderName.forceActiveFocus();
+        }
+        anchors.centerIn: parent
+        modal: true
+        title: renaming ? "Rename folder" : "New folder"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        TextField {
+            id: folderName
+            objectName: "folderName"
+            width: 280
+            placeholderText: "Folder name"
+            maximumLength: 80
+            onAccepted: folderDialog.accept()
+        }
+        onAccepted: {
+            const name = folderName.text.trim();
+            if (renaming) {
+                editor.renameFolder(renaming, name);
+                return;
+            }
+            editor.addFolder(name);
+            if (assetId && (win.s.folders || []).indexOf(name) >= 0)
+                editor.moveToFolder([assetId], name);
         }
     }
     // The sound effects library: listen, add at the playhead, or a swoosh on every transition.

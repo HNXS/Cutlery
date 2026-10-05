@@ -338,6 +338,162 @@ class UiTest : public QObject {
         QCOMPARE(editor.project().clips.first().scale, .5);
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void libraryFoldersAndSearch() {
+        QTemporaryDir dir;
+        QList<QUrl> files;
+        for (const auto &name : {"Beach sunset.png", "Beach walk.png", "Logo.png"}) {
+            QImage image(64, 36, QImage::Format_RGB32);
+            image.fill(Qt::green);
+            QVERIFY(image.save(dir.filePath(name)));
+            files << QUrl::fromLocalFile(dir.filePath(name));
+        }
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.importMedia(files);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 3, 15000);
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        auto *list = findItem(window->contentItem(), "mediaLibrary");
+        QVERIFY(list);
+        QTRY_COMPARE(list->property("count").toInt(), 3);
+        QVERIFY(!findItem(window->contentItem(), "missingMedia")->isVisible());
+        // Search words narrow the list, in any order and case.
+        auto *search = findItem(window->contentItem(), "librarySearch");
+        search->setProperty("text", "beach");
+        QTRY_COMPARE(list->property("count").toInt(), 2);
+        search->setProperty("text", "WALK beach");
+        QTRY_COMPARE(list->property("count").toInt(), 1);
+        search->setProperty("text", "");
+        // A new folder is shown at once and empty; media moved into it appears there.
+        auto *dialog = window->findChild<QObject *>("folderDialog");
+        QVERIFY(QMetaObject::invokeMethod(dialog, "ask", Q_ARG(QVariant, ""), Q_ARG(QVariant, ""),
+                                          Q_ARG(QVariant, "")));
+        findItem(window->contentItem(), "folderName")->setProperty("text", "Graphics");
+        QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
+        QCOMPARE(editor.project().folders, QStringList{"Graphics"});
+        auto *view = findItem(window->contentItem(), "libraryView");
+        QTRY_COMPARE(view->property("folder").toString(), QString("Graphics"));
+        QTRY_COMPARE(list->property("count").toInt(), 0);
+        QString logo;
+        for (const auto &a : editor.project().assets)
+            if (a.name == "Logo.png")
+                logo = a.id;
+        editor.moveToFolder({logo}, "Graphics");
+        QTRY_COMPARE(list->property("count").toInt(), 1);
+        QTRY_VERIFY(findItem(window->contentItem(), "asset-" + logo));
+        // Back to all media; the kind filter shows images only.
+        view->setProperty("currentIndex", 0);
+        QTRY_COMPARE(list->property("count").toInt(), 3);
+        QTRY_COMPARE(editor.state()["importFolder"].toString(), QString());
+        view->setProperty("currentIndex", 2); // audio
+        QTRY_COMPARE(list->property("count").toInt(), 0);
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
+    void startScreenAndPreferences() {
+        QTemporaryDir dir;
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        auto *start = findItem(window->contentItem(), "startScreen");
+        QVERIFY(start && !start->isVisible());
+        // Shown at launch (main.cpp sets this when no project is opened).
+        window->setProperty("startScreen", true);
+        QTRY_VERIFY(start->isVisible());
+        QVERIFY(findItem(window->contentItem(), "startFormat-5"));
+        // Choosing "Vertical 9:16" starts a project in that shape and closes the screen.
+        auto *vertical = findItem(window->contentItem(), "startFormat-2");
+        QVERIFY(vertical);
+        QVERIFY(QMetaObject::invokeMethod(vertical, "clicked"));
+        QCOMPARE(editor.project().width, 1080);
+        QCOMPARE(editor.project().height, 1920);
+        QTRY_VERIFY(!start->isVisible());
+        QVERIFY(!window->property("startScreen").toBool());
+        // Preferences: the dialog shows and saves the app-wide settings.
+        auto *dialog = window->findChild<QObject *>("preferencesDialog");
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        auto *format = findItem(window->contentItem(), "prefFormat");
+        QTRY_VERIFY(format && format->isVisible());
+        QCOMPARE(format->property("currentIndex").toInt(), 0); // Full HD
+        format->setProperty("currentIndex", 4);                 // square
+        findItem(window->contentItem(), "prefBackups")->setProperty("value", 5);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
+        auto prefs = editor.state()["preferences"].toMap();
+        QCOMPARE(prefs["width"].toInt(), 1080);
+        QCOMPARE(prefs["height"].toInt(), 1080);
+        QCOMPARE(prefs["backups"].toInt(), 5);
+        editor.setPreferences({{"width", 1920}, {"height", 1080}, {"backups", 20}});
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
+    void nestedSequenceUi() {
+        QTemporaryDir dir;
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.configure(320, 180, 25, 1);
+        editor.addTitle();
+        const auto first = editor.state()["selectedId"].toString();
+        editor.seek(200);
+        editor.addTitle();
+        editor.toggleSelect(first);
+        editor.nestSelection();
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        const auto nested = editor.project().clips.first().id;
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        auto *bar = findItem(window->contentItem(), "nestingBar");
+        QVERIFY(bar && !bar->isVisible());
+        // Double-clicking the nested clip opens it; the bar leads back.
+        QQuickItem *clip = nullptr;
+        QTRY_VERIFY((clip = findItem(window->contentItem(), "clip-" + nested)));
+        QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, center(clip));
+        QTRY_VERIFY(bar->isVisible());
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        auto *back = findItem(window->contentItem(), "closeNested");
+        QVERIFY(QMetaObject::invokeMethod(back, "clicked"));
+        QTRY_VERIFY(!bar->isVisible());
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["nestedRendering"].toBool(), 30000);
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void exportDialog() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;
@@ -508,6 +664,7 @@ class UiTest : public QObject {
         QCOMPARE(clip().scale, 1.);
         QCOMPARE(clip().x, 0.);
         // A mosaic area: added from the library panel, configured in its own section.
+        findItem(window->contentItem(), "leftTabs")->setProperty("currentIndex", 1); // the Add tab
         press("addMosaicArea");
         const auto area = editor.project().clips.last();
         QCOMPARE(area.effect, QString("pixelate"));

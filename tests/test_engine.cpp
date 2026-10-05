@@ -481,6 +481,61 @@ class EngineTest : public QObject {
         QCOMPARE(editor.project().clips.back().start, cut - qRound64(0.165 * 30));
         qunsetenv("CUTLERY_SOUNDS_DIR");
     }
+    void appPreferences() {
+        QTemporaryDir dir;
+        FrameProvider frames;
+        auto reset = [](Editor &e) {
+            e.setPreferences({{"width", 1920}, {"height", 1080}, {"fpsN", 30}, {"fpsD", 1},
+                              {"stillSeconds", 5.}, {"backups", 20}, {"startScreen", true}});
+        };
+        {
+            Editor e(&frames);
+            reset(e);
+            auto prefs = e.state()["preferences"].toMap();
+            QCOMPARE(prefs["width"].toInt(), 1920);
+            QCOMPARE(prefs["backups"].toInt(), 20);
+            // Invalid values change nothing.
+            e.setPreferences({{"width", 1081}});
+            QVERIFY(e.state()["error"].toString().contains("even"));
+            e.setPreferences({{"fpsN", 500}});
+            QVERIFY(e.state()["error"].toString().contains("frame rate"));
+            e.setPreferences({{"colour", "red"}});
+            QVERIFY(e.state()["error"].toString().contains("Unknown"));
+            QCOMPARE(e.state()["preferences"].toMap()["width"].toInt(), 1920);
+            // An untouched new project takes the new format at once; later new projects too.
+            e.setPreferences({{"width", 1080}, {"height", 1920}, {"fpsN", 25},
+                              {"stillSeconds", 2.5}, {"backups", 0}, {"startScreen", false}});
+            QCOMPARE(e.project().width, 1080);
+            QCOMPARE(e.project().fpsN, 25);
+            e.addTitle();
+            e.newProject();
+            QCOMPARE(e.project().height, 1920);
+            // Pictures last the set time.
+            QImage image(64, 64, QImage::Format_RGB32);
+            image.fill(Qt::blue);
+            QVERIFY(image.save(dir.filePath("still.png")));
+            e.importMedia({QUrl::fromLocalFile(dir.filePath("still.png"))});
+            QTRY_VERIFY_WITH_TIMEOUT(e.project().assets.size() == 1, 15000);
+            e.addAsset(e.project().assets.first().id);
+            QCOMPARE(e.project().clips.first().duration, qint64(62)); // 2.5 s at 25 fps
+            // No earlier versions are kept.
+            QVERIFY(e.save(QUrl::fromLocalFile(dir.filePath("p.cutlery"))));
+            e.addTitle();
+            QVERIFY(e.save());
+            QVERIFY(e.backups().isEmpty());
+        }
+        {
+            // Saved for the next start.
+            Editor e(&frames);
+            const auto prefs = e.state()["preferences"].toMap();
+            QCOMPARE(prefs["height"].toInt(), 1920);
+            QCOMPARE(prefs["stillSeconds"].toDouble(), 2.5);
+            QCOMPARE(prefs["startScreen"].toBool(), false);
+            QCOMPARE(e.project().width, 1080);
+            reset(e);
+            QCOMPARE(e.project().width, 1920);
+        }
+    }
     void recentProjectsAndBackups() {
         QTemporaryDir dir;
         const auto path = dir.filePath("talk.cutlery");
@@ -3788,6 +3843,221 @@ class EngineTest : public QObject {
         QVERIFY(pa->group != e.project().clip(ids[0])->group);
         e.undo();
         QCOMPARE(e.project().clips.size(), before);
+    }
+    void nestedSequences() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("red.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=red:s=320x180:r=25:d=2", "-f",
+                     "lavfi", "-i", "sine=d=2", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest",
+                     source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.seek(0);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto red = editor.state()["selectedId"].toString();
+        editor.seek(10);
+        editor.addTitle();
+        const auto title = editor.state()["selectedId"].toString();
+        editor.setClip("duration", 30);
+        const int titleTrack = editor.project().clip(title)->track;
+        editor.select(red);
+        editor.toggleSelect(title);
+        // Nest: one clip over the same stretch, on the lowest track, holding both.
+        editor.nestSelection();
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        const auto nested = editor.project().clips.first();
+        const auto *asset = editor.project().asset(nested.assetId);
+        QVERIFY(asset && asset->isNested());
+        QCOMPARE(nested.start, qint64(0));
+        QCOMPARE(nested.duration, qint64(50));
+        QCOMPARE(nested.track, 0);
+        QCOMPARE(Project::fromJson(asset->nested, {}).clips.size(), size_t(2));
+        // Rendered in the background into the cache, then used like a video.
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["nestedRendering"].toBool() &&
+                                     QFileInfo::exists(editor.project().asset(nested.assetId)->path),
+                                 60000);
+        QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+        {
+            RenderOptions options;
+            options.audio = false;
+            options.from = 20;
+            options.to = 21;
+            const auto plan = compileRender(editor.project(), dir.filePath("work"), 320, 180, options);
+            QFile g(dir.filePath("graph.txt"));
+            QVERIFY(g.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage still;
+            still.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            const auto corner = still.pixelColor(4, 4);
+            QVERIFY2(corner.red() > 200 && corner.green() < 60, qPrintable(corner.name()));
+            int white = 0;
+            for (int y = 0; y < still.height(); ++y)
+                for (int x = 0; x < still.width(); ++x)
+                    white += qGray(still.pixel(x, y)) > 200;
+            QVERIFY2(white > 50, "the title is in the nested picture");
+        }
+        // Open it: its own timeline and undo history; exporting waits for the way back.
+        editor.openNested(nested.id);
+        QCOMPARE(editor.state()["nesting"].toStringList(), QStringList{"Nested 1"});
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        QCOMPARE(editor.project().clip(title)->track, titleTrack);
+        QVERIFY(!editor.state()["canUndo"].toBool());
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("out.mp4")), {{"format", "h264"}});
+        QVERIFY(editor.state()["error"].toString().contains("main timeline"));
+        editor.select(title);
+        editor.remove();
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        // Saving from inside saves the whole project, with the sequence as it is now.
+        const auto file = dir.filePath("nested.cutlery");
+        QVERIFY(editor.save(QUrl::fromLocalFile(file)));
+        {
+            const auto saved = loadProject(file);
+            QCOMPARE(saved.clips.size(), size_t(1));
+            const auto *a = saved.asset(nested.assetId);
+            QVERIFY(a && a->isNested());
+            QCOMPARE(Project::fromJson(a->nested, {}).clips.size(), size_t(1));
+            QFile raw(file);
+            QVERIFY(raw.open(QIODevice::ReadOnly));
+            QVERIFY(raw.readAll().contains("\"path\": \"red.mkv\""));
+        }
+        // Back: one undo step out here brings the title back into the sequence.
+        editor.closeNested();
+        QVERIFY(editor.state()["nesting"].toStringList().isEmpty());
+        QCOMPARE(Project::fromJson(editor.project().asset(nested.assetId)->nested, {}).clips.size(),
+                 size_t(1));
+        editor.undo();
+        QCOMPARE(Project::fromJson(editor.project().asset(nested.assetId)->nested, {}).clips.size(),
+                 size_t(2));
+        // Taken apart: the clips are back where they were, and the sequence leaves the library.
+        editor.select(nested.id);
+        editor.unnest();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        QCOMPARE(editor.project().clip(title)->start, qint64(10));
+        QCOMPARE(editor.project().clip(title)->track, titleTrack);
+        QCOMPARE(editor.project().clip(red)->duration, qint64(50));
+        QCOMPARE(editor.project().assets.size(), size_t(1));
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        editor.select(nested.id);
+        editor.setClip("speed", 2.0);
+        editor.unnest();
+        QVERIFY(editor.state()["error"].toString().contains("normal speed"));
+    }
+    void relinkMissingFromFolder() {
+        QTemporaryDir dir;
+        QImage image(32, 32, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        for (const auto &name : {"found/a/clip.png", "found/b/clip.png", "found/deep/er/logo.PNG"}) {
+            QVERIFY(QDir().mkpath(QFileInfo(dir.filePath(name)).absolutePath()));
+            QVERIFY(image.save(dir.filePath(name), "PNG"));
+        }
+        // A project whose media was in a folder that has moved.
+        Project p;
+        for (const auto &old : {"old/a/clip.png", "old/logo.png", "old/gone.png"}) {
+            Asset a;
+            a.id = QFileInfo(old).baseName();
+            a.path = dir.filePath(old);
+            a.name = QFileInfo(old).fileName();
+            a.kind = "image";
+            a.width = a.height = 32;
+            a.duration = 5;
+            p.assets.push_back(a);
+        }
+        const auto file = dir.filePath("moved.cutlery");
+        saveProject(p, file);
+        FrameProvider frames;
+        Editor editor(&frames);
+        QVERIFY(editor.openProject(QUrl::fromLocalFile(file)));
+        const auto listed = editor.assets();
+        QCOMPARE(std::count_if(listed.begin(), listed.end(),
+                               [](const QVariant &a) { return a.toMap()["missing"].toBool(); }),
+                 3);
+        editor.relinkFolder(QUrl::fromLocalFile(dir.filePath("found")));
+        // The clip from folder "a" (not "b"), the logo whatever the case and depth; one left.
+        QCOMPARE(editor.project().asset("clip")->path, QDir::cleanPath(dir.filePath("found/a/clip.png")));
+        QCOMPARE(editor.project().asset("logo")->path,
+                 QDir::cleanPath(dir.filePath("found/deep/er/logo.PNG")));
+        QCOMPARE(editor.project().asset("gone")->path, QDir::cleanPath(dir.filePath("old/gone.png")));
+        QVERIFY(editor.state()["status"].toString().contains("2 of 3"));
+        editor.undo();
+        QVERIFY(!QFileInfo::exists(editor.project().asset("clip")->path));
+        editor.relinkFolder(QUrl::fromLocalFile(dir.filePath("nothing-here")));
+        QVERIFY(editor.state()["error"].toString().contains("folder"));
+    }
+    void mediaFolders() {
+        QTemporaryDir dir;
+        auto image = [&](const QString &name) {
+            QImage i(64, 36, QImage::Format_RGB32);
+            i.fill(Qt::red);
+            const auto path = dir.filePath(name);
+            if (!i.save(path))
+                throw std::runtime_error("Cannot save test image");
+            return QUrl::fromLocalFile(path);
+        };
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.addFolder("  ");
+        QVERIFY(editor.state()["error"].toString().contains("Name"));
+        editor.addFolder("B-roll");
+        QCOMPARE(editor.state()["importFolder"].toString(), QString("B-roll"));
+        editor.addFolder("B-roll");
+        QVERIFY(editor.state()["error"].toString().contains("already"));
+        // Imports go into the folder on show.
+        editor.importMedia({image("beach.png")});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        QCOMPARE(editor.project().assets[0].folder, QString("B-roll"));
+        editor.setImportFolder("");
+        editor.importMedia({image("logo.png")});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        const auto beach = editor.project().assets[0].id, logo = editor.project().assets[1].id;
+        QVERIFY(editor.project().assets[1].folder.isEmpty());
+        QCOMPARE(editor.assets()[0].toMap()["folder"].toString(), QString("B-roll"));
+        // Rename: the media follows; move; saved and loaded.
+        editor.addFolder("Graphics");
+        editor.renameFolder("B-roll", "Outdoor");
+        QCOMPARE(editor.project().folders, (QStringList{"Outdoor", "Graphics"}));
+        QCOMPARE(editor.project().asset(beach)->folder, QString("Outdoor"));
+        editor.renameFolder("Outdoor", "Graphics");
+        QVERIFY(editor.state()["error"].toString().contains("already"));
+        editor.moveToFolder({logo}, "Graphics");
+        QCOMPARE(editor.project().asset(logo)->folder, QString("Graphics"));
+        editor.moveToFolder({logo}, "Nowhere");
+        QVERIFY(editor.state()["error"].toString().contains("No such folder"));
+        const auto loaded = Project::fromJson(editor.project().json(), {});
+        QCOMPARE(loaded.folders, editor.project().folders);
+        QCOMPARE(loaded.asset(logo)->folder, QString("Graphics"));
+        auto bad = loaded;
+        bad.assets[0].folder = "Missing";
+        QVERIFY_EXCEPTION_THROWN(bad.validate(), std::runtime_error);
+        bad = loaded;
+        bad.folders << "Graphics";
+        QVERIFY_EXCEPTION_THROWN(bad.validate(), std::runtime_error);
+        // Deleting a folder keeps its media at the top level; one undo step brings it back.
+        editor.removeFolder("Graphics");
+        QCOMPARE(editor.project().folders, QStringList{"Outdoor"});
+        QVERIFY(editor.project().asset(logo)->folder.isEmpty());
+        editor.undo();
+        QCOMPARE(editor.project().asset(logo)->folder, QString("Graphics"));
+        // Only unused media can be removed from the library.
+        editor.addAsset(beach);
+        QVERIFY(editor.assets()[0].toMap()["used"].toBool());
+        editor.removeAssets({beach});
+        QVERIFY(editor.state()["error"].toString().contains("timeline"));
+        editor.removeAssets({logo});
+        QCOMPARE(editor.project().assets.size(), size_t(1));
+        // Pasted into a project without that folder, the media lands at the top level.
+        editor.select(editor.project().clips.first().id);
+        editor.copy();
+        editor.newProject();
+        editor.paste();
+        QCOMPARE(editor.project().assets.size(), size_t(1));
+        QVERIFY(editor.project().assets[0].folder.isEmpty());
     }
     void titlesThatBuildUp() {
         const auto ffmpeg = Editor::executable("ffmpeg");

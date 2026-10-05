@@ -26,6 +26,14 @@ struct Asset {
     bool variableRate = false;
     // Animated GIFs repeat, so their clips can be any length.
     bool loops = false;
+    // The media library folder it is in; empty for the top level.
+    QString folder;
+    // A nested sequence: the project it holds (absolute media paths). Its picture and sound are
+    // rendered by the editor into `path`, a cache file named after this content.
+    QJsonObject nested;
+    bool isNested() const {
+        return !nested.isEmpty();
+    }
     // Images and looping animations have no end; their clips are not limited by the source.
     bool endless() const {
         return kind == "image" || loops;
@@ -188,6 +196,8 @@ struct Project {
     int width = 1920, height = 1080, fpsN = 30, fpsD = 1, tracks = 3;
     QVector<Track> trackSettings{{"Track 1"}, {"Track 2"}, {"Track 3"}};
     QVector<Asset> assets;
+    // Media library folders, in the order shown; assets name theirs in Asset::folder.
+    QStringList folders;
     QVector<Clip> clips;
     qint64 duration() const;
     double seconds() const {
