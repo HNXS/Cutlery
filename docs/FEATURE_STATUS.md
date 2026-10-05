@@ -26,7 +26,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F020 | Multitrack video, audio, images and text | Implemented (alpha) | Up to 64 named tracks with video/audio/images/titles; large-project performance not qualified. |
 | F021 | Layer order, overlays and adjustment tracks | Partial | Overlays and layer order; no adjustment tracks. |
 | F022 | Linked A/V, unlink and resync | Implemented (alpha) | Detach audio puts the sound on its own track, linked to the picture: moving or trimming either one moves or trims both while they stay aligned, splitting both keeps two linked pairs, and a slip of one alone keeps the link. "Unlink picture and sound" frees them; linked clips show ⛓ in the timeline. No automatic resync by waveform. |
-| F023 | Groups, track lock, mute, solo and hide | Partial | Track lock, audio mute/solo and picture hide; no clip groups. |
+| F023 | Groups, track lock, mute, solo and hide | Implemented (alpha) | Track lock, audio mute/solo and picture hide; multiple selection (Ctrl+click, Ctrl+A) that moves and deletes together, and clip groups (Ctrl+G, Ctrl+Shift+G) that are selected, moved and deleted as one. No rubber-band selection or nested groups. |
 | F024 | Snapping and optional magnetic/ripple mode | Implemented (alpha) | Per-track edge snapping and magnetic insertion/reorder/ripple edits. Master edge-snap switch is independent of Magnet; locks respected. |
 | F025 | Insert, overwrite and reorder | Partial | Magnetic insert and reorder; free-position drops. No overwrite edit mode. |
 | F026 | Split, trim, delete and duplicate | Implemented (alpha) | Split, drag-edge/source-aware trims, inspector trims, delete and duplicate; each committed edit is undoable. |
@@ -64,7 +64,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F058 | Transition duration and curve editing | Partial | Duration 0.1–3 s in the inspector, limited by both clips. No easing curves. |
 | F059 | Audio extraction and linked source streams | Partial | Detach audio reuses source media on an independent track; no extraction to a standalone audio file or resync. |
 | F060 | Waveform generation and peak pyramids | Partial | Async bounded mono waveform overview cached by file fingerprint; follows trim/speed/reverse. No multilevel pyramid. |
-| F061 | Volume, gain, pan, mute and fades | Implemented (alpha) | Volume (keyframable), mute, fades, and pan per clip (balance −1 left to +1 right in the sound tools: the far side gets quieter). No pan keyframes. |
+| F061 | Volume, gain, pan, mute and fades | Implemented (alpha) | Volume and pan per clip, both keyframable (pan as balance −1 left to +1 right), mute and fades. |
 | F062 | Multitrack mixing and channel layouts | Partial | 48 kHz stereo only. |
 | F063 | 5.1 and configurable audio routing | Planned | Not implemented in this alpha. |
 | F064 | Voice-over and audio recording | Partial | "● Voice-over" in the transport row records the default microphone to WAV (Qt Multimedia) in the data folder's recordings/ while the timeline plays from the playhead; stopping adds the recording at that frame on the lowest free non-magnetic track (or a new one). No input-device choice, level display during recording, count-in or punch-in; checked on CI only for the no-microphone path. |
@@ -85,7 +85,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F079 | Font browser, favorites and local font files | Partial | Font list of all installed families (each shown in its own font, type to search) and local .ttf/.otf/.ttc files added with "+ Font", copied into the data folder so they travel with a portable install and load at start. No favourites; projects store the family name only. |
 | F080 | Size, weight, spacing, kerning and alignment | Implemented (alpha) | Font size, bold, italic, left/centre/right alignment, letter spacing (−0.1..0.5 of the size) and line spacing (0.7..3×) for titles and captions; kerning is the font's own. Title templates keep their fixed layout. |
 | F081 | Outline, shadow, glow and text background | Partial | Outline (width and colour), drop shadow strength and a rounded box behind each line (colour and opacity) for titles; karaoke captions get outline and shadow. No text glow; templates keep their own plate. |
-| F082 | Text transforms and per-character animation | Planned | Not implemented in this alpha. |
+| F082 | Text transforms and per-character animation | Partial | Plain titles can build up from the clip's start: typewriter (one character after another) or word by word, finished after a set time (0.1–30 s). No per-character motion, scaling or colour animation. |
 | F083 | Original titles, lower thirds and presets | Partial | Original title templates: lower third with plate, lower third with accent line (both slide in from the left and fade), and title card; name/role from the text lines, accent colour, scale and position from the preview frame. Three templates, no preset library, no per-template animation choice. |
 | F084 | Manual captions and subtitle track | Partial | Editable title clips used as captions. |
 | F085 | SRT import/export and TXT import | Partial | SRT roundtrip (WebVTT and ASS too, see F086); no TXT. |
@@ -173,7 +173,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F167 | GPU device loss and CPU fallback | Planned | Not implemented in this alpha. |
 | F168 | Dark UI, dockable panels and searchable tools | Partial | Dark resizable panels and original app icon; no docking/search. |
 | F169 | High DPI, scaling and multi-monitor | Partial | Qt scaling support; manual qualification outstanding. |
-| F170 | Shortcuts, customization and command search | Partial | 31 customizable commands, conflict checks and portable settings; no command search or complete CapCut keymap. |
+| F170 | Shortcuts, customization and command search | Partial | 44 customizable commands, conflict checks and portable settings; no command search or complete CapCut keymap. |
 | F171 | Accessible focus, labels and errors | Planned | Not implemented in this alpha. |
 | F172 | Background jobs, progress and tooltips | Partial | Job state/progress/cancel; tooltips incomplete. |
 | F173 | Per-user Windows installer | Planned | Not implemented in this alpha. |

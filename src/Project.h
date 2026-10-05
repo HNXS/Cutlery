@@ -48,6 +48,8 @@ struct Clip {
     // Clips with the same link (picture and its detached sound) move and trim together while
     // they stay aligned; "none" marks a pair the user unlinked.
     QString link;
+    // Clips with the same group are selected, moved and deleted together.
+    QString group;
     int track = 0;
     qint64 start = 0, duration = 1;
     Time sourceIn, speed{1};
@@ -78,6 +80,10 @@ struct Clip {
     // The first text line is the name or headline, further lines the role or subtitle.
     QString titleStyle;
     QString accentColor = "#64d8bc";
+    // Plain titles can build up: "typewriter" shows one character after another, "words" one
+    // word after another, all of them within textAnimationTime seconds from the clip's start.
+    QString textAnimation;
+    double textAnimationTime = 1.5;
     // Effect area clips (no media, no text) blur or pixelate whatever lower tracks show inside a
     // rectangle of effectWidth × effectHeight canvas fractions at scale 1, centred at x/y.
     QString effect; // "", "blur", "pixelate"

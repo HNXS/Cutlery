@@ -16,7 +16,10 @@ Click the timeline before using editing/playback keys. During text entry, normal
 | Redo | Edit | `Ctrl+Y` |
 | Split selected clip | Edit | `Ctrl+B` |
 | Duplicate clip | Edit | `Ctrl+D` |
-| Delete clip | Edit | `Del` |
+| Delete clip (all selected clips) | Edit | `Del` |
+| Select all clips | Edit | `Ctrl+A` |
+| Group selected clips | Edit | `Ctrl+G` |
+| Ungroup | Edit | `Ctrl+Shift+G` |
 | Delete and close track gap | Edit | `Shift+Del` |
 | Trim start to playhead | Edit | `Q` |
 | Trim end to playhead | Edit | `W` |

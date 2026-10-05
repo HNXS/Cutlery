@@ -730,7 +730,7 @@ class EngineTest : public QObject {
         QTemporaryDir dir;
         const auto path = dir.filePath("shortcuts.json");
         KeyboardShortcuts keys(path);
-        QCOMPARE(keys.bindings().size(), 41);
+        QCOMPARE(keys.bindings().size(), 44);
         QVERIFY(!keys.assign("play", "Ctrl+B"));
         QVERIFY(keys.error().contains("Already assigned"));
         QVERIFY(!keys.assign("play", "Ctrl+NotARealKey"));
@@ -739,10 +739,16 @@ class EngineTest : public QObject {
         KeyboardShortcuts loaded(path);
         QCOMPARE(loaded.bindings(), keys.bindings());
         QVERIFY(loaded.reset());
-        QCOMPARE(loaded.bindings()[19].toMap()["sequence"].toString(), QString("Space"));
+        auto play = [](const KeyboardShortcuts &k) {
+            for (const auto &b : k.bindings())
+                if (b.toMap()["id"] == "play")
+                    return b.toMap()["sequence"].toString();
+            return QString();
+        };
+        QCOMPARE(play(loaded), QString("Space"));
         KeyboardShortcuts failed(dir.path());
         QVERIFY(!failed.assign("play", "Ctrl+J"));
-        QCOMPARE(failed.bindings()[19].toMap()["sequence"].toString(), QString("Space"));
+        QCOMPARE(play(failed), QString("Space"));
     }
     void thumbnailStrips() {
         const auto ffmpeg = Editor::executable("ffmpeg");
@@ -3074,6 +3080,20 @@ class EngineTest : public QObject {
         const auto half = render(x, "half");
         run(ffmpeg, {"-v", "error", "-y", "-i", half, "-af", "pan=mono|c0=c0", left});
         QVERIFY(std::abs(peak(left, 0, 0.05) - (peak(plain, 0, 0.05) - 6.02)) < 1);
+        // Animated pan on a steady tone: from left at the start to right at the end.
+        const auto tone = dir.filePath("tone.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "sine=f=440:d=2", "-ar", "48000", "-ac", "2", tone});
+        p.assets[0].path = tone;
+        x = c;
+        x.keyframes["pan"] = {{0, -1, false}, {59, 1, false}};
+        const auto sweep = render(x, "sweep");
+        run(ffmpeg, {"-v", "error", "-y", "-i", sweep, "-af", "pan=mono|c0=c1", right});
+        run(ffmpeg, {"-v", "error", "-y", "-i", sweep, "-af", "pan=mono|c0=c0", left});
+        // (FFmpeg's sine peaks at -18 dBFS.)
+        QVERIFY2(peak(left, 0.02, 0.1) > peak(right, 0.02, 0.1) + 15,
+                 qPrintable(QString("%1 %2").arg(peak(right, 0.02, 0.1)).arg(peak(left, 0.02, 0.1))));
+        QVERIFY(peak(right, 1.9, 1.98) > peak(left, 1.9, 1.98) + 15);
+        QVERIFY(std::abs(peak(left, 0.95, 1.05) - peak(right, 0.95, 1.05)) < 3);
     }
     void beatDetection() {
         const auto ffmpeg = Editor::executable("ffmpeg");
@@ -3548,6 +3568,130 @@ class EngineTest : public QObject {
         e.select(video);
         e.unlinkClip();
         QVERIFY(e.state()["error"].toString().contains("not linked"));
+    }
+    void multipleSelectionAndGroups() {
+        FrameProvider frames;
+        Editor e(&frames);
+        e.addTitle();
+        e.addTitle();
+        e.addTitle();
+        auto ids = QStringList{};
+        for (const auto &c : e.project().clips)
+            ids << c.id;
+        QCOMPARE(ids.size(), 3);
+        // Spread the titles over two tracks: A at 0, B at 200 (track 0), C at 100 (track 1).
+        e.addTrack();
+        e.moveClip(ids[0], 0, 0);
+        e.moveClip(ids[1], 200, 0);
+        e.moveClip(ids[2], 100, 1);
+        // Ctrl+click selection: A and C.
+        e.select(ids[0]);
+        e.toggleSelect(ids[2]);
+        QCOMPARE(e.selection().size(), 2);
+        QCOMPARE(e.state()["selectedIds"].toStringList().size(), 2);
+        // Moving A by 30 frames moves C by 30 too, on its own track.
+        e.moveClip(ids[0], 30, 0);
+        QCOMPARE(e.project().clip(ids[0])->start, 30);
+        QCOMPARE(e.project().clip(ids[2])->start, 130);
+        QCOMPARE(e.project().clip(ids[2])->track, 1);
+        QCOMPARE(e.project().clip(ids[1])->start, 200);
+        // One undo step for all of them.
+        e.undo();
+        QCOMPARE(e.project().clip(ids[0])->start, 0);
+        QCOMPARE(e.project().clip(ids[2])->start, 100);
+        // Toggling again removes it.
+        e.toggleSelect(ids[2]);
+        QCOMPARE(e.selection(), QStringList{ids[0]});
+        // Group A and C: selecting either brings both; the group survives saving.
+        e.toggleSelect(ids[2]);
+        e.groupSelection();
+        e.select(ids[1]);
+        QCOMPARE(e.selection(), QStringList{ids[1]});
+        e.select(ids[2]);
+        QCOMPARE(e.selection().size(), 2);
+        QVERIFY(e.selection().contains(ids[0]));
+        const auto loaded = Project::fromJson(e.project().json(), {});
+        QCOMPARE(loaded.clip(ids[0])->group, loaded.clip(ids[2])->group);
+        QVERIFY(!loaded.clip(ids[0])->group.isEmpty());
+        QVERIFY(loaded.clip(ids[1])->group.isEmpty());
+        // Ctrl+click on a grouped clip toggles the whole group.
+        e.select(ids[1]);
+        e.toggleSelect(ids[0]);
+        QCOMPARE(e.selection().size(), 3);
+        e.toggleSelect(ids[2]);
+        QCOMPARE(e.selection(), QStringList{ids[1]});
+        // Delete removes the whole group.
+        e.select(ids[0]);
+        e.remove(false);
+        QCOMPARE(e.project().clips.size(), size_t(1));
+        e.undo();
+        QCOMPARE(e.project().clips.size(), size_t(3));
+        // Ungroup, select all, and a group needs two clips.
+        e.select(ids[0]);
+        e.ungroupSelection();
+        e.select(ids[0]);
+        QCOMPARE(e.selection(), QStringList{ids[0]});
+        e.groupSelection();
+        QVERIFY(e.state()["error"].toString().contains("at least two"));
+        e.clearError();
+        e.selectAll();
+        QCOMPARE(e.selection().size(), 3);
+    }
+    void titlesThatBuildUp() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        Project p;
+        p.width = 320;
+        p.height = 180;
+        Clip t;
+        t.id = "t";
+        t.text = "AB CD";
+        t.fontSize = 120;
+        t.duration = 60;
+        auto lit = [&](const Clip &clip, qint64 frame) {
+            auto project = p;
+            project.clips = {clip};
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 320, 180, options);
+            const auto graph = dir.filePath("graph.txt");
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            int count = 0;
+            for (int y = 0; y < out.height(); ++y)
+                for (int x = 0; x < out.width(); ++x)
+                    count += qGray(out.pixel(x, y)) > 128;
+            return count;
+        };
+        const int whole = lit(t, 10);
+        QVERIFY(whole > 500);
+        // Typewriter over 1 s: one of four characters every quarter second.
+        auto typed = t;
+        typed.textAnimation = "typewriter";
+        typed.textAnimationTime = 1;
+        const int one = lit(typed, 3), two = lit(typed, 10), three = lit(typed, 20), all = lit(typed, 40);
+        QVERIFY2(0 < one && one < two && two < three && three < all,
+                 qPrintable(QString("%1 %2 %3 %4").arg(one).arg(two).arg(three).arg(all)));
+        QVERIFY2(std::abs(all - whole) < whole / 20, qPrintable(QString("%1 vs %2").arg(all).arg(whole)));
+        // Word by word over 1 s: "AB" for the first half, then everything.
+        auto words = typed;
+        words.textAnimation = "words";
+        QVERIFY(std::abs(lit(words, 5) - two) < two / 10);
+        QVERIFY(std::abs(lit(words, 20) - whole) < whole / 20);
+        // Saved, and checked.
+        p.clips = {typed};
+        QCOMPARE(Project::fromJson(p.json(), {}).clips[0].textAnimation, QString("typewriter"));
+        auto bad = p;
+        bad.clips[0].textAnimation = "explode";
+        QVERIFY_EXCEPTION_THROWN(bad.validate(), std::runtime_error);
     }
     void sceneDetection() {
         const auto ffmpeg = Editor::executable("ffmpeg");

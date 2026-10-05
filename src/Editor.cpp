@@ -242,6 +242,7 @@ QVariantList Editor::clips() const {
                               {"assetId", c.assetId},
                               {"name", c.name},
                               {"linked", !m_project.linkedClips(c.id).isEmpty()},
+                              {"grouped", !c.group.isEmpty()},
                               {"track", c.track},
                               {"start", c.start},
                               {"duration", c.duration},
@@ -468,6 +469,8 @@ QVariantMap Editor::state() const {
             PROP(reverb);
             PROP(echo);
             PROP(pan);
+            PROP(textAnimation);
+            PROP(textAnimationTime);
             PROP(anchorX);
             PROP(anchorY);
             PROP(slowMotion);
@@ -526,6 +529,7 @@ QVariantMap Editor::state() const {
             {"dirty", m_dirty},
             {"selected", selected},
             {"selectedId", m_selected},
+            {"selectedIds", selection()},
             {"playhead", m_playhead},
             {"duration", m_project.duration()},
             {"fps", double(m_project.fpsN) / m_project.fpsD},
@@ -830,7 +834,71 @@ void Editor::recover() {
 }
 void Editor::select(const QString &id) {
     m_selected = id;
+    m_also.clear();
+    if (const auto *c = m_project.clip(id); c && !c->group.isEmpty())
+        for (const auto &x : m_project.clips)
+            if (x.group == c->group && x.id != id)
+                m_also << x.id;
     emit changed();
+}
+QStringList Editor::selection() const {
+    QStringList ids;
+    for (const auto &id : QStringList{m_selected} + m_also)
+        if (!id.isEmpty() && m_project.clip(id) && !ids.contains(id))
+            ids << id;
+    return ids;
+}
+void Editor::toggleSelect(const QString &id) {
+    const auto *c = m_project.clip(id);
+    if (!c)
+        return;
+    // The whole group goes in or out together.
+    QStringList members{id};
+    if (!c->group.isEmpty())
+        for (const auto &x : m_project.clips)
+            if (x.group == c->group && x.id != id)
+                members << x.id;
+    auto current = selection();
+    if (current.contains(id)) {
+        for (const auto &m : members)
+            current.removeAll(m);
+    } else
+        current = members + current;
+    m_selected = current.isEmpty() ? QString() : current.takeFirst();
+    m_also = current;
+    emit changed();
+}
+void Editor::selectAll() {
+    m_also.clear();
+    for (const auto &c : m_project.clips)
+        if (c.id != m_selected)
+            m_also << c.id;
+    if (m_selected.isEmpty() && !m_also.isEmpty())
+        m_selected = m_also.takeFirst();
+    emit changed();
+}
+void Editor::groupSelection() {
+    const auto ids = selection();
+    if (ids.size() < 2)
+        return fail("Ctrl+click to select at least two clips to group");
+    const auto group = newId();
+    mutate([&](Project &p) {
+        for (const auto &id : ids)
+            p.clip(id)->group = group;
+    });
+}
+void Editor::ungroupSelection() {
+    const auto ids = selection();
+    mutate([&](Project &p) {
+        bool any = false;
+        for (const auto &id : ids)
+            if (auto *c = p.clip(id); !c->group.isEmpty()) {
+                c->group.clear();
+                any = true;
+            }
+        if (!any)
+            throw std::runtime_error("The selection has no group");
+    });
 }
 void Editor::seek(qint64 frame) {
     m_resumeTimer.stop();
@@ -1212,13 +1280,32 @@ void Editor::moveClip(const QString &id, qint64 frame, int track) {
         if (!c)
             return;
         const auto old = c->start;
+        const int oldTrack = c->track;
+        // Other selected clips (and everyone's linked sound or picture) come along.
+        QStringList others;
+        const auto selected = selection();
+        if (selected.contains(id))
+            for (const auto &x : selected)
+                if (x != id)
+                    others << x;
         p.move(id, track, frame);
-        // Linked sound (or picture) follows by the same amount, on its own track.
-        if (const auto delta = p.clip(id)->start - old)
-            for (const auto &other : linked) {
-                const auto *x = p.clip(other);
-                p.move(other, x->track, x->start + delta);
-            }
+        const auto delta = p.clip(id)->start - old;
+        const int shift = p.clip(id)->track - oldTrack;
+        QStringList followers = linked;
+        for (const auto &x : others)
+            for (const auto &f : QStringList{x} + p.linkedClips(x))
+                if (f != id && !followers.contains(f))
+                    followers << f;
+        for (const auto &other : followers) {
+            const auto *x = p.clip(other);
+            // Selected clips change track by the same amount where that track exists.
+            const int target = others.contains(other) && x->track + shift >= 0 &&
+                                       x->track + shift < p.tracks
+                                   ? x->track + shift
+                                   : x->track;
+            if (delta || target != x->track)
+                p.move(other, target, std::max<qint64>(0, x->start + delta));
+        }
     });
 }
 void Editor::unlinkClip() {
@@ -1359,6 +1446,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(reverb, toDouble);
         FIELD(echo, toDouble);
         FIELD(pan, toDouble);
+        FIELD(textAnimation, toString);
+        FIELD(textAnimationTime, toDouble);
         FIELD(anchorX, toDouble);
         FIELD(anchorY, toDouble);
         FIELD(slowMotion, toString);
@@ -1487,6 +1576,8 @@ void Editor::toggleKeyframe(const QString &property) {
                     c->rotation = value;
                 else if (property == "opacity")
                     c->opacity = value;
+                else if (property == "pan")
+                    c->pan = value;
                 else
                     c->volume = value;
             }
@@ -1527,7 +1618,20 @@ void Editor::split() {
     mutate([&](Project &p) { p.split(m_selected, m_playhead); });
 }
 void Editor::remove(bool ripple) {
-    mutate([&](Project &p) { p.remove(m_selected, ripple); });
+    auto ids = selection();
+    if (ids.size() <= 1) {
+        mutate([&](Project &p) { p.remove(m_selected, ripple); });
+        return;
+    }
+    // Several clips: the latest first, so ripple closes each gap at the right place.
+    if (mutate([&](Project &p) {
+            std::sort(ids.begin(), ids.end(), [&](const QString &a, const QString &b) {
+                return p.clip(a)->start > p.clip(b)->start;
+            });
+            for (const auto &id : ids)
+                p.remove(id, ripple);
+        }))
+        m_also.clear();
 }
 void Editor::duplicate() {
     const auto id = newId();

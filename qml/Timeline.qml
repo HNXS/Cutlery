@@ -519,7 +519,14 @@ FocusScope {
                                 }
                                 function begin(mode, mouse, area) {
                                     root.forceActiveFocus();
-                                    editor.select(modelData.id);
+                                    // Ctrl+click adds or removes the clip from the selection.
+                                    if (mouse.modifiers & Qt.ControlModifier) {
+                                        editor.toggleSelect(modelData.id);
+                                        return;
+                                    }
+                                    // A clip that is already selected keeps the others selected.
+                                    if ((root.state.selectedIds || []).indexOf(modelData.id) < 0)
+                                        editor.select(modelData.id);
                                     if (modelData.locked)
                                         return;
                                     if (mouse.modifiers & Qt.AltModifier)
@@ -594,8 +601,9 @@ FocusScope {
                                 clip: true
                                 color: modelData.effect ? "#4d3f66" : modelData.title ? "#59453e" : modelData.audio ? "#28564c" : "#334a65"
                                 opacity: modelData.locked ? .65 : 1
-                                border.width: root.state.selectedId === modelData.id ? 2 : 1
-                                border.color: operation === 1 && (dragTrack < 0 || dragTrack >= root.state.tracks || (editor.trackList[dragTrack] || {}).locked) ? "#ec947e" : root.state.selectedId === modelData.id ? "#64d8bc" : "#6481a0"
+                                readonly property bool chosen: (root.state.selectedIds || []).indexOf(modelData.id) >= 0
+                                border.width: chosen ? 2 : 1
+                                border.color: operation === 1 && (dragTrack < 0 || dragTrack >= root.state.tracks || (editor.trackList[dragTrack] || {}).locked) ? "#ec947e" : root.state.selectedId === modelData.id ? "#64d8bc" : chosen ? "#b7f0e1" : "#6481a0"
                                 Component.onCompleted: {
                                     refreshWave();
                                     refreshThumbs();
@@ -653,7 +661,7 @@ FocusScope {
                                     elide: Text.ElideRight
                                     font.pixelSize: 11
                                     font.bold: true
-                                    text: (clipRect.modelData.locked ? "[L] " : "") + (clipRect.modelData.linked ? "⛓ " : "") + clipRect.modelData.name
+                                    text: (clipRect.modelData.locked ? "[L] " : "") + (clipRect.modelData.linked ? "⛓ " : "") + (clipRect.modelData.grouped ? "▣ " : "") + clipRect.modelData.name
                                 }
                                 Label {
                                     objectName: "editLabel-" + clipRect.modelData.id
@@ -832,18 +840,19 @@ FocusScope {
                                 }
                                 Rectangle {
                                     objectName: "transitionMarker-" + cut.modelData.id
+                                    // On the top edge of the clips, so the edges below stay free for trims.
                                     x: cut.cutX - width / 2
-                                    y: cut.rowY + (root.rowHeight - 8) / 2 - height / 2
-                                    width: 20
-                                    height: 20
-                                    radius: 5
+                                    y: cut.rowY - height / 2
+                                    width: 16
+                                    height: 14
+                                    radius: 4
                                     color: cut.active ? "#64d8bc" : markerMouse.containsMouse ? "#34434d" : "#202831"
                                     border.color: cut.active ? "#e7edf2" : "#6481a0"
                                     Label {
                                         anchors.centerIn: parent
                                         text: cut.active ? "⧓" : "+"
                                         color: cut.active ? "#0b1016" : "#e7edf2"
-                                        font.pixelSize: cut.active ? 11 : 14
+                                        font.pixelSize: cut.active ? 9 : 12
                                         font.bold: true
                                     }
                                     MouseArea {
