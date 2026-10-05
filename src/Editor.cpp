@@ -412,6 +412,7 @@ QVariantMap Editor::state() const {
                         {"text", c.text},
                         {"fontSize", c.fontSize},
                         {"textColor", c.textColor},
+                        {"gradientColor", c.gradientColor},
                         {"transition", c.transition},
                         {"transitionFrames", c.transitionFrames},
                         {"transitionLength", m_project.transitionLength(c)},
@@ -1425,6 +1426,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             c->highlightColor = v.toString();
         else if (key == "textColor")
             c->textColor = v.toString();
+        else if (key == "gradientColor")
+            c->gradientColor = v.toString();
         else if (key == "transition") {
             c->transition = v.toString();
             // New transitions start at half a second, like a typical dissolve.

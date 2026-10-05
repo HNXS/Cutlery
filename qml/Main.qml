@@ -1570,12 +1570,12 @@ ApplicationWindow {
                                     ComboBox {
                                         objectName: "textAnimation"
                                         Layout.fillWidth: true
-                                        readonly property var kinds: ["", "typewriter", "words"]
-                                        model: ["Appears at once", "Typewriter", "Word by word"]
+                                        readonly property var kinds: ["", "typewriter", "words", "rise", "pop", "fly"]
+                                        model: ["Appears at once", "Typewriter", "Word by word", "Letters rise", "Letters pop up", "Letters fly in"]
                                         currentIndex: Math.max(0, kinds.indexOf(win.selection.textAnimation || ""))
                                         onActivated: editor.setClip("textAnimation", kinds[currentIndex])
                                         ToolTip.visible: hovered
-                                        ToolTip.text: "Lets the text build up from the start of the clip"
+                                        ToolTip.text: "Lets the text build up from the start of the clip, letter by letter or word by word"
                                     }
                                     SpinBox {
                                         objectName: "textAnimationTime"
@@ -1685,11 +1685,25 @@ ApplicationWindow {
                                         onValueModified: editor.setClip("fontSize", value)
                                     }
                                 }
-                                TextField {
+                                RowLayout {
                                     Layout.fillWidth: true
-                                    text: win.selection.textColor || "#ffffff"
-                                    placeholderText: "Text colour (#rrggbb)"
-                                    onEditingFinished: editor.setClip("textColor", text)
+                                    TextField {
+                                        Layout.fillWidth: true
+                                        text: win.selection.textColor || "#ffffff"
+                                        placeholderText: "Text colour (#rrggbb)"
+                                        onEditingFinished: editor.setClip("textColor", text)
+                                    }
+                                    // A second colour turns the letters into a top-to-bottom gradient.
+                                    TextField {
+                                        objectName: "gradientColor"
+                                        Layout.fillWidth: true
+                                        visible: !win.selection.titleStyle && !win.selection.captionStyle
+                                        text: win.selection.gradientColor || ""
+                                        placeholderText: "Gradient to (#rrggbb)"
+                                        onEditingFinished: editor.setClip("gradientColor", text.trim())
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "The letters fade from the text colour at the top to this colour at the bottom. Leave empty for one colour."
+                                    }
                                 }
                                 // Typography: font, weight, alignment, spacing, outline, shadow, box.
                                 RowLayout {

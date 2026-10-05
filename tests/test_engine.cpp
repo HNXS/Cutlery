@@ -3801,7 +3801,7 @@ class EngineTest : public QObject {
         t.text = "AB CD";
         t.fontSize = 120;
         t.duration = 60;
-        auto lit = [&](const Clip &clip, qint64 frame) {
+        auto picture = [&](const Clip &clip, qint64 frame) {
             auto project = p;
             project.clips = {clip};
             RenderOptions options;
@@ -3817,12 +3817,23 @@ class EngineTest : public QObject {
             g.close();
             QImage out;
             out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return out.convertToFormat(QImage::Format_RGB32);
+        };
+        // Bright pixels, and their centre.
+        auto centre = [&](const Clip &clip, qint64 frame) {
+            const auto out = picture(clip, frame);
             int count = 0;
+            double sx = 0, sy = 0;
             for (int y = 0; y < out.height(); ++y)
                 for (int x = 0; x < out.width(); ++x)
-                    count += qGray(out.pixel(x, y)) > 128;
-            return count;
+                    if (qGray(out.pixel(x, y)) > 128) {
+                        ++count;
+                        sx += x;
+                        sy += y;
+                    }
+            return std::tuple{count, count ? sx / count : 0., count ? sy / count : 0.};
         };
+        auto lit = [&](const Clip &clip, qint64 frame) { return std::get<0>(centre(clip, frame)); };
         const int whole = lit(t, 10);
         QVERIFY(whole > 500);
         // Typewriter over 1 s: one of four characters every quarter second.
@@ -3838,6 +3849,93 @@ class EngineTest : public QObject {
         words.textAnimation = "words";
         QVERIFY(std::abs(lit(words, 5) - two) < two / 10);
         QVERIFY(std::abs(lit(words, 20) - whole) < whole / 20);
+        // Letters that rise into place over 1 s (one line here): the first letter, still low,
+        // then the finished text.
+        auto rise = typed;
+        rise.textAnimation = "rise";
+        rise.text = "ABCD";
+        rise.fontSize = 60;
+        auto still = rise;
+        still.textAnimation.clear();
+        const auto [early, earlyX, earlyY] = centre(rise, 4);
+        const auto [done, doneX, doneY] = centre(rise, 40);
+        const auto [plain, plainX, plainY] = centre(still, 40);
+        QVERIFY2(early > 0 && early < done / 3 && earlyY > doneY + 3 && earlyX < doneX,
+                 qPrintable(QString("%1 %2 %3 / %4 %5 %6").arg(early).arg(earlyX).arg(earlyY)
+                                .arg(done).arg(doneX).arg(doneY)));
+        QVERIFY2(std::abs(done - plain) < plain / 20 && std::abs(doneY - plainY) < 0.5,
+                 qPrintable(QString("%1 vs %2").arg(done).arg(plain)));
+        // Played through from the middle of the animation: the frames follow on, ending with
+        // the finished text.
+        {
+            auto project = p;
+            project.clips = {rise};
+            RenderOptions options;
+            options.from = 5;
+            options.to = 45;
+            const auto plan = compileRender(project, dir.filePath("work"), 320, 180, options);
+            const auto graph = dir.filePath("graph.txt"), out = dir.filePath("rise.mp4");
+            QFile g(graph);
+            QVERIFY(g.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            g.write(plan.graph.toUtf8());
+            g.close();
+            run(ffmpeg, renderArguments(plan, graph, out, "", -1));
+            const auto frames = QString::fromUtf8(run(Editor::executable("ffprobe"),
+                {"-v", "error", "-count_frames", "-select_streams", "v", "-show_entries",
+                 "stream=nb_read_frames", "-of", "csv=p=0", out})).trimmed();
+            QCOMPARE(frames, QString("40"));
+            QImage last;
+            last.loadFromData(run(ffmpeg, {"-v", "error", "-sseof", "-0.05", "-i", out, "-frames:v",
+                                           "1", "-c:v", "png", "-f", "image2pipe", "pipe:1"}),
+                              "PNG");
+            int count = 0;
+            for (int y = 0; y < last.height(); ++y)
+                for (int x = 0; x < last.width(); ++x)
+                    count += qGray(last.pixel(x, y)) > 128;
+            QVERIFY2(std::abs(count - plain) < plain / 8, qPrintable(QString("%1 vs %2").arg(count).arg(plain)));
+        }
+        // Letters that grow: smaller first, then the finished text.
+        auto pop = rise;
+        pop.textAnimation = "pop";
+        QVERIFY(lit(pop, 4) < lit(pop, 20));
+        QVERIFY(std::abs(lit(pop, 40) - plain) < plain / 20);
+        // Letters flying in from the right: at first only the "A", to the right of its place.
+        auto fly = rise;
+        fly.textAnimation = "fly";
+        fly.align = "left";
+        auto a = still;
+        a.align = "left";
+        a.text = "A";
+        const double flyX = std::get<1>(centre(fly, 4)), aX = std::get<1>(centre(a, 4));
+        QVERIFY2(flyX > aX + 20, qPrintable(QString("%1 vs %2").arg(flyX).arg(aX)));
+        QVERIFY(std::abs(lit(fly, 40) - plain) < plain / 20);
+        // A gradient from white at the top to red at the bottom of the text.
+        auto gradient = t;
+        gradient.textShadow = 0;
+        gradient.gradientColor = "#ff0000";
+        const auto image = picture(gradient, 10);
+        int high = -1, low = -1;
+        for (int y = 0; y < image.height(); ++y)
+            for (int x = 0; x < image.width(); ++x)
+                if (qRed(image.pixel(x, y)) > 200) {
+                    if (high < 0)
+                        high = y;
+                    low = y;
+                }
+        QVERIFY(high >= 0 && low - high > 20);
+        auto green = [&](int y) {
+            int best = 0;
+            for (int x = 0; x < image.width(); ++x)
+                if (qRed(image.pixel(x, y)) > 200)
+                    best = std::max(best, qGreen(image.pixel(x, y)));
+            return best;
+        };
+        QVERIFY2(green(high + 2) > 180 && green(low - 2) < 80,
+                 qPrintable(QString("%1 %2").arg(green(high + 2)).arg(green(low - 2))));
+        p.clips = {gradient};
+        QCOMPARE(Project::fromJson(p.json(), {}).clips[0].gradientColor, QString("#ff0000"));
+        p.clips[0].gradientColor = "nope";
+        QVERIFY_EXCEPTION_THROWN(p.validate(), std::runtime_error);
         // Saved, and checked.
         p.clips = {typed};
         QCOMPARE(Project::fromJson(p.json(), {}).clips[0].textAnimation, QString("typewriter"));

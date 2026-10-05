@@ -299,6 +299,8 @@ QJsonObject Project::json(const QString &base) const {
             o["background"] = c.background;
             o["backgroundColor"] = c.backgroundColor;
         }
+        if (!c.gradientColor.isEmpty())
+            o["gradientColor"] = c.gradientColor;
         if (!c.textAnimation.isEmpty()) {
             o["textAnimation"] = c.textAnimation;
             o["textAnimationTime"] = c.textAnimationTime;
@@ -510,6 +512,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.titleStyle = j["titleStyle"].toString();
         c.textAnimation = j["textAnimation"].toString();
         c.textAnimationTime = j["textAnimationTime"].toDouble(1.5);
+        c.gradientColor = j["gradientColor"].toString();
         c.accentColor = j["accentColor"].toString("#64d8bc");
         c.effect = j["effect"].toString();
         c.effectStrength = j["effectStrength"].toDouble(0.6);
@@ -709,8 +712,10 @@ void Project::validate() const {
                     c.titleStyle) &&
                     QColor(c.accentColor).isValid(),
                 "Invalid title style");
-        require(QStringList{"", "typewriter", "words"}.contains(c.textAnimation) &&
-                    bounded(c.textAnimationTime, 0.1, 60),
+        require(QStringList{"", "typewriter", "words", "rise", "pop", "fly"}.contains(
+                    c.textAnimation) &&
+                    bounded(c.textAnimationTime, 0.1, 60) &&
+                    (c.gradientColor.isEmpty() || QColor(c.gradientColor).isValid()),
                 "Invalid text animation");
         if (const auto *a = asset(c.assetId); a && !a->endless())
             require(c.sourceIn.seconds() +
