@@ -653,7 +653,7 @@ FocusScope {
                                     elide: Text.ElideRight
                                     font.pixelSize: 11
                                     font.bold: true
-                                    text: (clipRect.modelData.locked ? "[L] " : "") + clipRect.modelData.name
+                                    text: (clipRect.modelData.locked ? "[L] " : "") + (clipRect.modelData.linked ? "⛓ " : "") + clipRect.modelData.name
                                 }
                                 Label {
                                     objectName: "editLabel-" + clipRect.modelData.id

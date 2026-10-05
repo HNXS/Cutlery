@@ -241,6 +241,7 @@ QVariantList Editor::clips() const {
         result << QVariantMap{{"id", c.id},
                               {"assetId", c.assetId},
                               {"name", c.name},
+                              {"linked", !m_project.linkedClips(c.id).isEmpty()},
                               {"track", c.track},
                               {"start", c.start},
                               {"duration", c.duration},
@@ -295,7 +296,12 @@ qint64 Editor::snap(qint64 frame, qint64 threshold, const QString &exclude, qint
     return m_project.snap(frame, threshold, exclude, m_playhead, length);
 }
 void Editor::trimClip(const QString &id, qint64 start, qint64 end) {
-    mutate([&](Project &p) { p.trim(id, start, end); });
+    mutate([&](Project &p) {
+        const auto linked = p.linkedClips(id);
+        p.trim(id, start, end);
+        for (const auto &other : linked)
+            p.trim(other, start, end);
+    });
 }
 qint64 Editor::placement(int track, qint64 frame, const QString &exclude) const {
     if (track < 0 || track >= m_project.tracks)
@@ -343,6 +349,9 @@ void Editor::detachAudio() {
         const auto *a = p.asset(c->assetId);
         if (!a || !a->hasAudio || a->kind != "video" || c->audioOnly)
             throw std::runtime_error("Select a video clip with audio");
+        // Picture and sound stay linked: they move and trim together until unlinked.
+        if (c->link.isEmpty() || c->link == "none")
+            c->link = newId();
         auto audio = *c;
         audio.id = id;
         audio.name = c->name + " · audio";
@@ -382,6 +391,7 @@ QVariantMap Editor::state() const {
                         {"variableRate", m_project.asset(c.assetId) &&
                                              m_project.asset(c.assetId)->variableRate},
                         {"locked", m_project.trackSettings[c.track].locked},
+                        {"linkedCount", int(m_project.linkedClips(c.id).size())},
                         {"canDetach", !c.audioOnly && m_project.asset(c.assetId) &&
                                           m_project.asset(c.assetId)->kind == "video" &&
                                           m_project.asset(c.assetId)->hasAudio},
@@ -1196,7 +1206,29 @@ void Editor::addGraphic(const QString &kind) {
     select(id);
 }
 void Editor::moveClip(const QString &id, qint64 frame, int track) {
-    mutate([&](Project &p) { p.move(id, track, frame); });
+    mutate([&](Project &p) {
+        const auto linked = p.linkedClips(id);
+        const auto *c = p.clip(id);
+        if (!c)
+            return;
+        const auto old = c->start;
+        p.move(id, track, frame);
+        // Linked sound (or picture) follows by the same amount, on its own track.
+        if (const auto delta = p.clip(id)->start - old)
+            for (const auto &other : linked) {
+                const auto *x = p.clip(other);
+                p.move(other, x->track, x->start + delta);
+            }
+    });
+}
+void Editor::unlinkClip() {
+    mutate([&](Project &p) {
+        const auto linked = p.linkedClips(m_selected);
+        if (linked.isEmpty())
+            throw std::runtime_error("This clip is not linked");
+        for (const auto &id : linked + QStringList{m_selected})
+            p.clip(id)->link = "none";
+    });
 }
 void Editor::setClip(const QString &key, const QVariant &v) {
     setClipValues({{key, v}});

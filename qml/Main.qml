@@ -2550,6 +2550,16 @@ ApplicationWindow {
                                 onClicked: editor.detachAudio()
                             }
                             Action {
+                                objectName: "unlinkClip"
+                                text: "Unlink picture and sound"
+                                visible: (win.selection.linkedCount || 0) > 0
+                                enabled: win.selection.locked !== true
+                                Layout.fillWidth: true
+                                onClicked: editor.unlinkClip()
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Linked clips move and trim together. Unlink to edit them separately."
+                            }
+                            Action {
                                 text: "Relink source media…"
                                 visible: (win.selection.assetId || "").length > 0
                                 Layout.fillWidth: true

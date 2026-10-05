@@ -45,6 +45,9 @@ struct Keyframe {
 };
 struct Clip {
     QString id, assetId, name;
+    // Clips with the same link (picture and its detached sound) move and trim together while
+    // they stay aligned; "none" marks a pair the user unlinked.
+    QString link;
     int track = 0;
     qint64 start = 0, duration = 1;
     Time sourceIn, speed{1};

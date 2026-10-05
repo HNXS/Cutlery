@@ -110,6 +110,8 @@ class Editor final : public QObject {
     // a full-size clip to 30% and inset it by a margin; "full" restores a centred full frame.
     Q_INVOKABLE void placeClip(const QString &corner);
     Q_INVOKABLE void moveClip(const QString &id, qint64 frame, int track);
+    // Lets the selected clip and its linked picture or sound move and trim on their own.
+    Q_INVOKABLE void unlinkClip();
     Q_INVOKABLE void split();
     // Adds a keyframe at the playhead with the current value, or removes the one there.
     Q_INVOKABLE void toggleKeyframe(const QString &property);

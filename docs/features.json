@@ -546,8 +546,8 @@
     "status": "Planned",
     "acceptance": "Ripple maintains link; deliberate offset shows and can be reset",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Video and audio initially share timing; detach creates an independent audio-only clip. No pair resync."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Detach audio puts the sound on its own track, linked to the picture: moving or trimming either one moves or trims both while they stay aligned, splitting both keeps two linked pairs, and a slip of one alone keeps the link. \"Unlink picture and sound\" frees them; linked clips show ⛓ in the timeline. No automatic resync by waveform."
   },
   {
     "id": "F023",
@@ -671,8 +671,8 @@
     "status": "Planned",
     "acceptance": "Each tool matches golden before/after model including audio links",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Magnetic track trims ripple subsequent clips; no roll, slip, slide or linked-pair propagation."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Magnetic tracks ripple; Alt+drag a clip to slip its source, Alt+Shift+drag to slide it between its neighbours (they grow or shrink), Alt+drag an edge between two touching clips to roll the cut. Each edit is one undo step; slipping takes the clip's linked sound along. No numeric trim entry."
   },
   {
     "id": "F028",
@@ -822,7 +822,7 @@
     "acceptance": "Frame/sample mapping passes fractional-speed and boundary cases",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Partial",
-    "alphaNotes": "0.25–4x only, preserves pitch via atempo."
+    "alphaNotes": "0.1–10x with pitch kept (atempo chain). No speeds beyond 10x."
   },
   {
     "id": "F034",
@@ -946,8 +946,8 @@
     "status": "Planned",
     "acceptance": "Pixel reference matches CPU/GPU tolerance at noncentral anchor",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Scale/position/rotation/opacity; fixed center anchor."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "Scale, position, rotation and opacity (keyframable) around an anchor point chosen from a 3×3 grid in the inspector (centre by default); the anchor stays in place while the picture scales or turns, also when animated, and the preview frame follows it."
   },
   {
     "id": "F039",
@@ -2447,7 +2447,7 @@
     "acceptance": "Every shipped asset has recorded redistribution rights",
     "source": "Attachment 1, feature ID; expanded by Attachment 2",
     "alphaStatus": "Partial",
-    "alphaNotes": "Imported images as overlays only."
+    "alphaNotes": "Imported images, SVG graphics and animated GIFs as overlays; no built-in sticker or icon library."
   },
   {
     "id": "F099",
@@ -2471,8 +2471,8 @@
     "status": "Planned",
     "acceptance": "Alpha, frame delays and sequence gaps handled consistently",
     "source": "Attachment 2, named section",
-    "alphaStatus": "Partial",
-    "alphaNotes": "Raster still images only."
+    "alphaStatus": "Implemented (alpha)",
+    "alphaNotes": "PNG, JPEG, WebP, TIFF and BMP stills; SVG files drawn with Qt SVG into a 2048-pixel transparent picture on import; animated GIFs as looping clips of any length; numbered image sequences (F151)."
   },
   {
     "id": "F100",

@@ -268,6 +268,8 @@ QJsonObject Project::json(const QString &base) const {
                       {"fontFamily", c.fontFamily},
                       {"textColor", c.textColor},
                       {"fontSize", c.fontSize}};
+        if (!c.link.isEmpty())
+            o["link"] = c.link;
         if (c.anchorX != 0.5 || c.anchorY != 0.5)
             o["anchor"] = QJsonArray{c.anchorX, c.anchorY};
         // Text style, stored when it differs from the default.
@@ -462,6 +464,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         Clip c;
         c.id = j["id"].toString();
         c.assetId = j["assetId"].toString();
+        c.link = j["link"].toString().left(64);
         c.name = j["name"].toString();
         c.track = j["track"].toInt();
         c.start = integer(j["start"]);
@@ -816,10 +819,18 @@ qint64 Project::cutRanges(const QString &id, QVector<QPair<qint64, qint64>> rang
 QStringList Project::linkedClips(const QString &id) const {
     QStringList ids;
     const auto *c = clip(id);
-    if (!c || c->assetId.isEmpty())
+    if (!c || c->assetId.isEmpty() || c->link == "none")
         return ids;
+    if (!c->link.isEmpty()) {
+        for (const auto &x : clips)
+            if (x.id != id && x.link == c->link && x.track != c->track && x.start == c->start &&
+                x.duration == c->duration)
+                ids << x.id;
+        return ids;
+    }
+    // Projects from before links: the same source range on another track.
     for (const auto &x : clips)
-        if (x.id != id && x.track != c->track && x.assetId == c->assetId && x.start == c->start &&
+        if (x.id != id && x.link.isEmpty() && x.track != c->track && x.assetId == c->assetId && x.start == c->start &&
             x.duration == c->duration && x.sourceIn == c->sourceIn && x.speed == c->speed &&
             x.reverse == c->reverse)
             ids << x.id;

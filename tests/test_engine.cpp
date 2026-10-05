@@ -3498,6 +3498,57 @@ class EngineTest : public QObject {
         QVERIFY(!e.state()["error"].toString().isEmpty());
         QCOMPARE(e.project().clip(id)->sourceIn.seconds(), 1.);
     }
+    void linkedPictureAndSound() {
+        QTemporaryDir dir;
+        const auto source = dir.filePath("talk.mkv");
+        run(Editor::executable("ffmpeg"), {"-v", "error", "-f", "lavfi", "-i", "color=gray:s=160x90:r=30:d=4", "-f", "lavfi",
+                                           "-i", "sine=d=4", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest", source});
+        FrameProvider frames;
+        Editor e(&frames);
+        e.configure(160, 90, 30, 1);
+        e.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(e.project().assets.size() == 1, 15000);
+        e.addAsset(e.project().assets.first().id);
+        const auto video = e.project().clips.first().id;
+        e.select(video);
+        e.detachAudio();
+        const auto audio = e.state()["selectedId"].toString();
+        QVERIFY(audio != video);
+        QCOMPARE(e.project().linkedClips(video), QStringList{audio});
+        QVERIFY(!e.project().clip(video)->link.isEmpty());
+        // Moving or trimming either one takes the other along.
+        e.moveClip(video, 45, e.project().clip(video)->track);
+        QCOMPARE(e.project().clip(audio)->start, 45);
+        e.trimClip(audio, 50, 90);
+        QCOMPARE(e.project().clip(video)->start, 50);
+        QCOMPARE(e.project().clip(video)->duration, 40);
+        // A slip of the picture alone keeps the pair linked (sound offset on purpose).
+        auto p = e.project();
+        p.clip(video)->sourceIn = Time(1, 2);
+        QCOMPARE(p.linkedClips(video), QStringList{audio});
+        // Splitting both makes two linked pairs.
+        e.seek(70);
+        e.select(video);
+        e.split();
+        e.select(audio);
+        e.split();
+        QCOMPARE(e.project().clips.size(), size_t(4));
+        for (const auto &c : e.project().clips)
+            QCOMPARE(e.project().linkedClips(c.id).size(), 1);
+        // Saved and loaded with the project.
+        const auto loaded = Project::fromJson(e.project().json(), {});
+        QCOMPARE(loaded.linkedClips(video), QStringList{audio});
+        // Unlinked: they move on their own.
+        e.select(video);
+        e.unlinkClip();
+        QVERIFY(e.project().linkedClips(video).isEmpty());
+        QVERIFY(e.project().linkedClips(audio).isEmpty());
+        e.moveClip(video, 100, e.project().clip(video)->track);
+        QCOMPARE(e.project().clip(audio)->start, 50);
+        e.select(video);
+        e.unlinkClip();
+        QVERIFY(e.state()["error"].toString().contains("not linked"));
+    }
     void sceneDetection() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
