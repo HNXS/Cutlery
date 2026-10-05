@@ -4,7 +4,8 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
-- **Several clips at once:** Ctrl+click to select more clips, which then move and delete together; Ctrl+G groups them, Ctrl+Shift+G ungroups, Ctrl+A selects all.
+- **Export queue:** "Add to queue…" in the export dialog lines up several exports (say a 4K master, a small 1080p and an MP3) that run one after another; each renders the timeline as it was when you queued it, so you can keep editing.
+- **Several clips at once:** Ctrl+click to select more clips, or drag a frame over empty timeline; they move, delete, copy and paste together (pasting keeps their spacing). Ctrl+G groups them, Ctrl+Shift+G ungroups, Ctrl+A selects all.
 - **Titles that build up:** typewriter or word by word.
 - **Pan keyframes:** move the sound from left to right over time.
 - **Slip, slide and roll:** Alt+drag a clip to slip, Alt+Shift+drag to slide, Alt+drag the edge between two clips to roll the cut.

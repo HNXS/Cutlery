@@ -3850,6 +3850,43 @@ class EngineTest : public QObject {
         QCOMPARE(editor.exportPreview({{"format", "h264"}})["audio"].toBool(), false);
         editor.exportWith(QUrl::fromLocalFile(dir.filePath("wrong.mp4")), {{"format", "mp3"}});
         QVERIFY(editor.state()["error"].toString().contains(".mp3"));
+
+        // The export queue: each job keeps the timeline as it was when queued, so editing on
+        // (here: deleting the clip) does not change what the queued exports contain.
+        const auto queued1 = dir.filePath("queue-1.wav"), second = dir.filePath("queue-2.mp3"),
+                   dropped = dir.filePath("queue-3.wav");
+        editor.queueExport(QUrl::fromLocalFile(queued1), {{"format", "wav"}});
+        editor.queueExport(QUrl::fromLocalFile(second), {{"format", "mp3"}});
+        editor.queueExport(QUrl::fromLocalFile(second), {{"format", "mp3"}});
+        QVERIFY(editor.state()["error"].toString().contains("queue already"));
+        editor.queueExport(QUrl::fromLocalFile(dir.filePath("queue.mp4")), {{"format", "wav"}});
+        QVERIFY(editor.state()["error"].toString().contains(".wav"));
+        editor.queueExport(QUrl::fromLocalFile(dropped), {{"format", "wav"}});
+        auto queue = editor.state()["exportQueue"].toList();
+        QCOMPARE(queue.size(), 3);
+        QCOMPARE(queue[0].toMap()["status"].toString(), QString("exporting"));
+        QCOMPARE(queue[1].toMap()["status"].toString(), QString("waiting"));
+        QCOMPARE(queue[1].toMap()["file"].toString(), QString("queue-2.mp3"));
+        editor.removeQueued(0); // running: stays
+        editor.removeQueued(2);
+        QCOMPARE(editor.state()["exportQueue"].toList().size(), 2);
+        editor.select(editor.project().clips.first().id);
+        editor.remove();
+        QVERIFY(editor.project().clips.empty());
+        QTRY_VERIFY_WITH_TIMEOUT(
+            [&] {
+                const auto q = editor.state()["exportQueue"].toList();
+                return q[0].toMap()["status"] == "done" && q[1].toMap()["status"] == "done";
+            }(),
+            60000);
+        QVERIFY(!QFileInfo::exists(dropped));
+        for (const auto &out : {queued1, second}) {
+            const auto probe = QString::fromUtf8(run(Editor::executable("ffprobe"),
+                                                     {"-v", "error", "-show_entries",
+                                                      "format=duration", "-of", "compact", out}));
+            const auto duration = QRegularExpression("duration=([0-9.]+)").match(probe);
+            QVERIFY2(std::abs(duration.captured(1).toDouble() - 2) < 0.1, qPrintable(probe));
+        }
     }
     void colourAndLook() {
         QCOMPARE(filterPath("C:/a b/it's,[x];y=z.cube"),

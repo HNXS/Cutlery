@@ -117,6 +117,11 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     m_previewTimer.setSingleShot(true);
     m_previewTimer.setInterval(180);
     connect(&m_previewTimer, &QTimer::timeout, this, &Editor::requestPreview);
+    m_queueTimer.setInterval(500);
+    connect(&m_queueTimer, &QTimer::timeout, this, [this] {
+        advanceQueue();
+        emit changed();
+    });
     m_playback = new Playback(this);
     connect(m_playback, &Playback::frameChanged, this, &Editor::playbackChanged);
     connect(m_playback, &Playback::finished, this, [this] {
@@ -530,6 +535,20 @@ QVariantMap Editor::state() const {
             {"selected", selected},
             {"selectedId", m_selected},
             {"selectedIds", selection()},
+            {"exportQueue", [this] {
+                 QVariantList list;
+                 for (const auto &q : m_queue) {
+                     const auto s = q.settings;
+                     list << QVariantMap{{"file", QFileInfo(localPath(q.url)).fileName()},
+                                         {"label", s.value("format").toString().toUpper() + " · " +
+                                                       s.value("quality").toString() +
+                                                       (s.value("height").toInt() > 0 ? " · " + QString::number(s.value("height").toInt()) + "p" : QString()) +
+                                                       (s.value("range") == "inout" ? " · in/out" : QString())},
+                                         {"status", q.status}};
+                 }
+                 return list;
+             }()},
+            {"queuePaused", m_queuePaused},
             {"playhead", m_playhead},
             {"duration", m_project.duration()},
             {"fps", double(m_project.fpsN) / m_project.fpsD},
@@ -3293,7 +3312,73 @@ QVariantMap Editor::exportPreview(const QVariantMap &settings) const {
         return {};
     }
 }
+void Editor::queueExport(const QUrl &url, const QVariantMap &settings) {
+    try {
+        const auto output = localPath(url);
+        const auto s = exportSettings(settings);
+        if (QFileInfo::exists(output))
+            throw std::runtime_error("That output file already exists. Choose a new filename.");
+        if (QFileInfo(output).suffix().compare(formatExtension(s.format), Qt::CaseInsensitive))
+            throw std::runtime_error(
+                ("Use a ." + formatExtension(s.format) + " filename for this format").toStdString());
+        for (const auto &q : m_queue)
+            if (q.status == "waiting" && localPath(q.url) == output)
+                throw std::runtime_error("That file is in the queue already");
+        m_queue.push_back({url, settings, m_project});
+        m_queuePaused = false;
+        m_status = "Added to the export queue: " + QFileInfo(output).fileName();
+        advanceQueue();
+        emit changed();
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
+void Editor::removeQueued(int index) {
+    if (index < 0 || index >= m_queue.size() || m_queue[index].status == "exporting")
+        return;
+    m_queue.remove(index);
+    emit changed();
+}
+void Editor::startQueue() {
+    m_queuePaused = false;
+    advanceQueue();
+    emit changed();
+}
+void Editor::advanceQueue() {
+    // The running export finished: its file tells whether it worked.
+    for (auto &q : m_queue)
+        if (q.status == "exporting" && !m_busy) {
+            if (QFileInfo::exists(localPath(q.url)))
+                q.status = "done";
+            else if (m_cancelled) {
+                q.status = "cancelled";
+                m_queuePaused = true;
+            } else
+                q.status = "failed";
+        }
+    if (m_busy || m_queuePaused) {
+        if (m_busy && !m_queueTimer.isActive())
+            m_queueTimer.start();
+        return;
+    }
+    for (auto &q : m_queue)
+        if (q.status == "waiting") {
+            q.status = "exporting";
+            exportProject(q.project, q.url, q.settings);
+            if (!m_busy && !QFileInfo::exists(localPath(q.url)))
+                q.status = "failed";
+            else
+                m_queueTimer.start();
+            if (q.status == "failed")
+                continue; // try the next one
+            return;
+        }
+    m_queueTimer.stop();
+}
 void Editor::exportWith(const QUrl &url, const QVariantMap &settings) {
+    exportProject(m_project, url, settings);
+}
+void Editor::exportProject(const Project &project, const QUrl &url, const QVariantMap &settings) {
     if (m_busy)
         return;
     try {
@@ -3304,7 +3389,7 @@ void Editor::exportWith(const QUrl &url, const QVariantMap &settings) {
         if (QFileInfo(output).suffix().compare(formatExtension(s.format), Qt::CaseInsensitive))
             throw std::runtime_error(
                 ("Use a ." + formatExtension(s.format) + " filename for this format").toStdString());
-        if (m_project.clips.empty())
+        if (project.clips.empty())
             throw std::runtime_error("The timeline is empty");
         // The in/out range, or the whole timeline.
         const auto range = settings.value("range", "all").toString();
@@ -3313,16 +3398,17 @@ void Editor::exportWith(const QUrl &url, const QVariantMap &settings) {
         m_exportFrom = 0;
         m_exportTo = -1;
         if (range == "inout") {
-            if (m_project.inPoint < 0 && m_project.outPoint < 0)
+            if (project.inPoint < 0 && project.outPoint < 0)
                 throw std::runtime_error("Set an in or out point first (I / O)");
-            m_exportFrom = std::max<qint64>(0, m_project.inPoint);
-            m_exportTo = m_project.outPoint >= 0 ? std::min(m_project.outPoint, m_project.duration())
+            m_exportFrom = std::max<qint64>(0, project.inPoint);
+            m_exportTo = project.outPoint >= 0 ? std::min(project.outPoint, project.duration())
                                                  : -1;
-            if (m_exportFrom >= (m_exportTo >= 0 ? m_exportTo : m_project.duration()))
+            if (m_exportFrom >= (m_exportTo >= 0 ? m_exportTo : project.duration()))
                 throw std::runtime_error("The in/out range is outside the timeline");
         }
-        const auto size = exportSize(m_project, s.height);
-        const double fps = double(m_project.fpsN) / m_project.fpsD;
+        const auto size = exportSize(project, s.height);
+        const double fps = double(project.fpsN) / project.fpsD;
+        m_exportProject = project;
         m_resumeTimer.stop();
         stopPlayback();
         m_busy = true;
@@ -3419,7 +3505,7 @@ void Editor::measureLoudness(const QString &output, QSize size, const Encoder &e
         options.measureLoudness = true;
         options.from = m_exportFrom;
         options.to = m_exportTo;
-        const auto plan = compileRender(m_project, work->path(), size.width(), size.height(),
+        const auto plan = compileRender(m_exportProject, work->path(), size.width(), size.height(),
                                         options);
         const auto graph = work->filePath("measure.txt");
         writeGraph(graph, plan.graph);
@@ -3499,7 +3585,7 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
         }
         addAiMedia(options);
         const auto plan =
-            compileRender(m_project, work->path(), size.width(), size.height(), options);
+            compileRender(m_exportProject, work->path(), size.width(), size.height(), options);
         const auto graph = work->filePath("graph.txt");
         writeGraph(graph, plan.graph);
         const QString temp =

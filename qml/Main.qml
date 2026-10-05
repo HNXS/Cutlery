@@ -36,6 +36,7 @@ ApplicationWindow {
             height: 0,
             loudness: -14
         })
+    property bool queueExport: false // the export file dialog adds to the queue instead
     property string pendingAction: ""
     property bool allowClose: false
     property var libraryGesture: null
@@ -2705,7 +2706,7 @@ ApplicationWindow {
         readonly property string extension: editor.exportPreview(win.exportChoice).extension || "mp4"
         defaultSuffix: extension
         nameFilters: [extension.toUpperCase() + " (*." + extension + ")"]
-        onAccepted: editor.exportWith(selectedFile, win.exportChoice)
+        onAccepted: win.queueExport ? editor.queueExport(selectedFile, win.exportChoice) : editor.exportWith(selectedFile, win.exportChoice)
     }
     FileDialog {
         id: relinkDialog
@@ -3207,7 +3208,32 @@ ApplicationWindow {
         title: "Export video"
         modal: true
         width: 480
-        standardButtons: Dialog.Ok | Dialog.Cancel
+        footer: DialogButtonBox {
+            Button {
+                objectName: "exportNow"
+                text: "Export…"
+                enabled: !win.s.busy
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+                onClicked: exportSettings.choose(false)
+            }
+            Button {
+                objectName: "addToQueue"
+                text: "Add to queue…"
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+                onClicked: exportSettings.choose(true)
+            }
+            Button {
+                text: "Close"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+        }
+        function choose(queue) {
+            win.exportChoice = Object.assign({}, current, { range: exportRange.visible && exportRange.currentIndex === 1 ? "inout" : "all" });
+            win.queueExport = queue;
+            exportDialog.open();
+            if (!queue)
+                close();
+        }
         readonly property var formats: [
             { id: "h264", label: "H.264 · MP4 (plays everywhere)" },
             { id: "hevc", label: "HEVC / H.265 · MP4 (smaller files)" },
@@ -3360,10 +3386,48 @@ ApplicationWindow {
                 font.pixelSize: 11
                 text: exportSettings.preview.audio ? "Output: the timeline's sound only, 48 kHz stereo · ." + exportSettings.preview.extension + (exportSettings.preview.extension === "wav" ? " (24-bit at Maximum quality, otherwise 16-bit)" : "") + "." : "Output " + (exportSettings.preview.width || 0) + " × " + (exportSettings.preview.height || 0) + " · ." + (exportSettings.preview.extension || "mp4") + ". Cutlery uses your graphics card's encoder (NVIDIA, AMD or Intel) when available, otherwise Windows' encoder; AV1, VP9 and ProRes also work in software. Higher resolutions re-render each source at that size with sharp Lanczos scaling, so 4K sources stay 4K."
             }
-        }
-        onAccepted: {
-            win.exportChoice = Object.assign({}, current, { range: exportRange.visible && exportRange.currentIndex === 1 ? "inout" : "all" });
-            exportDialog.open();
+            // The export queue: each job renders the timeline as it was when it was added, one
+            // after the other, so you can queue several formats and keep editing.
+            Label {
+                Layout.columnSpan: 2
+                visible: win.s.exportQueue.length > 0
+                text: "Export queue" + (win.s.queuePaused ? " (paused after a cancelled export)" : "")
+                font.bold: true
+            }
+            Repeater {
+                model: win.s.exportQueue
+                delegate: RowLayout {
+                    required property var modelData
+                    required property int index
+                    Layout.columnSpan: 2
+                    Layout.fillWidth: true
+                    objectName: "queued-" + index
+                    Label {
+                        Layout.fillWidth: true
+                        elide: Text.ElideMiddle
+                        text: modelData.file + "  ·  " + modelData.label
+                    }
+                    Label {
+                        text: ({ waiting: "Waiting", exporting: "Exporting " + Math.round(win.s.progress * 100) + " %", done: "Done", failed: "Failed", cancelled: "Cancelled" })[modelData.status] || modelData.status
+                        color: modelData.status === "failed" || modelData.status === "cancelled" ? "#e06c75" : modelData.status === "done" ? "#98c379" : win.muted
+                    }
+                    ToolButton {
+                        objectName: "removeQueued-" + index
+                        text: "✕"
+                        enabled: modelData.status !== "exporting"
+                        onClicked: editor.removeQueued(index)
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Remove from the queue"
+                    }
+                }
+            }
+            Button {
+                Layout.columnSpan: 2
+                objectName: "startQueue"
+                visible: win.s.queuePaused && win.s.exportQueue.some(q => q.status === "waiting")
+                text: "Continue the queue"
+                onClicked: editor.startQueue()
+            }
         }
     }
     Dialog {

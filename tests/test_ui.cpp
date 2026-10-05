@@ -405,6 +405,18 @@ class UiTest : public QObject {
         QVERIFY(result && findItem(window->contentItem(), "measureLoudness"));
         QVERIFY(result->property("text").toString().contains("Integrated loudness"));
         QVERIFY(findItem(window->contentItem(), "levelMeter"));
+        // Export now or add to the queue; queued jobs are listed with their state.
+        QVERIFY(findItem(window->contentItem(), "exportNow")->isVisible());
+        QVERIFY(findItem(window->contentItem(), "addToQueue")->isVisible());
+        editor.queueExport(QUrl::fromLocalFile(dir.filePath("a.wav")), {{"format", "wav"}});
+        editor.queueExport(QUrl::fromLocalFile(dir.filePath("b.wav")), {{"format", "wav"}});
+        QTRY_VERIFY(findItem(window->contentItem(), "queued-1"));
+        auto *removeSecond = findItem(window->contentItem(), "removeQueued-1");
+        QVERIFY(removeSecond && removeSecond->isEnabled());
+        QVERIFY(!findItem(window->contentItem(), "removeQueued-0")->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(removeSecond, "clicked"));
+        QTRY_VERIFY(!findItem(window->contentItem(), "queued-1"));
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void presenterControls() {

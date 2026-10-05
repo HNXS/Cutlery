@@ -210,6 +210,12 @@ class Editor final : public QObject {
     Q_INVOKABLE void exportVideo(const QUrl &, const QString &profile);
     // settings: {format, quality, height}; see ExportSettings.
     Q_INVOKABLE void exportWith(const QUrl &, const QVariantMap &settings);
+    // Export queue: exports run one after another (state "exportQueue": file, label, status
+    // waiting|exporting|done|failed|cancelled). Cancelling the running export pauses the queue
+    // until startQueue().
+    Q_INVOKABLE void queueExport(const QUrl &, const QVariantMap &settings);
+    Q_INVOKABLE void removeQueued(int index);
+    Q_INVOKABLE void startQueue();
     // Output size and file extension for export settings, for the export dialog.
     Q_INVOKABLE QVariantMap exportPreview(const QVariantMap &settings) const;
     Q_INVOKABLE void cancelJob();
@@ -296,6 +302,7 @@ class Editor final : public QObject {
     QVariantMap m_loudness; // measurement of the running export, when normalising
     QVariantMap m_mixLoudness; // last analyzeLoudness() result
     qint64 m_exportFrom = 0, m_exportTo = -1; // frame range of the running export
+    Project m_exportProject; // the timeline being exported, as it was when the export started
     std::optional<Clip> m_clipboard;
     void loadFonts(const QString &folder);
     QHash<QString, QString> m_fontFiles; // family → file, for fonts added in Cutlery
@@ -311,6 +318,17 @@ class Editor final : public QObject {
     // The track nearest `home` with room for [start, start + length), or a new one on top.
     static int freeTrack(Project &, int home, qint64 start, qint64 length);
     QStringList m_recent;
+    struct QueuedExport {
+        QUrl url;
+        QVariantMap settings;
+        Project project; // the timeline as it was when queued
+        QString status = "waiting";
+    };
+    QVector<QueuedExport> m_queue;
+    bool m_queuePaused = false;
+    QTimer m_queueTimer;
+    void advanceQueue();
+    void exportProject(const Project &, const QUrl &, const QVariantMap &settings);
     QStringList m_also; // selected besides m_selected
     void remember(const QString &path);
     void saveRecent();
