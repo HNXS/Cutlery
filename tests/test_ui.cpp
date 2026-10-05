@@ -597,6 +597,19 @@ class UiTest : public QObject {
         altDrag(clipA, qRound(10 * pixelsPerFrame), Qt::NoModifier);
         QTRY_VERIFY(editor.project().clip(a)->start > startA);
         QCOMPARE(editor.project().clip(c)->start - startC, editor.project().clip(a)->start - startA);
+        // A rectangle drawn from the empty track above into track 0 selects the clips it touches.
+        editor.select(QString());
+        clipA = findItem(window->contentItem(), "clip-" + a);
+        auto *clipB2 = findItem(window->contentItem(), "clip-" + b);
+        QVERIFY(clipA && clipB2);
+        const auto from = clipA->mapToScene(QPointF(10, -40)).toPoint(),
+                   to = center(clipB2);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, from);
+        QTest::mouseMove(window, from + QPoint(10, 10), 20);
+        QTest::mouseMove(window, (from + to) / 2, 20);
+        QTest::mouseMove(window, to, 20);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, to);
+        QTRY_VERIFY(editor.selection().contains(a) && editor.selection().contains(b));
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
     }
     void lookControls() {

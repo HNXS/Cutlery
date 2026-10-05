@@ -2363,29 +2363,85 @@ void Editor::copy() {
     m_clipboard = *c;
     const auto *a = m_project.asset(c->assetId);
     m_clipboardAsset = a ? std::optional<Asset>(*a) : std::nullopt;
-    m_status = "Copied " + c->name;
+    m_clipboardMore.clear();
+    m_clipboardMoreAssets.clear();
+    for (const auto &id : selection())
+        if (id != m_selected) {
+            const auto *x = m_project.clip(id);
+            m_clipboardMore << *x;
+            if (const auto *xa = m_project.asset(x->assetId))
+                m_clipboardMoreAssets << *xa;
+        }
+    m_status = m_clipboardMore.isEmpty()
+                   ? "Copied " + c->name
+                   : QString("Copied %1 clips").arg(m_clipboardMore.size() + 1);
     emit changed();
 }
 void Editor::paste() {
     if (!m_clipboard)
         return;
-    const auto id = newId();
+    QStringList added;
     mutate([&](Project &p) {
-        auto copy = *m_clipboard;
-        copy.id = id;
-        copy.transition.clear();
-        copy.transitionFrames = 0;
-        if (m_clipboardAsset && !p.asset(m_clipboardAsset->id))
-            p.assets.push_back(*m_clipboardAsset);
-        // Timing is in frames: a clip from a project with another frame rate keeps its length.
-        // The clip goes to its own track when that is free at the playhead (magnetic tracks make
-        // room), otherwise to the nearest free track above or below, or to a new track on top.
-        copy.start = m_playhead;
-        copy.track = freeTrack(p, std::min(copy.track, p.tracks - 1), copy.start, copy.duration);
-        p.clips.push_back(copy);
-        p.move(copy.id, copy.track, copy.start);
+        auto clips = QVector<Clip>{*m_clipboard} + m_clipboardMore;
+        auto assets = m_clipboardMoreAssets;
+        if (m_clipboardAsset)
+            assets.prepend(*m_clipboardAsset);
+        for (const auto &a : assets)
+            if (!p.asset(a.id))
+                p.assets.push_back(a);
+        // The earliest copied clip lands at the playhead; the others keep their distance to it.
+        qint64 earliest = clips.first().start;
+        for (const auto &c : clips)
+            earliest = std::min(earliest, c.start);
+        // New links and groups, so the copies stay together but apart from the originals.
+        QHash<QString, QString> renamed;
+        auto rename = [&](const QString &key) {
+            if (key.isEmpty() || key == "none")
+                return key;
+            if (!renamed.contains(key))
+                renamed[key] = newId();
+            return renamed[key];
+        };
+        for (auto copy : clips) {
+            copy.id = newId();
+            copy.transition.clear();
+            copy.transitionFrames = 0;
+            copy.link = rename(copy.link);
+            copy.group = rename(copy.group);
+            // Timing is in frames: a clip from a project with another frame rate keeps its
+            // length. A clip goes to its own track when that is free there (magnetic tracks make
+            // room), otherwise to the nearest free track above or below, or to a new track.
+            copy.start = m_playhead + (copy.start - earliest);
+            copy.track = freeTrack(p, std::min(copy.track, p.tracks - 1), copy.start, copy.duration);
+            p.clips.push_back(copy);
+            p.move(copy.id, copy.track, copy.start);
+            added << copy.id;
+        }
     });
-    select(id);
+    if (added.isEmpty())
+        return;
+    m_selected = added.takeFirst();
+    m_also = added;
+    emit changed();
+}
+void Editor::selectArea(qint64 from, qint64 to, int low, int high, bool add) {
+    if (!add) {
+        m_selected.clear();
+        m_also.clear();
+    }
+    auto current = selection();
+    for (const auto &c : m_project.clips)
+        if (c.track >= low && c.track <= high && c.start < to && c.start + c.duration > from &&
+            !current.contains(c.id)) {
+            current << c.id;
+            if (!c.group.isEmpty())
+                for (const auto &x : m_project.clips)
+                    if (x.group == c.group && !current.contains(x.id))
+                        current << x.id;
+        }
+    m_selected = current.isEmpty() ? QString() : current.takeFirst();
+    m_also = current;
+    emit changed();
 }
 void Editor::pasteAttributes(const QString &group) {
     if (!m_clipboard || (group != "look" && group != "all"))

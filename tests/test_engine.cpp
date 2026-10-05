@@ -3636,6 +3636,34 @@ class EngineTest : public QObject {
         e.clearError();
         e.selectAll();
         QCOMPARE(e.selection().size(), 3);
+        // An area: frames 50-150 on track 1 touch only C; tracks 0-1 from 0 to 120 touch A and C.
+        e.selectArea(50, 150, 1, 1, false);
+        QCOMPARE(e.selection(), QStringList{ids[2]});
+        e.selectArea(0, 120, 0, 1, false);
+        QCOMPARE(e.selection().size(), 2);
+        QVERIFY(e.selection().contains(ids[0]) && e.selection().contains(ids[2]));
+        e.selectArea(190, 260, 0, 0, true); // adds B
+        QCOMPARE(e.selection().size(), 3);
+        // Copy A and C, paste at 300: they keep their distance and tracks; the copies are
+        // selected; a group among copied clips becomes a new group of the copies.
+        e.select(ids[0]);
+        e.toggleSelect(ids[2]);
+        e.groupSelection();
+        e.select(ids[0]);
+        e.copy();
+        e.seek(300);
+        const auto before = e.project().clips.size();
+        e.paste();
+        QCOMPARE(e.project().clips.size(), before + 2);
+        const auto pasted = e.selection();
+        QCOMPARE(pasted.size(), 2);
+        const auto *pa = e.project().clip(pasted[0]), *pc = e.project().clip(pasted[1]);
+        QCOMPARE(std::min(pa->start, pc->start), e.state()["playhead"].toLongLong());
+        QCOMPARE(std::abs(pc->start - pa->start), 100);
+        QCOMPARE(pa->group, pc->group);
+        QVERIFY(pa->group != e.project().clip(ids[0])->group);
+        e.undo();
+        QCOMPARE(e.project().clips.size(), before);
     }
     void titlesThatBuildUp() {
         const auto ffmpeg = Editor::executable("ffmpeg");

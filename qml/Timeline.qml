@@ -471,12 +471,49 @@ FocusScope {
                                 border.color: "#293540"
                             }
                         }
+                        // Empty timeline: a click moves the playhead; dragging draws a rectangle that
+                        // selects the clips it touches (Ctrl adds to the selection).
                         MouseArea {
+                            id: emptyArea
+                            objectName: "timelineEmpty"
                             anchors.fill: parent
+                            property point origin
+                            property bool banding: false
+                            preventStealing: true
                             onPressed: function (mouse) {
                                 root.forceActiveFocus();
+                                origin = Qt.point(mouse.x, mouse.y);
+                                banding = false;
                                 root.seekRequested(Math.round(mouse.x / root.pixelsPerSecond * root.state.fps));
                             }
+                            onPositionChanged: function (mouse) {
+                                if (pressed && !banding && Math.abs(mouse.x - origin.x) + Math.abs(mouse.y - origin.y) > 8)
+                                    banding = true;
+                                if (banding) {
+                                    band.x = Math.min(origin.x, mouse.x);
+                                    band.y = Math.min(origin.y, mouse.y);
+                                    band.width = Math.abs(mouse.x - origin.x);
+                                    band.height = Math.abs(mouse.y - origin.y);
+                                }
+                            }
+                            onReleased: function (mouse) {
+                                if (!banding)
+                                    return;
+                                banding = false;
+                                const from = Math.floor(band.x / root.pixelsPerSecond * root.state.fps);
+                                const to = Math.ceil((band.x + band.width) / root.pixelsPerSecond * root.state.fps);
+                                const high = root.state.tracks - 1 - Math.floor(band.y / root.rowHeight);
+                                const low = root.state.tracks - 1 - Math.floor((band.y + band.height) / root.rowHeight);
+                                editor.selectArea(from, Math.max(from + 1, to), low, high, (mouse.modifiers & Qt.ControlModifier) !== 0);
+                            }
+                        }
+                        Rectangle {
+                            id: band
+                            objectName: "selectionBand"
+                            visible: emptyArea.banding
+                            z: 20
+                            color: "#3364d8bc"
+                            border.color: "#64d8bc"
                         }
                         Repeater {
                             model: editor.clips

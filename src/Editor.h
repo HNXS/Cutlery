@@ -117,6 +117,9 @@ class Editor final : public QObject {
     // deleting deletes them all.
     Q_INVOKABLE void toggleSelect(const QString &id);
     Q_INVOKABLE void selectAll();
+    // The clips in a timeline rectangle: frames [from, to) on tracks [low, high]. `add` keeps
+    // the current selection.
+    Q_INVOKABLE void selectArea(qint64 from, qint64 to, int low, int high, bool add);
     Q_INVOKABLE void groupSelection();
     Q_INVOKABLE void ungroupSelection();
     QStringList selection() const;
@@ -322,6 +325,9 @@ class Editor final : public QObject {
     qint64 m_voiceStart = 0;
     QElapsedTimer m_voiceClock;
     std::optional<Asset> m_clipboardAsset;
+    // The other clips copied with m_clipboard, and their media.
+    QVector<Clip> m_clipboardMore;
+    QVector<Asset> m_clipboardMoreAssets;
     QProcess *m_loudnessProcess = nullptr;
     struct Pauses {
         QString clipId, status; // status: idle, finding, ready, failed
