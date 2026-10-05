@@ -1199,7 +1199,7 @@ ApplicationWindow {
                                     },
                                     {
                                         key: "speed",
-                                        name: "Speed (0.25–4×)"
+                                        name: "Speed (0.1–10×)"
                                     }
                                 ]
                                 RowLayout {
@@ -1764,6 +1764,43 @@ ApplicationWindow {
                                             onClicked: editor.placeClip(modelData.id)
                                             ToolTip.visible: hovered
                                             ToolTip.text: modelData.id === "full" ? "Full frame" : "Picture-in-picture in this corner"
+                                        }
+                                    }
+                                }
+                                // Anchor: the point that zoom and rotation keep in place, e.g. a corner for
+                                // a zoom into that corner.
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label {
+                                        text: "Anchor"
+                                        color: (win.selection.anchorX ?? .5) !== .5 || (win.selection.anchorY ?? .5) !== .5 ? win.mint : win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    Grid {
+                                        objectName: "anchorGrid"
+                                        columns: 3
+                                        spacing: 2
+                                        Repeater {
+                                            model: 9
+                                            Rectangle {
+                                                required property int index
+                                                readonly property real ax: (index % 3) / 2
+                                                readonly property real ay: Math.floor(index / 3) / 2
+                                                readonly property bool active: Math.abs((win.selection.anchorX ?? .5) - ax) < .01 && Math.abs((win.selection.anchorY ?? .5) - ay) < .01
+                                                objectName: "anchor-" + index
+                                                width: 16
+                                                height: 12
+                                                radius: 2
+                                                color: active ? win.mint : "#2b3742"
+                                                border.color: "#35404b"
+                                                TapHandler {
+                                                    enabled: win.selection.locked !== true
+                                                    onTapped: editor.setClipValues({ anchorX: parent.ax, anchorY: parent.ay })
+                                                }
+                                                HoverHandler { id: anchorHover }
+                                                ToolTip.visible: anchorHover.hovered
+                                                ToolTip.text: "Zoom and rotate around this point"
+                                            }
                                         }
                                     }
                                 }
@@ -2513,6 +2550,16 @@ ApplicationWindow {
                                 onClicked: editor.detachAudio()
                             }
                             Action {
+                                objectName: "unlinkClip"
+                                text: "Unlink picture and sound"
+                                visible: (win.selection.linkedCount || 0) > 0
+                                enabled: win.selection.locked !== true
+                                Layout.fillWidth: true
+                                onClicked: editor.unlinkClip()
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Linked clips move and trim together. Unlink to edit them separately."
+                            }
+                            Action {
                                 text: "Relink source media…"
                                 visible: (win.selection.assetId || "").length > 0
                                 Layout.fillWidth: true
@@ -2579,7 +2626,7 @@ ApplicationWindow {
         id: importDialog
         title: "Import local media"
         fileMode: FileDialog.OpenFiles
-        nameFilters: ["Media files (*.mp4 *.mov *.mkv *.webm *.avi *.mp3 *.wav *.m4a *.aac *.flac *.ogg *.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff)", "All files (*)"]
+        nameFilters: ["Media files (*.mp4 *.mov *.mkv *.webm *.avi *.mp3 *.wav *.m4a *.aac *.flac *.ogg *.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.gif *.svg)", "All files (*)"]
         onAccepted: editor.importMedia(selectedFiles)
     }
     FileDialog {

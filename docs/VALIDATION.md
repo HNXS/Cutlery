@@ -1,5 +1,25 @@
 # Validation record
 
+## Windows portable build — 2026-10-05, slip/slide/roll, linked A/V, anchor, GIF and SVG (0.6 development)
+
+[GitHub Actions run 37290506341](https://github.com/HNXS/Cutlery/actions/runs/37290506341) on commit `51f6cf5c6b7fbca26ce905f7dcc52ed21704bdf7` passed every step, including the local build script. Qt SVG, now a build dependency, comes with the standard Qt installation, so the Qt install step needed no extra module.
+
+New coverage:
+
+- **Engine tests:**
+  - `anchorPointAndSpeedRange`:
+    - a corner anchor and an animated zoom towards the bottom-right corner keep that corner in place;
+    - the rotation maths;
+    - the anchor is saved only when moved;
+    - a 10× clip shows every tenth source frame and has a tenth of the audio;
+    - 0.1× is the lower limit.
+  - `gifAndSvgOverlays`:
+    - a 1 s GIF loops correctly over a 4 s clip;
+    - an SVG becomes a 2048 × 1024 transparent picture with the right colours.
+  - `slipRollAndSlide`: the model edits and their limits; slipping in the editor takes detached audio along.
+  - `linkedPictureAndSound`: move, trim, split into two linked pairs, save, unlink.
+- **Interface test `slipSlideAndRollDrags`:** Alt+drag, Alt+Shift+drag and Alt-drag on an edge in the real timeline.
+
 ## Windows portable build — 2026-10-04, freeze frame, transitions, pan, recent projects and versions (0.6 development)
 
 [GitHub Actions run 37206990048](https://github.com/HNXS/Cutlery/actions/runs/37206990048) on commit `409ced2ed4c9fb00116f87cc66ea652fd76166ad` passed every step, including the local build script; nothing was uploaded.

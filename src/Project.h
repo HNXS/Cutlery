@@ -2,6 +2,7 @@
 #include "RationalTime.h"
 #include <QJsonObject>
 #include <QMap>
+#include <QPointF>
 #include <QSizeF>
 #include <QString>
 #include <QVector>
@@ -23,6 +24,12 @@ struct Asset {
     // (variable frame rate, typical of phone and screen recordings).
     double frameRate = 0;
     bool variableRate = false;
+    // Animated GIFs repeat, so their clips can be any length.
+    bool loops = false;
+    // Images and looping animations have no end; their clips are not limited by the source.
+    bool endless() const {
+        return kind == "image" || loops;
+    }
 };
 // Variable frame rate: the nominal and average rates of a stream differ by more than 1 %.
 bool isVariableRate(double nominal, double average);
@@ -38,11 +45,17 @@ struct Keyframe {
 };
 struct Clip {
     QString id, assetId, name;
+    // Clips with the same link (picture and its detached sound) move and trim together while
+    // they stay aligned; "none" marks a pair the user unlinked.
+    QString link;
     int track = 0;
     qint64 start = 0, duration = 1;
     Time sourceIn, speed{1};
     bool muted = false, hidden = false, reverse = false, flip = false, audioOnly = false;
     double scale = 1, x = 0, y = 0, rotation = 0, opacity = 1, volume = 1;
+    // The point of the picture that scaling and rotation keep in place, as fractions of its
+    // width and height (0.5, 0.5: the centre).
+    double anchorX = 0.5, anchorY = 0.5;
     double brightness = 0, contrast = 1, saturation = 1, crop = 0;
     double fadeIn = 0, fadeOut = 0;
     QString text, fontFamily = "Arial", textColor = "#ffffff";
@@ -180,6 +193,9 @@ struct Project {
     // Size of a clip's picture fitted into a box at scale 1, before styling. Circles use the
     // centre square; equal-edge crop keeps the aspect ratio.
     QSizeF pictureSize(const Clip &c, double boxWidth, double boxHeight) const;
+    // How far the anchor point moves the picture's centre, in canvas pixels, for a picture of
+    // `base` size at scale 1 shown at `scale` and `rotation` degrees (clockwise).
+    static QPointF anchorShift(const Clip &c, QSizeF base, double scale, double rotation);
     // The clip a transition into `c` comes from, or nullptr when `c` does not start at a cut.
     const Clip *previousAdjacent(const Clip &c) const;
     // Effective transition length into `c` in frames (0 when inactive), limited by both clips.
@@ -200,6 +216,14 @@ struct Project {
     void addTrack(const QString &name = {});
     void removeTrack(int track);
     void trim(const QString &id, qint64 start, qint64 end);
+    // Edits that keep the clips around them in place (the caller validates the result):
+    // Slip shows a later (positive) or earlier part of the source in the same place and length;
+    // detached audio of the clip slips with it.
+    void slip(const QString &id, qint64 frames);
+    // Roll moves the cut between this clip and the one right after it on its track.
+    void roll(const QString &id, qint64 frames);
+    // Slide moves the clip; the touching clips before and after it grow or shrink to match.
+    void slide(const QString &id, qint64 frames);
     QVector<QString> trackOrder(int track, const QString &exclude = {}) const;
     void packTrack(int track, const QVector<QString> &order);
     qint64 placement(int track, qint64 frame, const QString &exclude = {}) const;

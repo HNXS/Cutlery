@@ -484,7 +484,11 @@ FocusScope {
                                 id: clipRect
                                 required property var modelData
                                 objectName: "clip-" + modelData.id
-                                property int operation: 0 // 1 move, 2 start trim, 3 end trim
+                                // 1 move, 2 start trim, 3 end trim; with Alt: 4 slip, 5 slide (Alt+Shift),
+                                // 6 roll the end cut, 7 roll the start cut.
+                                property int operation: 0
+                                property real grabX: 0
+                                property int editFrames: 0
                                 property real grabOffset: 0
                                 property real requestedStart: modelData.start
                                 property real dragStart: modelData.start
@@ -518,7 +522,11 @@ FocusScope {
                                     editor.select(modelData.id);
                                     if (modelData.locked)
                                         return;
+                                    if (mouse.modifiers & Qt.AltModifier)
+                                        mode = mode === 1 ? (mouse.modifiers & Qt.ShiftModifier ? 5 : 4) : mode === 3 ? 6 : 7;
                                     operation = mode;
+                                    editFrames = 0;
+                                    grabX = area.mapToItem(body, mouse.x, mouse.y).x;
                                     dragStart = modelData.start;
                                     dragEnd = modelData.start + modelData.duration;
                                     dragTrack = modelData.track;
@@ -539,6 +547,13 @@ FocusScope {
                                     updateAt(point.x + timeline.contentX, point.y + timeline.contentY);
                                 }
                                 function updateAt(x, y) {
+                                    if (operation >= 4) {
+                                        editFrames = Math.round((x - grabX) / root.pixelsPerSecond * root.state.fps);
+                                        const start = modelData.start, end = modelData.start + modelData.duration;
+                                        dragStart = operation === 5 ? start + editFrames : operation === 7 ? Math.min(end - 1, start + editFrames) : start;
+                                        dragEnd = operation === 5 ? end + editFrames : operation === 6 ? Math.max(start + 1, end + editFrames) : end;
+                                        return;
+                                    }
                                     if (operation === 1) {
                                         dragTrack = root.state.tracks - 1 - Math.floor(y / root.rowHeight);
                                         requestedStart = Math.max(0, Math.round((x - grabOffset) / root.pixelsPerSecond * root.state.fps));
@@ -552,11 +567,23 @@ FocusScope {
                                 function commit() {
                                     const id = modelData.id, mode = operation, start = dragStart, end = dragEnd, track = dragTrack;
                                     const frame = (editor.trackList[track] || {}).magnetic ? requestedStart : start;
+                                    const frames = editFrames;
                                     operation = 0;
                                     root.clearDrag();
-                                    if (mode === 1 && track >= 0 && track < root.state.tracks && !(editor.trackList[track] || {}).locked)
+                                    if (mode === 4)
+                                        // Dragging right shows earlier source, as if pulling the film along.
+                                        editor.slipClip(id, -frames);
+                                    else if (mode === 5)
+                                        editor.slideClip(id, frames);
+                                    else if (mode === 6)
+                                        editor.rollCut(id, frames);
+                                    else if (mode === 7) {
+                                        const before = editor.clips.find(c => c.track === modelData.track && c.start + c.duration === modelData.start);
+                                        if (before)
+                                            editor.rollCut(before.id, frames);
+                                    } else if (mode === 1 && track >= 0 && track < root.state.tracks && !(editor.trackList[track] || {}).locked)
                                         editor.moveClip(id, frame, track);
-                                    else if (mode > 1)
+                                    else if (mode === 2 || mode === 3)
                                         editor.trimClip(id, start, end);
                                 }
                                 x: shownStart / root.state.fps * root.pixelsPerSecond
@@ -626,7 +653,17 @@ FocusScope {
                                     elide: Text.ElideRight
                                     font.pixelSize: 11
                                     font.bold: true
-                                    text: (clipRect.modelData.locked ? "[L] " : "") + clipRect.modelData.name
+                                    text: (clipRect.modelData.locked ? "[L] " : "") + (clipRect.modelData.linked ? "⛓ " : "") + clipRect.modelData.name
+                                }
+                                Label {
+                                    objectName: "editLabel-" + clipRect.modelData.id
+                                    visible: clipRect.operation >= 4
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 8
+                                    y: 7
+                                    font.pixelSize: 10
+                                    color: "#ffd479"
+                                    text: ["Slip", "Slide", "Roll", "Roll"][Math.max(0, clipRect.operation - 4)] + " " + (clipRect.editFrames > 0 ? "+" : "") + clipRect.editFrames + " f"
                                 }
                                 Label {
                                     x: 10

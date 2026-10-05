@@ -2,6 +2,8 @@
 #include <QRegularExpression>
 #include <QColor>
 #include <algorithm>
+#include <cmath>
+#include <numbers>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -176,6 +178,12 @@ QSizeF Project::pictureSize(const Clip &c, double boxWidth, double boxHeight) co
         return {boxHeight * aspect, boxHeight};
     return {boxWidth, boxWidth / aspect};
 }
+QPointF Project::anchorShift(const Clip &c, QSizeF base, double scale, double rotation) {
+    // The anchor stays where it is at scale 1 without rotation; the centre moves around it.
+    const double dx = (c.anchorX - 0.5) * base.width(), dy = (c.anchorY - 0.5) * base.height();
+    const double a = rotation * std::numbers::pi / 180, cs = std::cos(a), sn = std::sin(a);
+    return {dx - scale * (cs * dx - sn * dy), dy - scale * (sn * dx + cs * dy)};
+}
 const Clip *Project::previousAdjacent(const Clip &c) const {
     const Clip *found = nullptr;
     for (const auto &x : clips)
@@ -238,6 +246,8 @@ QJsonObject Project::json(const QString &base) const {
             o["frameRate"] = a.frameRate;
         if (a.variableRate)
             o["variableRate"] = true;
+        if (a.loops)
+            o["loops"] = true;
         aa.append(o);
     }
     for (const auto &c : clips) {
@@ -258,6 +268,10 @@ QJsonObject Project::json(const QString &base) const {
                       {"fontFamily", c.fontFamily},
                       {"textColor", c.textColor},
                       {"fontSize", c.fontSize}};
+        if (!c.link.isEmpty())
+            o["link"] = c.link;
+        if (c.anchorX != 0.5 || c.anchorY != 0.5)
+            o["anchor"] = QJsonArray{c.anchorX, c.anchorY};
         // Text style, stored when it differs from the default.
         if (!c.bold)
             o["bold"] = false;
@@ -442,6 +456,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         a.hasAudio = j["audio"].toBool();
         a.frameRate = j["frameRate"].toDouble(0);
         a.variableRate = j["variableRate"].toBool(false);
+        a.loops = j["loops"].toBool(false) && a.kind == "video";
         p.assets.push_back(a);
     }
     for (auto v : o["clips"].toArray()) {
@@ -449,6 +464,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         Clip c;
         c.id = j["id"].toString();
         c.assetId = j["assetId"].toString();
+        c.link = j["link"].toString().left(64);
         c.name = j["name"].toString();
         c.track = j["track"].toInt();
         c.start = integer(j["start"]);
@@ -460,6 +476,12 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.hidden = j["hidden"].toBool();
         c.reverse = j["reverse"].toBool();
         c.flip = j["flip"].toBool();
+        if (j.contains("anchor")) {
+            const auto anchor = j["anchor"].toArray();
+            require(anchor.size() == 2, "Invalid anchor");
+            c.anchorX = anchor[0].toDouble(-1);
+            c.anchorY = anchor[1].toDouble(-1);
+        }
         c.text = j["text"].toString();
         c.fontFamily = j["fontFamily"].toString("Arial");
         c.textColor = j["textColor"].toString("#ffffff");
@@ -593,7 +615,7 @@ void Project::validate() const {
         require(c.start >= 0 && c.start <= 100000000 && c.duration > 0 &&
                     c.duration <= 100000000 - c.start && c.track >= 0 && c.track < tracks,
                 "Invalid clip range/track");
-        require(c.sourceIn.n >= 0 && c.speed.seconds() >= 0.25 && c.speed.seconds() <= 4,
+        require(c.sourceIn.n >= 0 && c.speed.seconds() >= 0.1 && c.speed.seconds() <= 10,
                 "Invalid source time/speed");
         auto bounded = [](double x, double lo, double hi) {
             return std::isfinite(x) && x >= lo && x <= hi;
@@ -667,13 +689,14 @@ void Project::validate() const {
                 "Invalid sound setting");
         require(QStringList{"", "shake", "glitch", "vhs", "film"}.contains(c.fx) &&
                     bounded(c.fxStrength, 0, 1) && bounded(c.motionBlur, 0, 1) &&
-                    bounded(c.reverb, 0, 1) && bounded(c.echo, 0, 1) && bounded(c.pan, -1, 1),
+                    bounded(c.reverb, 0, 1) && bounded(c.echo, 0, 1) && bounded(c.pan, -1, 1) &&
+                    bounded(c.anchorX, 0, 1) && bounded(c.anchorY, 0, 1),
                 "Invalid effect setting");
         require(QStringList{"", "lowerThird", "lowerThirdLine", "titleCard"}.contains(
                     c.titleStyle) &&
                     QColor(c.accentColor).isValid(),
                 "Invalid title style");
-        if (const auto *a = asset(c.assetId); a && a->kind != "image")
+        if (const auto *a = asset(c.assetId); a && !a->endless())
             require(c.sourceIn.seconds() +
                             frameTime(c.duration, fpsN, fpsD).seconds() * c.speed.seconds() <=
                         a->duration + 0.002,
@@ -796,10 +819,18 @@ qint64 Project::cutRanges(const QString &id, QVector<QPair<qint64, qint64>> rang
 QStringList Project::linkedClips(const QString &id) const {
     QStringList ids;
     const auto *c = clip(id);
-    if (!c || c->assetId.isEmpty())
+    if (!c || c->assetId.isEmpty() || c->link == "none")
         return ids;
+    if (!c->link.isEmpty()) {
+        for (const auto &x : clips)
+            if (x.id != id && x.link == c->link && x.track != c->track && x.start == c->start &&
+                x.duration == c->duration)
+                ids << x.id;
+        return ids;
+    }
+    // Projects from before links: the same source range on another track.
     for (const auto &x : clips)
-        if (x.id != id && x.track != c->track && x.assetId == c->assetId && x.start == c->start &&
+        if (x.id != id && x.link.isEmpty() && x.track != c->track && x.assetId == c->assetId && x.start == c->start &&
             x.duration == c->duration && x.sourceIn == c->sourceIn && x.speed == c->speed &&
             x.reverse == c->reverse)
             ids << x.id;
@@ -853,6 +884,64 @@ void Project::trim(const QString &id, qint64 start, qint64 end) {
     if (trackSettings[c->track].magnetic)
         packTrack(c->track, order);
     // Caller validates the complete candidate before committing an undo step.
+}
+namespace {
+// A clip's new timeline range with its source following the picture, as in a trim, but
+// without touching other clips.
+void setRange(Project &p, Clip &c, qint64 start, qint64 end) {
+    require(start >= 0 && end - start >= 1, "Every clip must keep at least one frame");
+    const auto delta = c.reverse ? c.start + c.duration - end : start - c.start;
+    if (const auto *a = p.asset(c.assetId); a && a->kind != "image")
+        c.sourceIn = c.sourceIn + frameTime(delta, p.fpsN, p.fpsD) * c.speed;
+    c.shiftKeyframes(c.start - start);
+    c.start = start;
+    c.duration = end - start;
+}
+Clip *touching(Project &p, const Clip &c, bool after) {
+    for (auto &x : p.clips)
+        if (x.id != c.id && x.track == c.track &&
+            (after ? x.start == c.start + c.duration : x.start + x.duration == c.start))
+            return &x;
+    return nullptr;
+}
+} // namespace
+void Project::slip(const QString &id, qint64 frames) {
+    auto *c = clip(id);
+    require(c != nullptr, "No such clip");
+    const auto *a = asset(c->assetId);
+    require(a && a->kind != "image", "Only video and audio clips can slip");
+    for (const auto &clipId : linkedClips(id) + QStringList{id}) {
+        auto *x = clip(clipId);
+        requireEditable(x->track);
+        x->sourceIn = x->sourceIn + frameTime(frames, fpsN, fpsD) * x->speed;
+    }
+    require(clip(id)->sourceIn.n >= 0, "The source has no earlier picture to show");
+}
+void Project::roll(const QString &id, qint64 frames) {
+    auto *left = clip(id);
+    require(left != nullptr, "No such clip");
+    auto *right = touching(*this, *left, true);
+    require(right != nullptr, "Roll needs a clip right after this one");
+    requireEditable(left->track);
+    setRange(*this, *left, left->start, left->start + left->duration + frames);
+    setRange(*this, *right, right->start + frames, right->start + right->duration);
+}
+void Project::slide(const QString &id, qint64 frames) {
+    auto *c = clip(id);
+    require(c != nullptr, "No such clip");
+    requireEditable(c->track);
+    auto *before = touching(*this, *c, false);
+    auto *after = touching(*this, *c, true);
+    require(c->start + frames >= 0, "The clip cannot start before the timeline");
+    if (before)
+        setRange(*this, *before, before->start, before->start + before->duration + frames);
+    if (after)
+        setRange(*this, *after, after->start + frames, after->start + after->duration);
+    c->start += frames;
+    for (const auto &x : clips)
+        require(x.id == c->id || x.track != c->track || x.start + x.duration <= c->start ||
+                    x.start >= c->start + c->duration,
+                "There is no room to slide the clip there");
 }
 QVector<QString> Project::trackOrder(int track, const QString &exclude) const {
     QVector<const Clip *> ordered;

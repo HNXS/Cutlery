@@ -3213,6 +3213,342 @@ class EngineTest : public QObject {
         editor.freezeFrame(1);
         QVERIFY(editor.state()["error"].toString().contains("playhead"));
     }
+    void anchorPointAndSpeedRange() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        QImage red(320, 180, QImage::Format_RGB32);
+        red.fill(QColor(220, 0, 0));
+        QVERIFY(red.save(dir.filePath("red.png")));
+        Project p;
+        p.width = 320;
+        p.height = 180;
+        Asset a;
+        a.id = "red";
+        a.path = dir.filePath("red.png");
+        a.kind = "image";
+        a.duration = 5;
+        a.width = 320;
+        a.height = 180;
+        p.assets = {a};
+        Clip c;
+        c.id = "c";
+        c.assetId = "red";
+        c.duration = 30;
+        c.scale = 0.5;
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Clip &clip, qint64 frame) {
+            auto project = p;
+            project.clips = {clip};
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 320, 180, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return out.convertToFormat(QImage::Format_RGB32);
+        };
+        auto isRed = [](const QImage &i, int x, int y) { return QColor(i.pixel(x, y)).red() > 150; };
+        // Centre anchor: half size in the middle.
+        auto centred = still(c, 5);
+        QVERIFY(!isRed(centred, 10, 10) && isRed(centred, 160, 90));
+        // Top-left anchor: the top-left corner stays at the canvas corner.
+        auto topLeft = c;
+        topLeft.anchorX = topLeft.anchorY = 0;
+        auto corner = still(topLeft, 5);
+        QVERIFY(isRed(corner, 5, 5) && isRed(corner, 150, 80) && !isRed(corner, 175, 95));
+        // Animated: zooming out towards the bottom-right corner keeps that corner in place.
+        auto zoom = c;
+        zoom.anchorX = zoom.anchorY = 1;
+        zoom.scale = 1;
+        zoom.keyframes["scale"] = {{0, 1, false}, {20, 0.5, false}};
+        auto end = still(zoom, 25);
+        QVERIFY(isRed(end, 314, 174) && isRed(end, 170, 100) && !isRed(end, 150, 80));
+        auto start = still(zoom, 0);
+        QVERIFY(isRed(start, 5, 5) && isRed(start, 314, 174));
+        // The shift itself, with rotation: a quarter turn around the top-left corner.
+        QSizeF base(320, 180);
+        auto shift = Project::anchorShift(topLeft, base, 1, 90);
+        // Centre offset (160, 90) from the anchor turns to (-90, 160).
+        QVERIFY(std::abs(shift.x() - (-160 - 90)) < 1e-6 && std::abs(shift.y() - (-90 + 160)) < 1e-6);
+        QCOMPARE(Project::anchorShift(c, base, 0.3, 45), QPointF());
+        // Saved only when moved; refused outside the picture.
+        p.clips = {topLeft};
+        const auto json = p.json();
+        QCOMPARE(Project::fromJson(json, {}).clips[0].anchorX, 0.);
+        p.clips = {c};
+        QVERIFY(!p.json()["clips"].toArray()[0].toObject().contains("anchor"));
+        auto bad = json;
+        auto clips = bad["clips"].toArray();
+        auto o = clips[0].toObject();
+        o["anchor"] = QJsonArray{1.5, 0};
+        clips[0] = o;
+        bad["clips"] = clips;
+        QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, {}), std::runtime_error);
+
+        // Speed from 0.1x to 10x: a 10x clip shows every tenth source frame and its sound is
+        // a tenth as long.
+        const auto ramp = dir.filePath("ramp.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=black:s=320x180:r=30:d=4,geq=lum='2*N':cb=128:cr=128",
+                     "-f", "lavfi", "-i", "sine=f=440:d=4:sample_rate=48000", "-c:v", "ffv1", "-c:a",
+                     "pcm_s16le", "-shortest", ramp});
+        Asset v;
+        v.id = "ramp";
+        v.path = ramp;
+        v.kind = "video";
+        v.duration = 4;
+        v.width = 320;
+        v.height = 180;
+        v.hasAudio = true;
+        p.assets = {v};
+        Clip fast;
+        fast.id = "fast";
+        fast.assetId = "ramp";
+        fast.speed = Time(10, 1);
+        fast.duration = 12;
+        const auto frame = still(fast, 5);
+        QVERIFY2(std::abs(qGray(frame.pixel(160, 90)) - 100) < 10, qPrintable(QString::number(qGray(frame.pixel(160, 90)))));
+        p.clips = {fast};
+        RenderOptions sound;
+        sound.video = false;
+        auto plan = compileRender(p, dir.filePath("work"), 320, 180, sound);
+        {
+            QFile g(graph);
+            QVERIFY(g.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            g.write(plan.graph.toUtf8());
+        }
+        QCOMPARE(run(ffmpeg, streamArguments(plan, graph, false)).size(), qsizetype(48000 * 4 * 12 / 30));
+        Clip slow = fast;
+        slow.speed = Time(1, 10);
+        slow.duration = 30;
+        p.clips = {slow};
+        p.validate();
+        slow.speed = Time(1, 20);
+        p.clips = {slow};
+        QVERIFY_EXCEPTION_THROWN(p.validate(), std::runtime_error);
+    }
+    void gifAndSvgOverlays() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // A 1 s GIF that alternates red and green four times a second.
+        const auto gif = dir.filePath("blink.gif");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "color=black:s=64x64:r=4:d=1,format=rgb24,geq=r='255*eq(mod(N,2),0)':g='255*eq(mod(N,2),1)':b=0",
+                     gif});
+        // An SVG: a blue circle on nothing, twice as wide as tall.
+        const auto svg = dir.filePath("badge.svg");
+        {
+            QFile f(svg);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            // A plain string: moc reads "//" inside raw strings as a comment.
+            f.write("<svg xmlns=\"http:/" "/www.w3.org/2000/svg\" viewBox=\"0 0 100 50\">"
+                    "<circle cx=\"50\" cy=\"25\" r=\"20\" fill=\"#0000ff\"/></svg>");
+        }
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(gif), QUrl::fromLocalFile(svg)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+        const auto &assets = editor.project().assets;
+        const auto blink = std::find_if(assets.begin(), assets.end(), [](const Asset &a) { return a.name == "blink.gif"; });
+        const auto badge = std::find_if(assets.begin(), assets.end(), [](const Asset &a) { return a.kind == "image"; });
+        QVERIFY(blink != assets.end() && badge != assets.end());
+        QVERIFY(blink->loops && blink->kind == "video");
+        QVERIFY(std::abs(blink->duration - 1) < 0.1);
+        // The SVG became a sharp transparent picture keeping its name and shape.
+        QCOMPARE(badge->name, QString("badge.png"));
+        QImage picture(badge->path);
+        QCOMPARE(picture.size(), QSize(2048, 1024));
+        QVERIFY(qAlpha(picture.pixel(5, 5)) == 0);
+        const QColor centre = picture.pixelColor(1024, 512);
+        QVERIFY(centre.blue() > 240 && centre.alpha() == 255);
+        QVERIFY_EXCEPTION_THROWN(rasterizeSvg(gif, dir.path()), std::runtime_error);
+        // A looping clip can be longer than its GIF and keeps alternating.
+        editor.addAsset(blink->id);
+        const auto id = editor.project().clips.back().id;
+        editor.select(id);
+        editor.setClip("duration", 120);
+        QCOMPARE(editor.project().clip(id)->duration, 120);
+        QCOMPARE(editor.trimBounds(id)["last"].toLongLong() > 120, true);
+        const auto json = editor.project().json();
+        QVERIFY(Project::fromJson(json, {}).assets[0].loops || Project::fromJson(json, {}).assets[1].loops);
+        auto colour = [&](qint64 frame) {
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(editor.project(), dir.filePath("work"), 160, 90, options);
+            const auto graph = dir.filePath("graph.txt");
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return out.pixelColor(80, 45);
+        };
+        // 4 frames a second: picture n = floor(t * 4), red when even.
+        for (const auto &[frame, red] : {std::pair{qint64(61), true}, std::pair{qint64(69), false},
+                                         std::pair{qint64(106), true}, std::pair{qint64(113), false}}) {
+            const auto c = colour(frame);
+            QVERIFY2(red ? (c.red() > 200 && c.green() < 60) : (c.green() > 200 && c.red() < 60),
+                     qPrintable(QString("frame %1: %2").arg(frame).arg(c.name())));
+        }
+    }
+    void slipRollAndSlide() {
+        // Three touching clips from a 10 s source: A 0-30 (source 1 s), B 30-60 (source 3 s),
+        // C 60-90 (source 5 s).
+        Project p;
+        Asset a;
+        a.id = "v";
+        a.path = "v.mkv";
+        a.kind = "video";
+        a.duration = 10;
+        a.width = 160;
+        a.height = 90;
+        a.hasAudio = true;
+        p.assets = {a};
+        auto make = [](const QString &id, qint64 start, double in) {
+            Clip c;
+            c.id = id;
+            c.assetId = "v";
+            c.start = start;
+            c.duration = 30;
+            c.sourceIn = Time(qRound64(in * 1000), 1000);
+            return c;
+        };
+        p.clips = {make("a", 0, 1), make("b", 30, 3), make("c", 60, 5)};
+        auto at = [](const Project &q, const QString &id) { return *q.clip(id); };
+        // Slip: B shows half a second later; nothing moves.
+        auto slipped = p;
+        slipped.slip("b", 15);
+        slipped.validate();
+        QCOMPARE(at(slipped, "b").sourceIn.seconds(), 3.5);
+        QCOMPARE(at(slipped, "b").start, 30);
+        QCOMPARE(at(slipped, "a").sourceIn.seconds(), 1.);
+        // Not before the start of the source.
+        auto early = p;
+        QVERIFY_EXCEPTION_THROWN(early.slip("a", -40), std::runtime_error);
+        // Roll: the A|B cut moves 6 frames later.
+        auto rolled = p;
+        rolled.roll("a", 6);
+        rolled.validate();
+        QCOMPARE(at(rolled, "a").duration, 36);
+        QCOMPARE(at(rolled, "b").start, 36);
+        QCOMPARE(at(rolled, "b").duration, 24);
+        QCOMPARE(at(rolled, "b").sourceIn.seconds(), 3.2);
+        QCOMPARE(rolled.duration(), 90);
+        QVERIFY_EXCEPTION_THROWN(rolled.roll("c", 5), std::runtime_error); // nothing after C
+        // Slide: B moves 3 frames later; A grows, C shrinks at its start; B keeps its source.
+        auto slid = p;
+        slid.slide("b", 3);
+        slid.validate();
+        QCOMPARE(at(slid, "a").duration, 33);
+        QCOMPARE(at(slid, "b").start, 33);
+        QCOMPARE(at(slid, "b").sourceIn.seconds(), 3.);
+        QCOMPARE(at(slid, "c").start, 63);
+        QCOMPARE(at(slid, "c").duration, 27);
+        QCOMPARE(at(slid, "c").sourceIn.seconds(), 5.1);
+        QCOMPARE(slid.duration(), 90);
+        // Sliding past a neighbour's whole length is refused.
+        auto far = p;
+        QVERIFY_EXCEPTION_THROWN(far.slide("b", 30), std::runtime_error);
+        // Without neighbours a clip slides into free space only.
+        Project gap = p;
+        gap.clips = {make("a", 0, 1), make("b", 40, 3), make("c", 80, 5)};
+        auto moved = gap;
+        moved.slide("b", -5);
+        QCOMPARE(at(moved, "b").start, 35);
+        QVERIFY_EXCEPTION_THROWN(gap.slide("b", -15), std::runtime_error);
+
+        // Through the editor: one undo step each; detached audio slips along.
+        FrameProvider frames;
+        Editor e(&frames);
+        QTemporaryDir dir;
+        const auto source = dir.filePath("tone.mkv");
+        run(Editor::executable("ffmpeg"), {"-v", "error", "-f", "lavfi", "-i", "color=gray:s=160x90:r=30:d=4", "-f", "lavfi",
+                                           "-i", "sine=d=4", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest", source});
+        e.configure(160, 90, 30, 1);
+        e.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(e.project().assets.size() == 1, 15000);
+        e.addAsset(e.project().assets.first().id);
+        const auto id = e.project().clips.first().id;
+        e.select(id);
+        e.setClip("duration", 60);
+        e.setClip("sourceIn", 1.0);
+        e.detachAudio();
+        QCOMPARE(e.project().clips.size(), size_t(2));
+        e.slipClip(id, 15);
+        QVERIFY2(e.state()["error"].toString().isEmpty(), qPrintable(e.state()["error"].toString()));
+        for (const auto &c : e.project().clips)
+            QCOMPARE(c.sourceIn.seconds(), 1.5);
+        e.undo();
+        for (const auto &c : e.project().clips)
+            QCOMPARE(c.sourceIn.seconds(), 1.);
+        e.slipClip(id, 200); // past the end of the 4 s source
+        QVERIFY(!e.state()["error"].toString().isEmpty());
+        QCOMPARE(e.project().clip(id)->sourceIn.seconds(), 1.);
+    }
+    void linkedPictureAndSound() {
+        QTemporaryDir dir;
+        const auto source = dir.filePath("talk.mkv");
+        run(Editor::executable("ffmpeg"), {"-v", "error", "-f", "lavfi", "-i", "color=gray:s=160x90:r=30:d=4", "-f", "lavfi",
+                                           "-i", "sine=d=4", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest", source});
+        FrameProvider frames;
+        Editor e(&frames);
+        e.configure(160, 90, 30, 1);
+        e.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(e.project().assets.size() == 1, 15000);
+        e.addAsset(e.project().assets.first().id);
+        const auto video = e.project().clips.first().id;
+        e.select(video);
+        e.detachAudio();
+        const auto audio = e.state()["selectedId"].toString();
+        QVERIFY(audio != video);
+        QCOMPARE(e.project().linkedClips(video), QStringList{audio});
+        QVERIFY(!e.project().clip(video)->link.isEmpty());
+        // Moving or trimming either one takes the other along.
+        e.moveClip(video, 45, e.project().clip(video)->track);
+        QCOMPARE(e.project().clip(audio)->start, 45);
+        e.trimClip(audio, 50, 90);
+        QCOMPARE(e.project().clip(video)->start, 50);
+        QCOMPARE(e.project().clip(video)->duration, 40);
+        // A slip of the picture alone keeps the pair linked (sound offset on purpose).
+        auto p = e.project();
+        p.clip(video)->sourceIn = Time(1, 2);
+        QCOMPARE(p.linkedClips(video), QStringList{audio});
+        // Splitting both makes two linked pairs.
+        e.seek(70);
+        e.select(video);
+        e.split();
+        e.select(audio);
+        e.split();
+        QCOMPARE(e.project().clips.size(), size_t(4));
+        for (const auto &c : e.project().clips)
+            QCOMPARE(e.project().linkedClips(c.id).size(), 1);
+        // Saved and loaded with the project.
+        const auto loaded = Project::fromJson(e.project().json(), {});
+        QCOMPARE(loaded.linkedClips(video), QStringList{audio});
+        // Unlinked: they move on their own.
+        e.select(video);
+        e.unlinkClip();
+        QVERIFY(e.project().linkedClips(video).isEmpty());
+        QVERIFY(e.project().linkedClips(audio).isEmpty());
+        e.moveClip(video, 100, e.project().clip(video)->track);
+        QCOMPARE(e.project().clip(audio)->start, 50);
+        e.select(video);
+        e.unlinkClip();
+        QVERIFY(e.state()["error"].toString().contains("not linked"));
+    }
     void sceneDetection() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

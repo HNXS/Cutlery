@@ -508,6 +508,9 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         r.inputs << "-protocol_whitelist" << "file,pipe";
         if (n.image)
             r.inputs << "-loop" << "1" << "-framerate" << fps;
+        else if (n.asset && n.asset->loops)
+            // Repeats endlessly; the start point is cut in the filter graph (see videoChain).
+            r.inputs << "-stream_loop" << "-1";
         else
             r.inputs << "-ss" << num(std::max(0., seek));
         r.inputs << "-i" << QFileInfo(file).absoluteFilePath();
@@ -516,7 +519,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
     // Clip-local seconds where source media exists; images and titles never run out.
     auto available = [&](const Info &n) {
         const auto &c = *n.clip;
-        if (n.image)
+        if (n.image || (n.asset && n.asset->loops))
             return std::pair{-1e12, 1e12};
         const double s = c.speed.seconds(), in = c.sourceIn.seconds(), d = secs(c.duration),
                      media = n.asset->duration;
@@ -605,7 +608,14 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             in = input++;
         } else
             in = addInput(n, seek - pre);
-        QString f = timing(QString("[%1:v:0]").arg(in), !n.image);
+        auto source = QString("[%1:v:0]").arg(in);
+        if (up.path.isEmpty() && n.asset && n.asset->loops && n.asset->duration > 0)
+            // A looping animation starts a whole number of loops before the seek point. Frames
+            // are made regular first, so the cut keeps the picture shown at that moment (an
+            // input seek would drop a long-held frame that began before it).
+            source += QString("fps=%1,trim=start=%2,")
+                          .arg(fps, num(std::fmod(std::max(0., seek - pre), n.asset->duration)));
+        QString f = timing(source, !n.image);
         // Camera shake is measured on the source picture, before scaling.
         if (c.stabilize && !n.image)
             f += ",deshake=rx=32:ry=32:edge=mirror";
@@ -843,13 +853,30 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         return f + ",setpts=PTS-STARTPTS";
     };
     // `offset` is the clip-local frame shown at overlay time zero, for animated positions.
+    // An anchor away from the centre moves the centre as the picture scales and turns, so the
+    // anchor point stays put (see Project::anchorShift).
     auto overlayPosition = [&](const Clip &c, qint64 offset) {
+        const bool anchored = (c.anchorX != 0.5 || c.anchorY != 0.5) && c.titleStyle.isEmpty();
+        const auto base = p.pictureSize(c, width, height);
         if (animatedGeometry(c)) {
             const auto local = QString("(t*%1/%2+%3)").arg(p.fpsN).arg(p.fpsD).arg(offset);
-            return QString("x='(W-w)/2+(%1)*W':y='(H-h)/2+(%2)*H'")
-                .arg(curve(c, "x", local), curve(c, "y", local));
+            QString sx, sy;
+            if (anchored) {
+                const auto dx = num((c.anchorX - 0.5) * base.width()),
+                           dy = num((c.anchorY - 0.5) * base.height()),
+                           s = "(" + curve(c, "scale", local) + ")",
+                           a = "((" + curve(c, "rotation", local) + ")*PI/180)";
+                sx = QString("+%1-%3*(cos(%4)*%1-sin(%4)*%2)").arg(dx, dy, s, a);
+                sy = QString("+%2-%3*(sin(%4)*%1+cos(%4)*%2)").arg(dx, dy, s, a);
+            }
+            return QString("x='(W-w)/2+(%1)*W%3':y='(H-h)/2+(%2)*H%4'")
+                .arg(curve(c, "x", local), curve(c, "y", local), sx, sy);
         }
-        return QString("x=(W-w)/2+%1*W:y=(H-h)/2+%2*H").arg(num(c.x), num(c.y));
+        if (!anchored)
+            return QString("x=(W-w)/2+%1*W:y=(H-h)/2+%2*H").arg(num(c.x), num(c.y));
+        const auto shift = Project::anchorShift(c, base, c.scale, c.rotation);
+        return QString("x=(W-w)/2+%1*W+(%3):y=(H-h)/2+%2*H+(%4)")
+            .arg(num(c.x), num(c.y), num(shift.x()), num(shift.y()));
     };
     // Composites a zero-based stream onto the picture for window frames [place, place + length).
     auto composite = [&](const QString &stream, const QString &position, qint64 place,

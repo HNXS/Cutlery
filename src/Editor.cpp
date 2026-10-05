@@ -19,6 +19,8 @@
 #include <QCryptographicHash>
 #include <QRegularExpression>
 #include <QSet>
+#include <QSvgRenderer>
+#include <QPainter>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -239,6 +241,7 @@ QVariantList Editor::clips() const {
         result << QVariantMap{{"id", c.id},
                               {"assetId", c.assetId},
                               {"name", c.name},
+                              {"linked", !m_project.linkedClips(c.id).isEmpty()},
                               {"track", c.track},
                               {"start", c.start},
                               {"duration", c.duration},
@@ -275,7 +278,7 @@ QVariantMap Editor::trimBounds(const QString &id) const {
     for (const auto &c : m_project.clips)
         if (c.id == id) {
             qint64 first = 0, last = qint64(86400. * m_project.fpsN / m_project.fpsD);
-            if (const auto *a = m_project.asset(c.assetId); a && a->kind != "image") {
+            if (const auto *a = m_project.asset(c.assetId); a && !a->endless()) {
                 const double rate = double(m_project.fpsN) / m_project.fpsD / c.speed.seconds();
                 const auto head =
                     std::max(qint64(0), qint64(std::floor(c.sourceIn.seconds() * rate + 1e-6)));
@@ -293,7 +296,12 @@ qint64 Editor::snap(qint64 frame, qint64 threshold, const QString &exclude, qint
     return m_project.snap(frame, threshold, exclude, m_playhead, length);
 }
 void Editor::trimClip(const QString &id, qint64 start, qint64 end) {
-    mutate([&](Project &p) { p.trim(id, start, end); });
+    mutate([&](Project &p) {
+        const auto linked = p.linkedClips(id);
+        p.trim(id, start, end);
+        for (const auto &other : linked)
+            p.trim(other, start, end);
+    });
 }
 qint64 Editor::placement(int track, qint64 frame, const QString &exclude) const {
     if (track < 0 || track >= m_project.tracks)
@@ -341,6 +349,9 @@ void Editor::detachAudio() {
         const auto *a = p.asset(c->assetId);
         if (!a || !a->hasAudio || a->kind != "video" || c->audioOnly)
             throw std::runtime_error("Select a video clip with audio");
+        // Picture and sound stay linked: they move and trim together until unlinked.
+        if (c->link.isEmpty() || c->link == "none")
+            c->link = newId();
         auto audio = *c;
         audio.id = id;
         audio.name = c->name + " · audio";
@@ -380,6 +391,7 @@ QVariantMap Editor::state() const {
                         {"variableRate", m_project.asset(c.assetId) &&
                                              m_project.asset(c.assetId)->variableRate},
                         {"locked", m_project.trackSettings[c.track].locked},
+                        {"linkedCount", int(m_project.linkedClips(c.id).size())},
                         {"canDetach", !c.audioOnly && m_project.asset(c.assetId) &&
                                           m_project.asset(c.assetId)->kind == "video" &&
                                           m_project.asset(c.assetId)->hasAudio},
@@ -456,6 +468,8 @@ QVariantMap Editor::state() const {
             PROP(reverb);
             PROP(echo);
             PROP(pan);
+            PROP(anchorX);
+            PROP(anchorY);
             PROP(slowMotion);
             PROP(fontFamily);
             PROP(graphic);
@@ -891,12 +905,44 @@ void Editor::relink(const QString &id, const QUrl &url) {
     }
     probeFile(url, id);
 }
+QString rasterizeSvg(const QString &svg, const QString &folder, int longest) {
+    QSvgRenderer renderer(svg);
+    if (!renderer.isValid())
+        throw std::runtime_error("Cannot read this SVG file");
+    QSizeF size = renderer.viewBoxF().size();
+    if (size.isEmpty())
+        size = renderer.defaultSize();
+    if (size.isEmpty())
+        throw std::runtime_error("The SVG file has no size");
+    size.scale(longest, longest, Qt::KeepAspectRatio);
+    QImage image(std::max(1, qRound(size.width())), std::max(1, qRound(size.height())),
+                 QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing);
+    renderer.render(&painter);
+    painter.end();
+    // One folder per source file and version, so the picture keeps the file's name.
+    QFile source(svg);
+    if (!source.open(QIODevice::ReadOnly))
+        throw std::runtime_error("Cannot read this SVG file");
+    const auto key = QCryptographicHash::hash(source.readAll(), QCryptographicHash::Sha1).toHex().left(12);
+    const auto dir = folder + "/" + QString::fromLatin1(key);
+    QDir().mkpath(dir);
+    const auto png = dir + "/" + QFileInfo(svg).completeBaseName() + ".png";
+    if (!image.save(png, "PNG"))
+        throw std::runtime_error("Cannot write the picture of the SVG file");
+    return png;
+}
 void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_ptr<DropBatch> drop) {
     QString path;
     try {
         path = localPath(url);
         if (!QFileInfo(path).isFile())
             throw std::runtime_error("Media file does not exist");
+        // Vector graphics become a sharp, transparent picture that is imported instead.
+        if (QFileInfo(path).suffix().compare("svg", Qt::CaseInsensitive) == 0)
+            path = rasterizeSvg(path, m_data + "/svg");
     } catch (const std::exception &e) {
         m_importErrors << QString::fromUtf8(e.what()) + ": " + url.fileName();
         fail(e.what());
@@ -960,6 +1006,8 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                 const bool still =
                     QStringList{"png", "jpg", "jpeg", "bmp", "webp", "tif", "tiff"}.contains(ext);
                 a.kind = still ? "image" : (a.width > 0 ? "video" : "audio");
+                // An animated GIF plays in a loop, like a sticker.
+                a.loops = ext == "gif" && a.kind == "video";
                 if (still) {
                     a.duration = 5;
                     a.frameRate = 0;
@@ -1158,7 +1206,29 @@ void Editor::addGraphic(const QString &kind) {
     select(id);
 }
 void Editor::moveClip(const QString &id, qint64 frame, int track) {
-    mutate([&](Project &p) { p.move(id, track, frame); });
+    mutate([&](Project &p) {
+        const auto linked = p.linkedClips(id);
+        const auto *c = p.clip(id);
+        if (!c)
+            return;
+        const auto old = c->start;
+        p.move(id, track, frame);
+        // Linked sound (or picture) follows by the same amount, on its own track.
+        if (const auto delta = p.clip(id)->start - old)
+            for (const auto &other : linked) {
+                const auto *x = p.clip(other);
+                p.move(other, x->track, x->start + delta);
+            }
+    });
+}
+void Editor::unlinkClip() {
+    mutate([&](Project &p) {
+        const auto linked = p.linkedClips(m_selected);
+        if (linked.isEmpty())
+            throw std::runtime_error("This clip is not linked");
+        for (const auto &id : linked + QStringList{m_selected})
+            p.clip(id)->link = "none";
+    });
 }
 void Editor::setClip(const QString &key, const QVariant &v) {
     setClipValues({{key, v}});
@@ -1206,8 +1276,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             c->sourceIn = Time(qRound64(t * 1000000), 1000000);
         } else if (key == "speed") {
             const auto speed = v.toDouble();
-            if (!std::isfinite(speed) || speed < .25 || speed > 4)
-                throw std::runtime_error("Speed must be 0.25–4x");
+            if (!std::isfinite(speed) || speed < .1 || speed > 10)
+                throw std::runtime_error("Speed must be 0.1–10x");
             auto old = c->speed;
             c->speed = Time(qRound64(speed * 1000), 1000);
             c->scaleKeyframes(old.seconds() / c->speed.seconds());
@@ -1289,6 +1359,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(reverb, toDouble);
         FIELD(echo, toDouble);
         FIELD(pan, toDouble);
+        FIELD(anchorX, toDouble);
+        FIELD(anchorY, toDouble);
         FIELD(slowMotion, toString);
         FIELD(bold, toBool);
         FIELD(italic, toBool);
@@ -1350,8 +1422,15 @@ QVariantMap Editor::clipBounds(const QString &id) const {
     const double scale = c->valueAt("scale", local);
     const auto size = m_project.pictureSize(*c, m_project.width * scale,
                                             m_project.height * scale);
-    return {{"x", 0.5 + c->valueAt("x", local) - size.width() / m_project.width / 2},
-            {"y", 0.5 + c->valueAt("y", local) - size.height() / m_project.height / 2},
+    const auto shift = Project::anchorShift(
+        *c, m_project.pictureSize(*c, m_project.width, m_project.height), scale,
+        c->valueAt("rotation", local));
+    return {{"x", 0.5 + c->valueAt("x", local) + shift.x() / m_project.width -
+                      size.width() / m_project.width / 2},
+            {"y", 0.5 + c->valueAt("y", local) + shift.y() / m_project.height -
+                      size.height() / m_project.height / 2},
+            {"anchorX", c->anchorX},
+            {"anchorY", c->anchorY},
             {"width", size.width() / m_project.width},
             {"height", size.height() / m_project.height},
             {"rotation", c->valueAt("rotation", local)},
@@ -1431,6 +1510,18 @@ qint64 Editor::adjacentKeyframe(bool forward) const {
                 target = frame;
         }
     return target;
+}
+void Editor::slipClip(const QString &id, qint64 frames) {
+    if (frames != 0)
+        mutate([&](Project &p) { p.slip(id, frames); });
+}
+void Editor::rollCut(const QString &id, qint64 frames) {
+    if (frames != 0)
+        mutate([&](Project &p) { p.roll(id, frames); });
+}
+void Editor::slideClip(const QString &id, qint64 frames) {
+    if (frames != 0)
+        mutate([&](Project &p) { p.slide(id, frames); });
 }
 void Editor::split() {
     mutate([&](Project &p) { p.split(m_selected, m_playhead); });
@@ -2222,6 +2313,8 @@ void Editor::pasteAttributes(const QString &group) {
         if (group == "look")
             return;
         c->scale = from.scale;
+        c->anchorX = from.anchorX;
+        c->anchorY = from.anchorY;
         c->x = from.x;
         c->y = from.y;
         c->rotation = from.rotation;

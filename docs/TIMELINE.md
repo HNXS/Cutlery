@@ -6,6 +6,14 @@ Drop files from Windows Explorer directly onto a track to import and insert them
 
 Drag the body of a video, audio, image or title clip to move it along a track or between tracks. Drag its edges to trim instead. Near the timeline viewport edges, the view scrolls during a drag. Press Escape to cancel. Locked tracks reject insertion, moves and trimming.
 
+Hold **Alt** for edits that keep everything around the clip in place:
+
+- **Slip:** Alt+drag the body to show an earlier part of the source (drag right) or a later part (drag left), at the same position and length.
+- **Slide:** Alt+Shift+drag the body to move the clip. The touching clips before and after it grow or shrink to match.
+- **Roll:** Alt+drag the edge between two touching clips to move the cut. Press near the top of the edge, because the transition button sits on the middle of the cut.
+
+Each edit is one undo step.
+
 | Control | Behavior |
 |---|---|
 | Edge snap, in the toolbar | Master switch for aligning clip edges to other edges, the playhead and frame zero. |
@@ -14,7 +22,7 @@ Drag the body of a video, audio, image or title clip to move it along a track or
 
 Enabling Magnet packs the track's current clips in chronological order, closing gaps and removing overlaps without changing their source ranges. This can change the timing of existing clips; **Undo restores the previous arrangement**. Other tracks retain their timing. Turn Magnet off for free placement, intentional gaps and overlaps; disabling it keeps the current positions.
 
-On magnetic tracks, dropping a clip chooses the nearest join based on neighboring clip midpoints. Existing clips shift to make room. Moving a clip out or deleting it closes its old gap. Trimming or changing duration/speed shifts later clips on that same track. Source trim boundaries remain enforced. A complete edit and the resulting shifts form one undo step. Separate audio/video pairs and clips on other tracks are not automatically synchronized.
+On magnetic tracks, dropping a clip chooses the nearest join based on neighboring clip midpoints. Existing clips shift to make room. Moving a clip out or deleting it closes its old gap. Trimming or changing duration/speed shifts later clips on that same track. Source trim boundaries remain enforced. A complete edit and the resulting shifts form one undo step. Audio detached from a video stays linked to it (⛓). Moving or trimming either one moves or trims both while they stay aligned; "Unlink picture and sound" in the inspector separates them. Other clips on other tracks are not synchronized.
 
 SRT import requires Magnet to be off on the destination caption track, so imported timestamps remain intact. New and migrated projects start with Magnet off and Snap on for every track. Both settings are saved in schema 3 projects.
 

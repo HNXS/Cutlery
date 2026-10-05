@@ -24,6 +24,9 @@ class QMediaRecorder;
 #include <memory>
 
 namespace cutlery {
+// Draws an SVG file at `longest` pixels on its longer side into a transparent PNG in `folder`
+// and returns the PNG's path. Throws when the file cannot be read or written.
+QString rasterizeSvg(const QString &svg, const QString &folder, int longest = 2048);
 class FrameProvider final : public QQuickImageProvider {
   public:
     FrameProvider() : QQuickImageProvider(QQuickImageProvider::Image) {}
@@ -63,6 +66,10 @@ class Editor final : public QObject {
     Q_INVOKABLE qint64 snap(qint64 frame, qint64 threshold, const QString &exclude,
                             qint64 length = 0) const;
     Q_INVOKABLE void trimClip(const QString &id, qint64 start, qint64 end);
+    // Slip, roll and slide by a number of frames; see Project. One undo step each.
+    Q_INVOKABLE void slipClip(const QString &id, qint64 frames);
+    Q_INVOKABLE void rollCut(const QString &id, qint64 frames);
+    Q_INVOKABLE void slideClip(const QString &id, qint64 frames);
     Q_INVOKABLE void addTrack();
     Q_INVOKABLE void removeTrack(int track);
     Q_INVOKABLE void setTrack(int track, const QString &key, const QVariant &value);
@@ -103,6 +110,8 @@ class Editor final : public QObject {
     // a full-size clip to 30% and inset it by a margin; "full" restores a centred full frame.
     Q_INVOKABLE void placeClip(const QString &corner);
     Q_INVOKABLE void moveClip(const QString &id, qint64 frame, int track);
+    // Lets the selected clip and its linked picture or sound move and trim on their own.
+    Q_INVOKABLE void unlinkClip();
     Q_INVOKABLE void split();
     // Adds a keyframe at the playhead with the current value, or removes the one there.
     Q_INVOKABLE void toggleKeyframe(const QString &property);
