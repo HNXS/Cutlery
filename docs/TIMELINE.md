@@ -10,7 +10,7 @@ Hold **Alt** for edits that keep everything around the clip in place:
 
 - **Slip:** Alt+drag the body to show an earlier part of the source (drag right) or a later part (drag left), at the same position and length.
 - **Slide:** Alt+Shift+drag the body to move the clip. The touching clips before and after it grow or shrink to match.
-- **Roll:** Alt+drag the edge between two touching clips to move the cut. Press near the top of the edge, because the transition button sits on the middle of the cut.
+- **Roll:** Alt+drag the edge between two touching clips to move the cut.
 
 Each edit is one undo step.
 

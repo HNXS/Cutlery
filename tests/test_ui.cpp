@@ -551,10 +551,9 @@ class UiTest : public QObject {
         QVERIFY(window);
         window->requestActivate();
         QTest::qWait(150);
-        // Pressed near the top: the transition button covers the middle of a cut.
+        // Pressed in the middle: the transition button sits on the top edge of the cut.
         auto altDrag = [&](QQuickItem *item, int dx, Qt::KeyboardModifiers modifiers) {
-            const auto from = item->mapToScene(QPointF(item->width() / 2, 6)).toPoint(),
-                       to = from + QPoint(dx, 0);
+            const auto from = center(item), to = from + QPoint(dx, 0);
             QTest::mousePress(window, Qt::LeftButton, modifiers, from);
             QTest::mouseMove(window, from + QPoint(dx / 4, 0), 20);
             QTest::mouseMove(window, from + QPoint(dx / 2, 0), 20);
@@ -585,6 +584,19 @@ class UiTest : public QObject {
         QTRY_VERIFY(std::abs(editor.project().clip(b)->start - (cut - 4)) <= 1);
         QCOMPARE(editor.project().clip(a)->duration, editor.project().clip(b)->start);
         QCOMPARE(editor.project().duration(), 90);
+        // Ctrl+click adds C to the selection; dragging A then moves both.
+        const auto c = editor.project().clips[2].id;
+        editor.select(a);
+        auto *clipC = findItem(window->contentItem(), "clip-" + c);
+        QVERIFY(clipC);
+        QTest::mouseClick(window, Qt::LeftButton, Qt::ControlModifier, center(clipC));
+        QTRY_COMPARE(editor.selection().size(), 2);
+        const auto startA = editor.project().clip(a)->start, startC = editor.project().clip(c)->start;
+        auto *clipA = findItem(window->contentItem(), "clip-" + a);
+        QVERIFY(clipA);
+        altDrag(clipA, qRound(10 * pixelsPerFrame), Qt::NoModifier);
+        QTRY_VERIFY(editor.project().clip(a)->start > startA);
+        QCOMPARE(editor.project().clip(c)->start - startC, editor.project().clip(a)->start - startA);
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
     }
     void lookControls() {

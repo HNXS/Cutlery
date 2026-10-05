@@ -103,6 +103,12 @@ ApplicationWindow {
             editor.pasteAttributes("all");
         else if (id === "delete" && editable)
             editor.remove(false);
+        else if (id === "selectAll")
+            editor.selectAll();
+        else if (id === "group")
+            editor.groupSelection();
+        else if (id === "ungroup")
+            editor.ungroupSelection();
         else if (id === "rippleDelete" && editable)
             editor.remove(true);
         else if (id === "trimStart" && editable && s.playhead > c.start && s.playhead < c.start + c.duration)
@@ -369,6 +375,21 @@ ApplicationWindow {
                 text: "Redo"
                 enabled: win.s.canRedo
                 onTriggered: editor.redo()
+            }
+            MenuItem {
+                text: "Select all clips"
+                onTriggered: editor.selectAll()
+            }
+            MenuItem {
+                objectName: "groupClips"
+                text: "Group selected clips"
+                enabled: (win.s.selectedIds || []).length > 1
+                onTriggered: editor.groupSelection()
+            }
+            MenuItem {
+                text: "Ungroup"
+                enabled: (win.s.selectedIds || []).length > 0
+                onTriggered: editor.ungroupSelection()
             }
             MenuItem {
                 text: "Split at playhead"

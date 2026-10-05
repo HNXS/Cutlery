@@ -40,6 +40,9 @@ KeyboardShortcuts::KeyboardShortcuts(QString path, QObject *parent)
     add("paste", "Paste clip at playhead", "Edit", "Ctrl+V");
     add("pasteAttributes", "Paste attributes onto selected clip", "Edit", "Ctrl+Alt+V");
     add("delete", "Delete clip", "Edit", "Del");
+    add("selectAll", "Select all clips", "Edit", "Ctrl+A");
+    add("group", "Group selected clips", "Edit", "Ctrl+G");
+    add("ungroup", "Ungroup", "Edit", "Ctrl+Shift+G");
     add("rippleDelete", "Delete and close track gap", "Edit", "Shift+Del");
     add("trimStart", "Trim start to playhead", "Edit", "Q");
     add("trimEnd", "Trim end to playhead", "Edit", "W");

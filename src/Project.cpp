@@ -270,6 +270,8 @@ QJsonObject Project::json(const QString &base) const {
                       {"fontSize", c.fontSize}};
         if (!c.link.isEmpty())
             o["link"] = c.link;
+        if (!c.group.isEmpty())
+            o["group"] = c.group;
         if (c.anchorX != 0.5 || c.anchorY != 0.5)
             o["anchor"] = QJsonArray{c.anchorX, c.anchorY};
         // Text style, stored when it differs from the default.
@@ -465,6 +467,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.id = j["id"].toString();
         c.assetId = j["assetId"].toString();
         c.link = j["link"].toString().left(64);
+        c.group = j["group"].toString().left(64);
         c.name = j["name"].toString();
         c.track = j["track"].toInt();
         c.start = integer(j["start"]);

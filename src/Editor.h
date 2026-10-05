@@ -112,6 +112,14 @@ class Editor final : public QObject {
     Q_INVOKABLE void moveClip(const QString &id, qint64 frame, int track);
     // Lets the selected clip and its linked picture or sound move and trim on their own.
     Q_INVOKABLE void unlinkClip();
+    // Selection of several clips (state "selectedIds", the selected clip first): Ctrl+click
+    // toggles a clip, a grouped clip brings its group. Moving the selected clip moves them all;
+    // deleting deletes them all.
+    Q_INVOKABLE void toggleSelect(const QString &id);
+    Q_INVOKABLE void selectAll();
+    Q_INVOKABLE void groupSelection();
+    Q_INVOKABLE void ungroupSelection();
+    QStringList selection() const;
     Q_INVOKABLE void split();
     // Adds a keyframe at the playhead with the current value, or removes the one there.
     Q_INVOKABLE void toggleKeyframe(const QString &property);
@@ -300,6 +308,7 @@ class Editor final : public QObject {
     // The track nearest `home` with room for [start, start + length), or a new one on top.
     static int freeTrack(Project &, int home, qint64 start, qint64 length);
     QStringList m_recent;
+    QStringList m_also; // selected besides m_selected
     void remember(const QString &path);
     void saveRecent();
     QString backupFolder(const QString &projectPath) const;

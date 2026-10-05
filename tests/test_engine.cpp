@@ -730,7 +730,7 @@ class EngineTest : public QObject {
         QTemporaryDir dir;
         const auto path = dir.filePath("shortcuts.json");
         KeyboardShortcuts keys(path);
-        QCOMPARE(keys.bindings().size(), 41);
+        QCOMPARE(keys.bindings().size(), 44);
         QVERIFY(!keys.assign("play", "Ctrl+B"));
         QVERIFY(keys.error().contains("Already assigned"));
         QVERIFY(!keys.assign("play", "Ctrl+NotARealKey"));
@@ -3548,6 +3548,74 @@ class EngineTest : public QObject {
         e.select(video);
         e.unlinkClip();
         QVERIFY(e.state()["error"].toString().contains("not linked"));
+    }
+    void multipleSelectionAndGroups() {
+        FrameProvider frames;
+        Editor e(&frames);
+        e.addTitle();
+        e.addTitle();
+        e.addTitle();
+        auto ids = QStringList{};
+        for (const auto &c : e.project().clips)
+            ids << c.id;
+        QCOMPARE(ids.size(), 3);
+        // Spread the titles over two tracks: A at 0, B at 200 (track 0), C at 100 (track 1).
+        e.addTrack();
+        e.moveClip(ids[0], 0, 0);
+        e.moveClip(ids[1], 200, 0);
+        e.moveClip(ids[2], 100, 1);
+        // Ctrl+click selection: A and C.
+        e.select(ids[0]);
+        e.toggleSelect(ids[2]);
+        QCOMPARE(e.selection().size(), 2);
+        QCOMPARE(e.state()["selectedIds"].toStringList().size(), 2);
+        // Moving A by 30 frames moves C by 30 too, on its own track.
+        e.moveClip(ids[0], 30, 0);
+        QCOMPARE(e.project().clip(ids[0])->start, 30);
+        QCOMPARE(e.project().clip(ids[2])->start, 130);
+        QCOMPARE(e.project().clip(ids[2])->track, 1);
+        QCOMPARE(e.project().clip(ids[1])->start, 200);
+        // One undo step for all of them.
+        e.undo();
+        QCOMPARE(e.project().clip(ids[0])->start, 0);
+        QCOMPARE(e.project().clip(ids[2])->start, 100);
+        // Toggling again removes it.
+        e.toggleSelect(ids[2]);
+        QCOMPARE(e.selection(), QStringList{ids[0]});
+        // Group A and C: selecting either brings both; the group survives saving.
+        e.toggleSelect(ids[2]);
+        e.groupSelection();
+        e.select(ids[1]);
+        QCOMPARE(e.selection(), QStringList{ids[1]});
+        e.select(ids[2]);
+        QCOMPARE(e.selection().size(), 2);
+        QVERIFY(e.selection().contains(ids[0]));
+        const auto loaded = Project::fromJson(e.project().json(), {});
+        QCOMPARE(loaded.clip(ids[0])->group, loaded.clip(ids[2])->group);
+        QVERIFY(!loaded.clip(ids[0])->group.isEmpty());
+        QVERIFY(loaded.clip(ids[1])->group.isEmpty());
+        // Ctrl+click on a grouped clip toggles the whole group.
+        e.select(ids[1]);
+        e.toggleSelect(ids[0]);
+        QCOMPARE(e.selection().size(), 3);
+        e.toggleSelect(ids[2]);
+        QCOMPARE(e.selection(), QStringList{ids[1]});
+        // Delete removes the whole group.
+        e.select(ids[0]);
+        e.remove(false);
+        QCOMPARE(e.project().clips.size(), size_t(1));
+        e.undo();
+        QCOMPARE(e.project().clips.size(), size_t(3));
+        // Ungroup, select all, and a group needs two clips.
+        e.select(ids[0]);
+        e.ungroupSelection();
+        e.select(ids[0]);
+        QCOMPARE(e.selection(), QStringList{ids[0]});
+        e.groupSelection();
+        QVERIFY(e.state()["error"].toString().contains("at least two"));
+        e.clearError();
+        e.selectAll();
+        QCOMPARE(e.selection().size(), 3);
     }
     void sceneDetection() {
         const auto ffmpeg = Editor::executable("ffmpeg");
