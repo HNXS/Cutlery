@@ -36,6 +36,14 @@ ApplicationWindow {
             height: 0,
             loudness: -14
         })
+    // The canvas at the aspect w:h, keeping the shorter side (even sizes).
+    function reframeTo(w, h) {
+        const side = Math.min(win.s.width, win.s.height);
+        if (w <= h)
+            editor.reframe(side, Math.round(side * h / w / 2) * 2);
+        else
+            editor.reframe(Math.round(side * w / h / 2) * 2, side);
+    }
     property bool queueExport: false // the export file dialog adds to the queue instead
     property string pendingAction: ""
     property bool allowClose: false
@@ -352,6 +360,28 @@ ApplicationWindow {
             MenuItem {
                 text: "Project settings…"
                 onTriggered: settings.open()
+            }
+            // A new canvas shape; pictures zoom to fill it and, with the AI pack, follow faces.
+            Menu {
+                id: reframeMenu
+                title: "Reframe for…"
+                enabled: win.s.duration > 0 && (win.s.reframe || {}).status !== "analysing"
+                Instantiator {
+                    model: [
+                        { label: "Shorts, Reels, TikTok (9:16)", w: 9, h: 16 },
+                        { label: "Instagram post (4:5)", w: 4, h: 5 },
+                        { label: "Square (1:1)", w: 1, h: 1 },
+                        { label: "Widescreen (16:9)", w: 16, h: 9 }
+                    ]
+                    delegate: MenuItem {
+                        required property var modelData
+                        objectName: "reframe-" + modelData.w + "x" + modelData.h
+                        text: modelData.label
+                        onTriggered: win.reframeTo(modelData.w, modelData.h)
+                    }
+                    onObjectAdded: (index, object) => reframeMenu.insertItem(index, object)
+                    onObjectRemoved: (index, object) => reframeMenu.removeItem(object)
+                }
             }
             MenuItem {
                 objectName: "restoreVersion"
@@ -2121,7 +2151,7 @@ ApplicationWindow {
                                         key: "scale",
                                         name: "Scale",
                                         lo: .1,
-                                        hi: 3,
+                                        hi: 5,
                                         step: .01
                                     },
                                     {

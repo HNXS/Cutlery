@@ -61,7 +61,7 @@ const QStringList &animatableProperties() {
 // Valid range of each animatable property, shared with static-value validation.
 static std::pair<double, double> propertyRange(const QString &p) {
     if (p == "scale")
-        return {0.1, 3};
+        return {0.1, 5};
     if (p == "x" || p == "y")
         return {-2, 2};
     if (p == "rotation")
@@ -633,7 +633,7 @@ void Project::validate() const {
         auto bounded = [](double x, double lo, double hi) {
             return std::isfinite(x) && x >= lo && x <= hi;
         };
-        require(bounded(c.scale, 0.1, 3) && bounded(c.x, -2, 2) && bounded(c.y, -2, 2) &&
+        require(bounded(c.scale, 0.1, 5) && bounded(c.x, -2, 2) && bounded(c.y, -2, 2) &&
                     bounded(c.rotation, -360, 360),
                 "Invalid transform");
         require(bounded(c.opacity, 0, 1) && bounded(c.volume, 0, 4) &&

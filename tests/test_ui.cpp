@@ -417,6 +417,13 @@ class UiTest : public QObject {
         QVERIFY(QMetaObject::invokeMethod(removeSecond, "clicked"));
         QTRY_VERIFY(!findItem(window->contentItem(), "queued-1"));
         QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        // Reframe for…: the shorter side stays, the canvas takes the new shape.
+        QVERIFY(window->findChild<QObject *>("reframe-9x16"));
+        QVERIFY(QMetaObject::invokeMethod(window, "reframeTo", Q_ARG(QVariant, 9), Q_ARG(QVariant, 16)));
+        QCOMPARE(editor.project().width, 1080);
+        QCOMPARE(editor.project().height, 1920);
+        QVERIFY(QMetaObject::invokeMethod(window, "reframeTo", Q_ARG(QVariant, 4), Q_ARG(QVariant, 5)));
+        QCOMPARE(editor.project().height, 1350);
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void presenterControls() {

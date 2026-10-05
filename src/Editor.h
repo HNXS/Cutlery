@@ -157,6 +157,10 @@ class Editor final : public QObject {
     // Analyses the faces first when needed (AI pack). State "follow": {status:
     // analysing|done|failed, keyframes, clipId}.
     Q_INVOKABLE void followFace();
+    // Changes the canvas to width × height (e.g. 9:16 for Shorts) and zooms every full-frame
+    // video and image to fill it; with the AI pack, videos then pan to keep the main face in
+    // the picture.
+    Q_INVOKABLE void reframe(int width, int height);
     // Imports the numbered image sequence that `firstImage` belongs to (e.g. shot_0001.png …)
     // at `fps`: FFmpeg turns it into a ProRes 4444 video (alpha kept) in the data folder's
     // sequences/, which is then imported like any video.
@@ -310,6 +314,8 @@ class Editor final : public QObject {
     QVariantMap m_collect;
     QVariantMap m_conform;
     QVariantMap m_follow;
+    QVariantMap m_reframe; // {status: analysing|done|failed, clips: [ids], faces: count}
+    void applyReframe();
     double m_playRate = 1, m_shuttleRate = 1;
     QTimer m_reverseTimer;
     void applyFollowFace();

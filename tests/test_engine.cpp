@@ -1505,6 +1505,130 @@ class EngineTest : public QObject {
         QSKIP("Needs the AI worker and the AI pack's models (CUTLERY_TEST_MODELS)");
 #endif
     }
+    void reframeToVertical() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Red 16:9 video with a green bar in the middle, a small picture in a corner and a title.
+        const auto source = dir.filePath("wide.mkv"), corner = dir.filePath("corner.png");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "color=c=red:s=1280x720:r=25:d=2,drawbox=x=600:y=0:w=80:h=720:c=lime:t=fill",
+                     "-c:v", "ffv1", source});
+        QImage blue(64, 64, QImage::Format_RGB32);
+        blue.fill(Qt::blue);
+        QVERIFY(blue.save(corner));
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(1280, 720, 25, 1);
+        editor.reframe(720, 1280);
+        QVERIFY(editor.state()["error"].toString().contains("empty"));
+        editor.importMedia({QUrl::fromLocalFile(source), QUrl::fromLocalFile(corner)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        const auto &assets = editor.project().assets;
+        const auto video = assets[0].kind == "video" ? assets[0].id : assets[1].id,
+                   image = assets[0].kind == "video" ? assets[1].id : assets[0].id;
+        editor.seek(0);
+        editor.addAsset(video);
+        const auto wide = editor.state()["selectedId"].toString();
+        editor.seek(0);
+        editor.addAsset(image, 1);
+        const auto small = editor.state()["selectedId"].toString();
+        editor.setClipValues({{"scale", 0.2}, {"x", 0.3}, {"y", -0.3}});
+        editor.addTitle();
+        const auto title = editor.state()["selectedId"].toString();
+        editor.reframe(721, 1280);
+        QVERIFY(editor.state()["error"].toString().contains("even"));
+
+        editor.reframe(720, 1280);
+        QCOMPARE(editor.project().width, 720);
+        QCOMPARE(editor.project().height, 1280);
+        // 16:9 fits 720 × 405 in the tall canvas; zoomed by 1280 / 405 it fills it.
+        QVERIFY(std::abs(editor.project().clip(wide)->scale - 1280. / 405) < 0.001);
+        QCOMPARE(editor.project().clip(small)->scale, 0.2);
+        QCOMPARE(editor.project().clip(small)->x, 0.3);
+        QCOMPARE(editor.project().clip(title)->scale, 1.);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.state()["reframe"].toMap()["status"] == "done", 120000);
+        QVERIFY(editor.state()["reframe"].toMap()["clips"].toStringList().contains(wide));
+
+        // The picture covers the tall frame: red at the edges, the green bar in the middle.
+        RenderOptions options;
+        options.audio = false;
+        options.from = 10;
+        options.to = 11;
+        auto project = editor.project();
+        project.clips.erase(std::remove_if(project.clips.begin(), project.clips.end(),
+                                           [&](const Clip &c) { return c.id != wide; }),
+                            project.clips.end());
+        const auto plan = compileRender(project, dir.filePath("work"), 180, 320, options);
+        const auto graph = dir.filePath("graph.txt");
+        QFile g(graph);
+        QVERIFY(g.open(QIODevice::WriteOnly));
+        g.write(plan.graph.toUtf8());
+        g.close();
+        QImage still;
+        still.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+        QCOMPARE(still.size(), QSize(180, 320));
+        for (const auto &point : {QPoint(2, 2), QPoint(177, 317), QPoint(2, 317)}) {
+            const auto c = still.pixelColor(point);
+            QVERIFY2(c.red() > 200 && c.green() < 60, qPrintable(c.name()));
+        }
+        const auto middle = still.pixelColor(90, 160);
+        QVERIFY2(middle.green() > 200 && middle.red() < 60, qPrintable(middle.name()));
+        // One undo step brings back the wide canvas and the picture.
+        editor.undo();
+        QCOMPARE(editor.project().width, 1280);
+        QCOMPARE(editor.project().clip(wide)->scale, 1.);
+    }
+    void reframeFollowsFace() {
+#if defined(CUTLERY_AI_WORKER) && defined(CUTLERY_TEST_MODELS)
+        const QString models = CUTLERY_TEST_MODELS;
+        if (!QFileInfo::exists(models + "/face_detection_short_range.onnx"))
+            QSKIP("The face models are not in the test models folder");
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // The face moves from left to right, 300 px/s across 1280 px.
+        const auto source = dir.filePath("moving.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=1280x720:r=25:d=2", "-i",
+                     QString(CUTLERY_SOURCE_DIR) + "/tests/fixtures/face-straight.jpg",
+                     "-filter_complex", "[1]scale=480:-2[f];[0][f]overlay=x='100+t*300':y=100",
+                     "-c:v", "ffv1", source});
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+        qputenv("CUTLERY_AI_MODELS", models.toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        editor.configure(1280, 720, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto id = editor.state()["selectedId"].toString();
+        editor.reframe(720, 1280);
+        QCOMPARE(editor.state()["reframe"].toMap()["status"].toString(), QString("analysing"));
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["reframe"].toMap()["status"].toString(),
+                                  QString("done"), 120000);
+        QCOMPARE(editor.state()["reframe"].toMap()["faces"].toInt(), 1);
+        const auto *c = editor.project().clip(id);
+        QVERIFY(c->keyframes.value("x").size() >= 3);
+        // The picture is 3.16 canvas widths wide, so the face's 0.234 of the source width per
+        // second moves the picture 0.74 canvas widths per second the other way.
+        const double x0 = c->valueAt("x", 15), x1 = c->valueAt("x", 35);
+        QVERIFY2(std::abs((x1 - x0) + 0.234 * 3.16 * 20 / 25.) < 0.1,
+                 qPrintable(QString("%1 → %2").arg(x0).arg(x1)));
+        // The face sits in the middle of the tall frame: at 1 s its centre is at about 0.57 of
+        // the source width, so the picture moves 0.07 × 3.16 to the left.
+        QVERIFY2(std::abs(c->valueAt("x", 25) + 0.22) < 0.12,
+                 qPrintable(QString::number(c->valueAt("x", 25))));
+        // Reframing and following are separate undo steps; both undo back to the wide frame.
+        editor.undo();
+        QVERIFY(!editor.project().clip(id)->keyframes.contains("x"));
+        editor.undo();
+        QCOMPARE(editor.project().width, 1280);
+#else
+        QSKIP("Needs the AI worker and the AI pack's models (CUTLERY_TEST_MODELS)");
+#endif
+    }
     void aiCutout() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
