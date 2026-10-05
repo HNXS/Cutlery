@@ -1,5 +1,17 @@
 # Validation record
 
+## Windows portable build — 2026-10-05, multiple selection and groups, titles that build up, pan keyframes (0.6 development)
+
+[GitHub Actions run 37303368450](https://github.com/HNXS/Cutlery/actions/runs/37303368450) on commit `379eb83b66a4bd46aa86c159f0dea623833d5df7` passed every step on its second attempt. The first attempt stopped while installing Qt, a download from the Qt mirror, before any test ran.
+
+New coverage:
+
+- **Engine tests:**
+  - `multipleSelectionAndGroups`: select several clips, move them together and undo in one step; group, save, select or toggle a whole group, delete a group, ungroup, select all.
+  - `titlesThatBuildUp`: a typewriter title shows more of the text at each step and ends as the whole title; word by word matches.
+  - `reverbAndEcho`: an animated pan moves the sound from left to right.
+- **Interface:** Ctrl+click adds a clip to the selection, and dragging moves both selected clips; slip, slide and roll now press the middle of the edge.
+
 ## Windows portable build — 2026-10-05, slip/slide/roll, linked A/V, anchor, GIF and SVG (0.6 development)
 
 [GitHub Actions run 37290506341](https://github.com/HNXS/Cutlery/actions/runs/37290506341) on commit `51f6cf5c6b7fbca26ce905f7dcc52ed21704bdf7` passed every step, including the local build script. Qt SVG, now a build dependency, comes with the standard Qt installation, so the Qt install step needed no extra module.
