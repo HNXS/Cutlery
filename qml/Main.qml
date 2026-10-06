@@ -2255,6 +2255,123 @@ ApplicationWindow {
                                 text: "Remove pauses…"
                                 onClicked: pauseDialog.open()
                             }
+                            // Text-based editing: the clip's words; click to choose, double-click
+                            // to jump there, then cut the chosen words or every "äh" and "ähm".
+                            ColumnLayout {
+                                id: wordEditor
+                                objectName: "wordEditor"
+                                Layout.fillWidth: true
+                                spacing: 6
+                                readonly property var t: win.s.transcript || ({})
+                                readonly property var words: t.words || []
+                                // The words as text, so the choice resets only when they change.
+                                readonly property string wordsKey: (t.clipId || "") + ":" + words.map(w => w.start + w.text).join("|")
+                                property var chosen: []
+                                visible: win.selection.hasAudio === true && win.selection.reverse !== true
+                                onWordsKeyChanged: chosen = []
+                                function toggle(i) {
+                                    const next = chosen.slice();
+                                    const at = next.indexOf(i);
+                                    if (at >= 0)
+                                        next.splice(at, 1);
+                                    else
+                                        next.push(i);
+                                    chosen = next;
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    visible: wordEditor.t.status !== "ready" && wordEditor.t.status !== "running"
+                                    ComboBox {
+                                        id: wordLanguage
+                                        objectName: "wordLanguage"
+                                        Layout.fillWidth: true
+                                        model: captionDialog.languages.map(l => l.label)
+                                        currentIndex: Math.max(0, captionDialog.languages.findIndex(l => l.id === (wordEditor.t.language || "auto")))
+                                    }
+                                    Action {
+                                        objectName: "transcribeClip"
+                                        text: "Edit by text"
+                                        enabled: wordEditor.t.status !== "unavailable"
+                                        onClicked: editor.transcribeClip(captionDialog.languages[wordLanguage.currentIndex].id)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: wordEditor.t.status === "unavailable" ? wordEditor.t.missing : "Writes down what is said in this clip; then cut words by choosing them"
+                                    }
+                                }
+                                ProgressBar {
+                                    Layout.fillWidth: true
+                                    visible: wordEditor.t.status === "running"
+                                    value: wordEditor.t.progress || 0
+                                }
+                                ScrollView {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: Math.min(wordFlow.implicitHeight + 4, 220)
+                                    visible: wordEditor.t.status === "ready" && wordEditor.words.length > 0
+                                    clip: true
+                                    contentWidth: availableWidth
+                                    Flow {
+                                        id: wordFlow
+                                        width: parent.width
+                                        spacing: 3
+                                        Repeater {
+                                            // A count, not the list: chips are kept while the playhead moves.
+                                            model: wordEditor.words.length
+                                            delegate: Rectangle {
+                                                id: wordChip
+                                                required property int index
+                                                readonly property var modelData: wordEditor.words[index] || ({})
+                                                objectName: "word-" + index
+                                                readonly property bool chosen: wordEditor.chosen.indexOf(index) >= 0
+                                                readonly property bool current: win.s.playhead >= modelData.start && win.s.playhead < modelData.end
+                                                width: wordText.implicitWidth + 8
+                                                height: wordText.implicitHeight + 4
+                                                radius: 3
+                                                color: chosen ? "#7a3b33" : current ? "#28564c" : modelData.filler ? "#4a3e22" : "transparent"
+                                                signal clicked
+                                                signal doubleClicked
+                                                onClicked: wordEditor.toggle(index)
+                                                onDoubleClicked: editor.seek(modelData.start)
+                                                Label {
+                                                    id: wordText
+                                                    anchors.centerIn: parent
+                                                    text: wordChip.modelData.text
+                                                    font.strikeout: wordChip.chosen
+                                                    color: wordChip.modelData.filler ? "#e5c07b" : palette.text
+                                                }
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    onClicked: wordChip.clicked()
+                                                    onDoubleClicked: wordChip.doubleClicked()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Label {
+                                    visible: wordEditor.t.status === "ready" && wordEditor.words.length === 0
+                                    text: "No speech found in this clip."
+                                    color: win.muted
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    visible: wordEditor.t.status === "ready" && wordEditor.words.length > 0
+                                    Action {
+                                        objectName: "cutWords"
+                                        Layout.fillWidth: true
+                                        enabled: wordEditor.chosen.length > 0 && win.selection.locked !== true
+                                        text: wordEditor.chosen.length ? "Cut " + wordEditor.chosen.length + (wordEditor.chosen.length === 1 ? " word" : " words") : "Click words to cut"
+                                        onClicked: editor.cutWords(wordEditor.chosen)
+                                    }
+                                    Action {
+                                        objectName: "removeFillers"
+                                        Layout.fillWidth: true
+                                        enabled: (wordEditor.t.fillers || 0) > 0 && win.selection.locked !== true
+                                        text: "Remove " + (wordEditor.t.fillers || 0) + " “äh”"
+                                        onClicked: editor.removeFillers()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Cuts every hesitation sound (äh, ähm, hm, um, uh) the transcript contains"
+                                    }
+                                }
+                            }
                             // Beat markers for cutting to music; clips snap to them.
                             RowLayout {
                                 Layout.fillWidth: true
@@ -2617,13 +2734,23 @@ ApplicationWindow {
                                         const look = looks[index].values;
                                         if (look) {
                                             // Every look setting at once, in one undo step; the LUT stays.
-                                            const values = { brightness: 0, contrast: 1, saturation: 1, temperature: 0, tint: 0, vibrance: 0, shadows: 0, highlights: 0, sharpen: 0, glow: 0, vignette: 0, grain: 0 };
+                                            const values = { brightness: 0, contrast: 1, saturation: 1, temperature: 0, tint: 0, vibrance: 0, shadows: 0, highlights: 0, sharpen: 0, glow: 0, vignette: 0, grain: 0, curveMaster: "", curveRed: "", curveGreen: "", curveBlue: "", hslColors: "", hslHue: 0, hslSaturation: 0, hslLightness: 0 };
                                             for (const k in look)
                                                 values[k] = look[k];
                                             editor.setClipValues(values);
                                         }
                                         currentIndex = 0;
                                     }
+                                }
+                                Action {
+                                    objectName: "autoColour"
+                                    Layout.fillWidth: true
+                                    readonly property bool measuring: (win.s.autoColour || {}).status === "measuring"
+                                    enabled: !measuring && win.selection.locked !== true
+                                    text: measuring ? "Measuring…" : "Auto colour"
+                                    onClicked: editor.autoColour()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Measures the clip and sets brightness, contrast, temperature and tint for a full range and neutral greys"
                                 }
                                 Repeater {
                                     model: [
@@ -2671,6 +2798,216 @@ ApplicationWindow {
                                             TapHandler {
                                                 acceptedButtons: Qt.LeftButton
                                                 onDoubleTapped: editor.setClip(lookRow.modelData.key, 0)
+                                            }
+                                        }
+                                    }
+                                }
+                                // Tone curves: drag points, click to add one, double-click to remove it.
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label {
+                                        text: "Curves"
+                                        color: ["curveMaster", "curveRed", "curveGreen", "curveBlue"].some(k => !!win.selection[k]) ? win.mint : win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    Repeater {
+                                        model: [{ key: "curveMaster", label: "All", colour: "#d8dee9" }, { key: "curveRed", label: "R", colour: "#e06c75" }, { key: "curveGreen", label: "G", colour: "#98c379" }, { key: "curveBlue", label: "B", colour: "#61afef" }]
+                                        ToolButton {
+                                            required property var modelData
+                                            objectName: "curveChannel-" + modelData.key
+                                            text: modelData.label
+                                            checkable: true
+                                            checked: curveEditor.key === modelData.key
+                                            onClicked: curveEditor.key = modelData.key
+                                            contentItem: Label {
+                                                text: parent.text
+                                                color: parent.modelData.colour
+                                                font.bold: parent.checked
+                                                horizontalAlignment: Text.AlignHCenter
+                                            }
+                                        }
+                                    }
+                                    ToolButton {
+                                        text: "↺"
+                                        enabled: !!win.selection[curveEditor.key] && win.selection.locked !== true
+                                        onClicked: editor.setClip(curveEditor.key, "")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Reset this curve"
+                                    }
+                                }
+                                Canvas {
+                                    id: curveEditor
+                                    objectName: "curveEditor"
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: width
+                                    property string key: "curveMaster"
+                                    // Points as [x, y] in 0..1, from the clip or the straight line.
+                                    readonly property var stored: {
+                                        const text = win.selection[key] || "";
+                                        const list = text.split(" ").filter(p => p.length).map(p => p.split("/").map(Number));
+                                        return list.length >= 2 ? list : [[0, 0], [1, 1]];
+                                    }
+                                    property var points: stored
+                                    property int dragging: -1
+                                    onStoredChanged: { points = stored; requestPaint(); }
+                                    onKeyChanged: requestPaint()
+                                    onWidthChanged: requestPaint()
+                                    readonly property color lineColour: ({ curveMaster: "#d8dee9", curveRed: "#e06c75", curveGreen: "#98c379", curveBlue: "#61afef" })[key]
+                                    function commit() {
+                                        const sorted = points.slice().sort((a, b) => a[0] - b[0]);
+                                        const unique = sorted.filter((p, i) => i === 0 || p[0] > sorted[i - 1][0] + 0.001);
+                                        const straight = unique.length === 2 && unique[0][0] === 0 && unique[0][1] === 0 && unique[1][0] === 1 && unique[1][1] === 1;
+                                        editor.setClip(key, straight ? "" : unique.map(p => p[0].toFixed(3) + "/" + p[1].toFixed(3)).join(" "));
+                                    }
+                                    function nearest(mx, my) {
+                                        for (let i = 0; i < points.length; ++i)
+                                            if (Math.abs(points[i][0] * width - mx) < 9 && Math.abs((1 - points[i][1]) * height - my) < 9)
+                                                return i;
+                                        return -1;
+                                    }
+                                    onPaint: {
+                                        const g = getContext("2d");
+                                        g.reset();
+                                        g.fillStyle = "#151b22";
+                                        g.fillRect(0, 0, width, height);
+                                        g.strokeStyle = "#2b333e";
+                                        g.lineWidth = 1;
+                                        for (let i = 1; i < 4; ++i) {
+                                            g.beginPath();
+                                            g.moveTo(i * width / 4, 0);
+                                            g.lineTo(i * width / 4, height);
+                                            g.moveTo(0, i * height / 4);
+                                            g.lineTo(width, i * height / 4);
+                                            g.stroke();
+                                        }
+                                        const sorted = points.slice().sort((a, b) => a[0] - b[0]);
+                                        g.strokeStyle = lineColour;
+                                        g.lineWidth = 2;
+                                        g.beginPath();
+                                        g.moveTo(0, (1 - sorted[0][1]) * height);
+                                        for (const p of sorted)
+                                            g.lineTo(p[0] * width, (1 - p[1]) * height);
+                                        g.lineTo(width, (1 - sorted[sorted.length - 1][1]) * height);
+                                        g.stroke();
+                                        g.fillStyle = lineColour;
+                                        for (const p of sorted)
+                                            g.fillRect(p[0] * width - 3.5, (1 - p[1]) * height - 3.5, 7, 7);
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        enabled: win.selection.locked !== true
+                                        preventStealing: true
+                                        function at(mouse) {
+                                            return [Math.max(0, Math.min(1, mouse.x / width)), Math.max(0, Math.min(1, 1 - mouse.y / height))];
+                                        }
+                                        onPressed: mouse => {
+                                            let i = curveEditor.nearest(mouse.x, mouse.y);
+                                            if (i < 0 && curveEditor.points.length < 16) {
+                                                curveEditor.points = curveEditor.points.concat([at(mouse)]);
+                                                i = curveEditor.points.length - 1;
+                                            }
+                                            curveEditor.dragging = i;
+                                            curveEditor.requestPaint();
+                                        }
+                                        onPositionChanged: mouse => {
+                                            if (curveEditor.dragging < 0)
+                                                return;
+                                            const next = curveEditor.points.slice();
+                                            next[curveEditor.dragging] = at(mouse);
+                                            curveEditor.points = next;
+                                            curveEditor.requestPaint();
+                                        }
+                                        onReleased: {
+                                            if (curveEditor.dragging >= 0)
+                                                curveEditor.commit();
+                                            curveEditor.dragging = -1;
+                                        }
+                                        onDoubleClicked: mouse => {
+                                            const i = curveEditor.nearest(mouse.x, mouse.y);
+                                            if (i >= 0 && curveEditor.points.length > 2) {
+                                                const next = curveEditor.points.slice();
+                                                next.splice(i, 1);
+                                                curveEditor.points = next;
+                                                curveEditor.commit();
+                                            }
+                                        }
+                                    }
+                                }
+                                // Selective colour: change only some colours (all when none is chosen).
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 3
+                                    Label {
+                                        text: "Colours"
+                                        color: (win.selection.hslHue || win.selection.hslSaturation || win.selection.hslLightness) ? win.mint : win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    Repeater {
+                                        model: [{ id: "r", colour: "#e05050" }, { id: "y", colour: "#e0c040" }, { id: "g", colour: "#50b050" }, { id: "c", colour: "#40c0c0" }, { id: "b", colour: "#4070e0" }, { id: "m", colour: "#c050c0" }]
+                                        Rectangle {
+                                            id: hslSwatch
+                                            required property var modelData
+                                            objectName: "hslColour-" + modelData.id
+                                            readonly property var chosen: (win.selection.hslColors || "").split(" ").filter(x => x.length)
+                                            readonly property bool on: chosen.indexOf(modelData.id) >= 0
+                                            width: 20
+                                            height: 20
+                                            radius: 10
+                                            color: modelData.colour
+                                            opacity: on || chosen.length === 0 ? 1 : 0.35
+                                            border.width: on ? 2 : 0
+                                            border.color: "white"
+                                            signal clicked
+                                            onClicked: {
+                                                const next = on ? chosen.filter(x => x !== modelData.id) : chosen.concat([modelData.id]);
+                                                editor.setClip("hslColors", next.join(" "));
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                enabled: win.selection.locked !== true
+                                                onClicked: hslSwatch.clicked()
+                                            }
+                                        }
+                                    }
+                                }
+                                Repeater {
+                                    model: [
+                                        { key: "hslHue", name: "Hue shift", lo: -180, hi: 180, step: 1 },
+                                        { key: "hslSaturation", name: "Colour saturation", lo: -1, hi: 1, step: .01 },
+                                        { key: "hslLightness", name: "Colour lightness", lo: -1, hi: 1, step: .01 }
+                                    ]
+                                    ColumnLayout {
+                                        id: hslRow
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        spacing: 0
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Label {
+                                                text: hslRow.modelData.name
+                                                color: Number(win.selection[hslRow.modelData.key] || 0) !== 0 ? win.mint : win.muted
+                                                Layout.fillWidth: true
+                                            }
+                                            Label {
+                                                text: Number(win.selection[hslRow.modelData.key] || 0).toFixed(hslRow.modelData.step < 1 ? 2 : 0)
+                                                font.pixelSize: 10
+                                            }
+                                        }
+                                        Slider {
+                                            objectName: "look-" + hslRow.modelData.key
+                                            Layout.fillWidth: true
+                                            from: hslRow.modelData.lo
+                                            to: hslRow.modelData.hi
+                                            stepSize: hslRow.modelData.step
+                                            value: Number(win.selection[hslRow.modelData.key] || 0)
+                                            enabled: win.selection.locked !== true
+                                            onPressedChanged: if (!pressed)
+                                                editor.setClip(hslRow.modelData.key, value)
+                                            onMoved: if (!pressed)
+                                                editor.setClip(hslRow.modelData.key, value)
+                                            TapHandler {
+                                                acceptedButtons: Qt.LeftButton
+                                                onDoubleTapped: editor.setClip(hslRow.modelData.key, 0)
                                             }
                                         }
                                     }

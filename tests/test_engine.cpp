@@ -1965,6 +1965,102 @@ class EngineTest : public QObject {
         QCOMPARE(editor.project().tracks, tracks + 1);
 #endif
     }
+    void transcriptEditing() {
+        // Cut ranges from chosen words: each run of words up to the next kept word.
+        const QVector<qint64> starts{0, 10, 20, 30, 40}, ends{8, 18, 28, 38, 48};
+        QCOMPARE(wordCutRanges(starts, ends, {1, 2}, 60, 4),
+                 (QVector<QPair<qint64, qint64>>{{10, 30}}));
+        QCOMPARE(wordCutRanges(starts, ends, {4, 0}, 60, 4),
+                 (QVector<QPair<qint64, qint64>>{{0, 10}, {40, 52}}));
+        QCOMPARE(wordCutRanges(starts, ends, {4}, 50, 4), (QVector<QPair<qint64, qint64>>{{40, 50}}));
+        QVERIFY(wordCutRanges(starts, ends, {7}, 60, 4).isEmpty());
+        QVERIFY(isFillerWord("Ähm,") && isFillerWord("uh") && isFillerWord("HMM.") && isFillerWord("äh"));
+        QVERIFY(!isFillerWord("er") && !isFillerWord("also") && !isFillerWord("Ähnlich"));
+
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("talk.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=25:d=6", "-f",
+                     "lavfi", "-i", "sine=d=6", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest",
+                     source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        const auto asset = editor.project().assets.first();
+        editor.addAsset(asset.id);
+        const auto id = editor.state()["selectedId"].toString();
+        editor.detachAudio();
+        editor.select(id);
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        // A cached transcript (as the speech recogniser writes it) for the whole file.
+        const auto key = QDir(editor.state()["dataPath"].toString() + "/ai")
+                             .filePath(MediaAnalysis::fingerprint(asset) + "-transcribe-v2-de");
+        QVERIFY(QDir().mkpath(QFileInfo(key).absolutePath()));
+        {
+            QFile srt(key + ".srt");
+            QVERIFY(srt.open(QIODevice::WriteOnly));
+            srt.write("1\n00:00:00,000 --> 00:00:00,800\nHallo\n\n"
+                      "2\n00:00:01,000 --> 00:00:01,400\nähm,\n\n"
+                      "3\n00:00:02,000 --> 00:00:02,600\nliebe\n\n"
+                      "4\n00:00:03,000 --> 00:00:03,800\nZuschauer.\n\n"
+                      "5\n00:00:04,000 --> 00:00:04,400\näh\n\n"
+                      "6\n00:00:05,000 --> 00:00:05,600\nTschüss\n");
+            QFile meta(key + ".json");
+            QVERIFY(meta.open(QIODevice::WriteOnly));
+            meta.write(R"({"start": 0, "end": 6, "rate": 8})");
+        }
+        editor.transcribeClip("de");
+        auto t = editor.state()["transcript"].toMap();
+        QCOMPARE(t["status"].toString(), QString("ready"));
+        auto words = t["words"].toList();
+        QCOMPARE(words.size(), 6);
+        QCOMPARE(words[2].toMap()["text"].toString(), QString("liebe"));
+        QCOMPARE(words[2].toMap()["start"].toLongLong(), qint64(50));
+        QCOMPARE(t["fillers"].toInt(), 2);
+        // Cutting "liebe Zuschauer." removes 2 s (to the start of the next word) from the clip
+        // and its sound, and the words after it move up.
+        // The clip and its sound are left in two pieces each, 100 frames in all; the transcript
+        // runs on across the pieces.
+        auto total = [&](int track) {
+            qint64 frames = 0;
+            for (const auto &c : editor.project().clips)
+                if (c.track == track)
+                    frames += c.duration;
+            return frames;
+        };
+        const int audioTrack = [&] {
+            for (const auto &c : editor.project().clips)
+                if (c.id != id)
+                    return c.track;
+            return -1;
+        }();
+        editor.cutWords({2, 3});
+        QCOMPARE(total(0), qint64(100));
+        QCOMPARE(total(audioTrack), qint64(100));
+        QCOMPARE(editor.project().clips.size(), size_t(4));
+        words = editor.state()["transcript"].toMap()["words"].toList();
+        QCOMPARE(words.size(), 4);
+        QCOMPARE(words[2].toMap()["text"].toString(), QString("äh"));
+        QCOMPARE(words[2].toMap()["start"].toLongLong(), qint64(50));
+        // Filler words: both go, each up to the next word.
+        editor.removeFillers();
+        words = editor.state()["transcript"].toMap()["words"].toList();
+        QCOMPARE(words.size(), 2);
+        QCOMPARE(words[1].toMap()["text"].toString(), QString("Tschüss"));
+        QCOMPARE(words[1].toMap()["start"].toLongLong(), qint64(25));
+        QCOMPARE(total(0), qint64(50));
+        QCOMPARE(total(audioTrack), qint64(50));
+        editor.removeFillers();
+        QVERIFY(editor.state()["error"].toString().contains("No filler"));
+        // One undo step each.
+        editor.undo();
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        QCOMPARE(editor.project().clip(id)->duration, qint64(150));
+    }
     void pausesAndLoudness() {
         // Cutting ranges out of a clip closes the gaps on its track only.
         Project p;
@@ -4379,6 +4475,92 @@ class EngineTest : public QObject {
             const auto duration = QRegularExpression("duration=([0-9.]+)").match(probe);
             QVERIFY2(std::abs(duration.captured(1).toDouble() - 2) < 0.1, qPrintable(probe));
         }
+    }
+    void curvesSelectiveAndAutoColour() {
+        QVERIFY(validCurve("0/0 0.5/0.6 1/1") && !validCurve("0/0") && !validCurve("0.5/0 0.2/1") &&
+                !validCurve("0/0 1/1.2") && !validCurve("a/b c/d"));
+        // Corrections for measured levels.
+        auto dark = autoColourCorrection(40, 120, 128, 128);
+        QVERIFY(dark["contrast"].toDouble() > 1.5 && dark["brightness"].toDouble() > 0.1);
+        QCOMPARE(dark["temperature"].toDouble(), 0.);
+        QVERIFY(autoColourCorrection(20, 230, 150, 110)["temperature"].toDouble() > 0.5);
+        QVERIFY(autoColourCorrection(20, 230, 115, 115)["tint"].toDouble() >= 0.5);
+        QCOMPARE(autoColourCorrection(20, 230, 128, 128)["contrast"].toDouble(), 0.98);
+
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // A dark, low-contrast, blue video (a fixed gradient).
+        const auto source = dir.filePath("dull.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "gradients=s=160x90:c0=0x182050:c1=0x3858a8:r=25:d=2:speed=0:seed=1", "-c:v", "ffv1",
+                     source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto id = editor.state()["selectedId"].toString();
+        auto still = [&]() {
+            RenderOptions options;
+            options.audio = false;
+            options.from = 10;
+            options.to = 11;
+            const auto plan = compileRender(editor.project(), dir.filePath("work"), 160, 90, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            double r = 0, gr = 0, b = 0, lo = 255, hi = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x) {
+                    const QColor c = image.pixelColor(x, y);
+                    r += c.red();
+                    gr += c.green();
+                    b += c.blue();
+                    lo = std::min<double>(lo, qGray(c.rgb()));
+                    hi = std::max<double>(hi, qGray(c.rgb()));
+                }
+            const double n = image.width() * image.height();
+            return std::array<double, 5>{r / n, gr / n, b / n, lo, hi};
+        };
+        const auto before = still();
+        editor.autoColour();
+        QCOMPARE(editor.state()["autoColour"].toMap()["status"].toString(), QString("measuring"));
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["autoColour"].toMap()["status"].toString(),
+                                  QString("done"), 30000);
+        const auto *c = editor.project().clip(id);
+        QVERIFY2(c->contrast > 1.2 && c->brightness > 0 && c->temperature > 0,
+                 qPrintable(QString("%1 %2 %3").arg(c->contrast).arg(c->brightness).arg(c->temperature)));
+        const auto after = still();
+        // Wider and brighter, and less blue.
+        QVERIFY2(after[4] - after[3] > (before[4] - before[3]) * 1.3, "more contrast");
+        QVERIFY2(after[2] / (after[0] + 1) < before[2] / (before[0] + 1),
+                 qPrintable(QString("blue/red %1 → %2").arg(before[2] / (before[0] + 1)).arg(after[2] / (after[0] + 1))));
+        editor.undo();
+        QCOMPARE(editor.project().clip(id)->contrast, 1.);
+
+        // Curves and selective colour, saved and rendered.
+        editor.setClip("curveMaster", "0/0 1/0.5");
+        QCOMPARE(editor.project().clip(id)->curveMaster, QString("0/0 1/0.5"));
+        const auto dim = still();
+        QVERIFY2(dim[4] < before[4] * 0.6, qPrintable(QString::number(dim[4])));
+        editor.setClip("curveMaster", "1/0 0/1");
+        QVERIFY(editor.state()["error"].toString().contains("curve"));
+        editor.setClip("curveMaster", "");
+        editor.setClipValues({{"hslColors", "b c"}, {"hslSaturation", -1.0}});
+        const auto grey = still();
+        QVERIFY2(std::abs(grey[2] - grey[0]) < (before[2] - before[0]) / 3,
+                 qPrintable(QString("blue - red %1 → %2").arg(before[2] - before[0]).arg(grey[2] - grey[0])));
+        const auto saved = Project::fromJson(editor.project().json(), {});
+        QCOMPARE(saved.clip(id)->hslColors, QString("b c"));
+        QCOMPARE(saved.clip(id)->hslSaturation, -1.);
+        editor.setClip("hslColors", "x");
+        QVERIFY(editor.state()["error"].toString().contains("selective"));
     }
     void colourAndLook() {
         QCOMPARE(filterPath("C:/a b/it's,[x];y=z.cube"),

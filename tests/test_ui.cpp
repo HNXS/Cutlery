@@ -1,5 +1,6 @@
 #include "Editor.h"
 #include "KeyboardShortcuts.h"
+#include "MediaAnalysis.h"
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QMimeData>
@@ -492,6 +493,138 @@ class UiTest : public QObject {
         QTRY_VERIFY(!bar->isVisible());
         QCOMPARE(editor.project().clips.size(), size_t(1));
         QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["nestedRendering"].toBool(), 30000);
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
+    void editByText() {
+        QTemporaryDir dir;
+        const auto source = dir.filePath("talk.mkv");
+        QProcess generate;
+        generate.start(Editor::executable("ffmpeg"),
+                       {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=25:d=4", "-f",
+                        "lavfi", "-i", "sine=d=4", "-c:v", "ffv1", "-c:a", "pcm_s16le",
+                        "-shortest", source});
+        QVERIFY(generate.waitForFinished(15000));
+        QCOMPARE(generate.exitCode(), 0);
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.configure(160, 90, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        const auto asset = editor.project().assets.first();
+        editor.addAsset(asset.id);
+        // The cached transcript the speech recogniser would write (German).
+        const auto key = QDir(editor.state()["dataPath"].toString() + "/ai")
+                             .filePath(MediaAnalysis::fingerprint(asset) + "-transcribe-v2-de");
+        QVERIFY(QDir().mkpath(QFileInfo(key).absolutePath()));
+        {
+            QFile srt(key + ".srt");
+            QVERIFY(srt.open(QIODevice::WriteOnly));
+            srt.write("1\n00:00:00,000 --> 00:00:00,800\nHallo\n\n"
+                      "2\n00:00:01,000 --> 00:00:01,400\nähm\n\n"
+                      "3\n00:00:02,000 --> 00:00:02,600\nalle\n\n"
+                      "4\n00:00:03,000 --> 00:00:03,600\nzusammen\n");
+            QFile meta(key + ".json");
+            QVERIFY(meta.open(QIODevice::WriteOnly));
+            meta.write(R"({"start": 0, "end": 4, "rate": 8})");
+        }
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        // Choose German and start: the transcript is there already, so the words show at once.
+        auto *language = findItem(window->contentItem(), "wordLanguage");
+        QTRY_VERIFY(language && language->isVisible());
+        language->setProperty("currentIndex", 1);
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "transcribeClip"), "clicked"));
+        QQuickItem *word = nullptr;
+        QTRY_VERIFY((word = findItem(window->contentItem(), "word-2")));
+        QTRY_VERIFY(findItem(window->contentItem(), "removeFillers")->property("text").toString().contains("1"));
+        // Click "alle" and "zusammen", then cut them.
+        QVERIFY(QMetaObject::invokeMethod(word, "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "word-3"), "clicked"));
+        auto *cut = findItem(window->contentItem(), "cutWords");
+        QTRY_VERIFY(cut->isEnabled());
+        QVERIFY(cut->property("text").toString().contains("2 words"));
+        QVERIFY(QMetaObject::invokeMethod(cut, "clicked"));
+        QTRY_VERIFY(!findItem(window->contentItem(), "word-2"));
+        qint64 total = 0;
+        for (const auto &c : editor.project().clips)
+            total += c.duration;
+        // Cut from "alle" to 0.15 s after "zusammen" (3.75 s): 2 s of the 4 s clip and 0.24 s stay.
+        QCOMPARE(total, qint64(56));
+        // Double-clicking a word moves the playhead to it.
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "word-1"), "doubleClicked"));
+        QCOMPARE(editor.state()["playhead"].toLongLong(), qint64(25));
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
+    void curvesAndSelectiveColour() {
+        QTemporaryDir dir;
+        QImage image(64, 36, QImage::Format_RGB32);
+        image.fill(QColor("#405070"));
+        QVERIFY(image.save(dir.filePath("still.png")));
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("still.png"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto id = editor.state()["selectedId"].toString();
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        auto *curve = findItem(window->contentItem(), "curveEditor");
+        QTRY_VERIFY(curve && curve->width() > 50);
+        // Scroll the inspector so the curve is on screen.
+        for (auto *p = curve->parentItem(); p; p = p->parentItem())
+            if (p->property("contentY").isValid() && p->property("contentHeight").toDouble() > p->height()) {
+                const double top = curve->mapToItem(p->property("contentItem").value<QQuickItem *>(), QPointF(0, 0)).y();
+                p->setProperty("contentY", std::max(0., top - 20));
+                break;
+            }
+        QTest::qWait(50);
+        // Click in the middle adds a point; dragging it up brightens the middle tones.
+        const auto from = curve->mapToScene(QPointF(curve->width() / 2, curve->height() / 2)).toPoint(),
+                   to = curve->mapToScene(QPointF(curve->width() / 2, curve->height() / 4)).toPoint();
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, from);
+        QTest::mouseMove(window, (from + to) / 2);
+        QTest::mouseMove(window, to);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, to);
+        QTRY_VERIFY(!editor.project().clip(id)->curveMaster.isEmpty());
+        const auto points = editor.project().clip(id)->curveMaster.split(' ');
+        QCOMPARE(points.size(), 3);
+        QVERIFY2(points[1].split('/')[1].toDouble() > 0.7, qPrintable(points.join(' ')));
+        // Another channel; the reset button clears it again.
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "curveChannel-curveBlue"), "clicked"));
+        QTRY_COMPARE(curve->property("key").toString(), QString("curveBlue"));
+        // Choosing blue for the selective colour change.
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "hslColour-b"), "clicked"));
+        QTRY_COMPARE(editor.project().clip(id)->hslColors, QString("b"));
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "hslColour-c"), "clicked"));
+        QTRY_COMPARE(editor.project().clip(id)->hslColors, QString("b c"));
+        QVERIFY(findItem(window->contentItem(), "autoColour")->isEnabled());
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void exportDialog() {

@@ -72,16 +72,25 @@ jobs:
         run: |
           cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DCUTLERY_ONNXRUNTIME_DIR=$env:ONNXRUNTIME_DIR" "-DCUTLERY_WHISPER_CLI=$env:WHISPER_DIR/whisper-cli.exe" "-DCUTLERY_TEST_MODELS=$env:MODELS_DIR"
           if ($LASTEXITCODE -ne 0) { throw 'Configuration failed' }
-          cmake --build build --config Release --parallel 2
-          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+          cmake --build build --config Release --parallel 2 2>&1 | Tee-Object -FilePath build/compile.log
+          if ($LASTEXITCODE -ne 0) {
+            # The first compiler errors as annotations on the run.
+            Select-String -Path build/compile.log -Pattern ': (fatal )?error ' | Select-Object -First 10 |
+              ForEach-Object { Write-Output "::error::$($_.Line.Trim())" }
+            throw 'Build failed'
+          }
       - name: Test model and actual media rendering
         env:
           QT_QPA_PLATFORM: offscreen
           QT_QUICK_BACKEND: software
         run: |
           $env:CUTLERY_TEST_SOUNDS = $env:SOUNDS_DIR
-          ctest --test-dir build -C Release --output-on-failure
+          ctest --test-dir build -C Release --output-on-failure 2>&1 | Tee-Object -FilePath build/ctest.log
           if ($LASTEXITCODE -ne 0) {
+            # What failed in this first run, as annotations: a check that fails only now and
+            # then passes again in the runs below.
+            Select-String -Path build/ctest.log -Pattern 'FAIL!|Loc: \[|\*\*\*Failed|\*\*\*Timeout|\*\*\*Exception|Actual|Expected' |
+              Select-Object -First 12 | ForEach-Object { Write-Output "::error::ctest: $($_.Line.Trim())" }
             # Show the failing checks directly; CTest's captured output can be empty here.
             $env:QT_QPA_FONTDIR = "$env:WINDIR/Fonts"
             build/bin/Release/cutlery_tests.exe -o build/engine.txt,txt -o -,txt | Out-Null
