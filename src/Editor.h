@@ -364,7 +364,7 @@ class Editor final : public QObject {
     };
     mutable struct {
         QString clipId, path;
-        quint64 revision = 0;
+        qint64 revision = -1;
         QVector<ClipWord> words;
     } m_words;
     QStringList wordRun(const Clip &) const;

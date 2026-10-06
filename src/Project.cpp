@@ -350,7 +350,7 @@ QJsonObject Project::json(const QString &base) const {
                                    std::pair{"curveBlue", &c.curveBlue},
                                    std::pair{"hslColors", &c.hslColors}})
             if (!v->isEmpty())
-                o[k] = *v;
+                o[QLatin1String(k)] = *v;
         if (!c.lut.isEmpty()) {
             o["lut"] = base.isEmpty() ? c.lut : QDir(base).relativeFilePath(c.lut);
             o["lutStrength"] = c.lutStrength;

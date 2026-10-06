@@ -733,7 +733,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             for (const auto &[name, points] : {std::pair{"m", &c.curveMaster}, std::pair{"r", &c.curveRed},
                                                std::pair{"g", &c.curveGreen}, std::pair{"b", &c.curveBlue}})
                 if (!points->isEmpty() && validCurve(*points))
-                    curves << QString("%1='%2'").arg(name, *points);
+                    curves << QLatin1String(name) + "='" + *points + "'";
             if (!curves.isEmpty())
                 f += ",curves=" + curves.join(':');
         }
