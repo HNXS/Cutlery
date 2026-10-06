@@ -1,5 +1,28 @@
 # Validation record
 
+## Windows portable build — 2026-10-06, soft mask edges, export frame rate and bitrate, export retry, cache limit (0.6 development)
+
+[GitHub Actions run 37534841625](https://github.com/HNXS/Cutlery/actions/runs/37534841625) on commit `8ecec29520c1af75bd648d84a7972f99f59a0f2f` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine tests:**
+  - `softEdgeMask`:
+    - a feathered picture is solid in the middle, shows the background at its border and changes gradually in between;
+    - without feather the edge is sharp, and a feathered circle keeps its corners clear;
+    - the setting is saved and validated.
+  - `exportRateBitrateAndRetry`:
+    - a set bitrate replaces the quality options of every H.264 candidate, and ProRes is left alone;
+    - VP9 at 29.97 fps uses `30000/1001`;
+    - a real MPEG-4 export at 50 fps from a 25 fps edit has 100 frames;
+    - invalid rates and bitrates are refused;
+    - an export into a missing folder fails and succeeds when tried again once the folder exists.
+  - `cacheLimitAndClearing`:
+    - the cache size is reported, and the limit is validated;
+    - "empty at next start" clears the waveform and thumbnail caches on the next start;
+    - a work folder from the last hour is kept.
+- **Interface:** the export dialog's frame-rate and bitrate lists change the choice and the preset; bitrate is off for ProRes.
+
 ## Windows portable build — 2026-10-06, command search, folder import, clip sound, text glow (0.6 development)
 
 [GitHub Actions run 37530257964](https://github.com/HNXS/Cutlery/actions/runs/37530257964) on commit `ed6b488532fed102b1262de13cf7415f01ab79be` passed every step on its first attempt.
