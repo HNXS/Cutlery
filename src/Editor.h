@@ -79,6 +79,12 @@ class Editor final : public QObject {
     Q_INVOKABLE void detachAudio();
     Q_INVOKABLE qint64 adjacentCut(bool forward) const;
     Q_INVOKABLE void newProject();
+    // Templates (data folder, templates/): the project as it is, saved under a name, to start
+    // new projects from; its media can then be replaced (relink) or stays as it is.
+    Q_INVOKABLE QVariantList templates() const;
+    Q_INVOKABLE void saveTemplate(const QString &name);
+    Q_INVOKABLE bool newFromTemplate(const QString &name);
+    Q_INVOKABLE void removeTemplate(const QString &name);
     // App-wide settings (state "preferences"): width, height, fpsN, fpsD of new projects,
     // stillSeconds of imported pictures, backups kept per project, startScreen. Saved at once.
     Q_INVOKABLE void setPreferences(const QVariantMap &values);
@@ -366,7 +372,8 @@ class Editor final : public QObject {
     QString m_importFolder;
     QVariantMap m_reframe;
     QVariantMap m_autoColour;
-    QVariantList m_textStyles;
+    QVariantList m_textStyles, m_templates;
+    void listTemplates();
     void saveTextStyles();
     QProcess *m_autoColourProcess = nullptr;
     // The selected clip's words in clip-local frames, cached per clip, transcript and revision.

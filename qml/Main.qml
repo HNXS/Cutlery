@@ -44,6 +44,7 @@ ApplicationWindow {
         else
             editor.reframe(Math.round(side * w / h / 2) * 2, side);
     }
+    property string relinkAsset: "" // the library item to replace; else the selected clip's
     property bool queueExport: false // the export file dialog adds to the queue instead
     property string pendingAction: ""
     property bool allowClose: false
@@ -65,7 +66,7 @@ ApplicationWindow {
         { n: 24, d: 1, label: "24" }, { n: 25, d: 1, label: "25" }, { n: 30, d: 1, label: "30" },
         { n: 50, d: 1, label: "50" }, { n: 60, d: 1, label: "60" }, { n: 30000, d: 1001, label: "29.97" }
     ]
-    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || styleDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
+    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || styleDialog.visible || templateDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
         enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
@@ -210,6 +211,10 @@ ApplicationWindow {
             editor.recover();
         else if (action.startsWith("recent:"))
             editor.openRecent(action.substring(7));
+        else if (action.startsWith("template:")) {
+            if (editor.newFromTemplate(action.substring(9)))
+                win.startScreen = false;
+        }
         else if (action.startsWith("restore:"))
             editor.restoreBackup(action.substring(8));
         else if (action === "close") {
@@ -380,6 +385,43 @@ ApplicationWindow {
                 objectName: "preferencesItem"
                 text: "Preferences…"
                 onTriggered: preferencesDialog.open()
+            }
+            MenuSeparator {}
+            MenuItem {
+                objectName: "saveTemplate"
+                text: "Save as template…"
+                enabled: win.s.duration > 0
+                onTriggered: templateDialog.open()
+            }
+            Menu {
+                id: templateMenu
+                title: "New from template"
+                enabled: (win.s.templates || []).length > 0
+                Instantiator {
+                    model: win.s.templates || []
+                    delegate: MenuItem {
+                        required property var modelData
+                        text: modelData.name
+                        onTriggered: win.guarded("template:" + modelData.name)
+                    }
+                    onObjectAdded: (index, object) => templateMenu.insertItem(index, object)
+                    onObjectRemoved: (index, object) => templateMenu.removeItem(object)
+                }
+            }
+            Menu {
+                id: removeTemplateMenu
+                title: "Remove a template"
+                enabled: (win.s.templates || []).length > 0
+                Instantiator {
+                    model: win.s.templates || []
+                    delegate: MenuItem {
+                        required property var modelData
+                        text: modelData.name
+                        onTriggered: editor.removeTemplate(modelData.name)
+                    }
+                    onObjectAdded: (index, object) => removeTemplateMenu.insertItem(index, object)
+                    onObjectRemoved: (index, object) => removeTemplateMenu.removeItem(object)
+                }
             }
             // A new canvas shape; pictures zoom to fill it and, with the AI pack, follow faces.
             Menu {
@@ -959,6 +1001,13 @@ ApplicationWindow {
                                                 }
                                                 onObjectAdded: (index, object) => moveMenu.insertItem(index + 1, object)
                                                 onObjectRemoved: (index, object) => moveMenu.removeItem(object)
+                                            }
+                                        }
+                                        MenuItem {
+                                            text: "Replace with another file…"
+                                            onTriggered: {
+                                                win.relinkAsset = mediaTile.modelData.id;
+                                                relinkDialog.open();
                                             }
                                         }
                                         MenuItem {
@@ -3579,6 +3628,26 @@ ApplicationWindow {
                     onClicked: win.guarded("recent:" + modelData.path)
                 }
             }
+            Label {
+                visible: (win.s.templates || []).length > 0
+                text: "From a template"
+                color: win.muted
+            }
+            Flow {
+                Layout.fillWidth: true
+                spacing: 8
+                visible: (win.s.templates || []).length > 0
+                Repeater {
+                    model: win.s.templates || []
+                    delegate: Action {
+                        required property var modelData
+                        required property int index
+                        objectName: "startTemplate-" + index
+                        text: modelData.name
+                        onClicked: win.guarded("template:" + modelData.name)
+                    }
+                }
+            }
             Action {
                 objectName: "startEmpty"
                 text: "Skip"
@@ -3619,7 +3688,9 @@ ApplicationWindow {
     FileDialog {
         id: relinkDialog
         title: "Choose replacement media"
-        onAccepted: editor.relink(win.selection.assetId, selectedFile)
+        onAccepted: editor.relink(win.relinkAsset || win.selection.assetId, selectedFile)
+        onVisibleChanged: if (!visible)
+            win.relinkAsset = ""
     }
     // Collect: copies the project and everything it uses into a new folder, e.g. to archive it or
     // move it to another computer.
@@ -3835,6 +3906,37 @@ ApplicationWindow {
             const f = win.projectFormats[prefFormat.currentIndex], r = win.frameRates[prefRate.currentIndex];
             editor.setPreferences({ width: f.w, height: f.h, fpsN: r.n, fpsD: r.d, stillSeconds: prefStill.value / 10, backups: prefBackups.value, startScreen: prefStart.checked });
         }
+    }
+    // Names a template made from the current project.
+    Dialog {
+        id: templateDialog
+        objectName: "templateDialog"
+        anchors.centerIn: parent
+        modal: true
+        title: "Save as template"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAboutToShow: {
+            templateName.text = "";
+            templateName.forceActiveFocus();
+        }
+        ColumnLayout {
+            width: 320
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: win.muted
+                text: "New projects can start from it (Project → New from template). Replace its media with right-click → Replace with another file."
+            }
+            TextField {
+                id: templateName
+                objectName: "templateName"
+                Layout.fillWidth: true
+                maximumLength: 60
+                placeholderText: "Template name, e.g. Tutorial intro"
+                onAccepted: templateDialog.accept()
+            }
+        }
+        onAccepted: editor.saveTemplate(templateName.text)
     }
     // Names a text style to keep.
     Dialog {

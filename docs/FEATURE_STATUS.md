@@ -18,7 +18,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F012 | Local search index for metadata and dialogue | Planned | Not implemented in this alpha. |
 | F013 | Semantic media search and object search | Planned | Not implemented in this alpha. |
 | F014 | Person search with user labels | Planned | Not implemented in this alpha. |
-| F015 | Local templates and replaceable media slots | Planned | Not implemented in this alpha. |
+| F015 | Local templates and replaceable media slots | Partial | Project → "Save as template…" keeps the whole project (also from inside a nested sequence) under a name in the data folder; Project → "New from template" and the start screen start a new, unsaved project from it, which stays out of the recent list; templates can be removed. Any medium can be swapped for another file of the same kind (library right-click → "Replace with another file…"), keeping its clips' trims. Templates refer to their media where it is (not copied); no marked placeholder slots. |
 | F016 | Local brand styles and reusable assets | Partial | Text styles for every project (data folder, styles.json, up to 200): "Save…" in the text inspector keeps a title's font, size, colours and gradient, bold/italic, alignment, spacing, outline, shadow, box, highlight colour and build-up animation under a name (the same name replaces it); "Apply a style…" sets them on all selected titles in one undo step; styles can be removed. No brand colour palettes, logos or reusable asset collections. |
 | F017 | Interchange OTIO, EDL and loss report | Planned | Not implemented in this alpha. |
 | F018 | FCPXML and AAF interchange | Planned | Not implemented in this alpha. |

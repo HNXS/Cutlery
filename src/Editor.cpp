@@ -68,6 +68,7 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     }
     loadPreferences();
     applyPreferences(m_project);
+    listTemplates();
     {
         QFile styles(m_data + "/styles.json");
         if (styles.open(QIODevice::ReadOnly) && styles.size() < 1024 * 1024)
@@ -615,6 +616,7 @@ QVariantMap Editor::state() const {
             {"transcript", transcriptState()},
             {"autoColour", m_autoColour},
             {"textStyles", m_textStyles},
+            {"templates", m_templates},
             {"reframe", m_reframe},
             {"conform", m_conform},
             {"markers", [this] {
@@ -702,6 +704,66 @@ bool Editor::mutate(const std::function<void(Project &)> &fn) {
         fail(QString::fromUtf8(e.what()));
         return false;
     }
+}
+// Templates ---------------------------------------------------------------------------------
+static QString templateFileName(const QString &name) {
+    // A file name from the template's name: letters, digits, spaces, dashes and underscores.
+    QString safe;
+    for (const auto ch : name.trimmed())
+        safe += ch.isLetterOrNumber() || ch == ' ' || ch == '-' || ch == '_' ? ch : QChar('_');
+    return safe.left(60) + ".cutlery";
+}
+QVariantList Editor::templates() const {
+    return m_templates;
+}
+void Editor::listTemplates() {
+    QVariantList list;
+    const QDir dir(m_data + "/templates");
+    for (const auto &info : dir.entryInfoList({"*.cutlery"}, QDir::Files, QDir::Name))
+        list << QVariantMap{{"name", info.completeBaseName()}, {"path", info.absoluteFilePath()}};
+    m_templates = list;
+}
+void Editor::saveTemplate(const QString &name) {
+    const auto label = name.trimmed();
+    if (label.isEmpty())
+        return fail("Name the template");
+    if (m_project.clips.empty() && m_nest.isEmpty())
+        return fail("The timeline is empty");
+    try {
+        QDir().mkpath(m_data + "/templates");
+        const auto path = m_data + "/templates/" + templateFileName(label);
+        auto p = wholeProject();
+        p.name = QFileInfo(path).completeBaseName();
+        saveProject(p, path);
+        listTemplates();
+        m_status = "Template saved: " + p.name;
+        emit changed();
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
+bool Editor::newFromTemplate(const QString &name) {
+    const auto path = m_data + "/templates/" + templateFileName(name);
+    if (!QFileInfo::exists(path)) {
+        fail("No such template");
+        return false;
+    }
+    if (!openProject(QUrl::fromLocalFile(path)))
+        return false;
+    // A new, unsaved project; the template stays as it is and out of the recent list.
+    m_recent.removeAll(QFileInfo(path).absoluteFilePath());
+    saveRecent();
+    m_path.clear();
+    m_project.name = "Untitled";
+    m_dirty = true;
+    m_status = "New project from the template " + name;
+    emit changed();
+    return true;
+}
+void Editor::removeTemplate(const QString &name) {
+    QFile::remove(m_data + "/templates/" + templateFileName(name));
+    listTemplates();
+    emit changed();
 }
 void Editor::newProject() {
     if (m_importing) {

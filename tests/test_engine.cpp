@@ -481,6 +481,48 @@ class EngineTest : public QObject {
         QCOMPARE(editor.project().clips.back().start, cut - qRound64(0.165 * 30));
         qunsetenv("CUTLERY_SOUNDS_DIR");
     }
+    void projectTemplates() {
+        QTemporaryDir dir;
+        QImage image(64, 36, QImage::Format_RGB32);
+        image.fill(Qt::green);
+        QVERIFY(image.save(dir.filePath("logo.png")));
+        FrameProvider frames;
+        Editor editor(&frames);
+        for (const auto &t : editor.templates())
+            editor.removeTemplate(t.toMap()["name"].toString());
+        editor.saveTemplate("Empty");
+        QVERIFY(editor.state()["error"].toString().contains("empty"));
+        editor.configure(1280, 720, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("logo.png"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        editor.addTitle();
+        editor.setClip("text", "Welcome");
+        editor.saveTemplate("Tutorial intro / v2");
+        QCOMPARE(editor.templates().size(), 1);
+        QCOMPARE(editor.templates()[0].toMap()["name"].toString(), QString("Tutorial intro _ v2"));
+        QVERIFY(editor.save(QUrl::fromLocalFile(dir.filePath("work.cutlery"))));
+        // A new project from it: the same clips, unsaved, and not in the recent list.
+        editor.newProject();
+        QVERIFY(editor.newFromTemplate("Tutorial intro _ v2"));
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        QCOMPARE(editor.project().width, 1280);
+        QVERIFY(editor.state()["path"].toString().isEmpty());
+        QVERIFY(editor.state()["dirty"].toBool());
+        for (const auto &r : editor.state()["recent"].toList())
+            QVERIFY(!r.toMap()["path"].toString().contains("templates"));
+        bool hasTitle = false;
+        for (const auto &c : editor.project().clips)
+            hasTitle |= c.text == "Welcome";
+        QVERIFY(hasTitle);
+        // The template itself is unchanged by editing the new project.
+        editor.addTitle();
+        QVERIFY(editor.newFromTemplate("Tutorial intro _ v2"));
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        QVERIFY(!editor.newFromTemplate("Nope"));
+        editor.removeTemplate("Tutorial intro _ v2");
+        QVERIFY(editor.templates().isEmpty());
+    }
     void appPreferences() {
         QTemporaryDir dir;
         FrameProvider frames;
