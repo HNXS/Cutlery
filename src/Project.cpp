@@ -414,6 +414,8 @@ QJsonObject Project::json(const QString &base) const {
         }
         o["shape"] = c.shape;
         o["radius"] = c.radius;
+        if (c.feather > 0)
+            o["feather"] = c.feather;
         o["border"] = c.border;
         o["borderColor"] = c.borderColor;
         o["shadow"] = c.shadow;
@@ -635,6 +637,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         }
         c.shape = j["shape"].toString("rect");
         c.radius = j["radius"].toDouble(0.12);
+        c.feather = j["feather"].toDouble(0);
         c.border = j["border"].toDouble(0);
         c.borderColor = j["borderColor"].toString("#ffffff");
         c.shadow = j["shadow"].toDouble(0);
@@ -753,6 +756,7 @@ void Project::validate() const {
         }
         require(QStringList{"rect", "rounded", "circle"}.contains(c.shape) &&
                     bounded(c.radius, 0, 0.5) && bounded(c.border, 0, 0.1) &&
+                    bounded(c.feather, 0, 0.5) &&
                     QColor(c.borderColor).isValid() && bounded(c.shadow, 0, 1) &&
                     QColor(c.keyColor).isValid() && bounded(c.keySimilarity, 0.01, 1) &&
                     bounded(c.keyBlend, 0, 1),

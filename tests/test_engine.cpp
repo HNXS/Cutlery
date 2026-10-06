@@ -4981,6 +4981,192 @@ class EngineTest : public QObject {
         QCOMPARE(editor.project().clips.last().textGlowColor, QString("#00ff00"));
         editor.removeTextStyle("Neon");
     }
+    void softEdgeMask() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        QImage blue(200, 200, QImage::Format_RGB32), red(200, 200, QImage::Format_RGB32);
+        blue.fill(Qt::blue);
+        red.fill(Qt::red);
+        QVERIFY(blue.save(dir.filePath("blue.png")) && red.save(dir.filePath("red.png")));
+        Project p;
+        p.width = 200;
+        p.height = 200;
+        for (auto [id, file] : {std::pair{"bg", "blue.png"}, {"top", "red.png"}}) {
+            Asset a;
+            a.id = id;
+            a.path = dir.filePath(file);
+            a.kind = "image";
+            a.duration = 5;
+            a.width = 200;
+            a.height = 200;
+            p.assets.push_back(a);
+        }
+        Clip bg;
+        bg.id = "bg";
+        bg.assetId = "bg";
+        bg.duration = 30;
+        Clip top = bg;
+        top.id = "top";
+        top.assetId = "top";
+        top.track = 1;
+        top.feather = 0.4; // 80 px soft edge on a 200 px picture
+        p.clips = {bg, top};
+        auto still = [&](const Project &project) {
+            RenderOptions options;
+            options.audio = false;
+            options.to = 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 200, 200, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        auto image = still(p);
+        // Red in the middle, the background at the very edge, and a gradual change between.
+        QVERIFY2(image.pixelColor(100, 100).red() > 240, qPrintable(image.pixelColor(100, 100).name()));
+        QVERIFY2(image.pixelColor(1, 100).blue() > 200, qPrintable(image.pixelColor(1, 100).name()));
+        int previous = -1;
+        for (int x = 1; x <= 100; x += 9) {
+            const int r = image.pixelColor(x, 100).red();
+            QVERIFY2(r >= previous - 3, qPrintable(QString("%1 at %2").arg(r).arg(x)));
+            previous = r;
+        }
+        const auto mid = image.pixelColor(40, 100);
+        QVERIFY2(mid.red() > 40 && mid.blue() > 40, qPrintable(mid.name()));
+        // Without the soft edge the picture ends sharply.
+        auto sharp = p;
+        sharp.clips[1].feather = 0;
+        image = still(sharp);
+        QVERIFY(image.pixelColor(1, 100).red() > 240);
+        // With a circle: soft all around, the corners stay the background.
+        auto circle = p;
+        circle.clips[1].shape = "circle";
+        circle.clips[1].feather = 0.2;
+        image = still(circle);
+        QVERIFY(image.pixelColor(100, 100).red() > 240);
+        QVERIFY(image.pixelColor(10, 10).blue() > 240);
+        // Saved and validated.
+        QCOMPARE(Project::fromJson(p.json(), {}).clips[1].feather, 0.4);
+        QVERIFY(!sharp.json()["clips"].toArray()[1].toObject().contains("feather"));
+        auto invalid = p;
+        invalid.clips[1].feather = 0.6;
+        QVERIFY_EXCEPTION_THROWN(invalid.validate(), std::runtime_error);
+    }
+    void exportRateBitrateAndRetry() {
+        // A set bitrate replaces the quality controls of every encoder that takes one.
+        ExportSettings s;
+        s.format = "h264";
+        s.bitrate = 8000;
+        for (const auto &e : encoderCandidates(s, {1920, 1080}, 30)) {
+            const auto args = e.videoArguments.join(' ');
+            QVERIFY2(args.contains("-b:v 8000k -maxrate 12000k -bufsize 16000k"), qPrintable(args));
+            QVERIFY2(!args.contains("-cq") && !args.contains("-qp_i") &&
+                         !args.contains("-global_quality"),
+                     qPrintable(args));
+            QCOMPARE(args.count("-b:v"), 1);
+        }
+        s.format = "prores";
+        QVERIFY(!encoderCandidates(s, {1920, 1080}, 30)[0].videoArguments.contains("-b:v"));
+        s.format = "vp9";
+        s.fps = 29.97;
+        const auto vp9 = encoderCandidates(s, {1920, 1080}, 30)[0];
+        QVERIFY(!vp9.videoArguments.contains("-crf"));
+        QCOMPARE(vp9.frameRate, QString("30000/1001"));
+
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("clip.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=25:d=2", "-f",
+                     "lavfi", "-i", "sine=d=2", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest",
+                     source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        // 50 frames a second from a 25 fps edit, at a set bitrate.
+        const auto out = dir.filePath("fifty.mp4");
+        editor.exportWith(QUrl::fromLocalFile(out),
+                          {{"format", "mpeg4"}, {"fps", 50}, {"bitrate", 1500}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(QFileInfo::exists(out), qPrintable(editor.state()["error"].toString()));
+        const auto probe = QString::fromUtf8(run(Editor::executable("ffprobe"),
+            {"-v", "error", "-count_frames", "-select_streams", "v", "-show_entries",
+             "stream=r_frame_rate,nb_read_frames", "-of", "compact", out}));
+        QVERIFY2(probe.contains("r_frame_rate=50/1"), qPrintable(probe));
+        const auto count = QRegularExpression("nb_read_frames=(\\d+)").match(probe).captured(1).toInt();
+        QVERIFY2(std::abs(count - 100) <= 1, qPrintable(probe));
+        // Invalid values are refused before anything runs.
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("odd.mp4")), {{"format", "mpeg4"}, {"fps", 27}});
+        QVERIFY(editor.state()["error"].toString().contains("frame rate"));
+        editor.clearError();
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("tiny.mp4")), {{"format", "mpeg4"}, {"bitrate", 10}});
+        QVERIFY(editor.state()["error"].toString().contains("Bitrate"));
+        editor.clearError();
+        QVERIFY(!editor.state()["canRetryExport"].toBool());
+        // A failed export (its folder is gone) can be tried again once the folder is back.
+        const auto folder = dir.filePath("gone");
+        const auto later = folder + "/later.mp4";
+        editor.exportWith(QUrl::fromLocalFile(later), {{"format", "mpeg4"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY(!QFileInfo::exists(later));
+        QVERIFY(editor.state()["error"].toString().contains("Render failed"));
+        QVERIFY(editor.state()["canRetryExport"].toBool());
+        QVERIFY(QDir().mkpath(folder));
+        editor.clearError();
+        editor.retryExport();
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(QFileInfo::exists(later), qPrintable(editor.state()["error"].toString()));
+        QVERIFY(!editor.state()["canRetryExport"].toBool());
+    }
+    void cacheLimitAndClearing() {
+        const auto data = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        const auto cache = data + "/cache";
+        QVERIFY(QDir().mkpath(cache + "/thumbnails") && QDir().mkpath(cache + "/waveforms"));
+        auto write = [](const QString &file, int bytes) {
+            QFile f(file);
+            if (!f.open(QIODevice::WriteOnly))
+                return false;
+            return f.write(QByteArray(bytes, 'x')) == bytes;
+        };
+        QVERIFY(write(cache + "/thumbnails/test-tiles.png", 5000));
+        QVERIFY(write(cache + "/waveforms/test-peaks.bin", 3000));
+        // A work folder from the last hour may belong to a running render and stays.
+        QVERIFY(QDir().mkpath(cache + "/play-newtest"));
+        FrameProvider frames;
+        {
+            Editor editor(&frames);
+            const auto usage = editor.cacheUsage();
+            QVERIFY(usage["bytes"].toLongLong() >= 8000);
+            QVERIFY(usage["files"].toInt() >= 2);
+            QVERIFY(!usage["clearAtStart"].toBool());
+            // The limit is a preference, 1–2000 GB.
+            QCOMPARE(editor.state()["preferences"].toMap()["cacheGB"].toInt(), 20);
+            editor.setPreferences({{"cacheGB", 0}});
+            QVERIFY(editor.state()["error"].toString().contains("cache limit"));
+            editor.clearError();
+            editor.clearCacheAtStart();
+            QVERIFY(editor.cacheUsage()["clearAtStart"].toBool());
+            // Files stay while this session runs.
+            QVERIFY(QFileInfo::exists(cache + "/thumbnails/test-tiles.png"));
+        }
+        {
+            // The next start empties the caches and forgets the request; recent work folders stay.
+            Editor editor(&frames);
+            QVERIFY(!QFileInfo::exists(cache + "/thumbnails/test-tiles.png"));
+            QVERIFY(!QFileInfo::exists(cache + "/waveforms/test-peaks.bin"));
+            QVERIFY(QFileInfo::exists(cache + "/play-newtest"));
+            QVERIFY(!editor.cacheUsage()["clearAtStart"].toBool());
+        }
+        QDir(cache + "/play-newtest").removeRecursively();
+    }
     void adjustmentLayers() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

@@ -10,6 +10,12 @@ const QStringList &exportFormats() {
                                      "mpeg4", "gif", "mp3", "m4a", "wav"};
     return formats;
 }
+const QVector<QPair<QString, double>> &exportFrameRates() {
+    static const QVector<QPair<QString, double>> rates{
+        {"24000/1001", 24000 / 1001.}, {"24", 24}, {"25", 25}, {"30000/1001", 30000 / 1001.},
+        {"30", 30}, {"50", 50}, {"60000/1001", 60000 / 1001.}, {"60", 60}};
+    return rates;
+}
 bool audioFormat(const QString &format) {
     return format == "mp3" || format == "m4a" || format == "wav";
 }
@@ -135,6 +141,36 @@ QVector<Encoder> encoderCandidates(const ExportSettings &s, QSize size, double f
         c.last().audioArguments = {"-c:a", "pcm_s16le"};
     } else {
         add("mpeg4", "MPEG-4 Part 2 (software)", {"-q:v", pick({2, 3, 5, 8}), "-g", gop}, false);
+    }
+    for (auto &e : c) {
+        if (s.fps > 0)
+            for (const auto &[rate, value] : exportFrameRates())
+                if (std::abs(value - s.fps) < 0.01) {
+                    e.frameRate = rate;
+                    e.frameRateValue = value;
+                }
+        if (s.bitrate <= 0 || e.name == "prores_ks")
+            continue;
+        // A set bitrate replaces the quality-based rate control: the quality options are
+        // dropped and an average bitrate with a 1.5× peak is asked for.
+        static const QStringList quality{"-cq", "-b:v", "-rc", "-qp_i", "-qp_p", "-qp_b",
+                                         "-global_quality", "-crf", "-q:v"};
+        QStringList kept;
+        for (int i = 0; i < e.videoArguments.size(); ++i) {
+            if (quality.contains(e.videoArguments[i]) && i + 1 < e.videoArguments.size()) {
+                ++i;
+                continue;
+            }
+            kept << e.videoArguments[i];
+        }
+        if (e.name.endsWith("_nvenc"))
+            kept << "-rc" << "vbr";
+        else if (e.name.endsWith("_amf"))
+            kept << "-rc" << "vbr_peak";
+        const auto k = [](double v) { return QString::number(qRound64(v)) + "k"; };
+        kept << "-b:v" << k(s.bitrate) << "-maxrate" << k(1.5 * s.bitrate) << "-bufsize"
+             << k(2 * s.bitrate);
+        e.videoArguments = kept;
     }
     return c;
 }

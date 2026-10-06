@@ -171,6 +171,8 @@ struct Clip {
     double border = 0;      // border width, fraction of the canvas height at scale 1
     QString borderColor = "#ffffff";
     double shadow = 0; // soft drop shadow strength, 0..1
+    // Soft edge of the overlay's shape, as a fraction of the picture's shorter side (0..0.5).
+    double feather = 0;
     // Background removal by colour (green/blue screen).
     bool chromaKey = false;
     QString keyColor = "#00ff00";
@@ -188,7 +190,7 @@ struct Clip {
     // one when both are on.
     bool eyeContact = false;
     bool styled() const {
-        return shape != "rect" || border > 0 || shadow > 0 || aiCutout;
+        return shape != "rect" || border > 0 || shadow > 0 || aiCutout || feather > 0;
     }
     double staticValue(const QString &property) const;
     // Property value at a clip-local frame, interpolating keyframes when present.

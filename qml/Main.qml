@@ -812,6 +812,17 @@ ApplicationWindow {
                     color: "#ffc2b7"
                 }
                 Action {
+                    objectName: "retryExport"
+                    visible: win.s.canRetryExport === true
+                    text: "Try export again"
+                    onClicked: {
+                        editor.clearError();
+                        editor.retryExport();
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Runs the same export again, e.g. after freeing disk space or reconnecting the drive"
+                }
+                Action {
                     text: "Dismiss"
                     onClicked: editor.clearError()
                 }
@@ -2484,6 +2495,7 @@ ApplicationWindow {
                                 Repeater {
                                     model: [
                                         { key: "radius", name: "Corner radius", lo: 0, hi: .5, step: .01, show: "rounded" },
+                                        { key: "feather", name: "Soft edge", lo: 0, hi: .5, step: .01, show: "" },
                                         { key: "border", name: "Border", lo: 0, hi: .03, step: .001, show: "" },
                                         { key: "shadow", name: "Shadow", lo: 0, hi: 1, step: .05, show: "" }
                                     ]
@@ -4146,7 +4158,10 @@ ApplicationWindow {
             prefStill.value = Math.round((prefs.stillSeconds || 5) * 10);
             prefBackups.value = prefs.backups ?? 20;
             prefStart.checked = prefs.startScreen !== false;
+            prefCache.value = prefs.cacheGB ?? 20;
+            cacheUsage = editor.cacheUsage();
         }
+        property var cacheUsage: ({})
         GridLayout {
             anchors.fill: parent
             columns: 2
@@ -4193,10 +4208,41 @@ ApplicationWindow {
                 Layout.columnSpan: 2
                 text: "Show the start screen when Cutlery opens"
             }
+            Label { text: "Cache limit" }
+            SpinBox {
+                id: prefCache
+                objectName: "prefCache"
+                from: 1
+                to: 2000
+                editable: true
+                textFromValue: (v) => v + " GB"
+                valueFromText: (t) => parseInt(t)
+                ToolTip.visible: hovered
+                ToolTip.text: "Waveforms, thumbnails and nested sequences are kept up to this size; the oldest go first when Cutlery starts"
+            }
+            Label {
+                objectName: "cacheUsage"
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: win.muted
+                font.pixelSize: 11
+                text: "Cache: " + ((preferencesDialog.cacheUsage.bytes || 0) / 1048576).toFixed(0) + " MB in " + (preferencesDialog.cacheUsage.files || 0) + " files" + (preferencesDialog.cacheUsage.clearAtStart ? " · emptied at the next start" : "")
+            }
+            Action {
+                objectName: "clearCache"
+                text: "Empty at next start"
+                enabled: !preferencesDialog.cacheUsage.clearAtStart
+                onClicked: {
+                    editor.clearCacheAtStart();
+                    preferencesDialog.cacheUsage = editor.cacheUsage();
+                }
+                ToolTip.visible: hovered
+                ToolTip.text: "Frees the disk space; Cutlery makes these files again when needed"
+            }
         }
         onAccepted: {
             const f = win.projectFormats[prefFormat.currentIndex], r = win.frameRates[prefRate.currentIndex];
-            editor.setPreferences({ width: f.w, height: f.h, fpsN: r.n, fpsD: r.d, stillSeconds: prefStill.value / 10, backups: prefBackups.value, startScreen: prefStart.checked });
+            editor.setPreferences({ width: f.w, height: f.h, fpsN: r.n, fpsD: r.d, stillSeconds: prefStill.value / 10, backups: prefBackups.value, startScreen: prefStart.checked, cacheGB: prefCache.value });
         }
     }
     // Names a template made from the current project.
@@ -4688,6 +4734,13 @@ ApplicationWindow {
             { id: "small", label: "Small file" }
         ]
         readonly property var heights: [0, 720, 1080, 1440, 2160]
+        readonly property var frameRates: [
+            { value: 0, label: "Project" },
+            { value: 23.976, label: "23.976" }, { value: 24, label: "24" }, { value: 25, label: "25" },
+            { value: 29.97, label: "29.97" }, { value: 30, label: "30" }, { value: 50, label: "50" },
+            { value: 59.94, label: "59.94" }, { value: 60, label: "60" }
+        ]
+        readonly property var bitrates: [0, 2000, 4000, 8000, 12000, 16000, 25000, 40000, 60000, 100000]
         readonly property var loudnessTargets: [
             { value: 0, label: "Keep as mixed" },
             { value: -14, label: "YouTube & streaming (−14 LUFS)" },
@@ -4710,15 +4763,19 @@ ApplicationWindow {
             exportQuality.currentIndex = qualities.findIndex(q => q.id === settings.quality);
             exportHeight.currentIndex = Math.max(0, heights.indexOf(settings.height));
             exportLoudness.currentIndex = Math.max(0, loudnessTargets.findIndex(l => l.value === (settings.loudness || 0)));
+            exportFps.currentIndex = Math.max(0, frameRates.findIndex(r => r.value === (settings.fps || 0)));
+            exportBitrate.currentIndex = Math.max(0, bitrates.indexOf(settings.bitrate || 0));
         }
         function changed() {
             current = {
                 format: formats[exportFormat.currentIndex].id,
                 quality: qualities[exportQuality.currentIndex].id,
                 height: heights[exportHeight.currentIndex],
-                loudness: loudnessTargets[exportLoudness.currentIndex].value
+                loudness: loudnessTargets[exportLoudness.currentIndex].value,
+                fps: frameRates[exportFps.currentIndex].value,
+                bitrate: bitrates[exportBitrate.currentIndex]
             };
-            const match = presets.findIndex(p => p.settings && p.settings.format === current.format && p.settings.quality === current.quality && p.settings.height === current.height && p.settings.loudness === current.loudness);
+            const match = presets.findIndex(p => p.settings && p.settings.format === current.format && p.settings.quality === current.quality && p.settings.height === current.height && p.settings.loudness === current.loudness && current.fps === 0 && current.bitrate === 0);
             exportPreset.currentIndex = Math.max(0, match);
         }
         onAboutToShow: apply(win.exportChoice)
@@ -4780,6 +4837,28 @@ ApplicationWindow {
                 model: exportSettings.heights.map(h => h === 0 ? "Project (" + win.s.width + " × " + win.s.height + ")" : h === 2160 ? "4K (2160p)" : h + "p")
                 enabled: !exportSettings.preview.audio
                 onActivated: exportSettings.changed()
+            }
+            Label { text: "Frame rate" }
+            ComboBox {
+                id: exportFps
+                objectName: "exportFps"
+                Layout.fillWidth: true
+                model: exportSettings.frameRates.map(r => r.value === 0 ? "Project (" + win.s.fps.toFixed(2).replace(/\.00$/, "") + " fps)" : r.label + " fps")
+                enabled: !exportSettings.preview.audio && exportSettings.current.format !== "gif"
+                onActivated: exportSettings.changed()
+                ToolTip.visible: hovered
+                ToolTip.text: "Another rate repeats or drops frames of the edit to reach it"
+            }
+            Label { text: "Bitrate" }
+            ComboBox {
+                id: exportBitrate
+                objectName: "exportBitrate"
+                Layout.fillWidth: true
+                model: exportSettings.bitrates.map(b => b === 0 ? "By quality" : (b / 1000) + " Mbit/s")
+                enabled: !exportSettings.preview.audio && ["gif", "prores"].indexOf(exportSettings.current.format) < 0
+                onActivated: exportSettings.changed()
+                ToolTip.visible: hovered
+                ToolTip.text: "A fixed average bitrate (peaks up to 1.5×) instead of the quality setting, e.g. for platforms with an upload limit"
             }
             Label { text: "Loudness" }
             ComboBox {
