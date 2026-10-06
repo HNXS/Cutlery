@@ -4,6 +4,8 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **GIF and picture export:** animated GIFs from the export dialog, and the frame at the playhead as PNG or JPEG (Project → Export current frame).
+- **Hand over to other editors:** Project → Export timeline writes OpenTimelineIO (.otio, for DaVinci Resolve, Premiere, Kdenlive) or a CMX 3600 EDL, and lists what could not be carried.
 - **Templates:** save a project as a template (e.g. your intro with logo and title) and start new projects from it, on the start screen or under Project; swap its media with right-click → Replace with another file.
 - **Layouts:** select two to four clips and arrange them side by side, stacked, as a grid, picture in picture or in the presenter layout (screen large, you round in the corner) with one click.
 - **Time-lapse up to 100×:** speed now goes from 0.1× to 100×, and fast clips show exactly the right moment of the source.

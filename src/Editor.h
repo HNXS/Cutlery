@@ -251,6 +251,9 @@ class Editor final : public QObject {
     // The picture at the playhead at the project's size, as PNG or JPEG (by the file's
     // extension), rendered in the background like a preview but at full quality.
     Q_INVOKABLE void exportFrame(const QUrl &);
+    // The timeline for other editors: OpenTimelineIO (.otio) or a CMX 3600 EDL (.edl), by the
+    // file's extension. The status names what the format could not carry.
+    Q_INVOKABLE void exportTimeline(const QUrl &);
     // Export queue: exports run one after another (state "exportQueue": file, label, status
     // waiting|exporting|done|failed|cancelled). Cancelling the running export pauses the queue
     // until startQueue().

@@ -1,4 +1,5 @@
 #include "Editor.h"
+#include "Interchange.h"
 #include "Captions.h"
 #include "RenderGraph.h"
 #include <QCoreApplication>
@@ -4739,6 +4740,29 @@ void Editor::exportFrame(const QUrl &url) {
                 complete(false);
         });
         p->start(executable("ffmpeg"), renderArguments(plan, graph, {}, "", 0));
+        emit changed();
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
+void Editor::exportTimeline(const QUrl &url) {
+    try {
+        const auto output = localPath(url);
+        const auto suffix = QFileInfo(output).suffix().toLower();
+        if (suffix != "otio" && suffix != "edl")
+            throw std::runtime_error("Use a .otio or .edl filename");
+        const auto project = wholeProject();
+        if (project.clips.empty())
+            throw std::runtime_error("The timeline is empty");
+        QStringList lost;
+        const QByteArray data = suffix == "otio"
+                                    ? QJsonDocument(otioTimeline(project, &lost)).toJson()
+                                    : cmxEdl(project, &lost).toUtf8();
+        QSaveFile file(output);
+        if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit())
+            throw std::runtime_error("Cannot write " + output.toStdString());
+        m_status = "Timeline exported to " + QFileInfo(output).fileName() +
+                   (lost.isEmpty() ? QString() : ". Not carried: " + lost.join("; "));
         emit changed();
     } catch (const std::exception &e) {
         fail(e.what());
