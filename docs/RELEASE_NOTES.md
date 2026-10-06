@@ -4,6 +4,10 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Soft edges:** fade a picture-in-picture out at its border (any shape) with the new "Soft edge" slider.
+- **Frame rate and bitrate in the export:** export at 24, 25, 30, 50 or 60 fps (and the 23.976/29.97/59.94 rates) and with a fixed bitrate when a platform asks for one.
+- **Try export again:** a failed export can be repeated with one click; when a graphics-card encoder fails part-way, Cutlery switches to the next encoder by itself.
+- **Cache limit:** Preferences shows how much space the cache takes, keeps it under a limit (20 GB by default) and can empty it.
 - **Search commands:** press Ctrl+K and type a few letters to find and run any command, from the menus or the keyboard list.
 - **Import whole folders:** drop a folder (or import one) and its photos, videos and sounds come in, folders inside included, into a library folder of the same name. A Stop button skips the rest of a long import.
 - **Save a clip's sound:** "Save sound as file…" writes the selected clip's sound as you hear it to WAV, MP3 or M4A.

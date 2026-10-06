@@ -68,6 +68,7 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
                     m_recent << v.toString();
     }
     loadPreferences();
+    trimCache();
     applyPreferences(m_project);
     listTemplates();
     {
@@ -548,6 +549,7 @@ QVariantMap Editor::state() const {
             PROP(hidden);
             PROP(shape);
             PROP(radius);
+            PROP(feather);
             PROP(border);
             PROP(borderColor);
             PROP(shadow);
@@ -612,6 +614,7 @@ QVariantMap Editor::state() const {
             {"status", m_status},
             {"error", m_error},
             {"busy", m_busy},
+            {"canRetryExport", m_exportFailed && !m_busy && !m_lastExportUrl.isEmpty()},
             {"importing", m_importing},
             {"importRemaining", m_importQueue.size() + (m_probe ? 1 : 0)},
             {"analyzing", m_analysis->busy() || m_thumbnails->busy()},
@@ -877,7 +880,7 @@ bool Editor::save(const QUrl &url) {
 static QVariantMap defaultPreferences() {
     return {{"width", 1920},     {"height", 1080},  {"fpsN", 30},
             {"fpsD", 1},         {"stillSeconds", 5.}, {"backups", 20},
-            {"startScreen", true}};
+            {"startScreen", true}, {"cacheGB", 20}};
 }
 // The valid preferences in `values`, over `base`; throws on an invalid value.
 static QVariantMap checkedPreferences(const QVariantMap &base, const QVariantMap &values) {
@@ -899,13 +902,17 @@ static QVariantMap checkedPreferences(const QVariantMap &base, const QVariantMap
     const int backups = p["backups"].toInt();
     if (backups < 0 || backups > 100)
         throw std::runtime_error("Keep 0–100 earlier versions");
+    const int cache = p["cacheGB"].toInt();
+    if (cache < 1 || cache > 2000)
+        throw std::runtime_error("The cache limit must be 1–2000 GB");
     return {{"width", w},
             {"height", h},
             {"fpsN", n},
             {"fpsD", d},
             {"stillSeconds", still},
             {"backups", backups},
-            {"startScreen", p["startScreen"].toBool()}};
+            {"startScreen", p["startScreen"].toBool()},
+            {"cacheGB", cache}};
 }
 void Editor::loadPreferences() {
     m_prefs = defaultPreferences();
@@ -919,6 +926,74 @@ void Editor::loadPreferences() {
             m_prefs = checkedPreferences(m_prefs, {{it.key(), it.value()}});
         } catch (const std::exception &) {
         }
+}
+namespace {
+struct CacheFile {
+    QString path;
+    qint64 bytes;
+    QDateTime written;
+};
+// The files of the caches that can be made again: waveforms, thumbnails, nested renders.
+QVector<CacheFile> cacheFiles(const QString &data) {
+    QVector<CacheFile> files;
+    for (const auto *folder : {"waveforms", "thumbnails", "nested"}) {
+        QDirIterator it(data + "/cache/" + QLatin1String(folder), QDir::Files,
+                        QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            it.next();
+            const auto info = it.fileInfo();
+            files.push_back({info.absoluteFilePath(), info.size(), info.lastModified()});
+        }
+    }
+    return files;
+}
+} // namespace
+void Editor::trimCache() {
+    const QDir cache(m_data + "/cache");
+    if (!cache.exists())
+        return;
+    // Work folders of renders, stills and measurements are removed when they finish; those
+    // older than an hour were left by a session that ended abruptly.
+    const auto hourAgo = QDateTime::currentDateTime().addSecs(-3600);
+    for (const auto &info : cache.entryInfoList(
+             {"play-*", "still-*", "frame-*", "render-*", "loudness-*", "nested-*"},
+             QDir::Dirs | QDir::NoDotAndDotDot))
+        if (info.lastModified() < hourAgo)
+            QDir(info.absoluteFilePath()).removeRecursively();
+    const bool clearAll = QFile::exists(cache.filePath("clear-at-start"));
+    QFile::remove(cache.filePath("clear-at-start"));
+    const qint64 limit = clearAll ? 0 : qint64(m_prefs.value("cacheGB").toInt()) << 30;
+    auto files = cacheFiles(m_data);
+    qint64 total = 0;
+    for (const auto &f : files)
+        total += f.bytes;
+    if (total <= limit)
+        return;
+    std::sort(files.begin(), files.end(),
+              [](const CacheFile &a, const CacheFile &b) { return a.written < b.written; });
+    for (const auto &f : files) {
+        if (total <= limit)
+            break;
+        if (QFile::remove(f.path))
+            total -= f.bytes;
+    }
+}
+QVariantMap Editor::cacheUsage() const {
+    qint64 bytes = 0;
+    const auto files = cacheFiles(m_data);
+    for (const auto &f : files)
+        bytes += f.bytes;
+    return {{"bytes", bytes},
+            {"files", files.size()},
+            {"clearAtStart", QFile::exists(m_data + "/cache/clear-at-start")}};
+}
+void Editor::clearCacheAtStart() {
+    QDir().mkpath(m_data + "/cache");
+    QFile marker(m_data + "/cache/clear-at-start");
+    if (!marker.open(QIODevice::WriteOnly))
+        return fail("Cannot write to " + m_data + "/cache");
+    m_status = "The cache is emptied when Cutlery starts next";
+    emit changed();
 }
 void Editor::applyPreferences(Project &p) const {
     p.width = m_prefs.value("width").toInt();
@@ -1953,6 +2028,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(muted, toBool);
         FIELD(hidden, toBool);
         FIELD(radius, toDouble);
+        FIELD(feather, toDouble);
         FIELD(border, toDouble);
         FIELD(shadow, toDouble);
         FIELD(chromaKey, toBool);
@@ -3577,6 +3653,7 @@ void Editor::pasteAttributes(const QString &group) {
         c->keyframes = from.keyframes;
         c->shape = from.shape;
         c->radius = from.radius;
+        c->feather = from.feather;
         c->border = from.border;
         c->borderColor = from.borderColor;
         c->shadow = from.shadow;
@@ -4714,6 +4791,15 @@ static ExportSettings exportSettings(const QVariantMap &m) {
     s.quality = m.value("quality", s.quality).toString();
     s.height = m.value("height", 0).toInt();
     s.loudness = m.value("loudness", 0).toDouble();
+    s.fps = m.value("fps", 0).toDouble();
+    s.bitrate = m.value("bitrate", 0).toInt();
+    if (s.fps != 0 && std::none_of(exportFrameRates().begin(), exportFrameRates().end(),
+                                   [&](const auto &r) { return std::abs(r.second - s.fps) < 0.01; }))
+        throw std::runtime_error("Unknown export frame rate");
+    if (s.bitrate != 0 && (s.bitrate < 200 || s.bitrate > 400000))
+        throw std::runtime_error("Bitrate must be between 200 and 400000 kbit/s");
+    if (s.format == "gif")
+        s.fps = 0, s.bitrate = 0; // GIF has its own frame rate and no bitrate
     if (s.loudness != 0 && (s.loudness < -36 || s.loudness > -6))
         throw std::runtime_error("Loudness target must be between -36 and -6 LUFS");
     if (!exportFormats().contains(s.format))
@@ -4909,9 +4995,13 @@ void Editor::exportTimeline(const QUrl &url) {
 void Editor::exportWith(const QUrl &url, const QVariantMap &settings) {
     exportProject(m_project, url, settings);
 }
-void Editor::exportProject(const Project &project, const QUrl &url, const QVariantMap &settings) {
+void Editor::exportProject(const Project &project, const QUrl &url, const QVariantMap &settings,
+                           bool retry) {
     if (m_busy)
         return;
+    if (!retry)
+        m_failedEncoders.clear();
+    m_exportFailed = false;
     try {
         if (!m_nest.isEmpty())
             throw std::runtime_error("Go back to the main timeline to export");
@@ -4943,8 +5033,16 @@ void Editor::exportProject(const Project &project, const QUrl &url, const QVaria
                 throw std::runtime_error("The in/out range is outside the timeline");
         }
         const auto size = exportSize(project, s.height);
-        const double fps = double(project.fpsN) / project.fpsD;
+        const double fps = s.fps > 0 ? s.fps : double(project.fpsN) / project.fpsD;
         m_exportProject = project;
+        m_lastExportUrl = url;
+        m_lastExportSettings = settings;
+        auto candidates = encoderCandidates(s, size, fps);
+        candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
+                                        [&](const Encoder &e) {
+                                            return m_failedEncoders.contains(e.name);
+                                        }),
+                         candidates.end());
         m_resumeTimer.stop();
         stopPlayback();
         m_busy = true;
@@ -4954,7 +5052,7 @@ void Editor::exportProject(const Project &project, const QUrl &url, const QVaria
         m_status = "Choosing an encoder…";
         emit changed();
         // Hardware encoders are tried first; each is proven with a short test encode.
-        m_encoders->resolve(encoderCandidates(s, size, fps), size, fps,
+        m_encoders->resolve(candidates, size, fps,
                             [this, output, size, format = s.format,
                              loudness = s.loudness](const Encoder *e) {
                                 if (m_cancelled || !m_busy) {
@@ -4965,7 +5063,11 @@ void Editor::exportProject(const Project &project, const QUrl &url, const QVaria
                                 if (!e) {
                                     m_busy = false;
                                     m_status = "Export failed";
-                                    fail("No " + format.toUpper() +
+                                    m_exportFailed = true;
+                                    fail(QString(m_failedEncoders.isEmpty()
+                                                     ? "No "
+                                                     : "The export failed, and no other ") +
+                                         format.toUpper() +
                                          " encoder works on this computer. Choose AV1, VP9 or "
                                          "ProRes, which always work.");
                                     return;
@@ -5165,8 +5267,8 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
                     }
                     emit changed();
                 });
-        auto complete = [this, process, work, output, temp, log,
-                         label = encoder.label](bool success) {
+        auto complete = [this, process, work, output, temp, log, label = encoder.label,
+                         name = encoder.name, probed = encoder.probe](bool success) {
             *log += process->readAllStandardError();
             m_job = nullptr;
             m_jobTemp.clear();
@@ -5177,6 +5279,20 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
                 m_status = "Render cancelled";
             } else if (!success) {
                 QFile::remove(temp);
+                m_exportFailed = true;
+                if (probed && m_failedEncoders.isEmpty()) {
+                    // A hardware encoder that passed its test can still fail on the real video
+                    // (drivers, memory): try once more with the next encoder.
+                    m_failedEncoders << name;
+                    m_analysis->setPaused(false);
+                    m_thumbnails->setPaused(false);
+                    exportProject(m_exportProject, m_lastExportUrl, m_lastExportSettings, true);
+                    if (m_busy) {
+                        m_status = label + " failed; trying the next encoder…";
+                        emit changed();
+                        return;
+                    }
+                }
                 fail("Render failed. " + QString::fromUtf8(*log).right(4000));
                 m_status = "Render failed";
             } else if (!QFile::rename(temp, output)) {
@@ -5212,6 +5328,11 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
         m_thumbnails->setPaused(false);
         fail(e.what());
     }
+}
+void Editor::retryExport() {
+    if (!m_exportFailed || m_busy || m_lastExportUrl.isEmpty())
+        return;
+    exportProject(m_exportProject, m_lastExportUrl, m_lastExportSettings);
 }
 void Editor::cancelJob() {
     if (m_encoders->busy()) {

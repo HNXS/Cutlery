@@ -17,7 +17,13 @@ struct ExportSettings {
     // Target integrated loudness in LUFS (-14 YouTube/streaming, -16 podcasts, -23 EBU R128 TV);
     // 0 keeps the mix as it is.
     double loudness = 0;
+    // Output frame rate (0: the project's), one of exportFrameRates(); frames are repeated or
+    // dropped to reach it. Video bitrate in kbit/s (0: by quality), for encoders that take one.
+    double fps = 0;
+    int bitrate = 0;
 };
+// Frame rates an export can be set to, as FFmpeg rates ("30000/1001") paired with their value.
+const QVector<QPair<QString, double>> &exportFrameRates();
 // One concrete way to produce that format. Candidates are tried in order; hardware encoders are
 // only used after a short probe proves they work on this machine.
 struct Encoder {
@@ -30,6 +36,9 @@ struct Encoder {
     // Filters after the picture's pixel format, before the encoder (e.g. GIF palette steps);
     // labels inside must not clash with the render graph's.
     QString videoTail;
+    // Output frame rate for FFmpeg's -r ("30000/1001"); empty keeps the project's.
+    QString frameRate;
+    double frameRateValue = 0;
 };
 const QStringList &exportFormats();
 QString formatExtension(const QString &format);

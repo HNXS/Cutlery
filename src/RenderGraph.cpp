@@ -42,15 +42,59 @@ static bool animatedGeometry(const Clip &c) {
 static QImage overlayMask(const Clip &c, int w, int h) {
     QImage mask(w, h, QImage::Format_ARGB32_Premultiplied);
     mask.fill(Qt::transparent);
-    QPainter paint(&mask);
-    paint.setRenderHint(QPainter::Antialiasing);
-    paint.setPen(Qt::NoPen);
-    paint.setBrush(Qt::white);
-    if (c.shape == "circle")
-        paint.drawEllipse(QRectF(0, 0, w, h));
-    else {
-        const double r = c.radius * std::min(w, h);
-        paint.drawRoundedRect(QRectF(0, 0, w, h), r, r);
+    // A soft edge: the shape is drawn smaller by half the feather and blurred, so it fades from
+    // fully visible to transparent over the feather width, ending at the picture's edge.
+    const double feather = c.feather * std::min(w, h);
+    const double inset = feather / 2;
+    {
+        QPainter paint(&mask);
+        paint.setRenderHint(QPainter::Antialiasing);
+        paint.setPen(Qt::NoPen);
+        paint.setBrush(Qt::white);
+        const QRectF area = QRectF(0, 0, w, h).adjusted(inset, inset, -inset, -inset);
+        if (c.shape == "circle")
+            paint.drawEllipse(area);
+        else {
+            const double r = c.shape == "rounded" ? c.radius * std::min(w, h) : 0;
+            paint.drawRoundedRect(area, std::max(0., r - inset), std::max(0., r - inset));
+        }
+    }
+    const int radius = int(std::lround(feather / 6));
+    if (radius < 1)
+        return mask;
+    // Three box blurs of the alpha (close to a Gaussian), with running sums.
+    QVector<int> alpha(w * h), tmp(w * h);
+    for (int y = 0; y < h; ++y) {
+        const auto *line = reinterpret_cast<const QRgb *>(mask.constScanLine(y));
+        for (int x = 0; x < w; ++x)
+            alpha[y * w + x] = qAlpha(line[x]);
+    }
+    auto pass = [radius](const int *in, int *out, int count, int stride) {
+        // Edges count as transparent.
+        int sum = 0;
+        for (int k = 0; k <= radius && k < count; ++k)
+            sum += in[k * stride];
+        const int n = 2 * radius + 1;
+        for (int i = 0; i < count; ++i) {
+            out[i * stride] = sum / n;
+            if (i + radius + 1 < count)
+                sum += in[(i + radius + 1) * stride];
+            if (i - radius >= 0)
+                sum -= in[(i - radius) * stride];
+        }
+    };
+    for (int round = 0; round < 3; ++round) {
+        for (int y = 0; y < h; ++y)
+            pass(alpha.data() + y * w, tmp.data() + y * w, w, 1);
+        for (int x = 0; x < w; ++x)
+            pass(tmp.data() + x, alpha.data() + x, h, w);
+    }
+    for (int y = 0; y < h; ++y) {
+        auto *line = reinterpret_cast<QRgb *>(mask.scanLine(y));
+        for (int x = 0; x < w; ++x) {
+            const int a = alpha[y * w + x];
+            line[x] = qRgba(a, a, a, a);
+        }
     }
     return mask;
 }
@@ -998,7 +1042,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                 .arg(p.fpsN)
                 .arg(l0 + base);
         };
-        if (c.shape != "rect") {
+        if (c.shape != "rect" || c.feather > 0) {
             // Multiply the picture's alpha by the shape: keeps chroma-key transparency.
             const auto id = QString::number(serial++);
             nodes << f + QString(",format=gbrap[pic%1]").arg(id);
@@ -1686,7 +1730,13 @@ QStringList exportArguments(const RenderPlan &r, const QString &graph, const QSt
         a << "-map" << "[vout]";
         if (!e.noAudio)
             a << "-map" << "[aout]";
-        a << "-frames:v" << QString::number(r.frames) << "-t" << num(r.duration);
+        // Another frame rate: FFmpeg repeats or drops frames to reach it.
+        const auto frames = e.frameRate.isEmpty()
+                                ? r.frames
+                                : qint64(std::ceil(r.duration * e.frameRateValue - 1e-6));
+        if (!e.frameRate.isEmpty())
+            a << "-r" << e.frameRate;
+        a << "-frames:v" << QString::number(frames) << "-t" << num(r.duration);
         a += e.videoArguments;
         // A tail of filters (the GIF palette) already gives the encoder its pixel format.
         if (e.videoTail.isEmpty())

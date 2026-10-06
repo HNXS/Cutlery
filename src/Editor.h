@@ -86,8 +86,13 @@ class Editor final : public QObject {
     Q_INVOKABLE bool newFromTemplate(const QString &name);
     Q_INVOKABLE void removeTemplate(const QString &name);
     // App-wide settings (state "preferences"): width, height, fpsN, fpsD of new projects,
-    // stillSeconds of imported pictures, backups kept per project, startScreen. Saved at once.
+    // stillSeconds of imported pictures, backups kept per project, startScreen, cacheGB (the
+    // cache limit). Saved at once.
     Q_INVOKABLE void setPreferences(const QVariantMap &values);
+    // Size of the waveform, thumbnail and nested-sequence caches: bytes, files.
+    Q_INVOKABLE QVariantMap cacheUsage() const;
+    // Empties those caches when Cutlery next starts (files in use now stay until then).
+    Q_INVOKABLE void clearCacheAtStart();
     Q_INVOKABLE bool openProject(const QUrl &);
     Q_INVOKABLE bool save(const QUrl &url = QUrl());
     // Recently opened or saved projects, newest first (state "recent": path, name, exists).
@@ -255,6 +260,8 @@ class Editor final : public QObject {
     // The picture at the playhead at the project's size, as PNG or JPEG (by the file's
     // extension), rendered in the background like a preview but at full quality.
     Q_INVOKABLE void exportFrame(const QUrl &);
+    // Runs the last export again after it failed (state "canRetryExport").
+    Q_INVOKABLE void retryExport();
     // Saves the sound of the selected clip as heard on the timeline (trim, speed, volume, sound
     // tools, fades; other clips left out) as .wav, .mp3 or .m4a, like an export.
     Q_INVOKABLE void extractAudio(const QUrl &);
@@ -380,6 +387,12 @@ class Editor final : public QObject {
     QVariantMap m_loudness; // measurement of the running export, when normalising
     QVariantMap m_mixLoudness; // last analyzeLoudness() result
     qint64 m_exportFrom = 0, m_exportTo = -1; // frame range of the running export
+    // The last export, for "Try again"; encoders that failed in its render are left out when it
+    // is retried automatically with the next one.
+    QUrl m_lastExportUrl;
+    QVariantMap m_lastExportSettings;
+    QStringList m_failedEncoders;
+    bool m_exportFailed = false;
     Project m_exportProject; // the timeline being exported, as it was when the export started
     std::optional<Clip> m_clipboard;
     void loadFonts(const QString &folder);
@@ -439,6 +452,9 @@ class Editor final : public QObject {
     QStringList m_recent;
     QVariantMap m_prefs;
     void loadPreferences();
+    // At start: removes work folders left by earlier sessions, then the least recently written
+    // cache files until the cache fits the limit (all of them after clearCacheAtStart()).
+    void trimCache();
     void applyPreferences(Project &) const;
     struct QueuedExport {
         QUrl url;
@@ -450,7 +466,9 @@ class Editor final : public QObject {
     bool m_queuePaused = false;
     QTimer m_queueTimer;
     void advanceQueue();
-    void exportProject(const Project &, const QUrl &, const QVariantMap &settings);
+    // `retry` keeps the encoders that failed in this export's earlier attempts left out.
+    void exportProject(const Project &, const QUrl &, const QVariantMap &settings,
+                       bool retry = false);
     QStringList m_also; // selected besides m_selected
     void remember(const QString &path);
     void saveRecent();

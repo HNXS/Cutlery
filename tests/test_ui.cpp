@@ -811,6 +811,21 @@ class UiTest : public QObject {
         QTRY_VERIFY(!findItem(window->contentItem(), "exportHeight")->isEnabled());
         choose("exportFormat", 0);
         QTRY_VERIFY(findItem(window->contentItem(), "exportHeight")->isEnabled());
+        // Frame rate and bitrate: part of the choice, and no longer a preset.
+        choose("exportPreset", 1);
+        choose("exportFps", 7); // 59.94
+        choose("exportBitrate", 3); // 8 Mbit/s
+        QCOMPARE(dialog->property("current").toMap()["fps"].toDouble(), 59.94);
+        QCOMPARE(dialog->property("current").toMap()["bitrate"].toInt(), 8000);
+        QCOMPARE(preset->property("currentIndex").toInt(), 0);
+        QCOMPARE(findItem(window->contentItem(), "exportBitrate")->property("currentText").toString(),
+                 QString("8 Mbit/s"));
+        choose("exportFormat", 4); // ProRes takes no bitrate
+        QTRY_VERIFY(!findItem(window->contentItem(), "exportBitrate")->isEnabled());
+        QVERIFY(findItem(window->contentItem(), "exportFps")->isEnabled());
+        choose("exportFps", 0);
+        choose("exportBitrate", 0);
+        choose("exportFormat", 0);
         auto *result = findItem(window->contentItem(), "loudnessResult");
         QVERIFY(result && findItem(window->contentItem(), "measureLoudness"));
         QVERIFY(result->property("text").toString().contains("Integrated loudness"));
