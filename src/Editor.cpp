@@ -215,7 +215,7 @@ Editor::~Editor() {
             delete t;
         }
     for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess, m_sceneProcess,
-                    m_nestedProcess})
+                    m_nestedProcess, m_autoColourProcess})
         if (p) {
             p->disconnect(this);
             p->kill();
@@ -471,6 +471,14 @@ QVariantMap Editor::state() const {
             PROP(vignette);
             PROP(grain);
             PROP(lutStrength);
+            PROP(curveMaster);
+            PROP(curveRed);
+            PROP(curveGreen);
+            PROP(curveBlue);
+            PROP(hslColors);
+            PROP(hslHue);
+            PROP(hslSaturation);
+            PROP(hslLightness);
             PROP(eqLow);
             PROP(eqMid);
             PROP(eqHigh);
@@ -597,6 +605,7 @@ QVariantMap Editor::state() const {
             {"collect", m_collect},
             {"follow", m_follow},
             {"transcript", transcriptState()},
+            {"autoColour", m_autoColour},
             {"reframe", m_reframe},
             {"conform", m_conform},
             {"markers", [this] {
@@ -1627,6 +1636,14 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(vignette, toDouble);
         FIELD(grain, toDouble);
         FIELD(lutStrength, toDouble);
+        FIELD(curveMaster, toString);
+        FIELD(curveRed, toString);
+        FIELD(curveGreen, toString);
+        FIELD(curveBlue, toString);
+        FIELD(hslColors, toString);
+        FIELD(hslHue, toDouble);
+        FIELD(hslSaturation, toDouble);
+        FIELD(hslLightness, toDouble);
         FIELD(eqLow, toDouble);
         FIELD(eqMid, toDouble);
         FIELD(eqHigh, toDouble);
@@ -3248,6 +3265,14 @@ void Editor::pasteAttributes(const QString &group) {
         c->grain = from.grain;
         c->lut = from.lut;
         c->lutStrength = from.lutStrength;
+        c->curveMaster = from.curveMaster;
+        c->curveRed = from.curveRed;
+        c->curveGreen = from.curveGreen;
+        c->curveBlue = from.curveBlue;
+        c->hslColors = from.hslColors;
+        c->hslHue = from.hslHue;
+        c->hslSaturation = from.hslSaturation;
+        c->hslLightness = from.hslLightness;
         c->fx = from.fx;
         c->fxStrength = from.fxStrength;
         c->motionBlur = from.motionBlur;
@@ -3994,6 +4019,97 @@ void Editor::removeFillers() {
         return fail(words.isEmpty() ? "Transcribe the clip first" : "No filler words found");
     cutClipWords(chosen, chosen.size() == 1 ? QString("1 filler word")
                                             : QString("%1 filler words").arg(chosen.size()));
+}
+// The correction for measured levels: luma at the 10th and 90th percentile and the average
+// chroma (0..255, as FFmpeg's signalstats reports them).
+QVariantMap autoColourCorrection(double low, double high, double u, double v) {
+    // Stretch the middle 80 % of the levels to 25..230 around mid-grey.
+    const double contrast = std::clamp(205. / std::max(1., high - low), 0.7, 1.8);
+    const double mid = (low + high) / 2;
+    const double brightness = std::clamp(-(mid - 128) * contrast / 255, -0.35, 0.35);
+    // Blue (u above 128) is warmed, red–yellow cooled; green (both low) gets magenta.
+    const double temperature = std::clamp(((u - 128) - (v - 128)) / 30, -0.6, 0.6);
+    const double tint = std::clamp((128 - (u + v) / 2) / 20, -0.5, 0.5);
+    auto round = [](double x) { return std::round(x * 100) / 100; };
+    return {{"brightness", round(brightness)},
+            {"contrast", round(contrast)},
+            {"temperature", round(temperature)},
+            {"tint", round(tint)}};
+}
+void Editor::autoColour() {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || (a->kind != "video" && a->kind != "image") || c->audioOnly)
+        return fail("Select a video or picture clip");
+    if (m_autoColourProcess)
+        return;
+    const double length = a->kind == "image"
+                              ? 0.
+                              : std::min(20., frameTime(c->duration, m_project.fpsN, m_project.fpsD).seconds() *
+                                                  c->speed.seconds());
+    QStringList args{"-hide_banner", "-nostdin", "-v", "error"};
+    if (a->kind == "video")
+        args << "-ss" << QString::number(c->sourceIn.seconds(), 'f', 3) << "-t"
+             << QString::number(std::max(0.1, length), 'f', 3);
+    args << "-i" << a->path << "-vf"
+         << "fps=2,scale=320:-2,signalstats,metadata=print:file=-" << "-f" << "null" << "-";
+    auto *p = new QProcess(this);
+    m_autoColourProcess = p;
+    m_autoColour = {{"status", "measuring"}, {"clipId", c->id}};
+    const auto id = c->id;
+    const auto revision = m_revision;
+    auto out = std::make_shared<QByteArray>();
+    connect(p, &QProcess::readyReadStandardOutput, this, [p, out] {
+        *out += p->readAllStandardOutput();
+        if (out->size() > 8 * 1024 * 1024)
+            *out = out->right(4 * 1024 * 1024);
+    });
+    auto complete = [this, p, out, id, revision](bool success) {
+        *out += p->readAllStandardOutput();
+        p->deleteLater();
+        m_autoColourProcess = nullptr;
+        QHash<QString, double> sums;
+        QHash<QString, int> counts;
+        static const QRegularExpression line("lavfi\\.signalstats\\.(YLOW|YHIGH|UAVG|VAVG)=([0-9.]+)");
+        for (auto it = line.globalMatch(QString::fromUtf8(*out)); it.hasNext();) {
+            const auto m = it.next();
+            sums[m.captured(1)] += m.captured(2).toDouble();
+            counts[m.captured(1)] += 1;
+        }
+        if (!success || counts.value("YLOW") == 0 || counts.value("UAVG") == 0) {
+            m_autoColour = {{"status", "failed"}, {"clipId", id}};
+            fail("Could not measure the picture");
+            return;
+        }
+        auto avg = [&](const QString &k) { return sums[k] / std::max(1, counts[k]); };
+        const auto fix = autoColourCorrection(avg("YLOW"), avg("YHIGH"), avg("UAVG"), avg("VAVG"));
+        if (revision != m_revision && !m_project.clip(id)) {
+            m_autoColour = {{"status", "failed"}, {"clipId", id}};
+            return;
+        }
+        mutate([&](Project &pr) {
+            auto *c = pr.clip(id);
+            if (!c)
+                return;
+            pr.requireEditable(c->track);
+            c->brightness = fix["brightness"].toDouble();
+            c->contrast = fix["contrast"].toDouble();
+            c->temperature = fix["temperature"].toDouble();
+            c->tint = fix["tint"].toDouble();
+        });
+        m_autoColour = {{"status", "done"}, {"clipId", id}};
+        m_status = "Colour corrected automatically";
+        emit changed();
+    };
+    connect(p, &QProcess::finished, this, [complete](int code, QProcess::ExitStatus status) {
+        complete(code == 0 && status == QProcess::NormalExit);
+    });
+    connect(p, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart)
+            complete(false);
+    });
+    p->start(executable("ffmpeg"), args);
+    emit changed();
 }
 void Editor::removePauses() {
     if (m_pauses.status != "ready" || m_pauses.revision != m_revision || m_pauses.ranges.isEmpty())

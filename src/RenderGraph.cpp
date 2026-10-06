@@ -727,6 +727,23 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         if (c.shadows != 0 || c.highlights != 0)
             f += QString(",curves=m='0/0 0.25/%1 0.75/%2 1/1'")
                      .arg(num(0.25 + 0.12 * c.shadows), num(0.75 + 0.12 * c.highlights));
+        // Tone curves, and a selective change to some colours (FFmpeg's huesaturation).
+        {
+            QStringList curves;
+            for (const auto &[name, points] : {std::pair{"m", &c.curveMaster}, std::pair{"r", &c.curveRed},
+                                               std::pair{"g", &c.curveGreen}, std::pair{"b", &c.curveBlue}})
+                if (!points->isEmpty() && validCurve(*points))
+                    curves << QString("%1='%2'").arg(name, *points);
+            if (!curves.isEmpty())
+                f += ",curves=" + curves.join(':');
+        }
+        if (c.hslHue != 0 || c.hslSaturation != 0 || c.hslLightness != 0) {
+            const auto colours = c.hslColors.split(' ', Qt::SkipEmptyParts);
+            // Strength 5 reaches muted colours too while staying with the chosen ones.
+            f += QString(",huesaturation=hue=%1:saturation=%2:intensity=%3:colors=%4:strength=5")
+                     .arg(num(c.hslHue), num(c.hslSaturation), num(c.hslLightness * 0.5),
+                          colours.isEmpty() ? QString("a") : colours.join('+'));
+        }
         // Branches for filters that mix with the picture or would drop its alpha channel.
         auto branch = [&](const QString &a, const QString &b, const QString &join) {
             const auto id = QString::number(serial++);

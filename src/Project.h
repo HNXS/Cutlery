@@ -130,6 +130,12 @@ struct Clip {
     double sharpen = 0, glow = 0, vignette = 0, grain = 0;
     // A 3D LUT file (.cube or .3dl) mixed in at lutStrength (0..1). Missing files are skipped.
     QString lut;
+    // Tone curves as FFmpeg curve points "x/y x/y ..." (0..1, x rising); empty is unchanged.
+    QString curveMaster, curveRed, curveGreen, curveBlue;
+    // Selective colour: hue shift (degrees), saturation and lightness (-1..1) of the colours in
+    // hslColors ("r y g c b m", any of them; empty means all colours).
+    QString hslColors;
+    double hslHue = 0, hslSaturation = 0, hslLightness = 0;
     double lutStrength = 1;
     // The look settings above (for copy and paste of attributes).
     static const QStringList &lookProperties();
@@ -176,6 +182,8 @@ struct Clip {
 const QStringList &animatableProperties();
 // Clip::graphic values.
 const QStringList &graphicKinds();
+// A tone curve as FFmpeg's curves filter takes it: 2–16 points "x/y", 0..1, x rising.
+bool validCurve(const QString &points);
 // Words of a caption text, as used with Clip::wordStarts.
 QStringList captionWords(const QString &text);
 // Supported transitions: FFmpeg xfade names paired with display labels.

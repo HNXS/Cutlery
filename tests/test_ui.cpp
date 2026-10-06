@@ -568,6 +568,65 @@ class UiTest : public QObject {
         QCOMPARE(editor.state()["playhead"].toLongLong(), qint64(25));
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void curvesAndSelectiveColour() {
+        QTemporaryDir dir;
+        QImage image(64, 36, QImage::Format_RGB32);
+        image.fill(QColor("#405070"));
+        QVERIFY(image.save(dir.filePath("still.png")));
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("still.png"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto id = editor.state()["selectedId"].toString();
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        auto *curve = findItem(window->contentItem(), "curveEditor");
+        QTRY_VERIFY(curve && curve->width() > 50);
+        // Scroll the inspector so the curve is on screen.
+        for (auto *p = curve->parentItem(); p; p = p->parentItem())
+            if (p->property("contentY").isValid() && p->property("contentHeight").toDouble() > p->height()) {
+                const double top = curve->mapToItem(p->property("contentItem").value<QQuickItem *>(), QPointF(0, 0)).y();
+                p->setProperty("contentY", std::max(0., top - 20));
+                break;
+            }
+        QTest::qWait(50);
+        // Click in the middle adds a point; dragging it up brightens the middle tones.
+        const auto from = curve->mapToScene(QPointF(curve->width() / 2, curve->height() / 2)).toPoint(),
+                   to = curve->mapToScene(QPointF(curve->width() / 2, curve->height() / 4)).toPoint();
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, from);
+        QTest::mouseMove(window, (from + to) / 2);
+        QTest::mouseMove(window, to);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, to);
+        QTRY_VERIFY(!editor.project().clip(id)->curveMaster.isEmpty());
+        const auto points = editor.project().clip(id)->curveMaster.split(' ');
+        QCOMPARE(points.size(), 3);
+        QVERIFY2(points[1].split('/')[1].toDouble() > 0.7, qPrintable(points.join(' ')));
+        // Another channel; the reset button clears it again.
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "curveChannel-curveBlue"), "clicked"));
+        QTRY_COMPARE(curve->property("key").toString(), QString("curveBlue"));
+        // Choosing blue for the selective colour change.
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "hslColour-b"), "clicked"));
+        QTRY_COMPARE(editor.project().clip(id)->hslColors, QString("b"));
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "hslColour-c"), "clicked"));
+        QTRY_COMPARE(editor.project().clip(id)->hslColors, QString("b c"));
+        QVERIFY(findItem(window->contentItem(), "autoColour")->isEnabled());
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void exportDialog() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;

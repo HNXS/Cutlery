@@ -43,6 +43,9 @@ class FrameProvider final : public QQuickImageProvider {
         return image;
     }
 };
+// Brightness, contrast, temperature and tint that correct measured levels: luma at the 10th
+// and 90th percentile and average chroma (0..255).
+QVariantMap autoColourCorrection(double low, double high, double u, double v);
 class Editor final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantMap state READ state NOTIFY changed)
@@ -275,6 +278,11 @@ class Editor final : public QObject {
     Q_INVOKABLE void transcribeClip(const QString &language);
     Q_INVOKABLE void cutWords(const QVariantList &indices);
     Q_INVOKABLE void removeFillers();
+    // Automatic correction of the selected video or image clip: measures its levels and colour
+    // cast (FFmpeg signalstats, in the background) and sets brightness, contrast, temperature
+    // and tint so the picture spans the usual range with neutral greys. One undo step; state
+    // "autoColour": status measuring|done|failed.
+    Q_INVOKABLE void autoColour();
     // Finds the shot changes in the selected video clip and splits it there, with any detached
     // audio, in one undo step. Sensitivity 0..1: higher finds subtler cuts.
     Q_INVOKABLE void splitAtScenes(double sensitivity = 0.5);
@@ -344,6 +352,8 @@ class Editor final : public QObject {
     QVariantMap m_follow;
     QString m_importFolder;
     QVariantMap m_reframe;
+    QVariantMap m_autoColour;
+    QProcess *m_autoColourProcess = nullptr;
     // The selected clip's words in clip-local frames, cached per clip, transcript and revision.
     // Words of the run of back-to-back pieces of the selected clip's recording on its track (as
     // cuts leave them), in timeline order; start and end are local to the word's piece.

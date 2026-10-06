@@ -86,7 +86,8 @@ const QVector<QPair<QString, double Clip::*>> &lookFields() {
         {"gate", &Clip::gate},               {"denoise", &Clip::denoise},
         {"deess", &Clip::deess},             {"motionBlur", &Clip::motionBlur},
         {"reverb", &Clip::reverb},           {"echo", &Clip::echo},
-        {"pan", &Clip::pan}};
+        {"pan", &Clip::pan},                 {"hslHue", &Clip::hslHue},
+        {"hslSaturation", &Clip::hslSaturation}, {"hslLightness", &Clip::hslLightness}};
     return fields;
 }
 } // namespace
@@ -94,7 +95,9 @@ const QStringList &Clip::lookProperties() {
     static const QStringList names{"brightness", "contrast",   "saturation", "blur",
                                    "temperature", "tint",      "vibrance",   "shadows",
                                    "highlights", "sharpen",    "glow",       "vignette",
-                                   "grain",      "lut",        "lutStrength"};
+                                   "grain",      "lut",        "lutStrength", "curveMaster",
+                                   "curveRed",   "curveGreen", "curveBlue",   "hslColors",
+                                   "hslHue",     "hslSaturation", "hslLightness"};
     return names;
 }
 double Clip::staticValue(const QString &p) const {
@@ -341,6 +344,13 @@ QJsonObject Project::json(const QString &base) const {
             o["graphicWidth"] = c.graphicWidth;
             o["graphicHeight"] = c.graphicHeight;
         }
+        for (const auto &[k, v] : {std::pair{"curveMaster", &c.curveMaster},
+                                   std::pair{"curveRed", &c.curveRed},
+                                   std::pair{"curveGreen", &c.curveGreen},
+                                   std::pair{"curveBlue", &c.curveBlue},
+                                   std::pair{"hslColors", &c.hslColors}})
+            if (!v->isEmpty())
+                o[k] = *v;
         if (!c.lut.isEmpty()) {
             o["lut"] = base.isEmpty() ? c.lut : QDir(base).relativeFilePath(c.lut);
             o["lutStrength"] = c.lutStrength;
@@ -557,6 +567,11 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
             c.lut = QDir::cleanPath(QDir::isRelativePath(c.lut) ? QDir(base).absoluteFilePath(c.lut)
                                                                 : c.lut);
         c.lutStrength = j["lutStrength"].toDouble(1);
+        c.curveMaster = j["curveMaster"].toString();
+        c.curveRed = j["curveRed"].toString();
+        c.curveGreen = j["curveGreen"].toString();
+        c.curveBlue = j["curveBlue"].toString();
+        c.hslColors = j["hslColors"].toString();
         c.captionStyle = j["captionStyle"].toString();
         c.highlightColor = j["highlightColor"].toString("#ffd23f");
         for (const auto &w : j["wordStarts"].toArray())
@@ -605,6 +620,23 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
     }
     p.validate();
     return p;
+}
+bool validCurve(const QString &points) {
+    const auto parts = points.split(' ', Qt::SkipEmptyParts);
+    if (parts.size() < 2 || parts.size() > 16)
+        return false;
+    double last = -1;
+    for (const auto &part : parts) {
+        const auto xy = part.split('/');
+        bool okX = false, okY = false;
+        if (xy.size() != 2)
+            return false;
+        const double x = xy[0].toDouble(&okX), y = xy[1].toDouble(&okY);
+        if (!okX || !okY || x < 0 || x > 1 || y < 0 || y > 1 || x <= last)
+            return false;
+        last = x;
+    }
+    return true;
 }
 void Project::validate() const {
     require(width >= 64 && width <= 7680 && height >= 64 && height <= 7680 && width % 2 == 0 &&
@@ -735,6 +767,14 @@ void Project::validate() const {
                     bounded(c.compressor, 0, 1) && bounded(c.gate, 0, 1) &&
                     bounded(c.denoise, 0, 1) && bounded(c.deess, 0, 1),
                 "Invalid sound setting");
+        for (const auto *curve : {&c.curveMaster, &c.curveRed, &c.curveGreen, &c.curveBlue})
+            require(curve->isEmpty() || validCurve(*curve), "Invalid colour curve");
+        require(bounded(c.hslHue, -180, 180) && bounded(c.hslSaturation, -1, 1) &&
+                    bounded(c.hslLightness, -1, 1) &&
+                    std::all_of(c.hslColors.begin(), c.hslColors.end(),
+                                [](QChar ch) { return QString("rygcbm ").contains(ch); }) &&
+                    c.hslColors.size() <= 16,
+                "Invalid selective colour");
         require(QStringList{"", "shake", "glitch", "vhs", "film"}.contains(c.fx) &&
                     bounded(c.fxStrength, 0, 1) && bounded(c.motionBlur, 0, 1) &&
                     bounded(c.reverb, 0, 1) && bounded(c.echo, 0, 1) && bounded(c.pan, -1, 1) &&
