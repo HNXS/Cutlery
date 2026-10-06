@@ -4,6 +4,7 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Time-lapse up to 100×:** speed now goes from 0.1× to 100×, and fast clips show exactly the right moment of the source.
 - **Icons:** check mark, cross, warning, info, star, heart, light bulb, mouse pointer and mouse click in the Add tab, sharp at any size and in any colour.
 - **Text styles:** save a title's look (font, colours, outline, animation …) under a name and apply it to other titles in any project.
 - **Adjustment layers:** one colour grade or look for everything below it, e.g. a whole scene: Add → “+ Adjustment layer”, then set the look in the inspector.
@@ -22,7 +23,6 @@ Projects are saved as schema 11; 0.5 cannot open them.
 - **Linked picture and sound:** detached audio moves and trims with its video until you unlink it.
 - **Anchor point:** zoom and rotate around a corner or edge, also with keyframes.
 - **GIF and SVG:** animated GIFs loop for as long as the clip runs; SVG graphics import sharp and transparent.
-- **Speed 0.1× to 10×.**
 - **Freeze frame:** holds the picture at the playhead for 2 seconds; the rest of the clip and its sound continue afterwards.
 - **29 transitions:** new push, reveal, blur, fade through grey, squeeze, pixel dissolve, wind and more.
 - **Pan:** move a clip's sound left or right.

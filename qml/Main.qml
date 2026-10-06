@@ -1497,7 +1497,7 @@ ApplicationWindow {
                                     },
                                     {
                                         key: "speed",
-                                        name: "Speed (0.1–10×)"
+                                        name: "Speed (0.1–100×)"
                                     }
                                 ]
                                 RowLayout {

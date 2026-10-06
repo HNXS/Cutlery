@@ -792,11 +792,15 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                         (matte ? "" : ",setpts=PTS-STARTPTS");
             if (c.reverse && reversible)
                 t += ",reverse";
-            // Sampling 1/8 frame late resolves exact half-frame ties (2x speed, 60 fps sources)
-            // the same way regardless of where decoding started, so stills, playback and export
-            // agree.
+            // The fps filter below keeps, for each output frame, the last source frame that
+            // rounds to it. Shifting the timestamps so that is the frame at exactly k × speed
+            // (1/8 frame before the next output slot, measured in source frames) makes fast clips
+            // and time-lapses show the right moment; at up to 1x the shift is 1/8 frame, which
+            // resolves exact half-frame ties the same way wherever decoding started. Stills,
+            // playback and export agree.
+            const double shift = s > 1 ? 0.5 - 0.125 / s : 0.125;
             t += ",setpts=" + (around ? "(PTS-" + num(pre) + "/TB)" : QString("PTS")) + "/" +
-                 num(s) + "+" + num(frame / 8) + "/TB";
+                 num(s) + "+" + num(frame * shift) + "/TB";
             // Slow motion: blended or motion-interpolated in-between frames instead of repeats;
             // the extra source before the range is dropped afterwards.
             if (around && c.slowMotion == "blend")

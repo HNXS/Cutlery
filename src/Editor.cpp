@@ -1593,8 +1593,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             c->sourceIn = Time(qRound64(t * 1000000), 1000000);
         } else if (key == "speed") {
             const auto speed = v.toDouble();
-            if (!std::isfinite(speed) || speed < .1 || speed > 10)
-                throw std::runtime_error("Speed must be 0.1–10x");
+            if (!std::isfinite(speed) || speed < .1 || speed > 100)
+                throw std::runtime_error("Speed must be 0.1–100x");
             auto old = c->speed;
             c->speed = Time(qRound64(speed * 1000), 1000);
             c->scaleKeyframes(old.seconds() / c->speed.seconds());

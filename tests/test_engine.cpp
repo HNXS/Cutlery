@@ -3587,7 +3587,7 @@ class EngineTest : public QObject {
         bad["clips"] = clips;
         QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, {}), std::runtime_error);
 
-        // Speed from 0.1x to 10x: a 10x clip shows every tenth source frame and its sound is
+        // Speed from 0.1x to 100x: a 10x clip shows every tenth source frame and its sound is
         // a tenth as long.
         const auto ramp = dir.filePath("ramp.mkv");
         run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=black:s=320x180:r=30:d=4,geq=lum='2*N':cb=128:cr=128",
@@ -3626,6 +3626,37 @@ class EngineTest : public QObject {
         p.validate();
         slow.speed = Time(1, 20);
         p.clips = {slow};
+        QVERIFY_EXCEPTION_THROWN(p.validate(), std::runtime_error);
+        // Each frame of a fast clip shows the source at exactly frame × speed (source frame N
+        // has luma 2N, i.e. grey (2N - 16) × 255 / 219): at 10x frames 1 and 2 show source frames
+        // 10 and 20; a 60x time-lapse shows frame 60 (2 s) one frame in.
+        auto grey = [&](const Clip &clip, qint64 frame, int source) {
+            const int expected = qRound((2 * source - 16) * 255 / 219.);
+            const int got = qGray(still(clip, frame).pixel(160, 90));
+            return std::pair{std::abs(got - std::max(0, expected)) <= 4, QString("%1 vs %2").arg(got).arg(expected)};
+        };
+        for (const auto &[frame, source] : {std::pair{1, 10}, std::pair{2, 20}}) {
+            const auto [ok, text] = grey(fast, frame, source);
+            QVERIFY2(ok, qPrintable(text));
+        }
+        Clip lapse = fast;
+        lapse.speed = Time(60, 1);
+        lapse.duration = 2;
+        for (const auto &[frame, source] : {std::pair{0, 0}, std::pair{1, 60}}) {
+            const auto [ok, text] = grey(lapse, frame, source);
+            QVERIFY2(ok, qPrintable(text));
+        }
+        p.clips = {lapse};
+        p.validate();
+        plan = compileRender(p, dir.filePath("work"), 320, 180, sound);
+        {
+            QFile g(graph);
+            QVERIFY(g.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            g.write(plan.graph.toUtf8());
+        }
+        QCOMPARE(run(ffmpeg, streamArguments(plan, graph, false)).size(), qsizetype(48000 * 4 * 2 / 30));
+        lapse.speed = Time(101, 1);
+        p.clips = {lapse};
         QVERIFY_EXCEPTION_THROWN(p.validate(), std::runtime_error);
     }
     void gifAndSvgOverlays() {
