@@ -983,12 +983,19 @@ void Editor::backUp(const QString &projectPath) {
     QFile name(folder + "/project.txt");
     if (name.open(QIODevice::WriteOnly | QIODevice::Truncate))
         name.write(QFileInfo(projectPath).absoluteFilePath().toUtf8());
-    const auto stamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz");
-    auto target = folder + "/" + stamp + ".cutlery";
-    for (int i = 1; QFileInfo::exists(target); ++i)
-        target = folder + "/" + stamp + "-" + QString::number(i) + ".cutlery";
-    QFile::copy(projectPath, target);
+    // Versions are named by time and listed in name order, so a new one must sort after every
+    // existing one: a save in the same millisecond as the last (the Windows clock is coarse)
+    // takes the next millisecond.
     auto files = QDir(folder).entryList({"*.cutlery"}, QDir::Files, QDir::Name);
+    auto stamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz");
+    if (!files.isEmpty() && stamp <= files.last().left(19)) {
+        auto last = QDateTime::fromString(files.last().left(19), "yyyyMMdd-HHmmss-zzz");
+        last.setTimeZone(QTimeZone::utc());
+        if (last.isValid())
+            stamp = last.addMSecs(1).toString("yyyyMMdd-HHmmss-zzz");
+    }
+    QFile::copy(projectPath, folder + "/" + stamp + ".cutlery");
+    files = QDir(folder).entryList({"*.cutlery"}, QDir::Files, QDir::Name);
     while (files.size() > keep)
         QFile::remove(folder + "/" + files.takeFirst());
 }

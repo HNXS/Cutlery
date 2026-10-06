@@ -620,6 +620,17 @@ class EngineTest : public QObject {
                 QVERIFY(e.save());
             }
             QCOMPARE(e.backups().size(), 20);
+            // New versions always sort after existing ones, also when those carry the same or
+            // a later time (a coarse or adjusted clock): each takes the next millisecond.
+            const auto folder = QFileInfo(e.backups()[0].toMap()["file"].toString()).absolutePath();
+            QVERIFY(QFile::copy(path, folder + "/29991231-235959-999.cutlery"));
+            for (const auto *expected : {"30000101-000000-000", "30000101-000000-001"}) {
+                e.addTitle();
+                QVERIFY(e.save());
+                const auto newest = QFileInfo(e.backups()[0].toMap()["file"].toString()).fileName();
+                QVERIFY2(newest.startsWith(QLatin1String(expected)), qPrintable(newest));
+            }
+            QCOMPARE(e.backups().size(), 20);
         }
         {
             // The list survives a restart; a missing project is reported and dropped.
