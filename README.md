@@ -24,7 +24,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - Split, draggable edge trims, inspector trims, move, duplicate, delete, track-local ripple delete; snapping to clip edges, the playhead and timeline start.
 - Detach video audio onto its own track; cached mono waveform overviews that follow trims, speed and reverse.
 - Filmstrip thumbnails on video and image clips that follow trims, speed and reverse, plus poster frames in the media library. They are extracted in the background from keyframes and cached per file.
-- 30 configurable keyboard commands with conflict checks and portable preferences. Open **Help → Keyboard shortcuts** or press **Ctrl+/**; see the [shortcut reference](docs/SHORTCUTS.md).
+- 45 configurable keyboard commands with conflict checks and portable preferences, and a command search (**Ctrl+K**) for every menu and keyboard command. Open **Help → Keyboard shortcuts** or press **Ctrl+/**; see the [shortcut reference](docs/SHORTCUTS.md).
 - 14 transitions between touching clips on a track: dissolve, dips to black/white, wipes, slides, zoom, circle, radial and pixelize. Click **+** on a cut or use the inspector; duration 0.1–3 s. Audio crossfades automatically. Clips keep their timing; each extends into the other using spare source media, or holds its edge frame.
 - Keyframe animation of scale, position, rotation, opacity and volume. Put the playhead in the clip and click ◇ next to a slider. Once a property has keyframes, moving its slider at another time adds a keyframe there. Keyframes show as yellow diamonds on the clip; click one to jump there, or use ◀◆ / ◆▶.
 - Presenter overlays for picture-in-picture, e.g. a speaker over a screen recording:

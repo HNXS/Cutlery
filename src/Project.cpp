@@ -315,6 +315,10 @@ QJsonObject Project::json(const QString &base) const {
         }
         if (c.textShadow != 1)
             o["textShadow"] = c.textShadow;
+        if (c.textGlow > 0) {
+            o["textGlow"] = c.textGlow;
+            o["textGlowColor"] = c.textGlowColor;
+        }
         if (c.background > 0) {
             o["background"] = c.background;
             o["backgroundColor"] = c.backgroundColor;
@@ -559,6 +563,8 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.outline = j["outline"].toDouble(0);
         c.outlineColor = j["outlineColor"].toString("#000000");
         c.textShadow = j["textShadow"].toDouble(1);
+        c.textGlow = j["textGlow"].toDouble(0);
+        c.textGlowColor = j["textGlowColor"].toString("#ffd23f");
         c.background = j["background"].toDouble(0);
         c.backgroundColor = j["backgroundColor"].toString("#000000");
         c.titleStyle = j["titleStyle"].toString();
@@ -772,7 +778,7 @@ void Project::validate() const {
                 "Invalid text/fade value");
         require(QStringList{"left", "center", "right"}.contains(c.align) &&
                     bounded(c.letterSpacing, -0.1, 0.5) && bounded(c.lineSpacing, 0.7, 3) &&
-                    bounded(c.outline, 0, 0.25) && bounded(c.textShadow, 0, 1) &&
+                    bounded(c.outline, 0, 0.25) && bounded(c.textShadow, 0, 1) && bounded(c.textGlow, 0, 1) && QColor(c.textGlowColor).isValid() &&
                     bounded(c.background, 0, 1) && QColor(c.outlineColor).isValid() &&
                     QColor(c.backgroundColor).isValid() && c.fontFamily.size() <= 200,
                 "Invalid text style");

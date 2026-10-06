@@ -66,7 +66,7 @@ ApplicationWindow {
         { n: 24, d: 1, label: "24" }, { n: 25, d: 1, label: "25" }, { n: 30, d: 1, label: "30" },
         { n: 50, d: 1, label: "50" }, { n: 60, d: 1, label: "60" }, { n: 30000, d: 1001, label: "29.97" }
     ]
-    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || frameDialog.visible || timelineFileDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || styleDialog.visible || templateDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
+    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || frameDialog.visible || audioFileDialog.visible || timelineFileDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || styleDialog.visible || templateDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || commandSearch.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
         enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
@@ -188,6 +188,8 @@ ApplicationWindow {
             editor.addTrack();
         else if (id === "shortcuts")
             shortcutsDialog.open();
+        else if (id === "commandSearch")
+            commandSearch.open();
     }
     function clock(frame) {
         const fps = s.fps;
@@ -553,12 +555,147 @@ ApplicationWindow {
         Menu {
             title: "Help"
             MenuItem {
+                text: "Search commands…"
+                onTriggered: commandSearch.open()
+            }
+            MenuItem {
                 text: "Keyboard shortcuts…"
                 onTriggered: shortcutsDialog.open()
             }
             MenuItem {
                 text: "About this alpha"
                 onTriggered: about.open()
+            }
+        }
+    }
+    // Command search: every menu command and keyboard command by name.
+    Popup {
+        id: commandSearch
+        objectName: "commandSearch"
+        parent: Overlay.overlay
+        x: Math.round((win.width - width) / 2)
+        y: 70
+        width: Math.min(560, win.width - 40)
+        height: Math.min(440, win.height - 120)
+        modal: true
+        focus: true
+        property var entries: []
+        property var found: []
+        // Menu items, submenus included, then keyboard commands not already found by name.
+        function collect() {
+            const list = [];
+            const seen = {};
+            const plain = text => text.replace(/[….]+$/, "").trim().toLowerCase();
+            function walk(menu, path) {
+                for (let i = 0; i < menu.count; ++i) {
+                    const item = menu.itemAt(i);
+                    if (!item || !item.text)
+                        continue;
+                    if (item.subMenu) {
+                        walk(item.subMenu, path + " › " + item.subMenu.title);
+                        continue;
+                    }
+                    const key = plain(item.text);
+                    if (seen[key])
+                        continue;
+                    seen[key] = true;
+                    list.push({ label: item.text, where: path, keys: "", item: item, id: "" });
+                }
+            }
+            for (let m = 0; m < win.menuBar.count; ++m) {
+                const menu = win.menuBar.menuAt(m);
+                walk(menu, menu.title);
+            }
+            for (const b of shortcutSettings.bindings) {
+                const key = plain(b.label);
+                if (seen[key])
+                    continue;
+                seen[key] = true;
+                list.push({ label: b.label, where: b.category, keys: b.sequence, item: null, id: b.id });
+            }
+            entries = list;
+        }
+        function filter() {
+            const words = searchField.text.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+            found = entries.filter(e => {
+                const text = (e.label + " " + e.where).toLowerCase();
+                return words.every(w => text.indexOf(w) >= 0) && (e.item === null || e.item.enabled);
+            });
+            results.currentIndex = found.length > 0 ? 0 : -1;
+        }
+        function run(index) {
+            const e = found[index];
+            if (!e)
+                return;
+            close();
+            if (e.item)
+                e.item.triggered();
+            else
+                win.command(e.id);
+        }
+        onAboutToShow: {
+            searchField.text = "";
+            collect();
+            filter();
+        }
+        onOpened: searchField.forceActiveFocus()
+        background: Rectangle {
+            color: "#1b2129"
+            border.color: "#3a4655"
+            radius: 8
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 8
+            TextField {
+                id: searchField
+                objectName: "commandSearchField"
+                Layout.fillWidth: true
+                placeholderText: "Search commands, e.g. export frame"
+                onTextChanged: commandSearch.filter()
+                Keys.onDownPressed: results.currentIndex = Math.min(results.count - 1, results.currentIndex + 1)
+                Keys.onUpPressed: results.currentIndex = Math.max(0, results.currentIndex - 1)
+                Keys.onReturnPressed: commandSearch.run(results.currentIndex)
+                Keys.onEnterPressed: commandSearch.run(results.currentIndex)
+            }
+            ListView {
+                id: results
+                objectName: "commandResults"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                model: commandSearch.found
+                highlightMoveDuration: 0
+                delegate: ItemDelegate {
+                    required property var modelData
+                    required property int index
+                    width: ListView.view.width
+                    highlighted: ListView.isCurrentItem
+                    onClicked: commandSearch.run(index)
+                    contentItem: RowLayout {
+                        Label {
+                            text: modelData.label
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                        }
+                        Label {
+                            text: modelData.where
+                            color: win.muted
+                            font.pixelSize: 11
+                        }
+                        Label {
+                            visible: modelData.keys.length > 0
+                            text: modelData.keys
+                            color: win.mint
+                            font.pixelSize: 11
+                        }
+                    }
+                }
+            }
+            Label {
+                visible: results.count === 0
+                text: "No command matches"
+                color: win.muted
             }
         }
     }
@@ -714,13 +851,25 @@ ApplicationWindow {
                         currentIndex: leftTabs.currentIndex
                         ColumnLayout {
                             spacing: 12
-                            Action {
-                                text: win.s.importing ? "Reading media…" : "+ Import media"
+                            RowLayout {
                                 Layout.fillWidth: true
-                                enabled: !win.s.importing
-                                onClicked: importDialog.open()
-                                ToolTip.visible: hovered
-                                ToolTip.text: "Or drop files here. Drag media onto any track; right-click it to sort it into folders."
+                                spacing: 6
+                                Action {
+                                    text: win.s.importing ? "Reading media… " + (win.s.importRemaining || 0) + " left" : "+ Import media"
+                                    Layout.fillWidth: true
+                                    enabled: !win.s.importing
+                                    onClicked: importDialog.open()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Or drop files or whole folders here (a folder's media goes into a library folder of its name). Drag media onto any track; right-click it to sort it into folders."
+                                }
+                                Action {
+                                    objectName: "cancelImport"
+                                    visible: win.s.importing === true
+                                    text: "Stop"
+                                    onClicked: editor.cancelImport()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Skip the files not read yet"
+                                }
                             }
                             // What the library shows: everything, one kind of media, or a folder; then a
                             // name search within that.
@@ -2210,6 +2359,7 @@ ApplicationWindow {
                                         { key: "lineSpacing", name: "Line spacing", lo: 0.7, hi: 3, def: 1 },
                                         { key: "outline", name: "Outline", lo: 0, hi: 0.25, def: 0 },
                                         { key: "textShadow", name: "Shadow", lo: 0, hi: 1, def: 1 },
+                                        { key: "textGlow", name: "Glow", lo: 0, hi: 1, def: 0 },
                                         { key: "background", name: "Background box", lo: 0, hi: 1, def: 0 }
                                     ]
                                     RowLayout {
@@ -2235,10 +2385,10 @@ ApplicationWindow {
                                         }
                                         // Outline and box colours.
                                         Repeater {
-                                            model: textStyleRow.modelData.key === "outline" ? ["#000000", "#ffffff", "#ffd23f"] : textStyleRow.modelData.key === "background" ? ["#000000", "#ffffff", "#64d8bc"] : []
+                                            model: textStyleRow.modelData.key === "outline" ? ["#000000", "#ffffff", "#ffd23f"] : textStyleRow.modelData.key === "background" ? ["#000000", "#ffffff", "#64d8bc"] : textStyleRow.modelData.key === "textGlow" ? ["#ffd23f", "#ffffff", "#ff4fd8"] : []
                                             Rectangle {
                                                 required property string modelData
-                                                readonly property string colorKey: textStyleRow.modelData.key === "outline" ? "outlineColor" : "backgroundColor"
+                                                readonly property string colorKey: textStyleRow.modelData.key === "outline" ? "outlineColor" : textStyleRow.modelData.key === "textGlow" ? "textGlowColor" : "backgroundColor"
                                                 width: 16
                                                 height: 16
                                                 radius: 8
@@ -2946,6 +3096,15 @@ ApplicationWindow {
                                 spacing: 6
                                 Rule {}
                                 Caption { text: "SOUND" }
+                                Action {
+                                    objectName: "extractAudio"
+                                    Layout.fillWidth: true
+                                    text: "Save sound as file…"
+                                    enabled: !win.s.busy && win.selection.muted !== true
+                                    onClicked: audioFileDialog.open()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "The clip's sound as you hear it (trim, speed, volume, sound tools), without the other clips, as WAV, MP3 or M4A"
+                                }
                                 ComboBox {
                                     objectName: "soundPreset"
                                     Layout.fillWidth: true
@@ -3792,6 +3951,14 @@ ApplicationWindow {
         defaultSuffix: "otio"
         nameFilters: ["OpenTimelineIO (*.otio)", "CMX 3600 EDL (*.edl)"]
         onAccepted: editor.exportTimeline(selectedFile)
+    }
+    FileDialog {
+        id: audioFileDialog
+        title: "Save the clip's sound"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: ["wav", "mp3", "m4a"][Math.max(0, selectedNameFilter.index)]
+        nameFilters: ["WAV sound (*.wav)", "MP3 sound (*.mp3)", "AAC sound (*.m4a)"]
+        onAccepted: editor.extractAudio(selectedFile)
     }
     FileDialog {
         id: frameDialog

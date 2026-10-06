@@ -4,6 +4,10 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Search commands:** press Ctrl+K and type a few letters to find and run any command, from the menus or the keyboard list.
+- **Import whole folders:** drop a folder (or import one) and its photos, videos and sounds come in, folders inside included, into a library folder of the same name. A Stop button skips the rest of a long import.
+- **Save a clip's sound:** "Save sound as file…" writes the selected clip's sound as you hear it to WAV, MP3 or M4A.
+- **Glowing text:** a soft glow around titles in a colour of your choice, also in text styles.
 - **Blend modes:** multiply, screen, overlay, soft light, darken, lighten, add and difference per clip, e.g. for light leaks, textures or a logo that takes on the colour below.
 - **Remove by brightness:** makes the black (or white) parts of a clip transparent, for fire, smoke, sparks and other effects filmed on black.
 - **Crop each edge:** crop left, right, top and bottom separately, and turn a clip upside down.

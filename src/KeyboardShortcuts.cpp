@@ -70,6 +70,7 @@ KeyboardShortcuts::KeyboardShortcuts(QString path, QObject *parent)
     add("snap", "Toggle snapping", "Timeline", "N");
     add("addTrack", "Add track", "Timeline", "Ctrl+Shift+N");
     add("shortcuts", "Keyboard shortcuts", "Help", "Ctrl+/");
+    add("commandSearch", "Search commands", "Help", "Ctrl+K");
     QFile f(m_path);
     if (!f.exists())
         return;

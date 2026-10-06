@@ -98,7 +98,11 @@ class Editor final : public QObject {
     Q_INVOKABLE QVariantList backups() const;
     Q_INVOKABLE bool restoreBackup(const QString &file);
     Q_INVOKABLE void recover();
+    // Files and folders: a folder adds the media files inside it and the folders below it,
+    // into a library folder of its name.
     Q_INVOKABLE void importMedia(const QList<QUrl> &);
+    // Stops the import: the file being read and those waiting are skipped.
+    Q_INVOKABLE void cancelImport();
     // Media library folders. New imports go into the import folder (the one on show).
     Q_INVOKABLE void addFolder(const QString &name);
     Q_INVOKABLE void renameFolder(const QString &from, const QString &to);
@@ -251,6 +255,9 @@ class Editor final : public QObject {
     // The picture at the playhead at the project's size, as PNG or JPEG (by the file's
     // extension), rendered in the background like a preview but at full quality.
     Q_INVOKABLE void exportFrame(const QUrl &);
+    // Saves the sound of the selected clip as heard on the timeline (trim, speed, volume, sound
+    // tools, fades; other clips left out) as .wav, .mp3 or .m4a, like an export.
+    Q_INVOKABLE void extractAudio(const QUrl &);
     // The timeline for other editors: OpenTimelineIO (.otio) or a CMX 3600 EDL (.edl), by the
     // file's extension. The status names what the format could not carry.
     Q_INVOKABLE void exportTimeline(const QUrl &);
@@ -481,7 +488,11 @@ class Editor final : public QObject {
     struct ImportRequest {
         QUrl url;
         std::shared_ptr<DropBatch> drop;
+        QString folder; // library folder for media found in a dropped folder
     };
+    // Requests for dropped files and folders (searched for media files, sorted by path).
+    QList<ImportRequest> importRequests(const QList<QUrl> &, std::shared_ptr<DropBatch> drop) const;
+    bool m_cancelProbe = false;
     QList<ImportRequest> m_importQueue;
     QStringList m_importErrors;
     void fail(const QString &);
@@ -489,7 +500,8 @@ class Editor final : public QObject {
     void edited();
     void requestPreview();
     void probeNext();
-    void probeFile(const QUrl &, const QString &replaceId, std::shared_ptr<DropBatch> drop = {});
+    void probeFile(const QUrl &, const QString &replaceId, std::shared_ptr<DropBatch> drop = {},
+                   const QString &folder = {});
     static QString insert(Project &, const QString &assetId, int track, qint64 frame);
     void startRender(const QString &output, QSize size, const Encoder &encoder,
                      double gainDb = 0);

@@ -86,6 +86,9 @@ struct Clip {
     QString align = "center";
     double letterSpacing = 0, lineSpacing = 1;
     double outline = 0, textShadow = 1, background = 0;
+    // A soft glow around the letters, 0..1 (reach about half the font size at 1).
+    double textGlow = 0;
+    QString textGlowColor = "#ffd23f";
     QString outlineColor = "#000000", backgroundColor = "#000000";
     // Captions with word timing: the clip-local frame each word of `text` (split at white
     // space) starts on. "karaoke" colours the word being spoken in `highlightColor`; "word"

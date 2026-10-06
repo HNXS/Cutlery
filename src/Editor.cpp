@@ -533,6 +533,8 @@ QVariantMap Editor::state() const {
             PROP(outline);
             PROP(outlineColor);
             PROP(textShadow);
+            PROP(textGlow);
+            PROP(textGlowColor);
             PROP(background);
             PROP(backgroundColor);
             selected["lut"] = c.lut;
@@ -611,6 +613,7 @@ QVariantMap Editor::state() const {
             {"error", m_error},
             {"busy", m_busy},
             {"importing", m_importing},
+            {"importRemaining", m_importQueue.size() + (m_probe ? 1 : 0)},
             {"analyzing", m_analysis->busy() || m_thumbnails->busy()},
             {"aiMissing", QVariantMap{{"matte", m_ai->missing("matte")},
                                       {"upscale", m_ai->missing("upscale")},
@@ -1148,30 +1151,80 @@ void Editor::redo() {
     m_project = m_redo.takeLast();
     edited();
 }
-void Editor::importMedia(const QList<QUrl> &urls) {
-    if (!m_importing)
-        m_importErrors.clear();
-    if (urls.size() + m_importQueue.size() > 500) {
-        fail("Drop at most 500 files at a time");
-        return;
+QList<Editor::ImportRequest> Editor::importRequests(const QList<QUrl> &urls,
+                                                   std::shared_ptr<DropBatch> drop) const {
+    static const QStringList media{
+        "mp4", "mov", "mkv", "webm", "avi", "m4v", "mts", "m2ts", "mpg", "mpeg", "wmv", "flv",
+        "3gp", "mp3", "wav", "m4a", "aac", "flac", "ogg", "opus", "wma", "aif", "aiff", "png",
+        "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif", "svg"};
+    QList<ImportRequest> requests;
+    for (const auto &url : urls) {
+        const QFileInfo info(url.toLocalFile());
+        if (!url.isLocalFile() || !info.isDir()) {
+            requests.push_back({url, drop, {}});
+            continue;
+        }
+        auto name = info.fileName().trimmed().left(100);
+        if (name.isEmpty())
+            name = "Imported";
+        QStringList files;
+        QDirIterator it(info.absoluteFilePath(), QDir::Files | QDir::Readable,
+                        QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const auto file = it.next();
+            if (media.contains(QFileInfo(file).suffix().toLower()))
+                files << file;
+            if (files.size() > 500)
+                throw std::runtime_error("Import at most 500 files at a time");
+        }
+        std::sort(files.begin(), files.end(), [](const QString &a, const QString &b) {
+            return QString::localeAwareCompare(a, b) < 0;
+        });
+        for (const auto &file : files)
+            requests.push_back({QUrl::fromLocalFile(file), drop, name});
     }
-    for (const auto &url : urls)
-        m_importQueue.push_back({url, {}});
-    if (!m_probe)
-        probeNext();
+    if (requests.size() + m_importQueue.size() > 500)
+        throw std::runtime_error("Import at most 500 files at a time");
+    return requests;
+}
+void Editor::importMedia(const QList<QUrl> &urls) {
+    try {
+        const auto requests = importRequests(urls, {});
+        if (!m_importing)
+            m_importErrors.clear();
+        if (requests.isEmpty())
+            throw std::runtime_error("No media files found");
+        m_importQueue += requests;
+        if (!m_probe)
+            probeNext();
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
+void Editor::cancelImport() {
+    const auto left = m_importQueue.size() + (m_probe ? 1 : 0);
+    if (left == 0)
+        return;
+    m_importQueue.clear();
+    if (m_probe) {
+        m_cancelProbe = true;
+        m_probe->kill();
+    }
+    m_status = QString("Import stopped; %1 file%2 not added").arg(left).arg(left == 1 ? "" : "s");
+    emit changed();
 }
 void Editor::dropFiles(const QList<QUrl> &urls, int track, qint64 frame) {
     try {
         m_project.requireEditable(track);
-        if (urls.size() + m_importQueue.size() > 500)
-            throw std::runtime_error("Drop at most 500 files at a time");
-        if (!m_importing)
-            m_importErrors.clear();
         auto batch = std::make_shared<DropBatch>();
         batch->trackId = m_project.trackSettings[track].id;
         batch->frame = std::max(qint64(0), frame);
-        for (const auto &url : urls)
-            m_importQueue.push_back({url, batch});
+        const auto requests = importRequests(urls, batch);
+        if (!m_importing)
+            m_importErrors.clear();
+        if (requests.isEmpty())
+            throw std::runtime_error("No media files found");
+        m_importQueue += requests;
         if (!m_probe)
             probeNext();
     } catch (const std::exception &e) {
@@ -1187,7 +1240,7 @@ void Editor::probeNext() {
         return;
     }
     const auto request = m_importQueue.takeFirst();
-    probeFile(request.url, {}, request.drop);
+    probeFile(request.url, {}, request.drop, request.folder);
 }
 void Editor::relink(const QString &id, const QUrl &url) {
     if (m_probe) {
@@ -1288,7 +1341,8 @@ QString rasterizeSvg(const QString &svg, const QString &folder, int longest) {
         throw std::runtime_error("Cannot write the picture of the SVG file");
     return png;
 }
-void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_ptr<DropBatch> drop) {
+void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_ptr<DropBatch> drop,
+                       const QString &folder) {
     QString path;
     try {
         path = localPath(url);
@@ -1308,11 +1362,16 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
     m_importing = true;
     m_status = "Reading " + QFileInfo(path).fileName();
     emit changed();
-    auto complete = [this, process, path, replaceId, drop](bool success) {
+    auto complete = [this, process, path, replaceId, drop, folder](bool success) {
         const auto bytes = process->readAllStandardOutput();
         const auto error = QString::fromUtf8(process->readAllStandardError());
         m_probe = nullptr;
         process->deleteLater();
+        if (m_cancelProbe) {
+            m_cancelProbe = false;
+            probeNext();
+            return;
+        }
         if (!success) {
             const auto message =
                 "Cannot read media: " + QFileInfo(path).fileName() + "\n" + error.left(1000);
@@ -1375,8 +1434,13 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                         if (clip.assetId == replaceId)
                             p.requireEditable(clip.track);
                     if (replaceId.isEmpty()) {
-                        // Into the library folder on show, if it still exists.
-                        if (p.folders.contains(m_importFolder))
+                        // Into the dropped folder's own library folder, or else the one on
+                        // show if it still exists.
+                        if (!folder.isEmpty()) {
+                            if (!p.folders.contains(folder))
+                                p.folders << folder;
+                            a.folder = folder;
+                        } else if (p.folders.contains(m_importFolder))
                             a.folder = m_importFolder;
                         p.assets.push_back(a);
                     } else
@@ -1866,6 +1930,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(outline, toDouble);
         FIELD(outlineColor, toString);
         FIELD(textShadow, toDouble);
+        FIELD(textGlow, toDouble);
+        FIELD(textGlowColor, toString);
         FIELD(background, toDouble);
         FIELD(backgroundColor, toString);
         FIELD(fontFamily, toString);
@@ -4324,6 +4390,7 @@ static const QStringList &textStyleKeys() {
     static const QStringList keys{"fontFamily",  "fontSize",       "textColor",     "gradientColor",
                                   "bold",        "italic",         "align",         "letterSpacing",
                                   "lineSpacing", "outline",        "outlineColor",  "textShadow",
+                                  "textGlow",    "textGlowColor",
                                   "background",  "backgroundColor", "textAnimation", "textAnimationTime",
                                   "highlightColor"};
     return keys;
@@ -4784,6 +4851,34 @@ void Editor::exportFrame(const QUrl &url) {
         });
         p->start(executable("ffmpeg"), renderArguments(plan, graph, {}, "", 0));
         emit changed();
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
+void Editor::extractAudio(const QUrl &url) {
+    try {
+        const auto *c = m_project.clip(m_selected);
+        const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+        if (!c || !a || !a->hasAudio || c->muted || c->volume <= 0)
+            throw std::runtime_error("Select a clip that plays sound");
+        const auto suffix = QFileInfo(localPath(url)).suffix().toLower();
+        if (!audioFormat(suffix))
+            throw std::runtime_error("Use a .wav, .mp3 or .m4a filename");
+        // The clip alone, at the start of a one-track timeline.
+        auto p = m_project;
+        auto one = *c;
+        one.start = 0;
+        one.track = 0;
+        one.link.clear();
+        one.group.clear();
+        one.transition.clear();
+        one.transitionFrames = 0;
+        p.clips = {one};
+        p.tracks = 1;
+        p.trackSettings = {Track{"Track 1"}};
+        p.markers.clear();
+        p.inPoint = p.outPoint = -1;
+        exportProject(p, url, {{"format", suffix}, {"quality", "max"}});
     } catch (const std::exception &e) {
         fail(e.what());
     }

@@ -691,6 +691,63 @@ class UiTest : public QObject {
         QTRY_VERIFY(findItem(window->contentItem(), "arrange-side")->isEnabled());
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void commandSearch() {
+        QTemporaryDir dir;
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.addTitle();
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *popup = window->findChild<QObject *>("commandSearch");
+        QVERIFY(popup);
+        // Ctrl+K opens it with every command listed.
+        QTest::keyClick(window, Qt::Key_K, Qt::ControlModifier);
+        QTRY_VERIFY(popup->property("visible").toBool());
+        auto *field = findItem(window->contentItem(), "commandSearchField");
+        QVERIFY(field);
+        QTRY_VERIFY(field->hasActiveFocus());
+        auto found = [&] { return popup->property("found").toList(); };
+        QVERIFY(found().size() > 40);
+        // Words in any order, from menus (with their place) and from keyboard commands.
+        field->setProperty("text", "frame export");
+        QVERIFY(!found().isEmpty());
+        QCOMPARE(found()[0].toMap()["label"].toString(), QString("Export current frame as picture…"));
+        QCOMPARE(found()[0].toMap()["where"].toString(), QString("Project"));
+        field->setProperty("text", "shuttle forward");
+        QCOMPARE(found().size(), 1);
+        QCOMPARE(found()[0].toMap()["keys"].toString(), QString("L"));
+        field->setProperty("text", "no such thing");
+        QVERIFY(found().isEmpty());
+        // Enter runs the first match and closes the search.
+        field->setProperty("text", "add track");
+        const int tracks = editor.project().tracks;
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_VERIFY(!popup->property("visible").toBool());
+        QCOMPARE(editor.project().tracks, tracks + 1);
+        // A menu command runs as if chosen from the menu.
+        QTest::keyClick(window, Qt::Key_K, Qt::ControlModifier);
+        QTRY_VERIFY(popup->property("visible").toBool());
+        field->setProperty("text", "preferences");
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_VERIFY(window->findChild<QObject *>("preferencesDialog") &&
+                    window->findChild<QObject *>("preferencesDialog")->property("visible").toBool());
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void exportDialog() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;

@@ -840,7 +840,7 @@ class EngineTest : public QObject {
         QTemporaryDir dir;
         const auto path = dir.filePath("shortcuts.json");
         KeyboardShortcuts keys(path);
-        QCOMPARE(keys.bindings().size(), 44);
+        QCOMPARE(keys.bindings().size(), 45);
         QVERIFY(!keys.assign("play", "Ctrl+B"));
         QVERIFY(keys.error().contains("Already assigned"));
         QVERIFY(!keys.assign("play", "Ctrl+NotARealKey"));
@@ -4813,6 +4813,173 @@ class EngineTest : public QObject {
         QCOMPARE(clips[1].start, clips[0].start + clips[0].duration);
         QCOMPARE(clips[1].text, QString("Zweite Zeile"));
         QCOMPARE(clips[0].track, editor.project().tracks - 1);
+    }
+    void folderImportAndStop() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Holiday/b.png, Holiday/a.png, Holiday/sound/c.wav, and a text file that is no media.
+        const auto root = dir.filePath("Holiday");
+        QVERIFY(QDir().mkpath(root + "/sound"));
+        QImage image(64, 36, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(root + "/b.png"));
+        QVERIFY(image.save(root + "/a.png"));
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                     root + "/sound/c.wav"});
+        {
+            QFile notes(root + "/notes.txt");
+            QVERIFY(notes.open(QIODevice::WriteOnly));
+            notes.write("not media");
+        }
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.importMedia({QUrl::fromLocalFile(root)});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["importing"].toBool(), 20000);
+        const auto assets = editor.project().assets;
+        QCOMPARE(assets.size(), 3);
+        QCOMPARE(assets[0].name, QString("a.png"));
+        QCOMPARE(assets[1].name, QString("b.png"));
+        QCOMPARE(assets[2].name, QString("c.wav"));
+        for (const auto &a : assets)
+            QCOMPARE(a.folder, QString("Holiday"));
+        QCOMPARE(editor.project().folders, QStringList{"Holiday"});
+        QVERIFY2(editor.state()["error"].toString().isEmpty(),
+                 qPrintable(editor.state()["error"].toString()));
+        // The same folder again goes into the same library folder.
+        editor.importMedia({QUrl::fromLocalFile(root + "/sound")});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["importing"].toBool(), 20000);
+        QCOMPARE(editor.project().assets.size(), 4);
+        QCOMPARE(editor.project().assets.last().folder, QString("sound"));
+        QCOMPARE(editor.project().folders, (QStringList{"Holiday", "sound"}));
+        // A folder without media is reported.
+        QVERIFY(QDir().mkpath(dir.filePath("Empty")));
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("Empty"))});
+        QVERIFY(editor.state()["error"].toString().contains("No media"));
+        editor.clearError();
+        // Dropped onto a track: the folder's media in order, into its library folder.
+        editor.newProject();
+        editor.dropFiles({QUrl::fromLocalFile(root)}, 0, 0);
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["importing"].toBool(), 20000);
+        QCOMPARE(editor.project().clips.size(), 3);
+        QCOMPARE(editor.project().assets[0].folder, QString("Holiday"));
+        // Stopping: the file being read and those waiting are skipped.
+        editor.newProject();
+        editor.importMedia({QUrl::fromLocalFile(root), QUrl::fromLocalFile(root)});
+        QVERIFY(editor.state()["importing"].toBool());
+        QCOMPARE(editor.state()["importRemaining"].toInt(), 6);
+        editor.cancelImport();
+        QCOMPARE(editor.state()["status"].toString(), QString("Import stopped; 6 files not added"));
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["importing"].toBool(), 20000);
+        QVERIFY(editor.project().assets.isEmpty());
+        QVERIFY(editor.state()["error"].toString().isEmpty());
+        // Importing works again afterwards.
+        editor.importMedia({QUrl::fromLocalFile(root + "/a.png")});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 20000);
+    }
+    void extractClipAudio() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("tone.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=4", source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        // A second clip on the timeline that is left out.
+        editor.addAsset(editor.project().assets.first().id);
+        const auto id = editor.project().clips.first().id;
+        editor.select(id);
+        editor.setClip("speed", 2.0); // 4 s of sound in 2 s
+        const auto output = dir.filePath("sound.mp3");
+        editor.extractAudio(QUrl::fromLocalFile(output));
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(editor.state()["error"].toString().isEmpty(),
+                 qPrintable(editor.state()["error"].toString()));
+        QVERIFY(QFileInfo::exists(output));
+        const auto probe = QString::fromUtf8(
+            run(Editor::executable("ffprobe"),
+                {"-v", "error", "-show_entries", "format=duration:stream=codec_name,codec_type",
+                 "-of", "default=nw=1", output}));
+        QVERIFY2(probe.contains("codec_name=mp3") && !probe.contains("codec_type=video"),
+                 qPrintable(probe));
+        const auto duration = probe.section("duration=", 1).section('\n', 0, 0).toDouble();
+        QVERIFY2(std::abs(duration - 2) < 0.15, qPrintable(probe));
+        // The timeline is unchanged; a wrong name or a clip without sound is refused.
+        QCOMPARE(editor.project().clips.size(), 2);
+        editor.extractAudio(QUrl::fromLocalFile(dir.filePath("sound.ogg")));
+        QVERIFY(editor.state()["error"].toString().contains(".wav"));
+        editor.clearError();
+        editor.addTitle();
+        editor.extractAudio(QUrl::fromLocalFile(dir.filePath("title.wav")));
+        QVERIFY(editor.state()["error"].toString().contains("sound"));
+        QVERIFY(!QFileInfo::exists(dir.filePath("title.wav")));
+    }
+    void textGlow() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        Project p;
+        p.width = 320;
+        p.height = 180;
+        Clip title;
+        title.id = "title";
+        title.duration = 30;
+        title.text = "I";
+        title.fontSize = 120;
+        title.textShadow = 0;
+        title.textColor = "#ffffff";
+        p.clips = {title};
+        auto redPixels = [&](const Project &project) {
+            RenderOptions options;
+            options.audio = false;
+            options.to = 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 320, 180, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            image = image.convertToFormat(QImage::Format_RGB32);
+            int red = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x) {
+                    const auto c = image.pixelColor(x, y);
+                    red += c.red() > 60 && c.green() < 40 && c.blue() < 40;
+                }
+            return red;
+        };
+        QCOMPARE(redPixels(p), 0);
+        p.clips[0].textGlow = 1;
+        p.clips[0].textGlowColor = "#ff0000";
+        const int strong = redPixels(p);
+        QVERIFY2(strong > 400, qPrintable(QString::number(strong)));
+        p.clips[0].textGlow = 0.3;
+        const int weak = redPixels(p);
+        QVERIFY2(weak > 0 && weak < strong, qPrintable(QString("%1 %2").arg(weak).arg(strong)));
+        // Saved, validated, and part of text styles.
+        const auto back = Project::fromJson(p.json(), {}).clips[0];
+        QCOMPARE(back.textGlow, 0.3);
+        QCOMPARE(back.textGlowColor, QString("#ff0000"));
+        p.clips[0].textGlow = 2;
+        QVERIFY_EXCEPTION_THROWN(p.validate(), std::runtime_error);
+        FrameProvider frames;
+        Editor editor(&frames);
+        for (const auto &st : editor.textStyles())
+            editor.removeTextStyle(st.toMap()["name"].toString());
+        editor.addTitle();
+        editor.setClipValues({{"textGlow", 0.8}, {"textGlowColor", "#00ff00"}});
+        editor.saveTextStyle("Neon");
+        editor.addTitle();
+        editor.applyTextStyle("Neon");
+        QCOMPARE(editor.project().clips.last().textGlow, 0.8);
+        QCOMPARE(editor.project().clips.last().textGlowColor, QString("#00ff00"));
+        editor.removeTextStyle("Neon");
     }
     void adjustmentLayers() {
         const auto ffmpeg = Editor::executable("ffmpeg");
