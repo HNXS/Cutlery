@@ -67,6 +67,14 @@ struct Clip {
     // width and height (0.5, 0.5: the centre).
     double anchorX = 0.5, anchorY = 0.5;
     double brightness = 0, contrast = 1, saturation = 1, crop = 0;
+    // Crop of single edges, as fractions of the source width (left, right) and height (top,
+    // bottom), before the equal-edge crop; each pair leaves at least a tenth of the picture.
+    double cropLeft = 0, cropRight = 0, cropTop = 0, cropBottom = 0;
+    // Upside down (flip mirrors left and right).
+    bool flipVertical = false;
+    // How the picture mixes with what the lower tracks show: "" normal, or one of
+    // blendModes() (FFmpeg blend mode names).
+    QString blendMode;
     double fadeIn = 0, fadeOut = 0;
     QString text, fontFamily = "Arial", textColor = "#ffffff";
     int fontSize = 72;
@@ -164,6 +172,10 @@ struct Clip {
     bool chromaKey = false;
     QString keyColor = "#00ff00";
     double keySimilarity = 0.25, keyBlend = 0.08;
+    // Background removal by brightness: "dark" keys out black, "light" white, within
+    // lumaTolerance (0.01..1) and a soft edge of lumaSoftness (0..1).
+    QString lumaKey;
+    double lumaTolerance = 0.1, lumaSoftness = 0.05;
     // Background removal with the AI person matte of the asset (see AiJobs). Takes precedence
     // over the colour key; without an analysed matte the picture stays as it is.
     bool aiCutout = false;
@@ -188,6 +200,8 @@ const QStringList &graphicKinds();
 bool validCurve(const QString &points);
 // Words of a caption text, as used with Clip::wordStarts.
 QStringList captionWords(const QString &text);
+// Blend modes other than normal: FFmpeg blend names paired with display labels.
+const QVector<QPair<QString, QString>> &blendModes();
 // Supported transitions: FFmpeg xfade names paired with display labels.
 const QVector<QPair<QString, QString>> &transitionTypes();
 // A named point on the timeline.

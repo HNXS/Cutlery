@@ -28,7 +28,11 @@ QVector<QPair<qint64, qint64>> wordCutRanges(const QVector<qint64> &starts,
 QVector<Cue> parseVtt(QString text);
 // Advanced SubStation Alpha (ASS/SSA) dialogue lines; override tags are dropped.
 QVector<Cue> parseAss(QString text);
-// Cues from a subtitle file's text by its suffix: "srt", "vtt", "ass" or "ssa".
+// Captions from plain text, shown back to back from 0: each line (or a part of a long line,
+// broken after sentences) becomes a cue of up to two lines of `maxChars`, on screen for a
+// reading time of 15 characters a second (1.5 to 7 s).
+QVector<Cue> parseTxt(QString text, int maxChars = 42);
+// Cues from a subtitle file's text by its suffix: "srt", "vtt", "ass", "ssa" or "txt".
 QVector<Cue> parseSubtitles(const QString &text, const QString &suffix);
 // A subtitle file for the cues: "srt", "vtt" or "ass". ASS uses the canvas size for its
 // coordinates, `fontSize` (canvas pixels) and `font` for the default style.

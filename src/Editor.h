@@ -271,6 +271,12 @@ class Editor final : public QObject {
     Q_INVOKABLE QVariantMap waveform(const QString &assetId) const {
         return m_analysis->waveform(assetId);
     }
+    Q_INVOKABLE QVariantList blendModes() const {
+        QVariantList result{QVariantMap{{"id", QString()}, {"label", "Normal"}}};
+        for (const auto &[id, label] : cutlery::blendModes())
+            result << QVariantMap{{"id", id}, {"label", label}};
+        return result;
+    }
     Q_INVOKABLE QVariantList transitionTypes() const {
         QVariantList result;
         for (const auto &[id, label] : cutlery::transitionTypes())

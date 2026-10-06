@@ -542,7 +542,7 @@ ApplicationWindow {
                 onTriggered: captionDialog.open()
             }
             MenuItem {
-                text: "Import captions (SRT, VTT, ASS)…"
+                text: "Import captions (SRT, VTT, ASS, TXT)…"
                 onTriggered: srtOpen.open()
             }
             MenuItem {
@@ -2462,6 +2462,69 @@ ApplicationWindow {
                                         }
                                     }
                                 }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label {
+                                        text: "Remove by brightness"
+                                        color: win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    ComboBox {
+                                        objectName: "lumaKey"
+                                        model: [{ id: "", label: "Off" }, { id: "dark", label: "Black" }, { id: "light", label: "White" }]
+                                        textRole: "label"
+                                        valueRole: "id"
+                                        currentIndex: Math.max(0, ["", "dark", "light"].indexOf(win.selection.lumaKey || ""))
+                                        onActivated: editor.setClip("lumaKey", currentValue)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Makes black (or white) parts transparent, e.g. for fire, smoke or light effects on black"
+                                    }
+                                }
+                                Repeater {
+                                    model: (win.selection.lumaKey || "") === "" ? [] : [
+                                        { key: "lumaTolerance", name: "Brightness tolerance", lo: .01, hi: .6 },
+                                        { key: "lumaSoftness", name: "Brightness edge softness", lo: 0, hi: .5 }
+                                    ]
+                                    ColumnLayout {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        spacing: 0
+                                        Label {
+                                            text: modelData.name + "  " + Number(win.selection[modelData.key] ?? 0).toFixed(2)
+                                            color: win.muted
+                                        }
+                                        Slider {
+                                            objectName: modelData.key
+                                            Layout.fillWidth: true
+                                            from: modelData.lo
+                                            to: modelData.hi
+                                            stepSize: .01
+                                            value: win.selection[modelData.key] ?? 0
+                                            onPressedChanged: if (!pressed)
+                                                editor.setClip(modelData.key, value)
+                                            onMoved: if (!pressed)
+                                                editor.setClip(modelData.key, value)
+                                        }
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label {
+                                        text: "Blend mode"
+                                        color: win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    ComboBox {
+                                        objectName: "blendMode"
+                                        model: editor.blendModes()
+                                        textRole: "label"
+                                        valueRole: "id"
+                                        currentIndex: Math.max(0, indexOfValue(win.selection.blendMode || ""))
+                                        onActivated: editor.setClip("blendMode", currentValue)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "How the picture mixes with the tracks below it"
+                                    }
+                                }
                                 Rule {}
                             }
                             Caption {
@@ -2735,6 +2798,34 @@ ApplicationWindow {
                                         name: "Crop all edges",
                                         lo: 0,
                                         hi: .45,
+                                        step: .01
+                                    },
+                                    {
+                                        key: "cropLeft",
+                                        name: "Crop left",
+                                        lo: 0,
+                                        hi: .9,
+                                        step: .01
+                                    },
+                                    {
+                                        key: "cropRight",
+                                        name: "Crop right",
+                                        lo: 0,
+                                        hi: .9,
+                                        step: .01
+                                    },
+                                    {
+                                        key: "cropTop",
+                                        name: "Crop top",
+                                        lo: 0,
+                                        hi: .9,
+                                        step: .01
+                                    },
+                                    {
+                                        key: "cropBottom",
+                                        name: "Crop bottom",
+                                        lo: 0,
+                                        hi: .9,
                                         step: .01
                                     },
                                     {
@@ -3362,6 +3453,12 @@ ApplicationWindow {
                                     checked: win.selection.flip || false
                                     onToggled: editor.setClip("flip", checked)
                                 }
+                                CheckBox {
+                                    objectName: "flipVertical"
+                                    text: "Upside down"
+                                    checked: win.selection.flipVertical || false
+                                    onToggled: editor.setClip("flipVertical", checked)
+                                }
                             }
                             RowLayout {
                                 CheckBox {
@@ -3796,7 +3893,7 @@ ApplicationWindow {
     FileDialog {
         id: srtOpen
         title: "Import captions"
-        nameFilters: ["Captions (*.srt *.vtt *.ass *.ssa)", "SubRip (*.srt)", "WebVTT (*.vtt)", "SubStation Alpha (*.ass *.ssa)"]
+        nameFilters: ["Captions (*.srt *.vtt *.ass *.ssa *.txt)", "SubRip (*.srt)", "WebVTT (*.vtt)", "SubStation Alpha (*.ass *.ssa)", "Plain text, one caption per line (*.txt)"]
         onAccepted: editor.importSrt(selectedFile)
     }
     FileDialog {

@@ -15,6 +15,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <functional>
 #include <limits>
 #include <tuple>
 using namespace cutlery;
@@ -4549,6 +4550,258 @@ class EngineTest : public QObject {
             const auto duration = QRegularExpression("duration=([0-9.]+)").match(probe);
             QVERIFY2(std::abs(duration.captured(1).toDouble() - 2) < 0.1, qPrintable(probe));
         }
+    }
+    void cropFlipBlendAndLumaKey() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        auto save = [&](const QString &name, const QImage &image) {
+            const auto file = dir.filePath(name);
+            if (!image.save(file))
+                throw std::runtime_error("Cannot write test image");
+            return file;
+        };
+        QImage background(160, 90, QImage::Format_RGB32);
+        background.fill(QColor(200, 100, 50));
+        // Quarters: red top left, green top right, yellow bottom left, magenta bottom right.
+        QImage quarters(160, 90, QImage::Format_RGB32);
+        {
+            QPainter paint(&quarters);
+            paint.fillRect(0, 0, 80, 45, Qt::red);
+            paint.fillRect(80, 0, 80, 45, Qt::green);
+            paint.fillRect(0, 45, 80, 45, Qt::yellow);
+            paint.fillRect(80, 45, 80, 45, Qt::magenta);
+        }
+        QImage grey(160, 90, QImage::Format_RGB32);
+        grey.fill(QColor(128, 128, 128));
+        // Black with a white square in the middle, and a transparent left quarter.
+        QImage glow(160, 90, QImage::Format_ARGB32);
+        glow.fill(Qt::black);
+        {
+            QPainter paint(&glow);
+            paint.fillRect(60, 25, 40, 40, Qt::white);
+            paint.setCompositionMode(QPainter::CompositionMode_Source);
+            paint.fillRect(0, 0, 40, 90, Qt::transparent);
+        }
+        Project p;
+        p.width = 160;
+        p.height = 90;
+        for (auto [id, path] : {std::pair{"bg", save("bg.png", background)},
+                                {"quarters", save("quarters.png", quarters)},
+                                {"grey", save("grey.png", grey)},
+                                {"glow", save("glow.png", glow)}}) {
+            Asset a;
+            a.id = id;
+            a.path = path;
+            a.kind = "image";
+            a.duration = 5;
+            a.width = 160;
+            a.height = 90;
+            p.assets.push_back(a);
+        }
+        Clip bg;
+        bg.id = "bg";
+        bg.assetId = "bg";
+        bg.duration = 30;
+        Clip top = bg;
+        top.id = "top";
+        top.assetId = "quarters";
+        top.track = 1;
+        p.clips = {bg, top};
+        auto still = [&](const Project &project) {
+            RenderOptions options;
+            options.audio = false;
+            options.to = 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 160, 90, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        auto near = [](QColor c, int r, int g, int b) {
+            return std::abs(c.red() - r) < 16 && std::abs(c.green() - g) < 16 &&
+                   std::abs(c.blue() - b) < 16;
+        };
+        auto check = [&](const QImage &image, int x, int y, int r, int g, int b) {
+            const auto c = image.pixelColor(x, y);
+            if (!near(c, r, g, b))
+                qWarning() << "pixel" << x << y << c.name() << "expected" << QColor(r, g, b).name();
+            return near(c, r, g, b);
+        };
+        // Cropping the left half leaves green over magenta, half as wide, centred.
+        auto cropped = p;
+        cropped.clips[1].cropLeft = .5;
+        QCOMPARE(cropped.pictureSize(cropped.clips[1], 160, 90), QSizeF(80, 90));
+        auto image = still(cropped);
+        QVERIFY(check(image, 80, 20, 0, 255, 0));
+        QVERIFY(check(image, 80, 70, 255, 0, 255));
+        QVERIFY(check(image, 20, 45, 200, 100, 50));
+        QVERIFY(check(image, 140, 45, 200, 100, 50));
+        // And the bottom half: only the green quarter, filling the frame again.
+        cropped.clips[1].cropTop = 0;
+        cropped.clips[1].cropBottom = .5;
+        image = still(cropped);
+        QVERIFY(check(image, 10, 10, 0, 255, 0));
+        QVERIFY(check(image, 150, 80, 0, 255, 0));
+        // Upside down: yellow comes to the top left; with flip as well, magenta does.
+        auto flipped = p;
+        flipped.clips[1].flipVertical = true;
+        image = still(flipped);
+        QVERIFY(check(image, 20, 20, 255, 255, 0));
+        QVERIFY(check(image, 20, 70, 255, 0, 0));
+        flipped.clips[1].flip = true;
+        image = still(flipped);
+        QVERIFY(check(image, 20, 20, 255, 0, 255));
+
+        // Blend modes with a mid-grey picture at half size over the background.
+        auto blended = p;
+        blended.clips[1].assetId = "grey";
+        blended.clips[1].scale = .5;
+        blended.clips[1].blendMode = "multiply";
+        image = still(blended);
+        QVERIFY(check(image, 80, 45, 100, 50, 25));
+        QVERIFY(check(image, 10, 10, 200, 100, 50)); // outside the picture
+        blended.clips[1].blendMode = "screen";
+        image = still(blended);
+        QVERIFY(check(image, 80, 45, 228, 178, 153));
+        // Opacity mixes the blended result with the picture below.
+        blended.clips[1].blendMode = "multiply";
+        blended.clips[1].opacity = .5;
+        image = still(blended);
+        QVERIFY(check(image, 80, 45, 150, 75, 38));
+        // With keyframed scale (half size at the first frame).
+        blended.clips[1].opacity = 1;
+        blended.clips[1].keyframes["scale"] = {{0, .5, false}, {29, 1, false}};
+        image = still(blended);
+        QVERIFY(check(image, 80, 45, 100, 50, 25));
+        QVERIFY(check(image, 10, 10, 200, 100, 50));
+
+        // Luma key: black disappears, the white square and the transparent quarter stay as
+        // they were (white, and the background).
+        auto keyed = p;
+        keyed.clips[1].assetId = "glow";
+        keyed.clips[1].lumaKey = "dark";
+        image = still(keyed);
+        QVERIFY(check(image, 120, 10, 200, 100, 50));
+        QVERIFY(check(image, 80, 45, 255, 255, 255));
+        QVERIFY(check(image, 10, 45, 200, 100, 50));
+        // White removed instead: black stays, the transparent quarter stays transparent.
+        keyed.clips[1].lumaKey = "light";
+        image = still(keyed);
+        QVERIFY(check(image, 120, 10, 0, 0, 0));
+        QVERIFY(check(image, 80, 45, 200, 100, 50));
+        QVERIFY(check(image, 10, 45, 200, 100, 50));
+
+        // Saved and validated.
+        auto all = p;
+        auto &c = all.clips[1];
+        c.cropLeft = .2;
+        c.cropBottom = .3;
+        c.flipVertical = true;
+        c.blendMode = "screen";
+        c.lumaKey = "dark";
+        c.lumaTolerance = .2;
+        const auto back = Project::fromJson(all.json(), {}).clips[1];
+        QCOMPARE(back.cropLeft, .2);
+        QCOMPARE(back.cropBottom, .3);
+        QVERIFY(back.flipVertical);
+        QCOMPARE(back.blendMode, QString("screen"));
+        QCOMPARE(back.lumaKey, QString("dark"));
+        QCOMPARE(back.lumaTolerance, .2);
+        QVERIFY(!p.json()["clips"].toArray()[1].toObject().contains("cropLeft"));
+        for (auto change : std::initializer_list<std::function<void(Clip &)>>{
+                 [](Clip &x) { x.cropLeft = .6, x.cropRight = .5; },
+                 [](Clip &x) { x.cropTop = -.1; },
+                 [](Clip &x) { x.blendMode = "dissolve"; },
+                 [](Clip &x) { x.lumaKey = "grey"; },
+                 [](Clip &x) { x.lumaTolerance = 0; }}) {
+            auto invalid = p;
+            change(invalid.clips[1]);
+            QVERIFY_EXCEPTION_THROWN(invalid.validate(), std::runtime_error);
+        }
+
+        // Editor: the opposite edge gives way; one undo step each; copied with attributes.
+        FrameProvider frames;
+        Editor editor(&frames);
+        const auto file = dir.filePath("p.cutlery");
+        saveProject(p, file);
+        QVERIFY(editor.openProject(QUrl::fromLocalFile(file)));
+        editor.select("top");
+        editor.setClip("cropRight", .5);
+        editor.setClip("cropLeft", .7);
+        QCOMPARE(editor.project().clips[1].cropLeft, .7);
+        QVERIFY(std::abs(editor.project().clips[1].cropRight - .2) < 1e-9);
+        editor.undo();
+        QCOMPARE(editor.project().clips[1].cropRight, .5);
+        editor.setClip("blendMode", "overlay");
+        editor.setClip("lumaKey", "light");
+        const auto selected = editor.state()["selected"].toMap();
+        QCOMPARE(selected["blendMode"].toString(), QString("overlay"));
+        QCOMPARE(selected["lumaKey"].toString(), QString("light"));
+        QCOMPARE(editor.blendModes().size(), 9);
+        editor.setClip("blendMode", "dissolve");
+        QVERIFY(!editor.state()["error"].toString().isEmpty());
+        QCOMPARE(editor.project().clips[1].blendMode, QString("overlay"));
+        // The timeline export lists blend modes and keys among the effects it cannot carry.
+        QStringList lost;
+        otioTimeline(editor.project(), &lost);
+        QVERIFY2(lost.join(' ').contains("effects"), qPrintable(lost.join(' ')));
+    }
+    void plainTextCaptions() {
+        // One caption per line; long lines are broken after sentences and into two lines.
+        const auto cues = parseTxt(QString(QChar(0xfeff)) +
+                                   "Hallo zusammen!\r\n\r\n"
+                                   "Heute zeige ich euch, wie man in wenigen Minuten ein Video "
+                                   "schneidet. Danach exportieren wir es als MP4 für YouTube und "
+                                   "andere Plattformen im Netz.\n   \nTschüss");
+        QCOMPARE(cues.size(), 4);
+        QCOMPARE(cues[0].text, QString("Hallo zusammen!"));
+        QCOMPARE(cues[0].start, 0.);
+        QCOMPARE(cues[0].end, 1.5); // the shortest time on screen
+        QVERIFY(cues[1].text.startsWith("Heute zeige"));
+        QVERIFY(cues[1].text.endsWith("schneidet."));
+        QVERIFY(cues[1].text.contains('\n'));
+        for (const auto &line : cues[1].text.split('\n'))
+            QVERIFY2(line.size() <= 42, qPrintable(line));
+        QVERIFY(cues[2].text.startsWith("Danach"));
+        QCOMPARE(cues[3].text, QString("Tschüss"));
+        for (int i = 1; i < cues.size(); ++i) {
+            QCOMPARE(cues[i].start, cues[i - 1].end); // back to back
+            QVERIFY(cues[i].end - cues[i].start <= 7);
+        }
+        QVERIFY(cues[1].end - cues[1].start > 3);
+        QVERIFY(parseTxt(" \n\n").isEmpty());
+        QCOMPARE(parseSubtitles("eins\nzwei", "TXT").size(), 2);
+
+        // Imported at the playhead onto the caption track.
+        QTemporaryDir dir;
+        const auto file = dir.filePath("script.txt");
+        {
+            QFile text(file);
+            QVERIFY(text.open(QIODevice::WriteOnly));
+            text.write("Erste Zeile\nZweite Zeile\n");
+        }
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(1920, 1080, 25, 1);
+        editor.addTitle(); // something to place the playhead in
+        editor.setClipValues({{"duration", 250}});
+        editor.seek(50);
+        editor.importSrt(QUrl::fromLocalFile(file));
+        QVERIFY2(editor.state()["error"].toString().isEmpty(),
+                 qPrintable(editor.state()["error"].toString()));
+        auto clips = editor.project().clips;
+        clips.removeFirst(); // the title
+        QCOMPARE(clips.size(), 2);
+        QCOMPARE(clips[0].start, 50);
+        QCOMPARE(clips[0].duration, 38); // 1.5 s at 25 fps, rounded
+        QCOMPARE(clips[1].start, clips[0].start + clips[0].duration);
+        QCOMPARE(clips[1].text, QString("Zweite Zeile"));
+        QCOMPARE(clips[0].track, editor.project().tracks - 1);
     }
     void adjustmentLayers() {
         const auto ffmpeg = Editor::executable("ffmpeg");

@@ -4,6 +4,10 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Blend modes:** multiply, screen, overlay, soft light, darken, lighten, add and difference per clip, e.g. for light leaks, textures or a logo that takes on the colour below.
+- **Remove by brightness:** makes the black (or white) parts of a clip transparent, for fire, smoke, sparks and other effects filmed on black.
+- **Crop each edge:** crop left, right, top and bottom separately, and turn a clip upside down.
+- **Captions from a text file:** Import captions also takes a .txt script: one caption per line from the playhead, each on screen long enough to read.
 - **GIF and picture export:** animated GIFs from the export dialog, and the frame at the playhead as PNG or JPEG (Project → Export current frame).
 - **Hand over to other editors:** Project → Export timeline writes OpenTimelineIO (.otio, for DaVinci Resolve, Premiere, Kdenlive) or a CMX 3600 EDL, and lists what could not be carried.
 - **Templates:** save a project as a template (e.g. your intro with logo and title) and start new projects from it, on the start screen or under Project; swap its media with right-click → Replace with another file.
