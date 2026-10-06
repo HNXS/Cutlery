@@ -1,5 +1,25 @@
 # Validation record
 
+## Windows portable build — 2026-10-06, command search, folder import, clip sound, text glow (0.6 development)
+
+[GitHub Actions run 37530257964](https://github.com/HNXS/Cutlery/actions/runs/37530257964) on commit `ed6b488532fed102b1262de13cf7415f01ab79be` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine tests:**
+  - `folderImportAndStop`:
+    - a folder's media, folders inside included, is imported in path order into a library folder of its name, and other files are skipped;
+    - importing the folder again reuses that library folder, and an empty folder is reported;
+    - a folder dropped on a track places its clips one after another;
+    - stopping skips the file being read and those waiting, and importing works again afterwards.
+  - `extractClipAudio`: the sound of a clip at 2× speed is saved as a 2-second MP3 without video; a wrong file type and a title are refused.
+  - `textGlow`: the glow shows in its colour, weaker at a lower strength; it is saved, validated and kept in text styles.
+  - `keyboardShortcuts` now counts 45 commands.
+- **Interface (`commandSearch`):**
+  - Ctrl+K opens the search with the field focused;
+  - menu commands are found with their menu, and keyboard commands with their key;
+  - Enter runs the first match, and a menu command opens its dialog.
+
 ## Windows portable build — 2026-10-06, blend modes, luma key, edge crop, TXT captions (0.6 development)
 
 [GitHub Actions run 37526553602](https://github.com/HNXS/Cutlery/actions/runs/37526553602) on commit `07dc295541b76ae8106ae7ebacfdfe6a6fbcb201` passed every step on its first attempt.
