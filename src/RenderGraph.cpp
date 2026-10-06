@@ -143,6 +143,21 @@ static QString curve(const Clip &c, const QString &property, const QString &fram
 static void paintStyledPath(QPainter &paint, const Clip &c, const QPainterPath &path, double px,
                             const QBrush &fill) {
     paint.setPen(Qt::NoPen);
+    if (c.textGlow > 0) {
+        // A soft halo: layers of wide, faint strokes, the narrower ones adding up near the
+        // letters.
+        QColor colour(c.textGlowColor);
+        const double reach = c.textGlow * 0.45 * px;
+        const int layers = 8;
+        colour.setAlpha(qRound(255 * std::min(1., 0.35 + 0.5 * c.textGlow) / layers * 2.2));
+        for (int i = layers; i >= 1; --i) {
+            QPen pen(colour, 2 * reach * i / layers);
+            pen.setJoinStyle(Qt::RoundJoin);
+            pen.setCapStyle(Qt::RoundCap);
+            paint.strokePath(path, pen);
+        }
+        paint.fillPath(path, colour);
+    }
     if (c.textShadow > 0) {
         const double d = std::max(1., px / 24);
         paint.fillPath(path.translated(d * 0.7, d), QColor(0, 0, 0, qRound(210 * c.textShadow)));

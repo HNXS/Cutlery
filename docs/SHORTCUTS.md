@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-Open **Help → Keyboard shortcuts** (default **Ctrl+/**) to view or change any of these 30 bindings. Type one combination such as `Ctrl+Shift+B` and click Apply. Clear a field to disable that command; clear an existing assignment before reusing its key. Conflicts and invalid combinations are rejected. Restore defaults resets the whole list. Changes are saved with the portable application data.
+Open **Help → Keyboard shortcuts** (default **Ctrl+/**) to view or change any of the 45 bindings (the most common are listed here). Type one combination such as `Ctrl+Shift+B` and click Apply. Clear a field to disable that command; clear an existing assignment before reusing its key. Conflicts and invalid combinations are rejected. Restore defaults resets the whole list. Changes are saved with the portable application data.
 
 Click the timeline before using editing/playback keys. During text entry, normal typing and text editing take priority; timeline shortcuts are disabled. Modal dialogs suppress application shortcuts. Arrow keys continue to work in sliders, lists and numeric controls.
 
@@ -39,6 +39,9 @@ Click the timeline before using editing/playback keys. During text entry, normal
 | Toggle snapping | Timeline | `N` |
 | Add track | Timeline | `Ctrl+Shift+N` |
 | Keyboard shortcuts | Help | `Ctrl+/` |
+| Search commands | Help | `Ctrl+K` |
+
+**Search commands** (Ctrl+K or Help → Search commands…) finds any menu command or keyboard command by name: type a few letters of each word, pick one with the arrow keys and press Enter.
 
 **Playback:** Space starts live playback from the playhead within a fraction of a second; nothing is rendered to disk first. Edits made while playing restart playback from the current frame. Space pauses/resumes; K pauses at the displayed frame. Export video creates a separate file that can be played in a compatible video player. The 0.3 `Ctrl+R` render-cache command no longer exists; a saved binding for it is ignored.
 
