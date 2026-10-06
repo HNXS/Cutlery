@@ -65,7 +65,7 @@ ApplicationWindow {
         { n: 24, d: 1, label: "24" }, { n: 25, d: 1, label: "25" }, { n: 30, d: 1, label: "30" },
         { n: 50, d: 1, label: "50" }, { n: 60, d: 1, label: "60" }, { n: 30000, d: 1001, label: "29.97" }
     ]
-    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
+    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || styleDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
         enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
@@ -1085,6 +1085,48 @@ ApplicationWindow {
                                     }
                                 }
                             }
+                            // Icons for tutorials: a click goes on at the playhead, coloured and sized
+                            // like shapes.
+                            Caption {
+                                text: "ICONS"
+                            }
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 5
+                                columnSpacing: 4
+                                rowSpacing: 4
+                                Repeater {
+                                    model: [
+                                        { kind: "check", glyph: "✔", name: "Check mark" },
+                                        { kind: "cross", glyph: "✖", name: "Cross" },
+                                        { kind: "warning", glyph: "⚠", name: "Warning" },
+                                        { kind: "info", glyph: "ℹ", name: "Info" },
+                                        { kind: "star", glyph: "★", name: "Star" },
+                                        { kind: "heart", glyph: "♥", name: "Heart" },
+                                        { kind: "lightbulb", glyph: "💡", name: "Light bulb (tip)" },
+                                        { kind: "cursor", glyph: "↖", name: "Mouse pointer" },
+                                        { kind: "click", glyph: "✳", name: "Mouse click" }
+                                    ]
+                                    ToolButton {
+                                        required property var modelData
+                                        objectName: "addIcon-" + modelData.kind
+                                        Layout.fillWidth: true
+                                        text: modelData.glyph
+                                        font.pixelSize: 18
+                                        onClicked: editor.addGraphic(modelData.kind)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: modelData.name
+                                    }
+                                }
+                            }
+                            Action {
+                                objectName: "addAdjustment"
+                                text: "+ Adjustment layer"
+                                Layout.fillWidth: true
+                                onClicked: editor.addEffect("adjust")
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Its colour and look change everything on the tracks below while it runs, e.g. one grade for a whole scene"
+                            }
                             Item {
                                 Layout.fillHeight: true
                             }
@@ -1565,9 +1607,47 @@ ApplicationWindow {
                             }
                             // Blur or mosaic area: what it does and how strongly. Move and resize it
                             // in the preview; its position can be keyframed.
+                            // Adjustment layer: its look (below) applies to every track under it.
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                visible: (win.selection.effect || "") !== ""
+                                visible: win.selection.effect === "adjust"
+                                spacing: 4
+                                Caption {
+                                    text: "ADJUSTMENT LAYER"
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    color: win.muted
+                                    font.pixelSize: 11
+                                    text: "The colour and look below change everything on the tracks under this clip while it runs."
+                                }
+                                RowLayout {
+                                    Label {
+                                        text: "Strength"
+                                        Layout.fillWidth: true
+                                    }
+                                    Label {
+                                        text: Math.round((win.selection.opacity ?? 1) * 100) + "%"
+                                    }
+                                }
+                                Slider {
+                                    objectName: "adjustStrength"
+                                    Layout.fillWidth: true
+                                    from: 0
+                                    to: 1
+                                    stepSize: .01
+                                    value: win.selection.opacity ?? 1
+                                    enabled: win.selection.locked !== true
+                                    onPressedChanged: if (!pressed)
+                                        editor.setClip("opacity", value)
+                                    onMoved: if (!pressed)
+                                        editor.setClip("opacity", value)
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                visible: (win.selection.effect || "") !== "" && win.selection.effect !== "adjust"
                                 spacing: 4
                                 Caption {
                                     text: "BLUR / MOSAIC AREA"
@@ -1887,6 +1967,51 @@ ApplicationWindow {
                                         value: win.selection.fontSize || 72
                                         editable: true
                                         onValueModified: editor.setClip("fontSize", value)
+                                    }
+                                }
+                                // Saved text styles (for every project): apply to the selected titles,
+                                // or save this title's look under a name.
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    ComboBox {
+                                        id: styleChoice
+                                        objectName: "textStyle"
+                                        Layout.fillWidth: true
+                                        readonly property var styles: win.s.textStyles || []
+                                        model: [styles.length ? "Apply a style…" : "No saved styles"].concat(styles.map(st => st.name))
+                                        enabled: styles.length > 0 && win.selection.locked !== true
+                                        onActivated: index => {
+                                            if (index > 0)
+                                                editor.applyTextStyle(styles[index - 1].name);
+                                            currentIndex = 0;
+                                        }
+                                    }
+                                    ToolButton {
+                                        objectName: "saveTextStyle"
+                                        text: "Save…"
+                                        enabled: !!win.selection.text
+                                        onClicked: styleDialog.open()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Keep this title's font, colours and effects as a style for every project"
+                                    }
+                                    ToolButton {
+                                        text: "⋯"
+                                        visible: styleChoice.styles.length > 0
+                                        onClicked: styleMenu.popup()
+                                        Menu {
+                                            id: styleMenu
+                                            title: "Remove a style"
+                                            Instantiator {
+                                                model: styleChoice.styles
+                                                delegate: MenuItem {
+                                                    required property var modelData
+                                                    text: "Remove “" + modelData.name + "”"
+                                                    onTriggered: editor.removeTextStyle(modelData.name)
+                                                }
+                                                onObjectAdded: (index, object) => styleMenu.insertItem(index, object)
+                                                onObjectRemoved: (index, object) => styleMenu.removeItem(object)
+                                            }
+                                        }
                                     }
                                 }
                                 RowLayout {
@@ -3676,6 +3801,28 @@ ApplicationWindow {
             const f = win.projectFormats[prefFormat.currentIndex], r = win.frameRates[prefRate.currentIndex];
             editor.setPreferences({ width: f.w, height: f.h, fpsN: r.n, fpsD: r.d, stillSeconds: prefStill.value / 10, backups: prefBackups.value, startScreen: prefStart.checked });
         }
+    }
+    // Names a text style to keep.
+    Dialog {
+        id: styleDialog
+        objectName: "styleDialog"
+        anchors.centerIn: parent
+        modal: true
+        title: "Save text style"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAboutToShow: {
+            styleName.text = "";
+            styleName.forceActiveFocus();
+        }
+        TextField {
+            id: styleName
+            objectName: "styleName"
+            width: 280
+            maximumLength: 60
+            placeholderText: "Style name, e.g. Channel title"
+            onAccepted: styleDialog.accept()
+        }
+        onAccepted: editor.saveTextStyle(styleName.text)
     }
     // Names a new folder (optionally moving one medium into it) or renames one.
     Dialog {

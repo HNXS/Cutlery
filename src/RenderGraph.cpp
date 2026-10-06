@@ -12,6 +12,8 @@
 #include <QHash>
 #include <QPainterPath>
 #include <algorithm>
+#include <cmath>
+#include <numbers>
 #include <stdexcept>
 
 namespace cutlery {
@@ -307,6 +309,86 @@ static void paintGraphic(QPainter &paint, const Clip &c, const QRectF &box, int 
         tail.closeSubpath();
         path = path.united(tail);
     }
+    // Icons are drawn in the largest centred square of the box.
+    const double side = std::min(w, h);
+    const QRectF sq(box.center().x() - side / 2, box.center().y() - side / 2, side, side);
+    auto at = [&](double x, double y) { return QPointF(sq.left() + x * side, sq.top() + y * side); };
+    auto stroked = [&](const QPainterPath &line, double width) {
+        QPainterPathStroker stroker;
+        stroker.setWidth(width * side);
+        stroker.setCapStyle(Qt::RoundCap);
+        stroker.setJoinStyle(Qt::RoundJoin);
+        return stroker.createStroke(line).simplified();
+    };
+    if (c.graphic == "check") {
+        QPainterPath line(at(0.14, 0.52));
+        line.lineTo(at(0.4, 0.78));
+        line.lineTo(at(0.86, 0.24));
+        path = stroked(line, 0.16);
+    } else if (c.graphic == "cross") {
+        QPainterPath line(at(0.18, 0.18));
+        line.lineTo(at(0.82, 0.82));
+        line.moveTo(at(0.82, 0.18));
+        line.lineTo(at(0.18, 0.82));
+        path = stroked(line, 0.16);
+    } else if (c.graphic == "star") {
+        QPolygonF star;
+        for (int i = 0; i < 10; ++i) {
+            const double a = -std::numbers::pi / 2 + i * std::numbers::pi / 5, r = i % 2 ? 0.2 : 0.48;
+            star << at(0.5 + r * std::cos(a), 0.53 + r * std::sin(a));
+        }
+        path.addPolygon(star);
+        path.closeSubpath();
+    } else if (c.graphic == "heart") {
+        path.moveTo(at(0.5, 0.88));
+        path.cubicTo(at(0.1, 0.62), at(0.0, 0.32), at(0.25, 0.17));
+        path.cubicTo(at(0.4, 0.09), at(0.5, 0.22), at(0.5, 0.3));
+        path.cubicTo(at(0.5, 0.22), at(0.6, 0.09), at(0.75, 0.17));
+        path.cubicTo(at(1.0, 0.32), at(0.9, 0.62), at(0.5, 0.88));
+        path.closeSubpath();
+    } else if (c.graphic == "warning") {
+        // A triangle with an exclamation mark cut out.
+        QPainterPath triangle(at(0.5, 0.06));
+        triangle.lineTo(at(0.96, 0.9));
+        triangle.lineTo(at(0.04, 0.9));
+        triangle.closeSubpath();
+        QPainterPath mark;
+        mark.addRoundedRect(QRectF(at(0.44, 0.32), at(0.56, 0.64)), 0.04 * side, 0.04 * side);
+        mark.addEllipse(QRectF(at(0.43, 0.7), at(0.57, 0.84)));
+        path = triangle.subtracted(mark);
+    } else if (c.graphic == "info") {
+        QPainterPath disc;
+        disc.addEllipse(QRectF(at(0.04, 0.04), at(0.96, 0.96)));
+        QPainterPath mark;
+        mark.addEllipse(QRectF(at(0.43, 0.2), at(0.57, 0.34)));
+        mark.addRoundedRect(QRectF(at(0.44, 0.4), at(0.56, 0.8)), 0.04 * side, 0.04 * side);
+        path = disc.subtracted(mark);
+    } else if (c.graphic == "cursor" || c.graphic == "click") {
+        // A mouse pointer; "click" adds short rays around its tip.
+        const double s0 = c.graphic == "click" ? 0.25 : 0.1;
+        auto p = [&](double x, double y) { return at(s0 + x * (1 - s0) * 0.95, s0 + y * (1 - s0) * 0.95); };
+        QPolygonF pointer{p(0, 0),    p(0, 0.82),  p(0.2, 0.64), p(0.34, 0.95),
+                          p(0.46, 0.9), p(0.32, 0.6), p(0.58, 0.6)};
+        path.addPolygon(pointer);
+        path.closeSubpath();
+        if (c.graphic == "click") {
+            QPainterPath rays;
+            for (const double a : {-150., -100., 160.}) {
+                const double r = a * std::numbers::pi / 180;
+                rays.moveTo(at(0.22 + 0.08 * std::cos(r), 0.22 + 0.08 * std::sin(r)));
+                rays.lineTo(at(0.22 + 0.2 * std::cos(r), 0.22 + 0.2 * std::sin(r)));
+            }
+            path = path.united(stroked(rays, 0.05));
+        }
+    } else if (c.graphic == "lightbulb") {
+        QPainterPath bulb;
+        bulb.addEllipse(QRectF(at(0.2, 0.04), at(0.8, 0.64)));
+        QPainterPath neck;
+        neck.addRect(QRectF(at(0.36, 0.5), at(0.64, 0.74)));
+        QPainterPath base;
+        base.addRoundedRect(QRectF(at(0.34, 0.78), at(0.66, 0.96)), 0.05 * side, 0.05 * side);
+        path = bulb.united(neck).united(base);
+    }
     paint.setPen(Qt::NoPen);
     paint.fillPath(path, QColor(c.fillColor));
     if (c.stroke > 0) {
@@ -596,6 +678,80 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
     };
     // Picture of clip-local frames [l0, l1), which may reach into transition handles. Missing
     // source frames at either end hold the nearest frame. Output timestamps start at zero.
+    // Colour and look of a clip appended to the chain `f` of a picture `w` pixels wide; filters
+    // that mix with the picture go through split branches added to `nodes`.
+    auto appendLook = [&](QString &f, const Clip &c, int w) {
+        if (c.brightness != 0 || c.contrast != 1) {
+            const QString expr = QString("clip((val-128)*%1+128+%2,0,255)")
+                                     .arg(num(c.contrast), num(c.brightness * 255));
+            f += QString(",lutrgb=r='%1':g='%1':b='%1'").arg(expr);
+        }
+        if (c.saturation != 1)
+            f += ",hue=s=" + num(c.saturation);
+        // Colour: light colour temperature with lightness kept, a green–magenta balance, and
+        // vibrance, which saturates muted colours more than saturated ones.
+        if (c.temperature != 0)
+            f += QString(",colortemperature=temperature=%1:pl=1")
+                     .arg(num(c.temperature > 0 ? 6500 - 3500 * c.temperature
+                                                : 6500 - 6500 * c.temperature));
+        if (c.tint > 0)
+            f += ",colorchannelmixer=gg=" + num(1 - 0.2 * c.tint);
+        else if (c.tint < 0)
+            f += QString(",colorchannelmixer=rr=%1:bb=%1").arg(num(1 + 0.2 * c.tint));
+        if (c.vibrance != 0)
+            f += ",vibrance=intensity=" + num(c.vibrance);
+        if (c.shadows != 0 || c.highlights != 0)
+            f += QString(",curves=m='0/0 0.25/%1 0.75/%2 1/1'")
+                     .arg(num(0.25 + 0.12 * c.shadows), num(0.75 + 0.12 * c.highlights));
+        // Tone curves, and a selective change to some colours (FFmpeg's huesaturation).
+        {
+            QStringList curves;
+            for (const auto &[name, points] : {std::pair{"m", &c.curveMaster}, std::pair{"r", &c.curveRed},
+                                               std::pair{"g", &c.curveGreen}, std::pair{"b", &c.curveBlue}})
+                if (!points->isEmpty() && validCurve(*points))
+                    curves << QLatin1String(name) + "='" + *points + "'";
+            if (!curves.isEmpty())
+                f += ",curves=" + curves.join(':');
+        }
+        if (c.hslHue != 0 || c.hslSaturation != 0 || c.hslLightness != 0) {
+            const auto colours = c.hslColors.split(' ', Qt::SkipEmptyParts);
+            // Strength 5 reaches muted colours too while staying with the chosen ones.
+            f += QString(",huesaturation=hue=%1:saturation=%2:intensity=%3:colors=%4:strength=5")
+                     .arg(num(c.hslHue), num(c.hslSaturation), num(c.hslLightness * 0.5),
+                          colours.isEmpty() ? QString("a") : colours.join('+'));
+        }
+        // Branches for filters that mix with the picture or would drop its alpha channel.
+        auto branch = [&](const QString &a, const QString &b, const QString &join) {
+            const auto id = QString::number(serial++);
+            nodes << f + QString(",split[lka%1][lkb%1]").arg(id);
+            nodes << QString("[lka%1]%2[lkc%1]").arg(id, a);
+            nodes << QString("[lkb%1]%2[lkd%1]").arg(id, b);
+            f = QString("[lkc%1][lkd%1]%2").arg(id, join);
+        };
+        if (!c.lut.isEmpty() && c.lutStrength > 0 && QFileInfo(c.lut).isFile()) {
+            const auto lut = "lut3d=file=" + filterPath(c.lut) + ":interp=tetrahedral";
+            if (c.lutStrength >= 1)
+                f += "," + lut;
+            else
+                branch(lut, "null", "blend=all_mode=normal:all_opacity=" + num(c.lutStrength));
+        }
+        if (c.blur > 0)
+            f += ",gblur=sigma=" + num(c.blur * 30 * w / 1920.0 + 0.5);
+        if (c.sharpen > 0)
+            f += ",cas=strength=" + num(c.sharpen);
+        if (c.glow > 0)
+            // Screen a soft copy over the picture; alpha stays the original's.
+            branch("null", "gblur=sigma=" + num(std::max(1., 18. * w / 1920)),
+                   QString("blend=c0_mode=screen:c1_mode=screen:c2_mode=screen:c0_opacity=%1:"
+                           "c1_opacity=%1:c2_opacity=%1,format=rgba")
+                       .arg(num(0.8 * c.glow)));
+        if (c.vignette > 0)
+            branch("vignette=angle=" + num(c.vignette * 1.1) + ":eval=init", "alphaextract",
+                   "alphamerge,format=rgba");
+        if (c.grain > 0)
+            // Luma grain that changes every frame, on a format that keeps alpha.
+            f += QString(",format=yuva444p,noise=c0s=%1:c0f=t,format=rgba").arg(num(4 + 26 * c.grain));
+    };
     auto videoChain = [&](Info &n, qint64 l0, qint64 l1) {
         const auto &c = *n.clip;
         const double s = c.speed.seconds(), d = secs(c.duration);
@@ -705,76 +861,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                      .arg(h);
         if (c.flip)
             f += ",hflip";
-        if (c.brightness != 0 || c.contrast != 1) {
-            const QString expr = QString("clip((val-128)*%1+128+%2,0,255)")
-                                     .arg(num(c.contrast), num(c.brightness * 255));
-            f += QString(",lutrgb=r='%1':g='%1':b='%1'").arg(expr);
-        }
-        if (c.saturation != 1)
-            f += ",hue=s=" + num(c.saturation);
-        // Colour: light colour temperature with lightness kept, a green–magenta balance, and
-        // vibrance, which saturates muted colours more than saturated ones.
-        if (c.temperature != 0)
-            f += QString(",colortemperature=temperature=%1:pl=1")
-                     .arg(num(c.temperature > 0 ? 6500 - 3500 * c.temperature
-                                                : 6500 - 6500 * c.temperature));
-        if (c.tint > 0)
-            f += ",colorchannelmixer=gg=" + num(1 - 0.2 * c.tint);
-        else if (c.tint < 0)
-            f += QString(",colorchannelmixer=rr=%1:bb=%1").arg(num(1 + 0.2 * c.tint));
-        if (c.vibrance != 0)
-            f += ",vibrance=intensity=" + num(c.vibrance);
-        if (c.shadows != 0 || c.highlights != 0)
-            f += QString(",curves=m='0/0 0.25/%1 0.75/%2 1/1'")
-                     .arg(num(0.25 + 0.12 * c.shadows), num(0.75 + 0.12 * c.highlights));
-        // Tone curves, and a selective change to some colours (FFmpeg's huesaturation).
-        {
-            QStringList curves;
-            for (const auto &[name, points] : {std::pair{"m", &c.curveMaster}, std::pair{"r", &c.curveRed},
-                                               std::pair{"g", &c.curveGreen}, std::pair{"b", &c.curveBlue}})
-                if (!points->isEmpty() && validCurve(*points))
-                    curves << QLatin1String(name) + "='" + *points + "'";
-            if (!curves.isEmpty())
-                f += ",curves=" + curves.join(':');
-        }
-        if (c.hslHue != 0 || c.hslSaturation != 0 || c.hslLightness != 0) {
-            const auto colours = c.hslColors.split(' ', Qt::SkipEmptyParts);
-            // Strength 5 reaches muted colours too while staying with the chosen ones.
-            f += QString(",huesaturation=hue=%1:saturation=%2:intensity=%3:colors=%4:strength=5")
-                     .arg(num(c.hslHue), num(c.hslSaturation), num(c.hslLightness * 0.5),
-                          colours.isEmpty() ? QString("a") : colours.join('+'));
-        }
-        // Branches for filters that mix with the picture or would drop its alpha channel.
-        auto branch = [&](const QString &a, const QString &b, const QString &join) {
-            const auto id = QString::number(serial++);
-            nodes << f + QString(",split[lka%1][lkb%1]").arg(id);
-            nodes << QString("[lka%1]%2[lkc%1]").arg(id, a);
-            nodes << QString("[lkb%1]%2[lkd%1]").arg(id, b);
-            f = QString("[lkc%1][lkd%1]%2").arg(id, join);
-        };
-        if (!c.lut.isEmpty() && c.lutStrength > 0 && QFileInfo(c.lut).isFile()) {
-            const auto lut = "lut3d=file=" + filterPath(c.lut) + ":interp=tetrahedral";
-            if (c.lutStrength >= 1)
-                f += "," + lut;
-            else
-                branch(lut, "null", "blend=all_mode=normal:all_opacity=" + num(c.lutStrength));
-        }
-        if (c.blur > 0)
-            f += ",gblur=sigma=" + num(c.blur * 30 * w / 1920.0 + 0.5);
-        if (c.sharpen > 0)
-            f += ",cas=strength=" + num(c.sharpen);
-        if (c.glow > 0)
-            // Screen a soft copy over the picture; alpha stays the original's.
-            branch("null", "gblur=sigma=" + num(std::max(1., 18. * w / 1920)),
-                   QString("blend=c0_mode=screen:c1_mode=screen:c2_mode=screen:c0_opacity=%1:"
-                           "c1_opacity=%1:c2_opacity=%1,format=rgba")
-                       .arg(num(0.8 * c.glow)));
-        if (c.vignette > 0)
-            branch("vignette=angle=" + num(c.vignette * 1.1) + ":eval=init", "alphaextract",
-                   "alphamerge,format=rgba");
-        if (c.grain > 0)
-            // Luma grain that changes every frame, on a format that keeps alpha.
-            f += QString(",format=yuva444p,noise=c0s=%1:c0f=t,format=rgba").arg(num(4 + 26 * c.grain));
+        appendLook(f, c, w);
         // Style effects. Times in the chain are clip-local frames plus the handle.
         const double fxk = c.fxStrength;
         if (c.fx == "shake" && fxk > 0) {
@@ -1014,6 +1101,25 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             // Inside one clip's own time: an ordinary clip, positioned on the canvas directly.
             auto &n = info[members.first()];
             const auto &c = *n.clip;
+            if (c.effect == "adjust") {
+                // Adjustment layer: the clip's colour and look on the picture composited so
+                // far, mixed in by its opacity while the clip runs.
+                const auto id = QString::number(serial++);
+                QString look = QString("[adj%1]format=rgba").arg(id);
+                appendLook(look, c, width);
+                if (look == QString("[adj%1]format=rgba").arg(id) || c.opacity <= 0)
+                    continue; // nothing to change
+                if (c.opacity < 1)
+                    look += ",colorchannelmixer=aa=" + num(c.opacity);
+                nodes << QString("[%1]split[base%2][adj%2]").arg(visual, id);
+                nodes << look + QString("[look%1]").arg(id);
+                nodes << QString("[base%1][look%1]overlay=eof_action=pass:repeatlast=0:format=auto:"
+                                 "enable='gte(t,%2)*lt(t,%3)'[adjusted%1]")
+                             .arg(id, num(secs(visibleStart - from) - half),
+                                  num(secs(visibleEnd - from) - half));
+                visual = "adjusted" + id;
+                continue;
+            }
             if (!c.effect.isEmpty()) {
                 // Effect area: blur or pixelate the picture composited so far, inside a
                 // rectangle that follows the clip's (possibly animated) position.

@@ -2555,7 +2555,7 @@ class EngineTest : public QObject {
         QCOMPARE(Project::fromJson(json, {}).clips.back().graphic, QString("bubble"));
         auto clips = json["clips"].toArray();
         auto o = clips.last().toObject();
-        o["graphic"] = "star";
+        o["graphic"] = "hexagon";
         clips[clips.size() - 1] = o;
         json["clips"] = clips;
         QVERIFY_EXCEPTION_THROWN(Project::fromJson(json, {}), std::runtime_error);
@@ -4475,6 +4475,167 @@ class EngineTest : public QObject {
             const auto duration = QRegularExpression("duration=([0-9.]+)").match(probe);
             QVERIFY2(std::abs(duration.captured(1).toDouble() - 2) < 0.1, qPrintable(probe));
         }
+    }
+    void adjustmentLayers() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("red.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=red:s=160x90:r=25:d=4", "-c:v",
+                     "ffv1", source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        // A greying adjustment layer from 1 s to 2 s above the red clip.
+        editor.seek(25);
+        editor.addEffect("adjust");
+        const auto id = editor.state()["selectedId"].toString();
+        QVERIFY(editor.state()["selected"].toMap()["picture"].toBool());
+        QVERIFY(editor.clipBounds(id).isEmpty()); // no area to drag in the viewer
+        editor.setClipValues({{"duration", 25}, {"saturation", 0.0}});
+        auto pixel = [&](qint64 frame) {
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(editor.project(), dir.filePath("work"), 160, 90, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            return image.pixelColor(80, 45);
+        };
+        auto red = [](QColor c) { return c.red() > 200 && c.green() < 60 && c.blue() < 60; };
+        auto grey = [](QColor c) { return std::abs(c.red() - c.green()) < 20 && std::abs(c.red() - c.blue()) < 20; };
+        QVERIFY2(red(pixel(10)), qPrintable(pixel(10).name()));
+        QVERIFY2(grey(pixel(35)), qPrintable(pixel(35).name()));
+        QVERIFY2(red(pixel(60)), qPrintable(pixel(60).name()));
+        // Half strength: half the colour.
+        editor.select(id);
+        editor.setClip("opacity", 0.5);
+        const auto half = pixel(35);
+        QVERIFY2(!red(half) && !grey(half) && half.red() > half.green(), qPrintable(half.name()));
+        // Saved; unknown effects are refused.
+        editor.setClip("opacity", 1.0);
+        QCOMPARE(Project::fromJson(editor.project().json(), {}).clip(id)->effect, QString("adjust"));
+        editor.addEffect("sparkle");
+        QVERIFY(editor.state()["error"].toString().contains("Unknown"));
+    }
+    void textStylesKit() {
+        FrameProvider frames;
+        {
+            Editor editor(&frames);
+            for (const auto &s : editor.textStyles())
+                editor.removeTextStyle(s.toMap()["name"].toString());
+            editor.addTitle();
+            const auto styled = editor.state()["selectedId"].toString();
+            editor.setClipValues({{"text", "Brand"}, {"fontFamily", "DejaVu Sans"}, {"fontSize", 96},
+                                  {"textColor", "#ffd23f"}, {"gradientColor", "#ff5000"},
+                                  {"bold", false}, {"italic", true}, {"align", "left"},
+                                  {"outline", 0.1}, {"outlineColor", "#112233"},
+                                  {"background", 0.5}, {"textAnimation", "rise"}});
+            editor.saveTextStyle("  ");
+            QVERIFY(editor.state()["error"].toString().contains("Name"));
+            editor.saveTextStyle("Channel");
+            QCOMPARE(editor.textStyles().size(), 1);
+            // Two plain titles get the style in one step; their text stays.
+            editor.addTitle();
+            const auto a = editor.state()["selectedId"].toString();
+            editor.addTitle();
+            const auto b = editor.state()["selectedId"].toString();
+            editor.toggleSelect(a);
+            editor.applyTextStyle("Channel");
+            for (const auto &id : {a, b}) {
+                const auto *c = editor.project().clip(id);
+                QCOMPARE(c->fontSize, 96);
+                QCOMPARE(c->textColor, QString("#ffd23f"));
+                QCOMPARE(c->gradientColor, QString("#ff5000"));
+                QCOMPARE(c->bold, false);
+                QCOMPARE(c->italic, true);
+                QCOMPARE(c->align, QString("left"));
+                QCOMPARE(c->outline, 0.1);
+                QCOMPARE(c->textAnimation, QString("rise"));
+                QVERIFY(c->text != "Brand");
+            }
+            editor.undo();
+            QCOMPARE(editor.project().clip(a)->fontSize, 72);
+            // Saving under the same name replaces the style.
+            editor.select(styled);
+            editor.setClip("fontSize", 120);
+            editor.saveTextStyle("channel");
+            QCOMPARE(editor.textStyles().size(), 1);
+            editor.applyTextStyle("Nope");
+            QVERIFY(editor.state()["error"].toString().contains("No such"));
+        }
+        {
+            // Kept for the next start; removed again.
+            Editor editor(&frames);
+            QCOMPARE(editor.textStyles().size(), 1);
+            QCOMPARE(editor.textStyles()[0].toMap()["values"].toMap()["fontSize"].toInt(), 120);
+            editor.removeTextStyle("channel");
+            QVERIFY(editor.textStyles().isEmpty());
+        }
+    }
+    void builtInIcons() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        auto render = [&]() {
+            RenderOptions options;
+            options.audio = false;
+            options.from = 5;
+            options.to = 6;
+            const auto plan = compileRender(editor.project(), dir.filePath("work"), 320, 180, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        for (const auto &kind : {"check", "cross", "star", "heart", "warning", "info", "cursor",
+                                 "click", "lightbulb"}) {
+            editor.newProject();
+            editor.configure(320, 180, 25, 1);
+            editor.seek(0);
+            editor.addGraphic(kind);
+            QVERIFY2(editor.state()["error"].toString().isEmpty(), kind);
+            const auto *c = editor.project().clips.isEmpty() ? nullptr : &editor.project().clips.first();
+            QVERIFY(c && c->graphic == kind);
+            // Square on the canvas, filled with its colour.
+            QVERIFY(std::abs(c->graphicWidth * 320 - c->graphicHeight * 180) < 0.5);
+            editor.setClipValues({{"graphicHeight", 0.8}, {"graphicWidth", 0.8 * 180 / 320}});
+            const auto image = render();
+            const QColor fill(c->fillColor);
+            int painted = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x) {
+                    const QColor p = image.pixelColor(x, y);
+                    painted += std::abs(p.red() - fill.red()) < 40 && std::abs(p.green() - fill.green()) < 40 &&
+                               std::abs(p.blue() - fill.blue()) < 40;
+                }
+            // At least a tenth of the 144 × 144 square.
+            QVERIFY2(painted > 2000, qPrintable(QString("%1: %2").arg(kind).arg(painted)));
+            if (QString(kind) == "warning") {
+                // The exclamation mark is cut out of the triangle.
+                const QColor hole = image.pixelColor(160, 87), solid = image.pixelColor(131, 133);
+                QVERIFY2(hole.red() < 60, qPrintable(hole.name()));
+                QVERIFY2(solid.red() > 200 && solid.green() > 120 && solid.blue() < 80, qPrintable(solid.name()));
+            }
+        }
+        editor.addGraphic("unicorn");
+        QVERIFY(editor.state()["error"].toString().contains("Unknown"));
     }
     void curvesSelectiveAndAutoColour() {
         QVERIFY(validCurve("0/0 0.5/0.6 1/1") && !validCurve("0/0") && !validCurve("0.5/0 0.2/1") &&

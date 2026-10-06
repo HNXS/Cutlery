@@ -168,7 +168,9 @@ double standardRate(double rate) {
     return rate;
 }
 const QStringList &graphicKinds() {
-    static const QStringList kinds{"rectangle", "ellipse", "arrow", "line", "bubble"};
+    static const QStringList kinds{"rectangle", "ellipse", "arrow", "line",    "bubble",
+                                   "check",     "cross",   "star",  "heart",   "warning",
+                                   "info",      "cursor",  "click", "lightbulb"};
     return kinds;
 }
 QSizeF Project::pictureSize(const Clip &c, double boxWidth, double boxHeight) const {
@@ -750,8 +752,9 @@ void Project::validate() const {
                     QColor(c.highlightColor).isValid() && c.wordStarts.size() <= 2000 &&
                     std::is_sorted(c.wordStarts.begin(), c.wordStarts.end()),
                 "Invalid caption style");
-        require((c.effect.isEmpty() || ((c.effect == "blur" || c.effect == "pixelate") &&
-                                        c.assetId.isEmpty())) &&
+        require((c.effect.isEmpty() ||
+                 ((c.effect == "blur" || c.effect == "pixelate" || c.effect == "adjust") &&
+                  c.assetId.isEmpty())) &&
                     bounded(c.effectStrength, 0, 1) && bounded(c.effectWidth, 0.02, 1) &&
                     bounded(c.effectHeight, 0.02, 1) && bounded(c.blur, 0, 1),
                 "Invalid blur or mosaic setting");

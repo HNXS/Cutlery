@@ -283,6 +283,14 @@ class Editor final : public QObject {
     // and tint so the picture spans the usual range with neutral greys. One undo step; state
     // "autoColour": status measuring|done|failed.
     Q_INVOKABLE void autoColour();
+    // Text styles kept for every project (data folder, styles.json): font, size, colours,
+    // outline, shadow, box, alignment, spacing and animation of a title. saveTextStyle takes
+    // them from the selected title (replacing a style of the same name); applyTextStyle sets
+    // them on every selected clip with text, in one undo step.
+    Q_INVOKABLE QVariantList textStyles() const;
+    Q_INVOKABLE void saveTextStyle(const QString &name);
+    Q_INVOKABLE void applyTextStyle(const QString &name);
+    Q_INVOKABLE void removeTextStyle(const QString &name);
     // Finds the shot changes in the selected video clip and splits it there, with any detached
     // audio, in one undo step. Sensitivity 0..1: higher finds subtler cuts.
     Q_INVOKABLE void splitAtScenes(double sensitivity = 0.5);
@@ -353,6 +361,8 @@ class Editor final : public QObject {
     QString m_importFolder;
     QVariantMap m_reframe;
     QVariantMap m_autoColour;
+    QVariantList m_textStyles;
+    void saveTextStyles();
     QProcess *m_autoColourProcess = nullptr;
     // The selected clip's words in clip-local frames, cached per clip, transcript and revision.
     // Words of the run of back-to-back pieces of the selected clip's recording on its track (as
