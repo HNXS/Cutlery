@@ -1,5 +1,29 @@
 # Validation record
 
+## Windows portable build — 2026-10-06, layouts, templates, time-lapse up to 100x (0.6 development)
+
+[GitHub Actions run 37511355410](https://github.com/HNXS/Cutlery/actions/runs/37511355410) on commit `e4f2088a32a9dd935a6cca3ce255c7bfceab91ec` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine tests:**
+  - `anchorPointAndSpeedRange`:
+    - each frame of a fast clip shows the source at exactly frame × speed: frames 10 and 20 at 10x, and frame 60 at 60x;
+    - the sound of a 60x clip is 1/60 as long;
+    - 100x is the upper limit.
+  - `layouts`:
+    - side by side;
+    - picture in picture with the background full;
+    - presenter with a round picture in the lower right;
+    - one undo step, and back to full size.
+  - `projectTemplates`:
+    - a template is saved and a new unsaved project starts from it, with the same clips and canvas;
+    - the new project stays out of the recent list and does not change the template;
+    - templates can be removed.
+- **Interface:**
+  - the start screen lists templates;
+  - the layout buttons need two selected clips.
+
 ## Windows portable build — 2026-10-06, adjustment layers, text styles, icons (0.6 development)
 
 [GitHub Actions run 37470489904](https://github.com/HNXS/Cutlery/actions/runs/37470489904) on commit `3d31c1bf17e234a7a01bb6b4576af87d9a34ef10` passed every step on its first attempt.
