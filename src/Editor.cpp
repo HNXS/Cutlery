@@ -68,6 +68,7 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     }
     loadPreferences();
     applyPreferences(m_project);
+    listTemplates();
     {
         QFile styles(m_data + "/styles.json");
         if (styles.open(QIODevice::ReadOnly) && styles.size() < 1024 * 1024)
@@ -615,6 +616,7 @@ QVariantMap Editor::state() const {
             {"transcript", transcriptState()},
             {"autoColour", m_autoColour},
             {"textStyles", m_textStyles},
+            {"templates", m_templates},
             {"reframe", m_reframe},
             {"conform", m_conform},
             {"markers", [this] {
@@ -702,6 +704,66 @@ bool Editor::mutate(const std::function<void(Project &)> &fn) {
         fail(QString::fromUtf8(e.what()));
         return false;
     }
+}
+// Templates ---------------------------------------------------------------------------------
+static QString templateFileName(const QString &name) {
+    // A file name from the template's name: letters, digits, spaces, dashes and underscores.
+    QString safe;
+    for (const auto ch : name.trimmed())
+        safe += ch.isLetterOrNumber() || ch == ' ' || ch == '-' || ch == '_' ? ch : QChar('_');
+    return safe.left(60) + ".cutlery";
+}
+QVariantList Editor::templates() const {
+    return m_templates;
+}
+void Editor::listTemplates() {
+    QVariantList list;
+    const QDir dir(m_data + "/templates");
+    for (const auto &info : dir.entryInfoList({"*.cutlery"}, QDir::Files, QDir::Name))
+        list << QVariantMap{{"name", info.completeBaseName()}, {"path", info.absoluteFilePath()}};
+    m_templates = list;
+}
+void Editor::saveTemplate(const QString &name) {
+    const auto label = name.trimmed();
+    if (label.isEmpty())
+        return fail("Name the template");
+    if (m_project.clips.empty() && m_nest.isEmpty())
+        return fail("The timeline is empty");
+    try {
+        QDir().mkpath(m_data + "/templates");
+        const auto path = m_data + "/templates/" + templateFileName(label);
+        auto p = wholeProject();
+        p.name = QFileInfo(path).completeBaseName();
+        saveProject(p, path);
+        listTemplates();
+        m_status = "Template saved: " + p.name;
+        emit changed();
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
+bool Editor::newFromTemplate(const QString &name) {
+    const auto path = m_data + "/templates/" + templateFileName(name);
+    if (!QFileInfo::exists(path)) {
+        fail("No such template");
+        return false;
+    }
+    if (!openProject(QUrl::fromLocalFile(path)))
+        return false;
+    // A new, unsaved project; the template stays as it is and out of the recent list.
+    m_recent.removeAll(QFileInfo(path).absoluteFilePath());
+    saveRecent();
+    m_path.clear();
+    m_project.name = "Untitled";
+    m_dirty = true;
+    m_status = "New project from the template " + name;
+    emit changed();
+    return true;
+}
+void Editor::removeTemplate(const QString &name) {
+    QFile::remove(m_data + "/templates/" + templateFileName(name));
+    listTemplates();
+    emit changed();
 }
 void Editor::newProject() {
     if (m_importing) {
@@ -1446,6 +1508,81 @@ void Editor::addEffect(const QString &effect) {
     });
     select(id);
 }
+void Editor::arrange(const QString &layout) {
+    static const QStringList layouts{"side",   "stack",  "grid",   "pip-tl",    "pip-tr",
+                                     "pip-bl", "pip-br", "presenter", "full"};
+    if (!layouts.contains(layout))
+        return fail("Unknown layout");
+    // Pictures in the selection, lowest track first, then by start.
+    QVector<const Clip *> clips;
+    for (const auto &id : selection()) {
+        const auto *c = m_project.clip(id);
+        const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+        if (c && a && a->kind != "audio" && !c->audioOnly)
+            clips << c;
+    }
+    std::sort(clips.begin(), clips.end(), [](const Clip *a, const Clip *b) {
+        return a->track != b->track ? a->track < b->track : a->start < b->start;
+    });
+    const int need = layout == "full" ? 1 : 2, most = layout == "grid" ? 4 : layout == "full" ? 64 : 2;
+    if (clips.size() < need)
+        return fail(layout == "full" ? "Select the pictures to show full size"
+                                     : "Select two pictures (Ctrl+click) to arrange");
+    if (clips.size() > most)
+        return fail(QString("This layout takes at most %1 pictures").arg(most));
+    const double W = m_project.width, H = m_project.height, aspect = W / H;
+    // Slots as centre and size in canvas fractions; each picture fits inside its slot.
+    struct Slot {
+        double cx, cy, w, h;
+        bool round = false;
+    };
+    QVector<Slot> areas;
+    const double small = 0.3, margin = 0.03;
+    if (layout == "side")
+        areas = {{0.25, 0.5, 0.5, 1}, {0.75, 0.5, 0.5, 1}};
+    else if (layout == "stack")
+        areas = {{0.5, 0.25, 1, 0.5}, {0.5, 0.75, 1, 0.5}};
+    else if (layout == "grid")
+        areas = {{0.25, 0.25, 0.5, 0.5}, {0.75, 0.25, 0.5, 0.5}, {0.25, 0.75, 0.5, 0.5}, {0.75, 0.75, 0.5, 0.5}};
+    else if (layout.startsWith("pip")) {
+        const bool right = layout.endsWith('r'), bottom = layout[4] == 'b';
+        const double w = small, h = small; // fits inside; the picture keeps its shape
+        areas = {{0.5, 0.5, 1, 1},
+                 {right ? 1 - margin - w / 2 : margin + w / 2,
+                  bottom ? 1 - margin * aspect - h / 2 : margin * aspect + h / 2, w, h}};
+    } else if (layout == "presenter") {
+        const double d = 0.24; // the round presenter's diameter, as a fraction of the width
+        areas = {{0.02 + 0.37, 0.5, 0.74, 0.9},
+                 {1 - 0.02 - d / 2, 1 - 0.05 - d * aspect / 2, d, d * aspect, true}};
+    }
+    mutate([&](Project &p) {
+        for (int i = 0; i < clips.size(); ++i) {
+            auto *c = p.clip(clips[i]->id);
+            p.requireEditable(c->track);
+            for (const auto &k : {"scale", "x", "y"})
+                c->keyframes.remove(k);
+            if (layout == "full") {
+                c->scale = 1;
+                c->x = c->y = 0;
+                if (c->shape == "circle")
+                    c->shape = "rect";
+                continue;
+            }
+            const auto &slot = areas[i];
+            if (slot.round)
+                c->shape = "circle";
+            else if (c->shape == "circle")
+                c->shape = "rect";
+            // The picture's size at scale 1, then the scale that fits it into the slot.
+            const auto fit = p.pictureSize(*c, W, H);
+            c->scale = std::clamp(std::min(slot.w * W / fit.width(), slot.h * H / fit.height()), 0.1, 5.);
+            c->x = slot.cx - 0.5;
+            c->y = slot.cy - 0.5;
+        }
+    });
+    m_status = "Arranged " + QString::number(clips.size()) + " pictures";
+    emit changed();
+}
 void Editor::addGraphic(const QString &kind) {
     if (!graphicKinds().contains(kind))
         return fail("Unknown shape");
@@ -1593,8 +1730,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             c->sourceIn = Time(qRound64(t * 1000000), 1000000);
         } else if (key == "speed") {
             const auto speed = v.toDouble();
-            if (!std::isfinite(speed) || speed < .1 || speed > 10)
-                throw std::runtime_error("Speed must be 0.1–10x");
+            if (!std::isfinite(speed) || speed < .1 || speed > 100)
+                throw std::runtime_error("Speed must be 0.1–100x");
             auto old = c->speed;
             c->speed = Time(qRound64(speed * 1000), 1000);
             c->scaleKeyframes(old.seconds() / c->speed.seconds());

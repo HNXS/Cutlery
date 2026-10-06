@@ -44,6 +44,7 @@ ApplicationWindow {
         else
             editor.reframe(Math.round(side * w / h / 2) * 2, side);
     }
+    property string relinkAsset: "" // the library item to replace; else the selected clip's
     property bool queueExport: false // the export file dialog adds to the queue instead
     property string pendingAction: ""
     property bool allowClose: false
@@ -65,7 +66,7 @@ ApplicationWindow {
         { n: 24, d: 1, label: "24" }, { n: 25, d: 1, label: "25" }, { n: 30, d: 1, label: "30" },
         { n: 50, d: 1, label: "50" }, { n: 60, d: 1, label: "60" }, { n: 30000, d: 1001, label: "29.97" }
     ]
-    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || styleDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
+    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || styleDialog.visible || templateDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
         enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
@@ -210,6 +211,10 @@ ApplicationWindow {
             editor.recover();
         else if (action.startsWith("recent:"))
             editor.openRecent(action.substring(7));
+        else if (action.startsWith("template:")) {
+            if (editor.newFromTemplate(action.substring(9)))
+                win.startScreen = false;
+        }
         else if (action.startsWith("restore:"))
             editor.restoreBackup(action.substring(8));
         else if (action === "close") {
@@ -380,6 +385,43 @@ ApplicationWindow {
                 objectName: "preferencesItem"
                 text: "Preferences…"
                 onTriggered: preferencesDialog.open()
+            }
+            MenuSeparator {}
+            MenuItem {
+                objectName: "saveTemplate"
+                text: "Save as template…"
+                enabled: win.s.duration > 0
+                onTriggered: templateDialog.open()
+            }
+            Menu {
+                id: templateMenu
+                title: "New from template"
+                enabled: (win.s.templates || []).length > 0
+                Instantiator {
+                    model: win.s.templates || []
+                    delegate: MenuItem {
+                        required property var modelData
+                        text: modelData.name
+                        onTriggered: win.guarded("template:" + modelData.name)
+                    }
+                    onObjectAdded: (index, object) => templateMenu.insertItem(index, object)
+                    onObjectRemoved: (index, object) => templateMenu.removeItem(object)
+                }
+            }
+            Menu {
+                id: removeTemplateMenu
+                title: "Remove a template"
+                enabled: (win.s.templates || []).length > 0
+                Instantiator {
+                    model: win.s.templates || []
+                    delegate: MenuItem {
+                        required property var modelData
+                        text: modelData.name
+                        onTriggered: editor.removeTemplate(modelData.name)
+                    }
+                    onObjectAdded: (index, object) => removeTemplateMenu.insertItem(index, object)
+                    onObjectRemoved: (index, object) => removeTemplateMenu.removeItem(object)
+                }
             }
             // A new canvas shape; pictures zoom to fill it and, with the AI pack, follow faces.
             Menu {
@@ -962,6 +1004,13 @@ ApplicationWindow {
                                             }
                                         }
                                         MenuItem {
+                                            text: "Replace with another file…"
+                                            onTriggered: {
+                                                win.relinkAsset = mediaTile.modelData.id;
+                                                relinkDialog.open();
+                                            }
+                                        }
+                                        MenuItem {
                                             text: "New folder with this media…"
                                             onTriggered: folderDialog.ask("", "", mediaTile.modelData.id)
                                         }
@@ -991,144 +1040,178 @@ ApplicationWindow {
                             }
                         }
                         // Titles, graphics, effect areas and sounds.
-                        ColumnLayout {
-                            spacing: 12
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Action {
-                                    text: "+ Add title"
+                        // Scrolls when the window is too low for all of it.
+                        ScrollView {
+                            objectName: "addTabScroll"
+                            clip: true
+                            contentWidth: availableWidth
+                            ColumnLayout {
+                                width: parent.width
+                                spacing: 12
+                                RowLayout {
                                     Layout.fillWidth: true
-                                    onClicked: editor.addTitle()
-                                }
-                                // Sound effects: clicks, typing and swooshes for tutorials and screen videos.
-                                Action {
-                                    objectName: "openSounds"
-                                    text: "♪ Sounds…"
-                                    Layout.fillWidth: true
-                                    onClicked: soundDialog.open()
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Sound effects: mouse clicks, keyboard typing and whooshes, free to use"
-                                }
-                            }
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Action {
-                                    objectName: "addLowerThird"
-                                    text: "+ Lower third"
-                                    Layout.fillWidth: true
-                                    onClicked: editor.addTitleTemplate("lowerThird")
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Name and role in the lower left; slides in, fades out"
-                                }
-                                Action {
-                                    objectName: "addTitleCard"
-                                    text: "+ Title card"
-                                    Layout.fillWidth: true
-                                    onClicked: editor.addTitleTemplate("titleCard")
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "A large centred heading with a subtitle, e.g. for chapters"
-                                }
-                            }
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Action {
-                                    objectName: "addBlurArea"
-                                    text: "+ Blur area"
-                                    Layout.fillWidth: true
-                                    onClicked: editor.addEffect("blur")
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Blurs whatever lower tracks show inside a rectangle, e.g. private data in a screen recording"
-                                }
-                                Action {
-                                    objectName: "addMosaicArea"
-                                    text: "+ Mosaic area"
-                                    Layout.fillWidth: true
-                                    onClicked: editor.addEffect("pixelate")
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Pixelates whatever lower tracks show inside a rectangle, e.g. a face"
-                                }
-                                // Shapes for tutorials and explainers.
-                                Action {
-                                    objectName: "addShape"
-                                    text: "+ Shape ▾"
-                                    Layout.fillWidth: true
-                                    onClicked: shapeMenu.popup()
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Arrow, circle, speech bubble, box or line"
-                                    Menu {
-                                        id: shapeMenu
-                                        MenuItem {
-                                            objectName: "addGraphic-arrow"
-                                            text: "➜  Arrow"
-                                            onTriggered: editor.addGraphic("arrow")
-                                        }
-                                        MenuItem {
-                                            objectName: "addGraphic-ellipse"
-                                            text: "◯  Circle"
-                                            onTriggered: editor.addGraphic("ellipse")
-                                        }
-                                        MenuItem {
-                                            objectName: "addGraphic-bubble"
-                                            text: "🗨  Speech bubble"
-                                            onTriggered: editor.addGraphic("bubble")
-                                        }
-                                        MenuItem {
-                                            objectName: "addGraphic-rectangle"
-                                            text: "▭  Box"
-                                            onTriggered: editor.addGraphic("rectangle")
-                                        }
-                                        MenuItem {
-                                            objectName: "addGraphic-line"
-                                            text: "―  Line"
-                                            onTriggered: editor.addGraphic("line")
-                                        }
-                                    }
-                                }
-                            }
-                            // Icons for tutorials: a click goes on at the playhead, coloured and sized
-                            // like shapes.
-                            Caption {
-                                text: "ICONS"
-                            }
-                            GridLayout {
-                                Layout.fillWidth: true
-                                columns: 5
-                                columnSpacing: 4
-                                rowSpacing: 4
-                                Repeater {
-                                    model: [
-                                        { kind: "check", glyph: "✔", name: "Check mark" },
-                                        { kind: "cross", glyph: "✖", name: "Cross" },
-                                        { kind: "warning", glyph: "⚠", name: "Warning" },
-                                        { kind: "info", glyph: "ℹ", name: "Info" },
-                                        { kind: "star", glyph: "★", name: "Star" },
-                                        { kind: "heart", glyph: "♥", name: "Heart" },
-                                        { kind: "lightbulb", glyph: "💡", name: "Light bulb (tip)" },
-                                        { kind: "cursor", glyph: "↖", name: "Mouse pointer" },
-                                        { kind: "click", glyph: "✳", name: "Mouse click" }
-                                    ]
-                                    ToolButton {
-                                        required property var modelData
-                                        objectName: "addIcon-" + modelData.kind
+                                    Action {
+                                        text: "+ Add title"
                                         Layout.fillWidth: true
-                                        text: modelData.glyph
-                                        font.pixelSize: 18
-                                        onClicked: editor.addGraphic(modelData.kind)
+                                        onClicked: editor.addTitle()
+                                    }
+                                    // Sound effects: clicks, typing and swooshes for tutorials and screen videos.
+                                    Action {
+                                        objectName: "openSounds"
+                                        text: "♪ Sounds…"
+                                        Layout.fillWidth: true
+                                        onClicked: soundDialog.open()
                                         ToolTip.visible: hovered
-                                        ToolTip.text: modelData.name
+                                        ToolTip.text: "Sound effects: mouse clicks, keyboard typing and whooshes, free to use"
                                     }
                                 }
-                            }
-                            Action {
-                                objectName: "addAdjustment"
-                                text: "+ Adjustment layer"
-                                Layout.fillWidth: true
-                                onClicked: editor.addEffect("adjust")
-                                ToolTip.visible: hovered
-                                ToolTip.text: "Its colour and look change everything on the tracks below while it runs, e.g. one grade for a whole scene"
-                            }
-                            Item {
-                                Layout.fillHeight: true
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Action {
+                                        objectName: "addLowerThird"
+                                        text: "+ Lower third"
+                                        Layout.fillWidth: true
+                                        onClicked: editor.addTitleTemplate("lowerThird")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Name and role in the lower left; slides in, fades out"
+                                    }
+                                    Action {
+                                        objectName: "addTitleCard"
+                                        text: "+ Title card"
+                                        Layout.fillWidth: true
+                                        onClicked: editor.addTitleTemplate("titleCard")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "A large centred heading with a subtitle, e.g. for chapters"
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Action {
+                                        objectName: "addBlurArea"
+                                        text: "+ Blur area"
+                                        Layout.fillWidth: true
+                                        onClicked: editor.addEffect("blur")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Blurs whatever lower tracks show inside a rectangle, e.g. private data in a screen recording"
+                                    }
+                                    Action {
+                                        objectName: "addMosaicArea"
+                                        text: "+ Mosaic area"
+                                        Layout.fillWidth: true
+                                        onClicked: editor.addEffect("pixelate")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Pixelates whatever lower tracks show inside a rectangle, e.g. a face"
+                                    }
+                                    // Shapes for tutorials and explainers.
+                                    Action {
+                                        objectName: "addShape"
+                                        text: "+ Shape ▾"
+                                        Layout.fillWidth: true
+                                        onClicked: shapeMenu.popup()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Arrow, circle, speech bubble, box or line"
+                                        Menu {
+                                            id: shapeMenu
+                                            MenuItem {
+                                                objectName: "addGraphic-arrow"
+                                                text: "➜  Arrow"
+                                                onTriggered: editor.addGraphic("arrow")
+                                            }
+                                            MenuItem {
+                                                objectName: "addGraphic-ellipse"
+                                                text: "◯  Circle"
+                                                onTriggered: editor.addGraphic("ellipse")
+                                            }
+                                            MenuItem {
+                                                objectName: "addGraphic-bubble"
+                                                text: "🗨  Speech bubble"
+                                                onTriggered: editor.addGraphic("bubble")
+                                            }
+                                            MenuItem {
+                                                objectName: "addGraphic-rectangle"
+                                                text: "▭  Box"
+                                                onTriggered: editor.addGraphic("rectangle")
+                                            }
+                                            MenuItem {
+                                                objectName: "addGraphic-line"
+                                                text: "―  Line"
+                                                onTriggered: editor.addGraphic("line")
+                                            }
+                                        }
+                                    }
+                                }
+                                // Layouts: arrange the selected pictures (Ctrl+click several) at once.
+                                Caption {
+                                    text: "ARRANGE SELECTED"
+                                }
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 2
+                                    columnSpacing: 4
+                                    rowSpacing: 4
+                                    Repeater {
+                                        model: [
+                                            { id: "side", label: "▯▯ Side by side", tip: "Two pictures next to each other" },
+                                            { id: "stack", label: "▭ Stacked", tip: "One above the other, e.g. for 9:16" },
+                                            { id: "grid", label: "⊞ 2 × 2", tip: "Up to four pictures in a grid" },
+                                            { id: "presenter", label: "◐ Presenter", tip: "Screen large on the left, the presenter round in the lower right" },
+                                            { id: "pip-br", label: "▣ Picture in picture", tip: "The lower track full, the other small in the lower right corner" },
+                                            { id: "full", label: "□ Full size", tip: "Back to full size" }
+                                        ]
+                                        Action {
+                                            required property var modelData
+                                            objectName: "arrange-" + modelData.id
+                                            Layout.fillWidth: true
+                                            text: modelData.label
+                                            enabled: (win.s.selectedIds || []).length > (modelData.id === "full" ? 0 : 1)
+                                            onClicked: editor.arrange(modelData.id)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: modelData.tip + ". Select the clips first (Ctrl+click)."
+                                        }
+                                    }
+                                }
+                                // Icons for tutorials: a click goes on at the playhead, coloured and sized
+                                // like shapes.
+                                Caption {
+                                    text: "ICONS"
+                                }
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 5
+                                    columnSpacing: 4
+                                    rowSpacing: 4
+                                    Repeater {
+                                        model: [
+                                            { kind: "check", glyph: "✔", name: "Check mark" },
+                                            { kind: "cross", glyph: "✖", name: "Cross" },
+                                            { kind: "warning", glyph: "⚠", name: "Warning" },
+                                            { kind: "info", glyph: "ℹ", name: "Info" },
+                                            { kind: "star", glyph: "★", name: "Star" },
+                                            { kind: "heart", glyph: "♥", name: "Heart" },
+                                            { kind: "lightbulb", glyph: "💡", name: "Light bulb (tip)" },
+                                            { kind: "cursor", glyph: "↖", name: "Mouse pointer" },
+                                            { kind: "click", glyph: "✳", name: "Mouse click" }
+                                        ]
+                                        ToolButton {
+                                            required property var modelData
+                                            objectName: "addIcon-" + modelData.kind
+                                            Layout.fillWidth: true
+                                            text: modelData.glyph
+                                            font.pixelSize: 18
+                                            onClicked: editor.addGraphic(modelData.kind)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: modelData.name
+                                        }
+                                    }
+                                }
+                                Action {
+                                    objectName: "addAdjustment"
+                                    text: "+ Adjustment layer"
+                                    Layout.fillWidth: true
+                                    onClicked: editor.addEffect("adjust")
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Its colour and look change everything on the tracks below while it runs, e.g. one grade for a whole scene"
+                                }
                             }
                         }
                     }
@@ -1497,7 +1580,7 @@ ApplicationWindow {
                                     },
                                     {
                                         key: "speed",
-                                        name: "Speed (0.1–10×)"
+                                        name: "Speed (0.1–100×)"
                                     }
                                 ]
                                 RowLayout {
@@ -3545,6 +3628,26 @@ ApplicationWindow {
                     onClicked: win.guarded("recent:" + modelData.path)
                 }
             }
+            Label {
+                visible: (win.s.templates || []).length > 0
+                text: "From a template"
+                color: win.muted
+            }
+            Flow {
+                Layout.fillWidth: true
+                spacing: 8
+                visible: (win.s.templates || []).length > 0
+                Repeater {
+                    model: win.s.templates || []
+                    delegate: Action {
+                        required property var modelData
+                        required property int index
+                        objectName: "startTemplate-" + index
+                        text: modelData.name
+                        onClicked: win.guarded("template:" + modelData.name)
+                    }
+                }
+            }
             Action {
                 objectName: "startEmpty"
                 text: "Skip"
@@ -3585,7 +3688,9 @@ ApplicationWindow {
     FileDialog {
         id: relinkDialog
         title: "Choose replacement media"
-        onAccepted: editor.relink(win.selection.assetId, selectedFile)
+        onAccepted: editor.relink(win.relinkAsset || win.selection.assetId, selectedFile)
+        onVisibleChanged: if (!visible)
+            win.relinkAsset = ""
     }
     // Collect: copies the project and everything it uses into a new folder, e.g. to archive it or
     // move it to another computer.
@@ -3801,6 +3906,37 @@ ApplicationWindow {
             const f = win.projectFormats[prefFormat.currentIndex], r = win.frameRates[prefRate.currentIndex];
             editor.setPreferences({ width: f.w, height: f.h, fpsN: r.n, fpsD: r.d, stillSeconds: prefStill.value / 10, backups: prefBackups.value, startScreen: prefStart.checked });
         }
+    }
+    // Names a template made from the current project.
+    Dialog {
+        id: templateDialog
+        objectName: "templateDialog"
+        anchors.centerIn: parent
+        modal: true
+        title: "Save as template"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAboutToShow: {
+            templateName.text = "";
+            templateName.forceActiveFocus();
+        }
+        ColumnLayout {
+            width: 320
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: win.muted
+                text: "New projects can start from it (Project → New from template). Replace its media with right-click → Replace with another file."
+            }
+            TextField {
+                id: templateName
+                objectName: "templateName"
+                Layout.fillWidth: true
+                maximumLength: 60
+                placeholderText: "Template name, e.g. Tutorial intro"
+                onAccepted: templateDialog.accept()
+            }
+        }
+        onAccepted: editor.saveTemplate(templateName.text)
     }
     // Names a text style to keep.
     Dialog {

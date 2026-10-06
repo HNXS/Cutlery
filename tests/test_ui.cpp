@@ -424,9 +424,14 @@ class UiTest : public QObject {
         QVERIFY(window);
         auto *start = findItem(window->contentItem(), "startScreen");
         QVERIFY(start && !start->isVisible());
-        // Shown at launch (main.cpp sets this when no project is opened).
+        // Shown at launch (main.cpp sets this when no project is opened), with the templates.
+        editor.addTitle();
+        editor.saveTemplate("UI intro");
+        editor.newProject();
         window->setProperty("startScreen", true);
         QTRY_VERIFY(start->isVisible());
+        QTRY_VERIFY(findItem(window->contentItem(), "startTemplate-0"));
+        editor.removeTemplate("UI intro");
         QVERIFY(findItem(window->contentItem(), "startFormat-5"));
         // Choosing "Vertical 9:16" starts a project in that shape and closes the screen.
         auto *vertical = findItem(window->contentItem(), "startFormat-2");
@@ -679,6 +684,11 @@ class UiTest : public QObject {
         QCOMPARE(editor.project().clips.last().effect, QString("adjust"));
         QTRY_VERIFY(findItem(window->contentItem(), "adjustStrength")->isVisible());
         QVERIFY(findItem(window->contentItem(), "lookSection")->isVisible());
+        // Layouts need two selected clips; "Full size" one.
+        QVERIFY(!findItem(window->contentItem(), "arrange-side")->isEnabled());
+        QVERIFY(findItem(window->contentItem(), "arrange-full")->isEnabled());
+        editor.toggleSelect(second);
+        QTRY_VERIFY(findItem(window->contentItem(), "arrange-side")->isEnabled());
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void exportDialog() {

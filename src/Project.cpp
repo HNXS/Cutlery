@@ -697,7 +697,7 @@ void Project::validate() const {
         require(c.start >= 0 && c.start <= 100000000 && c.duration > 0 &&
                     c.duration <= 100000000 - c.start && c.track >= 0 && c.track < tracks,
                 "Invalid clip range/track");
-        require(c.sourceIn.n >= 0 && c.speed.seconds() >= 0.1 && c.speed.seconds() <= 10,
+        require(c.sourceIn.n >= 0 && c.speed.seconds() >= 0.1 && c.speed.seconds() <= 100,
                 "Invalid source time/speed");
         auto bounded = [](double x, double lo, double hi) {
             return std::isfinite(x) && x >= lo && x <= hi;

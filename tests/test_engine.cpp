@@ -481,6 +481,48 @@ class EngineTest : public QObject {
         QCOMPARE(editor.project().clips.back().start, cut - qRound64(0.165 * 30));
         qunsetenv("CUTLERY_SOUNDS_DIR");
     }
+    void projectTemplates() {
+        QTemporaryDir dir;
+        QImage image(64, 36, QImage::Format_RGB32);
+        image.fill(Qt::green);
+        QVERIFY(image.save(dir.filePath("logo.png")));
+        FrameProvider frames;
+        Editor editor(&frames);
+        for (const auto &t : editor.templates())
+            editor.removeTemplate(t.toMap()["name"].toString());
+        editor.saveTemplate("Empty");
+        QVERIFY(editor.state()["error"].toString().contains("empty"));
+        editor.configure(1280, 720, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("logo.png"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        editor.addTitle();
+        editor.setClip("text", "Welcome");
+        editor.saveTemplate("Tutorial intro / v2");
+        QCOMPARE(editor.templates().size(), 1);
+        QCOMPARE(editor.templates()[0].toMap()["name"].toString(), QString("Tutorial intro _ v2"));
+        QVERIFY(editor.save(QUrl::fromLocalFile(dir.filePath("work.cutlery"))));
+        // A new project from it: the same clips, unsaved, and not in the recent list.
+        editor.newProject();
+        QVERIFY(editor.newFromTemplate("Tutorial intro _ v2"));
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        QCOMPARE(editor.project().width, 1280);
+        QVERIFY(editor.state()["path"].toString().isEmpty());
+        QVERIFY(editor.state()["dirty"].toBool());
+        for (const auto &r : editor.state()["recent"].toList())
+            QVERIFY(!r.toMap()["path"].toString().contains("templates"));
+        bool hasTitle = false;
+        for (const auto &c : editor.project().clips)
+            hasTitle |= c.text == "Welcome";
+        QVERIFY(hasTitle);
+        // The template itself is unchanged by editing the new project.
+        editor.addTitle();
+        QVERIFY(editor.newFromTemplate("Tutorial intro _ v2"));
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        QVERIFY(!editor.newFromTemplate("Nope"));
+        editor.removeTemplate("Tutorial intro _ v2");
+        QVERIFY(editor.templates().isEmpty());
+    }
     void appPreferences() {
         QTemporaryDir dir;
         FrameProvider frames;
@@ -3587,7 +3629,7 @@ class EngineTest : public QObject {
         bad["clips"] = clips;
         QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, {}), std::runtime_error);
 
-        // Speed from 0.1x to 10x: a 10x clip shows every tenth source frame and its sound is
+        // Speed from 0.1x to 100x: a 10x clip shows every tenth source frame and its sound is
         // a tenth as long.
         const auto ramp = dir.filePath("ramp.mkv");
         run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=black:s=320x180:r=30:d=4,geq=lum='2*N':cb=128:cr=128",
@@ -3626,6 +3668,37 @@ class EngineTest : public QObject {
         p.validate();
         slow.speed = Time(1, 20);
         p.clips = {slow};
+        QVERIFY_EXCEPTION_THROWN(p.validate(), std::runtime_error);
+        // Each frame of a fast clip shows the source at exactly frame × speed (source frame N
+        // has luma 2N, i.e. grey (2N - 16) × 255 / 219): at 10x frames 1 and 2 show source frames
+        // 10 and 20; a 60x time-lapse shows frame 60 (2 s) one frame in.
+        auto grey = [&](const Clip &clip, qint64 frame, int source) {
+            const int expected = qRound((2 * source - 16) * 255 / 219.);
+            const int got = qGray(still(clip, frame).pixel(160, 90));
+            return std::pair{std::abs(got - std::max(0, expected)) <= 4, QString("%1 vs %2").arg(got).arg(expected)};
+        };
+        for (const auto &[frame, source] : {std::pair{1, 10}, std::pair{2, 20}}) {
+            const auto [ok, text] = grey(fast, frame, source);
+            QVERIFY2(ok, qPrintable(text));
+        }
+        Clip lapse = fast;
+        lapse.speed = Time(60, 1);
+        lapse.duration = 2;
+        for (const auto &[frame, source] : {std::pair{0, 0}, std::pair{1, 60}}) {
+            const auto [ok, text] = grey(lapse, frame, source);
+            QVERIFY2(ok, qPrintable(text));
+        }
+        p.clips = {lapse};
+        p.validate();
+        plan = compileRender(p, dir.filePath("work"), 320, 180, sound);
+        {
+            QFile g(graph);
+            QVERIFY(g.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            g.write(plan.graph.toUtf8());
+        }
+        QCOMPARE(run(ffmpeg, streamArguments(plan, graph, false)).size(), qsizetype(48000 * 4 * 2 / 30));
+        lapse.speed = Time(101, 1);
+        p.clips = {lapse};
         QVERIFY_EXCEPTION_THROWN(p.validate(), std::runtime_error);
     }
     void gifAndSvgOverlays() {
@@ -4635,6 +4708,77 @@ class EngineTest : public QObject {
             }
         }
         editor.addGraphic("unicorn");
+        QVERIFY(editor.state()["error"].toString().contains("Unknown"));
+    }
+    void layouts() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        QList<QUrl> files;
+        for (const auto &[name, colour] : {std::pair{"red.png", Qt::red}, std::pair{"blue.png", Qt::blue}}) {
+            QImage image(320, 180, QImage::Format_RGB32);
+            image.fill(colour);
+            QVERIFY(image.save(dir.filePath(name)));
+            files << QUrl::fromLocalFile(dir.filePath(name));
+        }
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia(files);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        QString red, blue;
+        for (const auto &a : editor.project().assets)
+            (a.name == "red.png" ? red : blue) = a.id;
+        editor.addAsset(red, 0);
+        const auto back = editor.state()["selectedId"].toString();
+        editor.seek(0);
+        editor.addAsset(blue, 1);
+        const auto front = editor.state()["selectedId"].toString();
+        editor.arrange("side");
+        QVERIFY(editor.state()["error"].toString().contains("two"));
+        editor.select(back);
+        editor.toggleSelect(front);
+        auto image = [&]() {
+            RenderOptions options;
+            options.audio = false;
+            options.from = 5;
+            options.to = 6;
+            const auto plan = compileRender(editor.project(), dir.filePath("work"), 320, 180, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            return out;
+        };
+        auto isRed = [](QColor c) { return c.red() > 200 && c.blue() < 60; };
+        auto isBlue = [](QColor c) { return c.blue() > 200 && c.red() < 60; };
+        // Side by side: the lower track on the left.
+        editor.arrange("side");
+        auto out = image();
+        QVERIFY(isRed(out.pixelColor(80, 90)) && isBlue(out.pixelColor(240, 90)));
+        QCOMPARE(editor.project().clip(front)->scale, 0.5);
+        // Picture in picture, lower right: the background stays full.
+        editor.arrange("pip-br");
+        out = image();
+        QVERIFY(isRed(out.pixelColor(20, 20)) && isRed(out.pixelColor(160, 90)));
+        QVERIFY2(isBlue(out.pixelColor(270, 140)), qPrintable(out.pixelColor(270, 140).name()));
+        // Presenter: round picture in the lower right, the screen large on the left.
+        editor.arrange("presenter");
+        QCOMPARE(editor.project().clip(front)->shape, QString("circle"));
+        out = image();
+        const double cx = (1 - 0.02 - 0.12) * 320, cy = (1 - 0.05 - 0.12 * 16 / 9.) * 180;
+        QVERIFY2(isBlue(out.pixelColor(int(cx), int(cy))), qPrintable(out.pixelColor(int(cx), int(cy)).name()));
+        QVERIFY(isRed(out.pixelColor(110, 90)));
+        // One step to undo; "full" puts everything back to full size.
+        editor.undo();
+        QCOMPARE(editor.project().clip(front)->shape, QString("rect"));
+        editor.arrange("full");
+        QCOMPARE(editor.project().clip(front)->scale, 1.);
+        QCOMPARE(editor.project().clip(front)->x, 0.);
+        editor.arrange("hexagon");
         QVERIFY(editor.state()["error"].toString().contains("Unknown"));
     }
     void curvesSelectiveAndAutoColour() {
