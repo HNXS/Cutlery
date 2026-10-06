@@ -1,5 +1,32 @@
 # Validation record
 
+## Windows portable build — 2026-10-06, edit by text, filler words, curves, selective and auto colour (0.6 development)
+
+[GitHub Actions run 37457382153](https://github.com/HNXS/Cutlery/actions/runs/37457382153) on commit `f6fcd9304f343eac669eba32884fc80c3355b3aa` passed every step.
+
+The first commit of this change, `4765a01`, did not compile with MSVC. A signed revision number was braced into an unsigned field, which MSVC rejects as narrowing and GCC allowed. CI now reports the first compiler errors as annotations.
+
+New coverage:
+
+- **Engine tests:**
+  - `transcriptEditing`:
+    - cut ranges for chosen words;
+    - filler detection, which leaves the German "er" and "eh" alone;
+    - a cached transcript mapped onto a clip with detached sound;
+    - cutting words and fillers across the pieces the cuts leave;
+    - one undo step each.
+  - `curvesSelectiveAndAutoColour`:
+    - curve validation;
+    - the correction formula;
+    - auto colour on a dark, blue clip widens its range and reduces the cast;
+    - a halving master curve and the selective greying of blues render as expected;
+    - the settings are saved, and invalid values are refused.
+- **Interface:**
+  - choose the language, click two words, cut them, and double-click a word to seek;
+  - drag a point on the tone curve;
+  - switch the curve channel;
+  - choose colours for the selective change.
+
 ## Windows portable build — 2026-10-05, media folders, start screen, relink from a folder, nested sequences (0.6 development)
 
 [GitHub Actions run 37370014194](https://github.com/HNXS/Cutlery/actions/runs/37370014194) on commit `20eacc6b5da5b769e1e78a252f7fbe5aca40cd73` passed every step.
