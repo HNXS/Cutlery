@@ -9,7 +9,8 @@
 namespace cutlery {
 // What the user asks for: a delivery format, a quality level and an output height.
 struct ExportSettings {
-    // Video: h264, hevc, av1, vp9, prores, mpeg4. Audio only: mp3, m4a (AAC), wav.
+    // Video: h264, hevc, av1, vp9, prores, mpeg4, gif (animated, no sound). Audio only: mp3,
+    // m4a (AAC), wav.
     QString format = "h264";
     QString quality = "high"; // max, high, balanced, small
     int height = 0;           // 0: project size
@@ -25,6 +26,10 @@ struct Encoder {
     QString pixelFormat = "yuv420p", extension = "mp4";
     bool probe = false;
     bool audioOnly = false; // no video stream; videoArguments and pixelFormat are unused
+    bool noAudio = false;   // picture only (GIF)
+    // Filters after the picture's pixel format, before the encoder (e.g. GIF palette steps);
+    // labels inside must not clash with the render graph's.
+    QString videoTail;
 };
 const QStringList &exportFormats();
 QString formatExtension(const QString &format);

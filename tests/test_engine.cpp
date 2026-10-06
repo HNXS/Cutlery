@@ -4867,6 +4867,43 @@ class EngineTest : public QObject {
         editor.setClip("hslColors", "x");
         QVERIFY(editor.state()["error"].toString().contains("selective"));
     }
+    void gifExport() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("clip.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=25:d=2", "-f",
+                     "lavfi", "-i", "sine=d=2", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest",
+                     source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        QCOMPARE(editor.exportPreview({{"format", "gif"}})["extension"].toString(), QString("gif"));
+        QCOMPARE(editor.exportPreview({{"format", "gif"}})["audio"].toBool(), false);
+        // Loudness is ignored: a GIF has no sound.
+        const auto out = dir.filePath("loop.gif");
+        editor.exportWith(QUrl::fromLocalFile(out),
+                          {{"format", "gif"}, {"quality", "high"}, {"height", 144}, {"loudness", -14}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(QFileInfo::exists(out), qPrintable(editor.state()["error"].toString()));
+        QFile file(out);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.read(6), QByteArray("GIF89a"));
+        const auto probe = QString::fromUtf8(run(Editor::executable("ffprobe"),
+            {"-v", "error", "-count_frames", "-show_entries",
+             "stream=codec_type,codec_name,width,height,nb_read_frames", "-of", "compact", out}));
+        QVERIFY2(probe.contains("codec_name=gif") && probe.contains("height=144") &&
+                     probe.contains("width=256") && !probe.contains("codec_type=audio"),
+                 qPrintable(probe));
+        // 15 pictures a second for 2 s.
+        const auto count = QRegularExpression("nb_read_frames=(\\d+)").match(probe).captured(1).toInt();
+        QVERIFY2(std::abs(count - 30) <= 2, qPrintable(probe));
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("wrong.mp4")), {{"format", "gif"}});
+        QVERIFY(editor.state()["error"].toString().contains(".gif"));
+    }
     void colourAndLook() {
         QCOMPARE(filterPath("C:/a b/it's,[x];y=z.cube"),
                  QString("C\\\\:/a b/it\\\\\\'s\\,\\[x\\]\\;y\\\\=z.cube"));

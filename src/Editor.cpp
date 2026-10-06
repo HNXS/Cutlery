@@ -4754,7 +4754,7 @@ void Editor::exportProject(const Project &project, const QUrl &url, const QVaria
                                          "ProRes, which always work.");
                                     return;
                                 }
-                                if (loudness != 0)
+                                if (loudness != 0 && !e->noAudio)
                                     measureLoudness(output, size, *e, loudness);
                                 else
                                     startRender(output, size, *e);
@@ -4894,7 +4894,9 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
         RenderOptions options;
         options.highQuality = true;
         options.pixelFormat = encoder.pixelFormat;
+        options.videoTail = encoder.videoTail;
         options.video = !encoder.audioOnly;
+        options.audio = !encoder.noAudio;
         options.from = m_exportFrom;
         options.to = m_exportTo;
         if (gainDb != 0 || m_loudness.contains("target")) {

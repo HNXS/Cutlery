@@ -6,8 +6,8 @@
 
 namespace cutlery {
 const QStringList &exportFormats() {
-    static const QStringList formats{"h264", "hevc",   "av1", "vp9", "prores",
-                                     "mpeg4", "mp3", "m4a", "wav"};
+    static const QStringList formats{"h264", "hevc", "av1", "vp9", "prores",
+                                     "mpeg4", "gif", "mp3", "m4a", "wav"};
     return formats;
 }
 bool audioFormat(const QString &format) {
@@ -20,6 +20,8 @@ QString formatExtension(const QString &format) {
         return "webm";
     if (format == "prores")
         return "mov";
+    if (format == "gif")
+        return "gif";
     return "mp4";
 }
 QSize exportSize(const Project &p, int height) {
@@ -70,6 +72,21 @@ QVector<Encoder> encoderCandidates(const ExportSettings &s, QSize size, double f
             e.label = "WAV (uncompressed)";
             e.audioArguments = {"-c:a", q == 0 ? "pcm_s24le" : "pcm_s16le"};
         }
+        return {e};
+    }
+    if (s.format == "gif") {
+        // An animated GIF: fewer frames a second and one palette made from the whole clip
+        // (colours that change little between frames weigh most), with light ordered dithering.
+        Encoder e;
+        e.name = "gif";
+        e.label = "GIF";
+        e.extension = "gif";
+        e.noAudio = true;
+        e.pixelFormat = "rgb24";
+        e.videoArguments = {"-c:v", "gif", "-loop", "0"};
+        e.videoTail = QString("fps=%1,split[gifa][gifb];[gifa]palettegen=max_colors=%2:stats_mode=diff[gifp];"
+                              "[gifb][gifp]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle")
+                          .arg(pick({25, 15, 12, 10}), pick({256, 256, 192, 128}));
         return {e};
     }
     if (s.format == "h264" || s.format == "hevc") {

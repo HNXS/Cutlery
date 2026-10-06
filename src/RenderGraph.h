@@ -35,6 +35,8 @@ struct RenderOptions {
     // Export: high-quality (Lanczos, accurate) scaling and the encoder's pixel format.
     bool highQuality = false;
     QString pixelFormat = "yuv420p";
+    // Filters appended to the picture after its pixel format (export only, e.g. a GIF palette).
+    QString videoTail;
     // Master audio: gain before the output limiter (loudness normalisation) and the limiter's
     // ceiling as linear amplitude. `measureLoudness` replaces the limiter with an EBU R128 meter
     // whose summary FFmpeg logs at the "info" level (see parseIntegratedLoudness).

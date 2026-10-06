@@ -4384,6 +4384,7 @@ ApplicationWindow {
             { id: "vp9", label: "VP9 · WebM (web)" },
             { id: "prores", label: "ProRes 422 HQ · MOV (editing master, large)" },
             { id: "mpeg4", label: "MPEG-4 Part 2 · MP4 (legacy, always available)" },
+            { id: "gif", label: "Animated GIF (no sound; best at 480p or less)" },
             { id: "mp3", label: "Audio only · MP3" },
             { id: "m4a", label: "Audio only · AAC (M4A)" },
             { id: "wav", label: "Audio only · WAV (uncompressed)" }
