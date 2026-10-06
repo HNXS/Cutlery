@@ -1454,10 +1454,13 @@ void Editor::addGraphic(const QString &kind) {
         Clip c;
         c.id = id;
         c.graphic = kind;
-        c.name = kind == "bubble"  ? "Speech bubble"
-                 : kind == "arrow" ? "Arrow"
-                 : kind == "line"  ? "Line"
-                                   : kind == "ellipse" ? "Circle" : "Box";
+        static const QHash<QString, QString> names{
+            {"bubble", "Speech bubble"}, {"arrow", "Arrow"},   {"line", "Line"},
+            {"ellipse", "Circle"},       {"rectangle", "Box"}, {"check", "Check mark"},
+            {"cross", "Cross"},          {"star", "Star"},     {"heart", "Heart"},
+            {"warning", "Warning"},      {"info", "Info"},     {"cursor", "Mouse pointer"},
+            {"click", "Mouse click"},    {"lightbulb", "Light bulb"}};
+        c.name = names.value(kind, "Shape");
         if (kind == "bubble") {
             c.text = "Hello!";
             c.fillColor = "#ffffff";
@@ -1468,6 +1471,21 @@ void Editor::addGraphic(const QString &kind) {
         } else if (kind == "arrow" || kind == "line") {
             c.graphicHeight = kind == "arrow" ? 0.12 : 0.012;
             c.fillColor = kind == "arrow" ? "#ff5a5f" : "#ffffff";
+        } else if (QStringList{"check", "cross", "star", "heart", "warning", "info", "cursor",
+                               "click", "lightbulb"}
+                       .contains(kind)) {
+            // Icons: square, at about a ninth of the picture's height.
+            static const QHash<QString, QString> colours{
+                {"check", "#3ecf6e"}, {"cross", "#ff5a5f"},   {"star", "#ffd23f"},
+                {"heart", "#ff5a7a"}, {"warning", "#ffb020"}, {"info", "#4aa3ff"},
+                {"cursor", "#ffffff"}, {"click", "#ffffff"},  {"lightbulb", "#ffd23f"}};
+            c.graphicHeight = 0.16;
+            c.graphicWidth = 0.16 * p.height / p.width;
+            c.fillColor = colours.value(kind);
+            if (kind == "cursor" || kind == "click") {
+                c.strokeColor = "#000000";
+                c.stroke = 0.004;
+            }
         } else if (kind == "ellipse") {
             // An outline circle, like a highlight around something on screen.
             c.graphicWidth = 0.2;

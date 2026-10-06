@@ -168,7 +168,9 @@ double standardRate(double rate) {
     return rate;
 }
 const QStringList &graphicKinds() {
-    static const QStringList kinds{"rectangle", "ellipse", "arrow", "line", "bubble"};
+    static const QStringList kinds{"rectangle", "ellipse", "arrow", "line",    "bubble",
+                                   "check",     "cross",   "star",  "heart",   "warning",
+                                   "info",      "cursor",  "click", "lightbulb"};
     return kinds;
 }
 QSizeF Project::pictureSize(const Clip &c, double boxWidth, double boxHeight) const {

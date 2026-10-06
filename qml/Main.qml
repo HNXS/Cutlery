@@ -1085,6 +1085,40 @@ ApplicationWindow {
                                     }
                                 }
                             }
+                            // Icons for tutorials: a click goes on at the playhead, coloured and sized
+                            // like shapes.
+                            Caption {
+                                text: "ICONS"
+                            }
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 5
+                                columnSpacing: 4
+                                rowSpacing: 4
+                                Repeater {
+                                    model: [
+                                        { kind: "check", glyph: "✔", name: "Check mark" },
+                                        { kind: "cross", glyph: "✖", name: "Cross" },
+                                        { kind: "warning", glyph: "⚠", name: "Warning" },
+                                        { kind: "info", glyph: "ℹ", name: "Info" },
+                                        { kind: "star", glyph: "★", name: "Star" },
+                                        { kind: "heart", glyph: "♥", name: "Heart" },
+                                        { kind: "lightbulb", glyph: "💡", name: "Light bulb (tip)" },
+                                        { kind: "cursor", glyph: "↖", name: "Mouse pointer" },
+                                        { kind: "click", glyph: "✳", name: "Mouse click" }
+                                    ]
+                                    ToolButton {
+                                        required property var modelData
+                                        objectName: "addIcon-" + modelData.kind
+                                        Layout.fillWidth: true
+                                        text: modelData.glyph
+                                        font.pixelSize: 18
+                                        onClicked: editor.addGraphic(modelData.kind)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: modelData.name
+                                    }
+                                }
+                            }
                             Action {
                                 objectName: "addAdjustment"
                                 text: "+ Adjustment layer"

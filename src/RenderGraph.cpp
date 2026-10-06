@@ -12,6 +12,8 @@
 #include <QHash>
 #include <QPainterPath>
 #include <algorithm>
+#include <cmath>
+#include <numbers>
 #include <stdexcept>
 
 namespace cutlery {
@@ -306,6 +308,86 @@ static void paintGraphic(QPainter &paint, const Clip &c, const QRectF &box, int 
         tail.lineTo(body.left() + w * 0.34, body.bottom() - 1);
         tail.closeSubpath();
         path = path.united(tail);
+    }
+    // Icons are drawn in the largest centred square of the box.
+    const double side = std::min(w, h);
+    const QRectF sq(box.center().x() - side / 2, box.center().y() - side / 2, side, side);
+    auto at = [&](double x, double y) { return QPointF(sq.left() + x * side, sq.top() + y * side); };
+    auto stroked = [&](const QPainterPath &line, double width) {
+        QPainterPathStroker stroker;
+        stroker.setWidth(width * side);
+        stroker.setCapStyle(Qt::RoundCap);
+        stroker.setJoinStyle(Qt::RoundJoin);
+        return stroker.createStroke(line).simplified();
+    };
+    if (c.graphic == "check") {
+        QPainterPath line(at(0.14, 0.52));
+        line.lineTo(at(0.4, 0.78));
+        line.lineTo(at(0.86, 0.24));
+        path = stroked(line, 0.16);
+    } else if (c.graphic == "cross") {
+        QPainterPath line(at(0.18, 0.18));
+        line.lineTo(at(0.82, 0.82));
+        line.moveTo(at(0.82, 0.18));
+        line.lineTo(at(0.18, 0.82));
+        path = stroked(line, 0.16);
+    } else if (c.graphic == "star") {
+        QPolygonF star;
+        for (int i = 0; i < 10; ++i) {
+            const double a = -std::numbers::pi / 2 + i * std::numbers::pi / 5, r = i % 2 ? 0.2 : 0.48;
+            star << at(0.5 + r * std::cos(a), 0.53 + r * std::sin(a));
+        }
+        path.addPolygon(star);
+        path.closeSubpath();
+    } else if (c.graphic == "heart") {
+        path.moveTo(at(0.5, 0.88));
+        path.cubicTo(at(0.1, 0.62), at(0.0, 0.32), at(0.25, 0.17));
+        path.cubicTo(at(0.4, 0.09), at(0.5, 0.22), at(0.5, 0.3));
+        path.cubicTo(at(0.5, 0.22), at(0.6, 0.09), at(0.75, 0.17));
+        path.cubicTo(at(1.0, 0.32), at(0.9, 0.62), at(0.5, 0.88));
+        path.closeSubpath();
+    } else if (c.graphic == "warning") {
+        // A triangle with an exclamation mark cut out.
+        QPainterPath triangle(at(0.5, 0.06));
+        triangle.lineTo(at(0.96, 0.9));
+        triangle.lineTo(at(0.04, 0.9));
+        triangle.closeSubpath();
+        QPainterPath mark;
+        mark.addRoundedRect(QRectF(at(0.44, 0.32), at(0.56, 0.64)), 0.04 * side, 0.04 * side);
+        mark.addEllipse(QRectF(at(0.43, 0.7), at(0.57, 0.84)));
+        path = triangle.subtracted(mark);
+    } else if (c.graphic == "info") {
+        QPainterPath disc;
+        disc.addEllipse(QRectF(at(0.04, 0.04), at(0.96, 0.96)));
+        QPainterPath mark;
+        mark.addEllipse(QRectF(at(0.43, 0.2), at(0.57, 0.34)));
+        mark.addRoundedRect(QRectF(at(0.44, 0.4), at(0.56, 0.8)), 0.04 * side, 0.04 * side);
+        path = disc.subtracted(mark);
+    } else if (c.graphic == "cursor" || c.graphic == "click") {
+        // A mouse pointer; "click" adds short rays around its tip.
+        const double s0 = c.graphic == "click" ? 0.25 : 0.1;
+        auto p = [&](double x, double y) { return at(s0 + x * (1 - s0) * 0.95, s0 + y * (1 - s0) * 0.95); };
+        QPolygonF pointer{p(0, 0),    p(0, 0.82),  p(0.2, 0.64), p(0.34, 0.95),
+                          p(0.46, 0.9), p(0.32, 0.6), p(0.58, 0.6)};
+        path.addPolygon(pointer);
+        path.closeSubpath();
+        if (c.graphic == "click") {
+            QPainterPath rays;
+            for (const double a : {-150., -100., 160.}) {
+                const double r = a * std::numbers::pi / 180;
+                rays.moveTo(at(0.22 + 0.08 * std::cos(r), 0.22 + 0.08 * std::sin(r)));
+                rays.lineTo(at(0.22 + 0.2 * std::cos(r), 0.22 + 0.2 * std::sin(r)));
+            }
+            path = path.united(stroked(rays, 0.05));
+        }
+    } else if (c.graphic == "lightbulb") {
+        QPainterPath bulb;
+        bulb.addEllipse(QRectF(at(0.2, 0.04), at(0.8, 0.64)));
+        QPainterPath neck;
+        neck.addRect(QRectF(at(0.36, 0.5), at(0.64, 0.74)));
+        QPainterPath base;
+        base.addRoundedRect(QRectF(at(0.34, 0.78), at(0.66, 0.96)), 0.05 * side, 0.05 * side);
+        path = bulb.united(neck).united(base);
     }
     paint.setPen(Qt::NoPen);
     paint.fillPath(path, QColor(c.fillColor));

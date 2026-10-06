@@ -2555,7 +2555,7 @@ class EngineTest : public QObject {
         QCOMPARE(Project::fromJson(json, {}).clips.back().graphic, QString("bubble"));
         auto clips = json["clips"].toArray();
         auto o = clips.last().toObject();
-        o["graphic"] = "star";
+        o["graphic"] = "hexagon";
         clips[clips.size() - 1] = o;
         json["clips"] = clips;
         QVERIFY_EXCEPTION_THROWN(Project::fromJson(json, {}), std::runtime_error);
@@ -4581,6 +4581,61 @@ class EngineTest : public QObject {
             editor.removeTextStyle("channel");
             QVERIFY(editor.textStyles().isEmpty());
         }
+    }
+    void builtInIcons() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        auto render = [&]() {
+            RenderOptions options;
+            options.audio = false;
+            options.from = 5;
+            options.to = 6;
+            const auto plan = compileRender(editor.project(), dir.filePath("work"), 320, 180, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        for (const auto &kind : {"check", "cross", "star", "heart", "warning", "info", "cursor",
+                                 "click", "lightbulb"}) {
+            editor.newProject();
+            editor.configure(320, 180, 25, 1);
+            editor.seek(0);
+            editor.addGraphic(kind);
+            QVERIFY2(editor.state()["error"].toString().isEmpty(), kind);
+            const auto *c = editor.project().clips.isEmpty() ? nullptr : &editor.project().clips.first();
+            QVERIFY(c && c->graphic == kind);
+            // Square on the canvas, filled with its colour.
+            QVERIFY(std::abs(c->graphicWidth * 320 - c->graphicHeight * 180) < 0.5);
+            editor.setClipValues({{"graphicHeight", 0.8}, {"graphicWidth", 0.8 * 180 / 320}});
+            const auto image = render();
+            const QColor fill(c->fillColor);
+            int painted = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x) {
+                    const QColor p = image.pixelColor(x, y);
+                    painted += std::abs(p.red() - fill.red()) < 40 && std::abs(p.green() - fill.green()) < 40 &&
+                               std::abs(p.blue() - fill.blue()) < 40;
+                }
+            // At least a tenth of the 144 × 144 square.
+            QVERIFY2(painted > 2000, qPrintable(QString("%1: %2").arg(kind).arg(painted)));
+            if (QString(kind) == "warning") {
+                // The exclamation mark is cut out of the triangle.
+                const QColor hole = image.pixelColor(160, 87), solid = image.pixelColor(131, 133);
+                QVERIFY2(hole.red() < 60, qPrintable(hole.name()));
+                QVERIFY2(solid.red() > 200 && solid.green() > 120 && solid.blue() < 80, qPrintable(solid.name()));
+            }
+        }
+        editor.addGraphic("unicorn");
+        QVERIFY(editor.state()["error"].toString().contains("Unknown"));
     }
     void curvesSelectiveAndAutoColour() {
         QVERIFY(validCurve("0/0 0.5/0.6 1/1") && !validCurve("0/0") && !validCurve("0.5/0 0.2/1") &&

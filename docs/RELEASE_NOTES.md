@@ -4,6 +4,7 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Icons:** check mark, cross, warning, info, star, heart, light bulb, mouse pointer and mouse click in the Add tab, sharp at any size and in any colour.
 - **Text styles:** save a title's look (font, colours, outline, animation …) under a name and apply it to other titles in any project.
 - **Adjustment layers:** one colour grade or look for everything below it, e.g. a whole scene: Add → “+ Adjustment layer”, then set the look in the inspector.
 - **Curves and selective colour:** drag the tone curve (all, red, green, blue) in the inspector; change hue, saturation and lightness of chosen colours only. **Auto colour** corrects dull, dark or tinted clips in one click.
