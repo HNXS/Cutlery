@@ -4903,6 +4903,17 @@ class EngineTest : public QObject {
         QVERIFY2(std::abs(count - 30) <= 2, qPrintable(probe));
         editor.exportWith(QUrl::fromLocalFile(dir.filePath("wrong.mp4")), {{"format", "gif"}});
         QVERIFY(editor.state()["error"].toString().contains(".gif"));
+        // The picture at the playhead, at the project's size, as PNG and as JPEG.
+        editor.seek(25);
+        for (const auto &name : {"frame.png", "frame.jpg"}) {
+            const auto picture = dir.filePath(name);
+            editor.exportFrame(QUrl::fromLocalFile(picture));
+            QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(picture), 30000);
+            QImage image(picture);
+            QCOMPARE(image.size(), QSize(320, 180));
+        }
+        editor.exportFrame(QUrl::fromLocalFile(dir.filePath("frame.bmp")));
+        QVERIFY(editor.state()["error"].toString().contains(".png"));
     }
     void colourAndLook() {
         QCOMPARE(filterPath("C:/a b/it's,[x];y=z.cube"),

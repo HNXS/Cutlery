@@ -223,7 +223,7 @@ Editor::~Editor() {
             delete t;
         }
     for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess, m_sceneProcess,
-                    m_nestedProcess, m_autoColourProcess})
+                    m_nestedProcess, m_autoColourProcess, m_frameProcess})
         if (p) {
             p->disconnect(this);
             p->kill();
@@ -4689,6 +4689,60 @@ void Editor::advanceQueue() {
             return;
         }
     m_queueTimer.stop();
+}
+void Editor::exportFrame(const QUrl &url) {
+    try {
+        const auto output = localPath(url);
+        const auto suffix = QFileInfo(output).suffix().toLower();
+        if (!QStringList{"png", "jpg", "jpeg"}.contains(suffix))
+            throw std::runtime_error("Use a .png or .jpg filename");
+        if (m_project.clips.empty())
+            throw std::runtime_error("The timeline is empty");
+        if (m_frameProcess)
+            return;
+        auto work = std::make_shared<QTemporaryDir>(m_data + "/cache/frame-XXXXXX");
+        if (!work->isValid())
+            throw std::runtime_error("Cannot create a work folder");
+        RenderOptions options;
+        options.audio = false;
+        options.highQuality = true;
+        options.pixelFormat = "rgb24";
+        options.from = std::clamp<qint64>(m_playhead, 0, std::max<qint64>(0, m_project.duration() - 1));
+        options.to = options.from + 1;
+        addAiMedia(options);
+        const auto plan = compileRender(viewable(), work->path(), m_project.width, m_project.height, options);
+        const auto graph = work->filePath("graph.txt");
+        writeGraph(graph, plan.graph);
+        auto *p = new QProcess(this);
+        m_frameProcess = p;
+        m_status = "Saving the picture…";
+        auto png = std::make_shared<QByteArray>();
+        connect(p, &QProcess::readyReadStandardOutput, this, [p, png] { *png += p->readAllStandardOutput(); });
+        auto complete = [this, p, png, work, output, suffix](bool success) {
+            *png += p->readAllStandardOutput();
+            p->deleteLater();
+            m_frameProcess = nullptr;
+            QImage image;
+            QSaveFile file(output);
+            if (!success || !image.loadFromData(*png, "PNG") || !file.open(QIODevice::WriteOnly) ||
+                !image.save(&file, suffix == "png" ? "PNG" : "JPG", suffix == "png" ? -1 : 95) ||
+                !file.commit())
+                return fail("Cannot save the picture to " + output);
+            m_status = "Picture saved: " + output;
+            emit changed();
+        };
+        connect(p, &QProcess::finished, this, [complete](int code, QProcess::ExitStatus status) {
+            complete(code == 0 && status == QProcess::NormalExit);
+        });
+        connect(p, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+            if (e == QProcess::FailedToStart)
+                complete(false);
+        });
+        p->start(executable("ffmpeg"), renderArguments(plan, graph, {}, "", 0));
+        emit changed();
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
 }
 void Editor::exportWith(const QUrl &url, const QVariantMap &settings) {
     exportProject(m_project, url, settings);

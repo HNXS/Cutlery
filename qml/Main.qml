@@ -66,7 +66,7 @@ ApplicationWindow {
         { n: 24, d: 1, label: "24" }, { n: 25, d: 1, label: "25" }, { n: 30, d: 1, label: "30" },
         { n: 50, d: 1, label: "50" }, { n: 60, d: 1, label: "60" }, { n: 30000, d: 1001, label: "29.97" }
     ]
-    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || styleDialog.visible || templateDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
+    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || frameDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || styleDialog.visible || templateDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
         enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
@@ -369,6 +369,12 @@ ApplicationWindow {
             MenuItem {
                 text: "Import image sequence…"
                 onTriggered: sequenceFile.open()
+            }
+            MenuItem {
+                objectName: "exportFrameItem"
+                text: "Export current frame as picture…"
+                enabled: win.s.duration > 0
+                onTriggered: frameDialog.open()
             }
             MenuItem {
                 objectName: "collectProject"
@@ -3675,6 +3681,14 @@ ApplicationWindow {
         defaultSuffix: "cutlery"
         nameFilters: ["Cutlery project (*.cutlery)"]
         onAccepted: editor.save(selectedFile)
+    }
+    FileDialog {
+        id: frameDialog
+        title: "Save the picture at the playhead"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "png"
+        nameFilters: ["PNG picture (*.png)", "JPEG picture (*.jpg *.jpeg)"]
+        onAccepted: editor.exportFrame(selectedFile)
     }
     FileDialog {
         id: exportDialog
