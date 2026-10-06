@@ -1564,10 +1564,10 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
     for (double r = o.rate; r > 1.0001; r /= 2)
         tempo += ",atempo=" + num(std::min(2., r));
     if (o.video)
-        nodes << QString("[%1]trim=end_frame=%2,setpts=PTS-STARTPTS,format=%3%4[vout]")
+        nodes << QString("[%1]trim=end_frame=%2,setpts=PTS-STARTPTS,format=%3%4%5[vout]")
                      .arg(visual)
                      .arg(r.frames)
-                     .arg(o.pixelFormat, pace);
+                     .arg(o.pixelFormat, pace, o.videoTail.isEmpty() ? QString() : "," + o.videoTail);
     if (audio) {
         // Mix, master gain, then a peak limiter so no gain can clip; or the loudness meter.
         QString master;
@@ -1624,11 +1624,17 @@ QStringList exportArguments(const RenderPlan &r, const QString &graph, const QSt
     if (e.audioOnly)
         a << "-map" << "[aout]" << "-t" << num(r.duration) << "-vn";
     else {
-        a << "-map" << "[vout]" << "-map" << "[aout]" << "-frames:v" << QString::number(r.frames)
-          << "-t" << num(r.duration);
+        a << "-map" << "[vout]";
+        if (!e.noAudio)
+            a << "-map" << "[aout]";
+        a << "-frames:v" << QString::number(r.frames) << "-t" << num(r.duration);
         a += e.videoArguments;
-        a << "-pix_fmt" << e.pixelFormat;
+        // A tail of filters (the GIF palette) already gives the encoder its pixel format.
+        if (e.videoTail.isEmpty())
+            a << "-pix_fmt" << e.pixelFormat;
     }
+    if (e.noAudio)
+        a << "-an";
     a += e.audioArguments;
     if (QStringList{"mp4", "mov", "m4a"}.contains(e.extension))
         a << "-movflags" << "+faststart";

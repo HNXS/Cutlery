@@ -1,5 +1,21 @@
 # Validation record
 
+## Windows portable build — 2026-10-06, GIF, still frames, OTIO and EDL (0.6 development)
+
+[GitHub Actions run 37520964820](https://github.com/HNXS/Cutlery/actions/runs/37520964820) on commit `1c1f9b0bbe0f8dc6a565a6123a130f47d87bb278` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine tests:**
+  - `gifExport`:
+    - an animated GIF is written with a palette, the chosen frame rate and no audio;
+    - the frame at the playhead is saved as PNG and JPEG at project size.
+  - `timelineInterchange`:
+    - OpenTimelineIO output with tracks, gaps, clips, speed changes and markers;
+    - CMX 3600 EDL with video and audio events, speed (M2) lines and clip names;
+    - effects that cannot be carried are listed in the loss report.
+- **Locally**, both files were also read with the official OpenTimelineIO 0.18.1 library and its CMX 3600 adapter.
+
 ## Windows portable build — 2026-10-06, layouts, templates, time-lapse up to 100x (0.6 development)
 
 [GitHub Actions run 37511355410](https://github.com/HNXS/Cutlery/actions/runs/37511355410) on commit `e4f2088a32a9dd935a6cca3ce255c7bfceab91ec` passed every step on its first attempt.

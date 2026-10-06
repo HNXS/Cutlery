@@ -1,6 +1,7 @@
 #include "Editor.h"
 #include "AiJobs.h"
 #include "Captions.h"
+#include "Interchange.h"
 #include "KeyboardShortcuts.h"
 #include "MediaAnalysis.h"
 #include "Project.h"
@@ -4866,6 +4867,132 @@ class EngineTest : public QObject {
         QCOMPARE(saved.clip(id)->hslSaturation, -1.);
         editor.setClip("hslColors", "x");
         QVERIFY(editor.state()["error"].toString().contains("selective"));
+    }
+    void gifExport() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("clip.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=25:d=2", "-f",
+                     "lavfi", "-i", "sine=d=2", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest",
+                     source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        QCOMPARE(editor.exportPreview({{"format", "gif"}})["extension"].toString(), QString("gif"));
+        QCOMPARE(editor.exportPreview({{"format", "gif"}})["audio"].toBool(), false);
+        // Loudness is ignored: a GIF has no sound.
+        const auto out = dir.filePath("loop.gif");
+        editor.exportWith(QUrl::fromLocalFile(out),
+                          {{"format", "gif"}, {"quality", "high"}, {"height", 144}, {"loudness", -14}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(QFileInfo::exists(out), qPrintable(editor.state()["error"].toString()));
+        QFile file(out);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.read(6), QByteArray("GIF89a"));
+        const auto probe = QString::fromUtf8(run(Editor::executable("ffprobe"),
+            {"-v", "error", "-count_frames", "-show_entries",
+             "stream=codec_type,codec_name,width,height,nb_read_frames", "-of", "compact", out}));
+        QVERIFY2(probe.contains("codec_name=gif") && probe.contains("height=144") &&
+                     probe.contains("width=256") && !probe.contains("codec_type=audio"),
+                 qPrintable(probe));
+        // 15 pictures a second for 2 s.
+        const auto count = QRegularExpression("nb_read_frames=(\\d+)").match(probe).captured(1).toInt();
+        QVERIFY2(std::abs(count - 30) <= 2, qPrintable(probe));
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("wrong.mp4")), {{"format", "gif"}});
+        QVERIFY(editor.state()["error"].toString().contains(".gif"));
+        // The picture at the playhead, at the project's size, as PNG and as JPEG.
+        editor.seek(25);
+        for (const auto &name : {"frame.png", "frame.jpg"}) {
+            const auto picture = dir.filePath(name);
+            editor.exportFrame(QUrl::fromLocalFile(picture));
+            QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(picture), 30000);
+            QImage image(picture);
+            QCOMPARE(image.size(), QSize(320, 180));
+        }
+        editor.exportFrame(QUrl::fromLocalFile(dir.filePath("frame.bmp")));
+        QVERIFY(editor.state()["error"].toString().contains(".png"));
+    }
+    void timelineInterchange() {
+        Project p;
+        p.name = "Talk";
+        p.fpsN = 25;
+        Asset v;
+        v.id = "v";
+        v.path = "/media/talk.mp4";
+        v.name = "talk.mp4";
+        v.kind = "video";
+        v.duration = 60;
+        v.hasAudio = true;
+        p.assets = {v};
+        Clip a;
+        a.id = "a";
+        a.assetId = "v";
+        a.name = "Intro";
+        a.start = 0;
+        a.duration = 50;
+        a.sourceIn = Time(10, 1);
+        Clip b = a;
+        b.id = "b";
+        b.name = "Main";
+        b.start = 75; // a one-second gap before it
+        b.duration = 100;
+        b.sourceIn = Time(20, 1);
+        b.speed = Time(2, 1);
+        b.temperature = 0.3;
+        Clip title;
+        title.id = "t";
+        title.track = 1;
+        title.start = 10;
+        title.duration = 25;
+        title.text = "Hello";
+        p.clips = {a, b, title};
+        p.markers = {{30, "Chapter", "#ffd23f"}};
+        p.validate();
+        QStringList lost;
+        const auto otio = otioTimeline(p, &lost);
+        QCOMPARE(otio["OTIO_SCHEMA"].toString(), QString("Timeline.1"));
+        const auto tracks = otio["tracks"].toObject()["children"].toArray();
+        QCOMPARE(tracks.size(), 3);
+        const auto first = tracks[0].toObject()["children"].toArray();
+        QCOMPARE(first.size(), 3); // clip, gap, clip
+        QCOMPARE(first[1].toObject()["OTIO_SCHEMA"].toString(), QString("Gap.1"));
+        QCOMPARE(first[1].toObject()["source_range"].toObject()["duration"].toObject()["value"].toDouble(), 25.);
+        const auto main = first[2].toObject();
+        QCOMPARE(main["source_range"].toObject()["start_time"].toObject()["value"].toDouble(), 500.);
+        QCOMPARE(main["effects"].toArray()[0].toObject()["time_scalar"].toDouble(), 2.);
+        QCOMPARE(main["media_references"].toObject()["DEFAULT_MEDIA"].toObject()["target_url"].toString(),
+                 QUrl::fromLocalFile("/media/talk.mp4").toString());
+        // The title stays a gap on the track above; colour and the title are reported.
+        QCOMPARE(tracks[1].toObject()["children"].toArray().size(), 2);
+        QVERIFY(lost.join('\n').contains("titles and graphics: 1 clip"));
+        QVERIFY(lost.join('\n').contains("colour settings: 1 clip"));
+        QCOMPARE(otio["tracks"].toObject()["markers"].toArray().size(), 1);
+        // EDL: two events on the main track, record time from 01:00:00:00, speed as M2.
+        const auto edl = cmxEdl(p, &lost);
+        QVERIFY2(edl.contains("001  AX       B      C        00:00:10:00 00:00:12:00 01:00:00:00 01:00:02:00"), qPrintable(edl));
+        QVERIFY2(edl.contains("002  AX       B      C        00:00:20:00 00:00:28:00 01:00:03:00 01:00:07:00"), qPrintable(edl));
+        QVERIFY(edl.contains("M2   AX       050.0 00:00:20:00"));
+        QVERIFY(edl.contains("* FROM CLIP NAME: talk.mp4"));
+        QVERIFY(edl.contains("* NOT CARRIED: clips on other tracks: 1 clip"));
+        // Through the editor, by the file's extension.
+        QTemporaryDir dir;
+        if (const auto out = qEnvironmentVariable("CUTLERY_OTIO_OUT"); !out.isEmpty()) {
+            QFile f(out);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(QJsonDocument(otio).toJson());
+        }
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.addTitle();
+        editor.exportTimeline(QUrl::fromLocalFile(dir.filePath("cut.otio")));
+        QVERIFY(QFileInfo::exists(dir.filePath("cut.otio")));
+        QVERIFY(editor.state()["status"].toString().contains("titles and graphics"));
+        editor.exportTimeline(QUrl::fromLocalFile(dir.filePath("cut.xml")));
+        QVERIFY(editor.state()["error"].toString().contains(".otio"));
     }
     void colourAndLook() {
         QCOMPARE(filterPath("C:/a b/it's,[x];y=z.cube"),

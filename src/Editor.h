@@ -248,6 +248,12 @@ class Editor final : public QObject {
     Q_INVOKABLE void exportVideo(const QUrl &, const QString &profile);
     // settings: {format, quality, height}; see ExportSettings.
     Q_INVOKABLE void exportWith(const QUrl &, const QVariantMap &settings);
+    // The picture at the playhead at the project's size, as PNG or JPEG (by the file's
+    // extension), rendered in the background like a preview but at full quality.
+    Q_INVOKABLE void exportFrame(const QUrl &);
+    // The timeline for other editors: OpenTimelineIO (.otio) or a CMX 3600 EDL (.edl), by the
+    // file's extension. The status names what the format could not carry.
+    Q_INVOKABLE void exportTimeline(const QUrl &);
     // Export queue: exports run one after another (state "exportQueue": file, label, status
     // waiting|exporting|done|failed|cancelled). Cancelling the running export pauses the queue
     // until startQueue().
@@ -375,7 +381,7 @@ class Editor final : public QObject {
     QVariantList m_textStyles, m_templates;
     void listTemplates();
     void saveTextStyles();
-    QProcess *m_autoColourProcess = nullptr;
+    QProcess *m_autoColourProcess = nullptr, *m_frameProcess = nullptr;
     // The selected clip's words in clip-local frames, cached per clip, transcript and revision.
     // Words of the run of back-to-back pieces of the selected clip's recording on its track (as
     // cuts leave them), in timeline order; start and end are local to the word's piece.

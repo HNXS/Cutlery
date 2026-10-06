@@ -66,7 +66,7 @@ ApplicationWindow {
         { n: 24, d: 1, label: "24" }, { n: 25, d: 1, label: "25" }, { n: 30, d: 1, label: "30" },
         { n: 50, d: 1, label: "50" }, { n: 60, d: 1, label: "60" }, { n: 30000, d: 1001, label: "29.97" }
     ]
-    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || styleDialog.visible || templateDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
+    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || frameDialog.visible || timelineFileDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || styleDialog.visible || templateDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
         enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
@@ -369,6 +369,18 @@ ApplicationWindow {
             MenuItem {
                 text: "Import image sequence…"
                 onTriggered: sequenceFile.open()
+            }
+            MenuItem {
+                objectName: "exportTimelineItem"
+                text: "Export timeline for other editors (OTIO, EDL)…"
+                enabled: win.s.duration > 0
+                onTriggered: timelineFileDialog.open()
+            }
+            MenuItem {
+                objectName: "exportFrameItem"
+                text: "Export current frame as picture…"
+                enabled: win.s.duration > 0
+                onTriggered: frameDialog.open()
             }
             MenuItem {
                 objectName: "collectProject"
@@ -3677,6 +3689,22 @@ ApplicationWindow {
         onAccepted: editor.save(selectedFile)
     }
     FileDialog {
+        id: timelineFileDialog
+        title: "Export the timeline for another editor"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "otio"
+        nameFilters: ["OpenTimelineIO (*.otio)", "CMX 3600 EDL (*.edl)"]
+        onAccepted: editor.exportTimeline(selectedFile)
+    }
+    FileDialog {
+        id: frameDialog
+        title: "Save the picture at the playhead"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "png"
+        nameFilters: ["PNG picture (*.png)", "JPEG picture (*.jpg *.jpeg)"]
+        onAccepted: editor.exportFrame(selectedFile)
+    }
+    FileDialog {
         id: exportDialog
         title: "Export — choose a new filename"
         fileMode: FileDialog.SaveFile
@@ -4384,6 +4412,7 @@ ApplicationWindow {
             { id: "vp9", label: "VP9 · WebM (web)" },
             { id: "prores", label: "ProRes 422 HQ · MOV (editing master, large)" },
             { id: "mpeg4", label: "MPEG-4 Part 2 · MP4 (legacy, always available)" },
+            { id: "gif", label: "Animated GIF (no sound; best at 480p or less)" },
             { id: "mp3", label: "Audio only · MP3" },
             { id: "m4a", label: "Audio only · AAC (M4A)" },
             { id: "wav", label: "Audio only · WAV (uncompressed)" }
