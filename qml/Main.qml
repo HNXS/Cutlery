@@ -1085,6 +1085,14 @@ ApplicationWindow {
                                     }
                                 }
                             }
+                            Action {
+                                objectName: "addAdjustment"
+                                text: "+ Adjustment layer"
+                                Layout.fillWidth: true
+                                onClicked: editor.addEffect("adjust")
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Its colour and look change everything on the tracks below while it runs, e.g. one grade for a whole scene"
+                            }
                             Item {
                                 Layout.fillHeight: true
                             }
@@ -1565,9 +1573,47 @@ ApplicationWindow {
                             }
                             // Blur or mosaic area: what it does and how strongly. Move and resize it
                             // in the preview; its position can be keyframed.
+                            // Adjustment layer: its look (below) applies to every track under it.
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                visible: (win.selection.effect || "") !== ""
+                                visible: win.selection.effect === "adjust"
+                                spacing: 4
+                                Caption {
+                                    text: "ADJUSTMENT LAYER"
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    color: win.muted
+                                    font.pixelSize: 11
+                                    text: "The colour and look below change everything on the tracks under this clip while it runs."
+                                }
+                                RowLayout {
+                                    Label {
+                                        text: "Strength"
+                                        Layout.fillWidth: true
+                                    }
+                                    Label {
+                                        text: Math.round((win.selection.opacity ?? 1) * 100) + "%"
+                                    }
+                                }
+                                Slider {
+                                    objectName: "adjustStrength"
+                                    Layout.fillWidth: true
+                                    from: 0
+                                    to: 1
+                                    stepSize: .01
+                                    value: win.selection.opacity ?? 1
+                                    enabled: win.selection.locked !== true
+                                    onPressedChanged: if (!pressed)
+                                        editor.setClip("opacity", value)
+                                    onMoved: if (!pressed)
+                                        editor.setClip("opacity", value)
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                visible: (win.selection.effect || "") !== "" && win.selection.effect !== "adjust"
                                 spacing: 4
                                 Caption {
                                     text: "BLUR / MOSAIC AREA"

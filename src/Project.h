@@ -96,7 +96,9 @@ struct Clip {
     QString gradientColor;
     // Effect area clips (no media, no text) blur or pixelate whatever lower tracks show inside a
     // rectangle of effectWidth × effectHeight canvas fractions at scale 1, centred at x/y.
-    QString effect; // "", "blur", "pixelate"
+    // "", "blur", "pixelate" (an area of the picture below), "adjust" (an adjustment layer:
+    // the clip's colour and look apply to everything below it, by its opacity)
+    QString effect;
     double effectStrength = 0.6, effectWidth = 0.3, effectHeight = 0.2;
     // Graphic clips (no media): a shape of graphicWidth × graphicHeight canvas fractions at
     // scale 1, centred at x/y, filled with fillColor and outlined with strokeColor at `stroke`

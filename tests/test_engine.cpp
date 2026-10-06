@@ -4476,6 +4476,57 @@ class EngineTest : public QObject {
             QVERIFY2(std::abs(duration.captured(1).toDouble() - 2) < 0.1, qPrintable(probe));
         }
     }
+    void adjustmentLayers() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("red.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=red:s=160x90:r=25:d=4", "-c:v",
+                     "ffv1", source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        // A greying adjustment layer from 1 s to 2 s above the red clip.
+        editor.seek(25);
+        editor.addEffect("adjust");
+        const auto id = editor.state()["selectedId"].toString();
+        QVERIFY(editor.state()["selected"].toMap()["picture"].toBool());
+        QVERIFY(editor.clipBounds(id).isEmpty()); // no area to drag in the viewer
+        editor.setClipValues({{"duration", 25}, {"saturation", 0.0}});
+        auto pixel = [&](qint64 frame) {
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(editor.project(), dir.filePath("work"), 160, 90, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            return image.pixelColor(80, 45);
+        };
+        auto red = [](QColor c) { return c.red() > 200 && c.green() < 60 && c.blue() < 60; };
+        auto grey = [](QColor c) { return std::abs(c.red() - c.green()) < 20 && std::abs(c.red() - c.blue()) < 20; };
+        QVERIFY2(red(pixel(10)), qPrintable(pixel(10).name()));
+        QVERIFY2(grey(pixel(35)), qPrintable(pixel(35).name()));
+        QVERIFY2(red(pixel(60)), qPrintable(pixel(60).name()));
+        // Half strength: half the colour.
+        editor.select(id);
+        editor.setClip("opacity", 0.5);
+        const auto half = pixel(35);
+        QVERIFY2(!red(half) && !grey(half) && half.red() > half.green(), qPrintable(half.name()));
+        // Saved; unknown effects are refused.
+        editor.setClip("opacity", 1.0);
+        QCOMPARE(Project::fromJson(editor.project().json(), {}).clip(id)->effect, QString("adjust"));
+        editor.addEffect("sparkle");
+        QVERIFY(editor.state()["error"].toString().contains("Unknown"));
+    }
     void curvesSelectiveAndAutoColour() {
         QVERIFY(validCurve("0/0 0.5/0.6 1/1") && !validCurve("0/0") && !validCurve("0.5/0 0.2/1") &&
                 !validCurve("0/0 1/1.2") && !validCurve("a/b c/d"));

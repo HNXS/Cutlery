@@ -401,8 +401,9 @@ QVariantMap Editor::state() const {
                         {"assetId", c.assetId},
                         {"nested", m_project.asset(c.assetId) && m_project.asset(c.assetId)->isNested()},
                         {"audioOnly", c.audioOnly},
-                        {"picture", !c.audioOnly && m_project.asset(c.assetId) &&
-                                        m_project.asset(c.assetId)->kind != "audio"},
+                        {"picture", c.effect == "adjust" ||
+                                        (!c.audioOnly && m_project.asset(c.assetId) &&
+                                         m_project.asset(c.assetId)->kind != "audio")},
                         {"video", !c.audioOnly && m_project.asset(c.assetId) &&
                                       m_project.asset(c.assetId)->kind == "video"},
                         {"variableRate", m_project.asset(c.assetId) &&
@@ -1420,13 +1421,13 @@ void Editor::addTitleTemplate(const QString &style) {
     select(id);
 }
 void Editor::addEffect(const QString &effect) {
-    if (effect != "blur" && effect != "pixelate")
+    if (effect != "blur" && effect != "pixelate" && effect != "adjust")
         return fail("Unknown effect");
     const auto id = newId();
     mutate([&](Project &p) {
         Clip c;
         c.id = id;
-        c.name = effect == "blur" ? "Blur area" : "Mosaic area";
+        c.name = effect == "blur" ? "Blur area" : effect == "adjust" ? "Adjustment layer" : "Mosaic area";
         c.effect = effect;
         c.track = p.tracks - 1;
         p.requireEditable(c.track);
@@ -1707,7 +1708,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
 QVariantMap Editor::clipBounds(const QString &id) const {
     const auto *c = m_project.clip(id);
     const auto *a = c ? m_project.asset(c->assetId) : nullptr;
-    if (!c || c->audioOnly || (a && a->kind == "audio"))
+    if (!c || c->audioOnly || (a && a->kind == "audio") || c->effect == "adjust")
         return {};
     // The picture's rectangle on the canvas at the playhead, in canvas fractions.
     const double local = m_playhead - c->start;
