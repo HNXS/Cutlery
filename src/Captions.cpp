@@ -1,4 +1,5 @@
 #include "Captions.h"
+#include <QSet>
 #include <QRegularExpression>
 #include <algorithm>
 #include <cmath>
@@ -196,6 +197,41 @@ QString writeSubtitles(const QVector<Cue> &cues, const QString &format, int widt
         }
     }
     return out;
+}
+bool isFillerWord(const QString &word) {
+    // Not "er" or "eh": they are German words ("he", "anyway").
+    static const QSet<QString> fillers{"äh", "ähm", "ääh", "äähm", "öh",  "öhm", "ehm", "hm",
+                                       "hmm", "mhm", "mm", "uh",   "uhm", "um",  "umm", "erm",
+                                       "ahm"};
+    QString w;
+    for (const auto ch : word.toLower())
+        if (ch.isLetter())
+            w += ch;
+    return fillers.contains(w);
+}
+QVector<QPair<qint64, qint64>> wordCutRanges(const QVector<qint64> &starts,
+                                             const QVector<qint64> &ends, QList<int> chosen,
+                                             qint64 length, qint64 pad) {
+    std::sort(chosen.begin(), chosen.end());
+    chosen.erase(std::unique(chosen.begin(), chosen.end()), chosen.end());
+    QVector<QPair<qint64, qint64>> ranges;
+    const int count = int(starts.size());
+    for (int i = 0; i < chosen.size();) {
+        int last = i;
+        while (last + 1 < chosen.size() && chosen[last + 1] == chosen[last] + 1)
+            ++last;
+        const int first = chosen[i], end = chosen[last];
+        if (first < 0 || end >= count) {
+            i = last + 1;
+            continue;
+        }
+        const qint64 from = starts[first];
+        const qint64 to = end + 1 < count ? starts[end + 1] : std::min(length, ends[end] + pad);
+        if (to > from)
+            ranges.push_back({from, to});
+        i = last + 1;
+    }
+    return ranges;
 }
 QVector<Cue> groupWords(const QVector<Cue> &words, int maxChars, double pause) {
     QVector<Cue> lines;

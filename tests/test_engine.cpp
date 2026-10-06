@@ -1965,6 +1965,102 @@ class EngineTest : public QObject {
         QCOMPARE(editor.project().tracks, tracks + 1);
 #endif
     }
+    void transcriptEditing() {
+        // Cut ranges from chosen words: each run of words up to the next kept word.
+        const QVector<qint64> starts{0, 10, 20, 30, 40}, ends{8, 18, 28, 38, 48};
+        QCOMPARE(wordCutRanges(starts, ends, {1, 2}, 60, 4),
+                 (QVector<QPair<qint64, qint64>>{{10, 30}}));
+        QCOMPARE(wordCutRanges(starts, ends, {4, 0}, 60, 4),
+                 (QVector<QPair<qint64, qint64>>{{0, 10}, {40, 52}}));
+        QCOMPARE(wordCutRanges(starts, ends, {4}, 50, 4), (QVector<QPair<qint64, qint64>>{{40, 50}}));
+        QVERIFY(wordCutRanges(starts, ends, {7}, 60, 4).isEmpty());
+        QVERIFY(isFillerWord("Ähm,") && isFillerWord("uh") && isFillerWord("HMM.") && isFillerWord("äh"));
+        QVERIFY(!isFillerWord("er") && !isFillerWord("also") && !isFillerWord("Ähnlich"));
+
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("talk.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=25:d=6", "-f",
+                     "lavfi", "-i", "sine=d=6", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest",
+                     source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        const auto asset = editor.project().assets.first();
+        editor.addAsset(asset.id);
+        const auto id = editor.state()["selectedId"].toString();
+        editor.detachAudio();
+        editor.select(id);
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        // A cached transcript (as the speech recogniser writes it) for the whole file.
+        const auto key = QDir(editor.state()["dataPath"].toString() + "/ai")
+                             .filePath(MediaAnalysis::fingerprint(asset) + "-transcribe-v2-de");
+        QVERIFY(QDir().mkpath(QFileInfo(key).absolutePath()));
+        {
+            QFile srt(key + ".srt");
+            QVERIFY(srt.open(QIODevice::WriteOnly));
+            srt.write("1\n00:00:00,000 --> 00:00:00,800\nHallo\n\n"
+                      "2\n00:00:01,000 --> 00:00:01,400\nähm,\n\n"
+                      "3\n00:00:02,000 --> 00:00:02,600\nliebe\n\n"
+                      "4\n00:00:03,000 --> 00:00:03,800\nZuschauer.\n\n"
+                      "5\n00:00:04,000 --> 00:00:04,400\näh\n\n"
+                      "6\n00:00:05,000 --> 00:00:05,600\nTschüss\n");
+            QFile meta(key + ".json");
+            QVERIFY(meta.open(QIODevice::WriteOnly));
+            meta.write(R"({"start": 0, "end": 6, "rate": 8})");
+        }
+        editor.transcribeClip("de");
+        auto t = editor.state()["transcript"].toMap();
+        QCOMPARE(t["status"].toString(), QString("ready"));
+        auto words = t["words"].toList();
+        QCOMPARE(words.size(), 6);
+        QCOMPARE(words[2].toMap()["text"].toString(), QString("liebe"));
+        QCOMPARE(words[2].toMap()["start"].toLongLong(), qint64(50));
+        QCOMPARE(t["fillers"].toInt(), 2);
+        // Cutting "liebe Zuschauer." removes 2 s (to the start of the next word) from the clip
+        // and its sound, and the words after it move up.
+        // The clip and its sound are left in two pieces each, 100 frames in all; the transcript
+        // runs on across the pieces.
+        auto total = [&](int track) {
+            qint64 frames = 0;
+            for (const auto &c : editor.project().clips)
+                if (c.track == track)
+                    frames += c.duration;
+            return frames;
+        };
+        const int audioTrack = [&] {
+            for (const auto &c : editor.project().clips)
+                if (c.id != id)
+                    return c.track;
+            return -1;
+        }();
+        editor.cutWords({2, 3});
+        QCOMPARE(total(0), qint64(100));
+        QCOMPARE(total(audioTrack), qint64(100));
+        QCOMPARE(editor.project().clips.size(), size_t(4));
+        words = editor.state()["transcript"].toMap()["words"].toList();
+        QCOMPARE(words.size(), 4);
+        QCOMPARE(words[2].toMap()["text"].toString(), QString("äh"));
+        QCOMPARE(words[2].toMap()["start"].toLongLong(), qint64(50));
+        // Filler words: both go, each up to the next word.
+        editor.removeFillers();
+        words = editor.state()["transcript"].toMap()["words"].toList();
+        QCOMPARE(words.size(), 2);
+        QCOMPARE(words[1].toMap()["text"].toString(), QString("Tschüss"));
+        QCOMPARE(words[1].toMap()["start"].toLongLong(), qint64(25));
+        QCOMPARE(total(0), qint64(50));
+        QCOMPARE(total(audioTrack), qint64(50));
+        editor.removeFillers();
+        QVERIFY(editor.state()["error"].toString().contains("No filler"));
+        // One undo step each.
+        editor.undo();
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        QCOMPARE(editor.project().clip(id)->duration, qint64(150));
+    }
     void pausesAndLoudness() {
         // Cutting ranges out of a clip closes the gaps on its track only.
         Project p;

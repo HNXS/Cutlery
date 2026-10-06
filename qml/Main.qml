@@ -2255,6 +2255,123 @@ ApplicationWindow {
                                 text: "Remove pauses…"
                                 onClicked: pauseDialog.open()
                             }
+                            // Text-based editing: the clip's words; click to choose, double-click
+                            // to jump there, then cut the chosen words or every "äh" and "ähm".
+                            ColumnLayout {
+                                id: wordEditor
+                                objectName: "wordEditor"
+                                Layout.fillWidth: true
+                                spacing: 6
+                                readonly property var t: win.s.transcript || ({})
+                                readonly property var words: t.words || []
+                                // The words as text, so the choice resets only when they change.
+                                readonly property string wordsKey: (t.clipId || "") + ":" + words.map(w => w.start + w.text).join("|")
+                                property var chosen: []
+                                visible: win.selection.hasAudio === true && win.selection.reverse !== true
+                                onWordsKeyChanged: chosen = []
+                                function toggle(i) {
+                                    const next = chosen.slice();
+                                    const at = next.indexOf(i);
+                                    if (at >= 0)
+                                        next.splice(at, 1);
+                                    else
+                                        next.push(i);
+                                    chosen = next;
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    visible: wordEditor.t.status !== "ready" && wordEditor.t.status !== "running"
+                                    ComboBox {
+                                        id: wordLanguage
+                                        objectName: "wordLanguage"
+                                        Layout.fillWidth: true
+                                        model: captionDialog.languages.map(l => l.label)
+                                        currentIndex: Math.max(0, captionDialog.languages.findIndex(l => l.id === (wordEditor.t.language || "auto")))
+                                    }
+                                    Action {
+                                        objectName: "transcribeClip"
+                                        text: "Edit by text"
+                                        enabled: wordEditor.t.status !== "unavailable"
+                                        onClicked: editor.transcribeClip(captionDialog.languages[wordLanguage.currentIndex].id)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: wordEditor.t.status === "unavailable" ? wordEditor.t.missing : "Writes down what is said in this clip; then cut words by choosing them"
+                                    }
+                                }
+                                ProgressBar {
+                                    Layout.fillWidth: true
+                                    visible: wordEditor.t.status === "running"
+                                    value: wordEditor.t.progress || 0
+                                }
+                                ScrollView {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: Math.min(wordFlow.implicitHeight + 4, 220)
+                                    visible: wordEditor.t.status === "ready" && wordEditor.words.length > 0
+                                    clip: true
+                                    contentWidth: availableWidth
+                                    Flow {
+                                        id: wordFlow
+                                        width: parent.width
+                                        spacing: 3
+                                        Repeater {
+                                            // A count, not the list: chips are kept while the playhead moves.
+                                            model: wordEditor.words.length
+                                            delegate: Rectangle {
+                                                id: wordChip
+                                                required property int index
+                                                readonly property var modelData: wordEditor.words[index] || ({})
+                                                objectName: "word-" + index
+                                                readonly property bool chosen: wordEditor.chosen.indexOf(index) >= 0
+                                                readonly property bool current: win.s.playhead >= modelData.start && win.s.playhead < modelData.end
+                                                width: wordText.implicitWidth + 8
+                                                height: wordText.implicitHeight + 4
+                                                radius: 3
+                                                color: chosen ? "#7a3b33" : current ? "#28564c" : modelData.filler ? "#4a3e22" : "transparent"
+                                                signal clicked
+                                                signal doubleClicked
+                                                onClicked: wordEditor.toggle(index)
+                                                onDoubleClicked: editor.seek(modelData.start)
+                                                Label {
+                                                    id: wordText
+                                                    anchors.centerIn: parent
+                                                    text: wordChip.modelData.text
+                                                    font.strikeout: wordChip.chosen
+                                                    color: wordChip.modelData.filler ? "#e5c07b" : palette.text
+                                                }
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    onClicked: wordChip.clicked()
+                                                    onDoubleClicked: wordChip.doubleClicked()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Label {
+                                    visible: wordEditor.t.status === "ready" && wordEditor.words.length === 0
+                                    text: "No speech found in this clip."
+                                    color: win.muted
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    visible: wordEditor.t.status === "ready" && wordEditor.words.length > 0
+                                    Action {
+                                        objectName: "cutWords"
+                                        Layout.fillWidth: true
+                                        enabled: wordEditor.chosen.length > 0 && win.selection.locked !== true
+                                        text: wordEditor.chosen.length ? "Cut " + wordEditor.chosen.length + (wordEditor.chosen.length === 1 ? " word" : " words") : "Click words to cut"
+                                        onClicked: editor.cutWords(wordEditor.chosen)
+                                    }
+                                    Action {
+                                        objectName: "removeFillers"
+                                        Layout.fillWidth: true
+                                        enabled: (wordEditor.t.fillers || 0) > 0 && win.selection.locked !== true
+                                        text: "Remove " + (wordEditor.t.fillers || 0) + " “äh”"
+                                        onClicked: editor.removeFillers()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Cuts every hesitation sound (äh, ähm, hm, um, uh) the transcript contains"
+                                    }
+                                }
+                            }
                             // Beat markers for cutting to music; clips snap to them.
                             RowLayout {
                                 Layout.fillWidth: true

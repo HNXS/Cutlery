@@ -15,6 +15,15 @@ struct Cue {
 QVector<Cue> groupWords(const QVector<Cue> &words, int maxChars = 42, double pause = 0.6);
 // SubRip (SRT) cues in file order. Throws on malformed timing; an empty text yields no cues.
 QVector<Cue> parseSrt(QString text);
+// A hesitation sound rather than a word ("äh", "ähm", "uh", "um", "hmm", ...), ignoring case and
+// punctuation.
+bool isFillerWord(const QString &word);
+// The clip-local frame ranges to cut for the words `chosen` (indices into `starts`/`ends`, in
+// clip-local frames, sorted by time): each run of chosen words is cut up to the next kept
+// word's start, or to `pad` frames after its last word (within `length`) when none follows.
+QVector<QPair<qint64, qint64>> wordCutRanges(const QVector<qint64> &starts,
+                                             const QVector<qint64> &ends, QList<int> chosen,
+                                             qint64 length, qint64 pad);
 // WebVTT cues; headers, notes, styles and regions are skipped, tags and cue settings dropped.
 QVector<Cue> parseVtt(QString text);
 // Advanced SubStation Alpha (ASS/SSA) dialogue lines; override tags are dropped.

@@ -4,6 +4,7 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Edit by text (AI pack):** the inspector shows what is said in a clip; click words and cut them, or remove every “äh” and “ähm” at once. Double-click a word to jump there.
 - **Nested sequences:** Edit → Nest selected clips packs several clips into one clip that moves, trims and takes effects as a whole. Double-click it to edit what is inside, and use Back to return; Take apart puts the clips back.
 - **Find missing media at once:** when files have moved, "Find in a folder…" in the library relinks every missing file found by name in that folder or below.
 - **Start screen and preferences:** Cutlery opens with a choice of video shapes (16:9, 4K, 9:16, 4:5, 1:1), your recent projects and the autosave. Project → Preferences… sets the format of new projects, how long pictures last and how many earlier versions are kept.

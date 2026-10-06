@@ -267,6 +267,14 @@ class Editor final : public QObject {
     // clip's track and on tracks with its detached audio. One undo step.
     Q_INVOKABLE void findPauses(double thresholdDb, double minPause);
     Q_INVOKABLE void removePauses();
+    // Text-based editing: transcribes the selected clip's speech (language as for captions; see
+    // state "transcript": status none|running|ready|failed|unavailable, words with timeline
+    // start/end frames and a filler flag). cutWords cuts the chosen words (indices into those
+    // words) out of the clip and its detached audio, closing the gaps; removeFillers cuts every
+    // hesitation sound ("äh", "ähm", "um"). Each is one undo step.
+    Q_INVOKABLE void transcribeClip(const QString &language);
+    Q_INVOKABLE void cutWords(const QVariantList &indices);
+    Q_INVOKABLE void removeFillers();
     // Finds the shot changes in the selected video clip and splits it there, with any detached
     // audio, in one undo step. Sensitivity 0..1: higher finds subtler cuts.
     Q_INVOKABLE void splitAtScenes(double sensitivity = 0.5);
@@ -336,6 +344,23 @@ class Editor final : public QObject {
     QVariantMap m_follow;
     QString m_importFolder;
     QVariantMap m_reframe;
+    // The selected clip's words in clip-local frames, cached per clip, transcript and revision.
+    // Words of the run of back-to-back pieces of the selected clip's recording on its track (as
+    // cuts leave them), in timeline order; start and end are local to the word's piece.
+    struct ClipWord {
+        QString clipId, text;
+        qint64 start = 0, end = 0;
+        bool filler = false;
+    };
+    mutable struct {
+        QString clipId, path;
+        quint64 revision = 0;
+        QVector<ClipWord> words;
+    } m_words;
+    QStringList wordRun(const Clip &) const;
+    QVector<ClipWord> clipWords(const Clip &) const;
+    QVariantMap transcriptState() const;
+    void cutClipWords(const QList<int> &indices, const QString &what);
     // The timelines above the open nested sequence, outermost first, with their undo history.
     struct NestFrame {
         Project parent;

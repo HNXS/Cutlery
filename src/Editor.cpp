@@ -596,6 +596,7 @@ QVariantMap Editor::state() const {
             {"beats", m_beats},
             {"collect", m_collect},
             {"follow", m_follow},
+            {"transcript", transcriptState()},
             {"reframe", m_reframe},
             {"conform", m_conform},
             {"markers", [this] {
@@ -3806,6 +3807,193 @@ void Editor::freezeFrame(double seconds) {
     p->start(executable("ffmpeg"),
              {"-hide_banner", "-nostdin", "-v", "error", "-y", "-ss", QString::number(source, 'f', 6),
               "-i", a->path, "-map", "0:v:0", "-frames:v", "1", still});
+}
+// Text-based editing ----------------------------------------------------------------------
+QStringList Editor::wordRun(const Clip &c) const {
+    auto adjacent = [&](const Clip &x, bool before) -> const Clip * {
+        for (const auto &y : m_project.clips)
+            if (y.id != x.id && y.track == x.track && y.assetId == x.assetId && !y.reverse &&
+                (before ? y.start + y.duration == x.start : y.start == x.start + x.duration))
+                return &y;
+        return nullptr;
+    };
+    const Clip *first = &c;
+    QStringList ids{c.id};
+    while (const auto *p = adjacent(*first, true)) {
+        if (ids.contains(p->id))
+            break;
+        ids.prepend(p->id);
+        first = p;
+    }
+    const Clip *last = &c;
+    while (const auto *n = adjacent(*last, false)) {
+        if (ids.contains(n->id))
+            break;
+        ids << n->id;
+        last = n;
+    }
+    return ids;
+}
+QVector<Editor::ClipWord> Editor::clipWords(const Clip &selected) const {
+    const auto *a = m_project.asset(selected.assetId);
+    if (!a || selected.reverse)
+        return {};
+    const auto r = m_ai->result("transcribe", *a, m_captionLanguage);
+    if (r.path.isEmpty())
+        return {};
+    if (m_words.clipId == selected.id && m_words.path == r.path && m_words.revision == m_revision)
+        return m_words.words;
+    QVector<ClipWord> words;
+    try {
+        const auto cues = parseSrt(readUtf8File(r.path));
+        const double fps = double(m_project.fpsN) / m_project.fpsD;
+        for (const auto &id : wordRun(selected)) {
+            const auto &c = *m_project.clip(id);
+            const double speed = c.speed.seconds(), in = c.sourceIn.seconds();
+            for (const auto &cue : cues) {
+                const auto text = cue.text.trimmed();
+                const qint64 from = qRound64((r.start + cue.start - in) / speed * fps),
+                             to = qRound64((r.start + cue.end - in) / speed * fps);
+                if (text.isEmpty() || from < 0 || from >= c.duration)
+                    continue;
+                words.push_back({c.id, text, from, std::clamp(to, from + 1, c.duration),
+                                 isFillerWord(text)});
+            }
+        }
+    } catch (const std::exception &) {
+        words.clear();
+    }
+    m_words = {selected.id, r.path, m_revision, words};
+    return words;
+}
+QVariantMap Editor::transcriptState() const {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || !a->hasAudio)
+        return {{"status", "none"}};
+    QVariantMap result{{"clipId", c->id}, {"language", m_captionLanguage}};
+    const auto st = m_ai->status("transcribe", *a, m_captionLanguage);
+    const auto status = st["status"].toString();
+    if (status == "queued" || status == "running") {
+        result["status"] = "running";
+        result["progress"] = st["progress"].toDouble();
+        return result;
+    }
+    if (status == "failed") {
+        result["status"] = "failed";
+        result["error"] = st["error"];
+        return result;
+    }
+    if (status != "ready") {
+        result["status"] = m_ai->available("transcribe") ? "none" : "unavailable";
+        result["missing"] = m_ai->missing("transcribe");
+        return result;
+    }
+    QVariantList list;
+    int fillers = 0;
+    for (const auto &w : clipWords(*c)) {
+        const qint64 origin = m_project.clip(w.clipId)->start;
+        list << QVariantMap{{"text", w.text},
+                            {"start", origin + w.start},
+                            {"end", origin + w.end},
+                            {"filler", w.filler}};
+        fillers += w.filler;
+    }
+    result["status"] = "ready";
+    result["words"] = list;
+    result["fillers"] = fillers;
+    return result;
+}
+void Editor::transcribeClip(const QString &language) {
+    static const QRegularExpression code("^(auto|[a-z]{2,3})$");
+    if (!code.match(language).hasMatch())
+        return fail("Unknown language");
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || !a->hasAudio)
+        return fail("Select a clip with speech");
+    if (c->reverse)
+        return fail("Reversed clips cannot be edited by their words");
+    m_captionLanguage = language;
+    if (!aiCovered("transcribe", *a, c)) {
+        if (!m_ai->available("transcribe"))
+            return fail(m_ai->missing("transcribe") + " Download the AI pack next to Cutlery.exe.");
+        startAi("transcribe", *a, c);
+        m_status = "Recognising speech…";
+    }
+    emit changed();
+}
+void Editor::cutClipWords(const QList<int> &indices, const QString &what) {
+    const auto *c = m_project.clip(m_selected);
+    if (!c)
+        return fail("Select the clip first");
+    const auto words = clipWords(*c);
+    if (words.isEmpty())
+        return fail("Transcribe the clip first");
+    // The ranges of each piece, from that piece's own words.
+    const double fps = double(m_project.fpsN) / m_project.fpsD;
+    QVector<QPair<QString, QVector<QPair<qint64, qint64>>>> cuts;
+    const auto run = wordRun(*c);
+    for (const auto &id : run) {
+        QVector<qint64> starts, ends;
+        QList<int> chosen;
+        for (int i = 0; i < words.size(); ++i)
+            if (words[i].clipId == id) {
+                if (indices.contains(i))
+                    chosen << int(starts.size());
+                starts << words[i].start;
+                ends << words[i].end;
+            }
+        // A piece's last word is cut to the piece's end when the speech goes on in the next.
+        const qint64 length = m_project.clip(id)->duration;
+        const auto ranges = wordCutRanges(starts, ends, chosen, length,
+                                          id == run.last() ? qRound64(0.15 * fps) : length);
+        if (!ranges.isEmpty())
+            cuts.push_back({id, ranges});
+    }
+    if (cuts.isEmpty())
+        return fail("Choose the words to cut");
+    const auto selected = c->id;
+    qint64 removed = 0;
+    if (!mutate([&](Project &p) {
+            // Later pieces first: cutting one moves those after it.
+            for (int i = int(cuts.size()) - 1; i >= 0; --i) {
+                const auto linked = p.linkedClips(cuts[i].first);
+                removed += p.cutRanges(cuts[i].first, cuts[i].second);
+                for (const auto &other : linked)
+                    p.cutRanges(other, cuts[i].second);
+            }
+        }))
+        return;
+    // Keep a piece of the recording selected so the transcript stays on show.
+    if (!m_project.clip(selected))
+        for (const auto &x : m_project.clips)
+            if (x.assetId == c->assetId)
+                m_selected = x.id;
+    m_status = QString("Cut %1 (%2 s)")
+                   .arg(what)
+                   .arg(frameTime(removed, m_project.fpsN, m_project.fpsD).seconds(), 0, 'f', 1);
+    emit changed();
+}
+void Editor::cutWords(const QVariantList &indices) {
+    QList<int> chosen;
+    for (const auto &v : indices)
+        chosen << v.toInt();
+    cutClipWords(chosen, chosen.size() == 1 ? QString("1 word") : QString("%1 words").arg(chosen.size()));
+}
+void Editor::removeFillers() {
+    const auto *c = m_project.clip(m_selected);
+    if (!c)
+        return fail("Select the clip first");
+    QList<int> chosen;
+    const auto words = clipWords(*c);
+    for (int i = 0; i < words.size(); ++i)
+        if (words[i].filler)
+            chosen << i;
+    if (chosen.isEmpty())
+        return fail(words.isEmpty() ? "Transcribe the clip first" : "No filler words found");
+    cutClipWords(chosen, chosen.size() == 1 ? QString("1 filler word")
+                                            : QString("%1 filler words").arg(chosen.size()));
 }
 void Editor::removePauses() {
     if (m_pauses.status != "ready" || m_pauses.revision != m_revision || m_pauses.ranges.isEmpty())
