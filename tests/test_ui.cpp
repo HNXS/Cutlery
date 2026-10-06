@@ -679,6 +679,11 @@ class UiTest : public QObject {
         QCOMPARE(editor.project().clips.last().effect, QString("adjust"));
         QTRY_VERIFY(findItem(window->contentItem(), "adjustStrength")->isVisible());
         QVERIFY(findItem(window->contentItem(), "lookSection")->isVisible());
+        // Layouts need two selected clips; "Full size" one.
+        QVERIFY(!findItem(window->contentItem(), "arrange-side")->isEnabled());
+        QVERIFY(findItem(window->contentItem(), "arrange-full")->isEnabled());
+        editor.toggleSelect(second);
+        QTRY_VERIFY(findItem(window->contentItem(), "arrange-side")->isEnabled());
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void exportDialog() {

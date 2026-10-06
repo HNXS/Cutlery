@@ -1446,6 +1446,81 @@ void Editor::addEffect(const QString &effect) {
     });
     select(id);
 }
+void Editor::arrange(const QString &layout) {
+    static const QStringList layouts{"side",   "stack",  "grid",   "pip-tl",    "pip-tr",
+                                     "pip-bl", "pip-br", "presenter", "full"};
+    if (!layouts.contains(layout))
+        return fail("Unknown layout");
+    // Pictures in the selection, lowest track first, then by start.
+    QVector<const Clip *> clips;
+    for (const auto &id : selection()) {
+        const auto *c = m_project.clip(id);
+        const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+        if (c && a && a->kind != "audio" && !c->audioOnly)
+            clips << c;
+    }
+    std::sort(clips.begin(), clips.end(), [](const Clip *a, const Clip *b) {
+        return a->track != b->track ? a->track < b->track : a->start < b->start;
+    });
+    const int need = layout == "full" ? 1 : 2, most = layout == "grid" ? 4 : layout == "full" ? 64 : 2;
+    if (clips.size() < need)
+        return fail(layout == "full" ? "Select the pictures to show full size"
+                                     : "Select two pictures (Ctrl+click) to arrange");
+    if (clips.size() > most)
+        return fail(QString("This layout takes at most %1 pictures").arg(most));
+    const double W = m_project.width, H = m_project.height, aspect = W / H;
+    // Slots as centre and size in canvas fractions; each picture fits inside its slot.
+    struct Slot {
+        double cx, cy, w, h;
+        bool round = false;
+    };
+    QVector<Slot> areas;
+    const double small = 0.3, margin = 0.03;
+    if (layout == "side")
+        areas = {{0.25, 0.5, 0.5, 1}, {0.75, 0.5, 0.5, 1}};
+    else if (layout == "stack")
+        areas = {{0.5, 0.25, 1, 0.5}, {0.5, 0.75, 1, 0.5}};
+    else if (layout == "grid")
+        areas = {{0.25, 0.25, 0.5, 0.5}, {0.75, 0.25, 0.5, 0.5}, {0.25, 0.75, 0.5, 0.5}, {0.75, 0.75, 0.5, 0.5}};
+    else if (layout.startsWith("pip")) {
+        const bool right = layout.endsWith('r'), bottom = layout[4] == 'b';
+        const double w = small, h = small; // fits inside; the picture keeps its shape
+        areas = {{0.5, 0.5, 1, 1},
+                 {right ? 1 - margin - w / 2 : margin + w / 2,
+                  bottom ? 1 - margin * aspect - h / 2 : margin * aspect + h / 2, w, h}};
+    } else if (layout == "presenter") {
+        const double d = 0.24; // the round presenter's diameter, as a fraction of the width
+        areas = {{0.02 + 0.37, 0.5, 0.74, 0.9},
+                 {1 - 0.02 - d / 2, 1 - 0.05 - d * aspect / 2, d, d * aspect, true}};
+    }
+    mutate([&](Project &p) {
+        for (int i = 0; i < clips.size(); ++i) {
+            auto *c = p.clip(clips[i]->id);
+            p.requireEditable(c->track);
+            for (const auto &k : {"scale", "x", "y"})
+                c->keyframes.remove(k);
+            if (layout == "full") {
+                c->scale = 1;
+                c->x = c->y = 0;
+                if (c->shape == "circle")
+                    c->shape = "rect";
+                continue;
+            }
+            const auto &slot = areas[i];
+            if (slot.round)
+                c->shape = "circle";
+            else if (c->shape == "circle")
+                c->shape = "rect";
+            // The picture's size at scale 1, then the scale that fits it into the slot.
+            const auto fit = p.pictureSize(*c, W, H);
+            c->scale = std::clamp(std::min(slot.w * W / fit.width(), slot.h * H / fit.height()), 0.1, 5.);
+            c->x = slot.cx - 0.5;
+            c->y = slot.cy - 0.5;
+        }
+    });
+    m_status = "Arranged " + QString::number(clips.size()) + " pictures";
+    emit changed();
+}
 void Editor::addGraphic(const QString &kind) {
     if (!graphicKinds().contains(kind))
         return fail("Unknown shape");

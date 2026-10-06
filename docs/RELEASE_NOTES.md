@@ -4,6 +4,7 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Layouts:** select two to four clips and arrange them side by side, stacked, as a grid, picture in picture or in the presenter layout (screen large, you round in the corner) with one click.
 - **Time-lapse up to 100×:** speed now goes from 0.1× to 100×, and fast clips show exactly the right moment of the source.
 - **Icons:** check mark, cross, warning, info, star, heart, light bulb, mouse pointer and mouse click in the Add tab, sharp at any size and in any colour.
 - **Text styles:** save a title's look (font, colours, outline, animation …) under a name and apply it to other titles in any project.

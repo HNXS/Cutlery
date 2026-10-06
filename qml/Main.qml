@@ -991,144 +991,178 @@ ApplicationWindow {
                             }
                         }
                         // Titles, graphics, effect areas and sounds.
-                        ColumnLayout {
-                            spacing: 12
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Action {
-                                    text: "+ Add title"
+                        // Scrolls when the window is too low for all of it.
+                        ScrollView {
+                            objectName: "addTabScroll"
+                            clip: true
+                            contentWidth: availableWidth
+                            ColumnLayout {
+                                width: parent.width
+                                spacing: 12
+                                RowLayout {
                                     Layout.fillWidth: true
-                                    onClicked: editor.addTitle()
-                                }
-                                // Sound effects: clicks, typing and swooshes for tutorials and screen videos.
-                                Action {
-                                    objectName: "openSounds"
-                                    text: "♪ Sounds…"
-                                    Layout.fillWidth: true
-                                    onClicked: soundDialog.open()
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Sound effects: mouse clicks, keyboard typing and whooshes, free to use"
-                                }
-                            }
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Action {
-                                    objectName: "addLowerThird"
-                                    text: "+ Lower third"
-                                    Layout.fillWidth: true
-                                    onClicked: editor.addTitleTemplate("lowerThird")
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Name and role in the lower left; slides in, fades out"
-                                }
-                                Action {
-                                    objectName: "addTitleCard"
-                                    text: "+ Title card"
-                                    Layout.fillWidth: true
-                                    onClicked: editor.addTitleTemplate("titleCard")
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "A large centred heading with a subtitle, e.g. for chapters"
-                                }
-                            }
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Action {
-                                    objectName: "addBlurArea"
-                                    text: "+ Blur area"
-                                    Layout.fillWidth: true
-                                    onClicked: editor.addEffect("blur")
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Blurs whatever lower tracks show inside a rectangle, e.g. private data in a screen recording"
-                                }
-                                Action {
-                                    objectName: "addMosaicArea"
-                                    text: "+ Mosaic area"
-                                    Layout.fillWidth: true
-                                    onClicked: editor.addEffect("pixelate")
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Pixelates whatever lower tracks show inside a rectangle, e.g. a face"
-                                }
-                                // Shapes for tutorials and explainers.
-                                Action {
-                                    objectName: "addShape"
-                                    text: "+ Shape ▾"
-                                    Layout.fillWidth: true
-                                    onClicked: shapeMenu.popup()
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Arrow, circle, speech bubble, box or line"
-                                    Menu {
-                                        id: shapeMenu
-                                        MenuItem {
-                                            objectName: "addGraphic-arrow"
-                                            text: "➜  Arrow"
-                                            onTriggered: editor.addGraphic("arrow")
-                                        }
-                                        MenuItem {
-                                            objectName: "addGraphic-ellipse"
-                                            text: "◯  Circle"
-                                            onTriggered: editor.addGraphic("ellipse")
-                                        }
-                                        MenuItem {
-                                            objectName: "addGraphic-bubble"
-                                            text: "🗨  Speech bubble"
-                                            onTriggered: editor.addGraphic("bubble")
-                                        }
-                                        MenuItem {
-                                            objectName: "addGraphic-rectangle"
-                                            text: "▭  Box"
-                                            onTriggered: editor.addGraphic("rectangle")
-                                        }
-                                        MenuItem {
-                                            objectName: "addGraphic-line"
-                                            text: "―  Line"
-                                            onTriggered: editor.addGraphic("line")
-                                        }
-                                    }
-                                }
-                            }
-                            // Icons for tutorials: a click goes on at the playhead, coloured and sized
-                            // like shapes.
-                            Caption {
-                                text: "ICONS"
-                            }
-                            GridLayout {
-                                Layout.fillWidth: true
-                                columns: 5
-                                columnSpacing: 4
-                                rowSpacing: 4
-                                Repeater {
-                                    model: [
-                                        { kind: "check", glyph: "✔", name: "Check mark" },
-                                        { kind: "cross", glyph: "✖", name: "Cross" },
-                                        { kind: "warning", glyph: "⚠", name: "Warning" },
-                                        { kind: "info", glyph: "ℹ", name: "Info" },
-                                        { kind: "star", glyph: "★", name: "Star" },
-                                        { kind: "heart", glyph: "♥", name: "Heart" },
-                                        { kind: "lightbulb", glyph: "💡", name: "Light bulb (tip)" },
-                                        { kind: "cursor", glyph: "↖", name: "Mouse pointer" },
-                                        { kind: "click", glyph: "✳", name: "Mouse click" }
-                                    ]
-                                    ToolButton {
-                                        required property var modelData
-                                        objectName: "addIcon-" + modelData.kind
+                                    Action {
+                                        text: "+ Add title"
                                         Layout.fillWidth: true
-                                        text: modelData.glyph
-                                        font.pixelSize: 18
-                                        onClicked: editor.addGraphic(modelData.kind)
+                                        onClicked: editor.addTitle()
+                                    }
+                                    // Sound effects: clicks, typing and swooshes for tutorials and screen videos.
+                                    Action {
+                                        objectName: "openSounds"
+                                        text: "♪ Sounds…"
+                                        Layout.fillWidth: true
+                                        onClicked: soundDialog.open()
                                         ToolTip.visible: hovered
-                                        ToolTip.text: modelData.name
+                                        ToolTip.text: "Sound effects: mouse clicks, keyboard typing and whooshes, free to use"
                                     }
                                 }
-                            }
-                            Action {
-                                objectName: "addAdjustment"
-                                text: "+ Adjustment layer"
-                                Layout.fillWidth: true
-                                onClicked: editor.addEffect("adjust")
-                                ToolTip.visible: hovered
-                                ToolTip.text: "Its colour and look change everything on the tracks below while it runs, e.g. one grade for a whole scene"
-                            }
-                            Item {
-                                Layout.fillHeight: true
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Action {
+                                        objectName: "addLowerThird"
+                                        text: "+ Lower third"
+                                        Layout.fillWidth: true
+                                        onClicked: editor.addTitleTemplate("lowerThird")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Name and role in the lower left; slides in, fades out"
+                                    }
+                                    Action {
+                                        objectName: "addTitleCard"
+                                        text: "+ Title card"
+                                        Layout.fillWidth: true
+                                        onClicked: editor.addTitleTemplate("titleCard")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "A large centred heading with a subtitle, e.g. for chapters"
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Action {
+                                        objectName: "addBlurArea"
+                                        text: "+ Blur area"
+                                        Layout.fillWidth: true
+                                        onClicked: editor.addEffect("blur")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Blurs whatever lower tracks show inside a rectangle, e.g. private data in a screen recording"
+                                    }
+                                    Action {
+                                        objectName: "addMosaicArea"
+                                        text: "+ Mosaic area"
+                                        Layout.fillWidth: true
+                                        onClicked: editor.addEffect("pixelate")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Pixelates whatever lower tracks show inside a rectangle, e.g. a face"
+                                    }
+                                    // Shapes for tutorials and explainers.
+                                    Action {
+                                        objectName: "addShape"
+                                        text: "+ Shape ▾"
+                                        Layout.fillWidth: true
+                                        onClicked: shapeMenu.popup()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Arrow, circle, speech bubble, box or line"
+                                        Menu {
+                                            id: shapeMenu
+                                            MenuItem {
+                                                objectName: "addGraphic-arrow"
+                                                text: "➜  Arrow"
+                                                onTriggered: editor.addGraphic("arrow")
+                                            }
+                                            MenuItem {
+                                                objectName: "addGraphic-ellipse"
+                                                text: "◯  Circle"
+                                                onTriggered: editor.addGraphic("ellipse")
+                                            }
+                                            MenuItem {
+                                                objectName: "addGraphic-bubble"
+                                                text: "🗨  Speech bubble"
+                                                onTriggered: editor.addGraphic("bubble")
+                                            }
+                                            MenuItem {
+                                                objectName: "addGraphic-rectangle"
+                                                text: "▭  Box"
+                                                onTriggered: editor.addGraphic("rectangle")
+                                            }
+                                            MenuItem {
+                                                objectName: "addGraphic-line"
+                                                text: "―  Line"
+                                                onTriggered: editor.addGraphic("line")
+                                            }
+                                        }
+                                    }
+                                }
+                                // Layouts: arrange the selected pictures (Ctrl+click several) at once.
+                                Caption {
+                                    text: "ARRANGE SELECTED"
+                                }
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 2
+                                    columnSpacing: 4
+                                    rowSpacing: 4
+                                    Repeater {
+                                        model: [
+                                            { id: "side", label: "▯▯ Side by side", tip: "Two pictures next to each other" },
+                                            { id: "stack", label: "▭ Stacked", tip: "One above the other, e.g. for 9:16" },
+                                            { id: "grid", label: "⊞ 2 × 2", tip: "Up to four pictures in a grid" },
+                                            { id: "presenter", label: "◐ Presenter", tip: "Screen large on the left, the presenter round in the lower right" },
+                                            { id: "pip-br", label: "▣ Picture in picture", tip: "The lower track full, the other small in the lower right corner" },
+                                            { id: "full", label: "□ Full size", tip: "Back to full size" }
+                                        ]
+                                        Action {
+                                            required property var modelData
+                                            objectName: "arrange-" + modelData.id
+                                            Layout.fillWidth: true
+                                            text: modelData.label
+                                            enabled: (win.s.selectedIds || []).length > (modelData.id === "full" ? 0 : 1)
+                                            onClicked: editor.arrange(modelData.id)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: modelData.tip + ". Select the clips first (Ctrl+click)."
+                                        }
+                                    }
+                                }
+                                // Icons for tutorials: a click goes on at the playhead, coloured and sized
+                                // like shapes.
+                                Caption {
+                                    text: "ICONS"
+                                }
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 5
+                                    columnSpacing: 4
+                                    rowSpacing: 4
+                                    Repeater {
+                                        model: [
+                                            { kind: "check", glyph: "✔", name: "Check mark" },
+                                            { kind: "cross", glyph: "✖", name: "Cross" },
+                                            { kind: "warning", glyph: "⚠", name: "Warning" },
+                                            { kind: "info", glyph: "ℹ", name: "Info" },
+                                            { kind: "star", glyph: "★", name: "Star" },
+                                            { kind: "heart", glyph: "♥", name: "Heart" },
+                                            { kind: "lightbulb", glyph: "💡", name: "Light bulb (tip)" },
+                                            { kind: "cursor", glyph: "↖", name: "Mouse pointer" },
+                                            { kind: "click", glyph: "✳", name: "Mouse click" }
+                                        ]
+                                        ToolButton {
+                                            required property var modelData
+                                            objectName: "addIcon-" + modelData.kind
+                                            Layout.fillWidth: true
+                                            text: modelData.glyph
+                                            font.pixelSize: 18
+                                            onClicked: editor.addGraphic(modelData.kind)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: modelData.name
+                                        }
+                                    }
+                                }
+                                Action {
+                                    objectName: "addAdjustment"
+                                    text: "+ Adjustment layer"
+                                    Layout.fillWidth: true
+                                    onClicked: editor.addEffect("adjust")
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Its colour and look change everything on the tracks below while it runs, e.g. one grade for a whole scene"
+                                }
                             }
                         }
                     }

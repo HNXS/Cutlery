@@ -116,6 +116,11 @@ class Editor final : public QObject {
     Q_INVOKABLE void addEffect(const QString &effect);
     // Adds a shape (see graphicKinds()) at the playhead on the top track.
     Q_INVOKABLE void addGraphic(const QString &kind);
+    // Arranges the selected pictures (lowest track first) on the canvas, in one undo step:
+    // "side" (side by side), "stack" (one above the other), "grid" (2 × 2), "pip-tl", "pip-tr",
+    // "pip-bl", "pip-br" (the lowest full, the others small in that corner), "presenter" (the
+    // lowest large on the left, the next round in the lower right) or "full" (all full size).
+    Q_INVOKABLE void arrange(const QString &layout);
     Q_INVOKABLE void select(const QString &id);
     Q_INVOKABLE void seek(qint64 frame);
     Q_INVOKABLE void setClip(const QString &key, const QVariant &value);

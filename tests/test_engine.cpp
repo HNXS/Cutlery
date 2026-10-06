@@ -4668,6 +4668,77 @@ class EngineTest : public QObject {
         editor.addGraphic("unicorn");
         QVERIFY(editor.state()["error"].toString().contains("Unknown"));
     }
+    void layouts() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        QList<QUrl> files;
+        for (const auto &[name, colour] : {std::pair{"red.png", Qt::red}, std::pair{"blue.png", Qt::blue}}) {
+            QImage image(320, 180, QImage::Format_RGB32);
+            image.fill(colour);
+            QVERIFY(image.save(dir.filePath(name)));
+            files << QUrl::fromLocalFile(dir.filePath(name));
+        }
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia(files);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        QString red, blue;
+        for (const auto &a : editor.project().assets)
+            (a.name == "red.png" ? red : blue) = a.id;
+        editor.addAsset(red, 0);
+        const auto back = editor.state()["selectedId"].toString();
+        editor.seek(0);
+        editor.addAsset(blue, 1);
+        const auto front = editor.state()["selectedId"].toString();
+        editor.arrange("side");
+        QVERIFY(editor.state()["error"].toString().contains("two"));
+        editor.select(back);
+        editor.toggleSelect(front);
+        auto image = [&]() {
+            RenderOptions options;
+            options.audio = false;
+            options.from = 5;
+            options.to = 6;
+            const auto plan = compileRender(editor.project(), dir.filePath("work"), 320, 180, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            return out;
+        };
+        auto isRed = [](QColor c) { return c.red() > 200 && c.blue() < 60; };
+        auto isBlue = [](QColor c) { return c.blue() > 200 && c.red() < 60; };
+        // Side by side: the lower track on the left.
+        editor.arrange("side");
+        auto out = image();
+        QVERIFY(isRed(out.pixelColor(80, 90)) && isBlue(out.pixelColor(240, 90)));
+        QCOMPARE(editor.project().clip(front)->scale, 0.5);
+        // Picture in picture, lower right: the background stays full.
+        editor.arrange("pip-br");
+        out = image();
+        QVERIFY(isRed(out.pixelColor(20, 20)) && isRed(out.pixelColor(160, 90)));
+        QVERIFY2(isBlue(out.pixelColor(270, 140)), qPrintable(out.pixelColor(270, 140).name()));
+        // Presenter: round picture in the lower right, the screen large on the left.
+        editor.arrange("presenter");
+        QCOMPARE(editor.project().clip(front)->shape, QString("circle"));
+        out = image();
+        const double cx = (1 - 0.02 - 0.12) * 320, cy = (1 - 0.05 - 0.12 * 16 / 9.) * 180;
+        QVERIFY2(isBlue(out.pixelColor(int(cx), int(cy))), qPrintable(out.pixelColor(int(cx), int(cy)).name()));
+        QVERIFY(isRed(out.pixelColor(110, 90)));
+        // One step to undo; "full" puts everything back to full size.
+        editor.undo();
+        QCOMPARE(editor.project().clip(front)->shape, QString("rect"));
+        editor.arrange("full");
+        QCOMPARE(editor.project().clip(front)->scale, 1.);
+        QCOMPARE(editor.project().clip(front)->x, 0.);
+        editor.arrange("hexagon");
+        QVERIFY(editor.state()["error"].toString().contains("Unknown"));
+    }
     void curvesSelectiveAndAutoColour() {
         QVERIFY(validCurve("0/0 0.5/0.6 1/1") && !validCurve("0/0") && !validCurve("0.5/0 0.2/1") &&
                 !validCurve("0/0 1/1.2") && !validCurve("a/b c/d"));
