@@ -1,5 +1,27 @@
 # Validation record
 
+## Windows portable build — 2026-10-06, adjustment layers, text styles, icons (0.6 development)
+
+[GitHub Actions run 37470489904](https://github.com/HNXS/Cutlery/actions/runs/37470489904) on commit `3d31c1bf17e234a7a01bb6b4576af87d9a34ef10` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine tests:**
+  - `adjustmentLayers`:
+    - an adjustment layer greys the picture below only while it runs;
+    - at half strength it changes the colour by half;
+    - it is saved, and unknown effects are refused.
+  - `textStylesKit`:
+    - a title's style is saved and applied to two titles in one undo step;
+    - saving under the same name replaces it;
+    - styles survive a restart and can be removed.
+  - `builtInIcons`:
+    - all nine icons render square and filled in their colour;
+    - the warning sign's exclamation mark is cut out.
+- **Interface:**
+  - a style is saved through its dialog and applied from the list;
+  - an adjustment layer from the Add tab shows its strength and the look controls.
+
 ## Windows portable build — 2026-10-06, edit by text, filler words, curves, selective and auto colour (0.6 development)
 
 [GitHub Actions run 37457382153](https://github.com/HNXS/Cutlery/actions/runs/37457382153) on commit `f6fcd9304f343eac669eba32884fc80c3355b3aa` passed every step.
