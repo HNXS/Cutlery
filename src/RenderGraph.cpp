@@ -822,6 +822,10 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                      .arg(p.fpsD)
                      .arg(p.fpsN)
                      .arg(l0 + base);
+            if (c.cropLeft > 0 || c.cropRight > 0 || c.cropTop > 0 || c.cropBottom > 0)
+                t += QString(",crop=iw*%1:ih*%2:iw*%3:ih*%4")
+                         .arg(num(1 - c.cropLeft - c.cropRight), num(1 - c.cropTop - c.cropBottom),
+                              num(c.cropLeft), num(c.cropTop));
             if (c.crop > 0)
                 t += QString(",crop=iw*(1-2*%1):ih*(1-2*%1)").arg(num(c.crop));
             if (c.shape == "circle")
@@ -865,6 +869,8 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                      .arg(h);
         if (c.flip)
             f += ",hflip";
+        if (c.flipVertical)
+            f += ",vflip";
         appendLook(f, c, w);
         // Style effects. Times in the chain are clip-local frames plus the handle.
         const double fxk = c.fxStrength;
@@ -938,7 +944,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                          QString(",scale=%1:%2,setsar=1%3,format=gray[matte%4]")
                              .arg(w)
                              .arg(h)
-                             .arg(c.flip ? ",hflip" : "")
+                             .arg(QString(c.flip ? ",hflip" : "") + (c.flipVertical ? ",vflip" : ""))
                              .arg(id);
             f = QString("[pic%1][matte%1]alphamerge").arg(id);
         } else if (c.chromaKey) {
@@ -950,6 +956,20 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                 f += ",despill=type=green,format=rgba";
             else if (key.blue() > key.red() && key.blue() > key.green())
                 f += ",despill=type=blue,format=rgba";
+        }
+        if (matte.path.isEmpty() && !c.lumaKey.isEmpty()) {
+            // Keys out pixels whose brightness is within the tolerance of black or white. The
+            // key multiplies the alpha the picture already has (transparent images, colour key).
+            const auto id = QString::number(serial++);
+            nodes << f + QString(",format=yuva444p,split=3[lk%1a][lk%1b][lk%1c]").arg(id);
+            nodes << QString("[lk%1a]lumakey=threshold=%2:tolerance=%3:softness=%4,"
+                             "alphaextract[lk%1k]")
+                         .arg(id)
+                         .arg(c.lumaKey == "light" ? 1 : 0)
+                         .arg(num(c.lumaTolerance), num(c.lumaSoftness));
+            nodes << QString("[lk%1b]alphaextract[lk%1o]").arg(id);
+            nodes << QString("[lk%1o][lk%1k]blend=all_mode=multiply[lk%1m]").arg(id);
+            f = QString("[lk%1c][lk%1m]alphamerge,format=rgba").arg(id);
         }
         // Each still layer (mask, decoration) is a looped image retimed to the clip's frames.
         auto stillInput = [&](const QImage &image, const QString &kind) {
@@ -1054,16 +1074,40 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         return QString("x=(W-w)/2+%1*W+(%3):y=(H-h)/2+%2*H+(%4)")
             .arg(num(c.x), num(c.y), num(shift.x()), num(shift.y()));
     };
-    // Composites a zero-based stream onto the picture for window frames [place, place + length).
+    // Composites a zero-based stream onto the picture for window frames [place, place + length),
+    // normally or with a blend mode (see blendModes()).
     auto composite = [&](const QString &stream, const QString &position, qint64 place,
-                         qint64 length) {
+                         qint64 length, const QString &blend = {}) {
         const auto id = QString::number(serial++);
         nodes << stream + QString(",setpts=PTS+%1[v%2]").arg(place).arg(id);
         const QString next = "mix" + id;
-        nodes << QString("[%1][v%2]overlay=%3:eof_action=pass:repeatlast=0:format=auto:"
-                         "enable='gte(t,%4)*lt(t,%5)'[%6]")
-                     .arg(visual, id, position, num(secs(place) - half),
-                          num(secs(place + length) - half), next);
+        const auto enable = QString("enable='gte(t,%1)*lt(t,%2)'")
+                                .arg(num(secs(place) - half), num(secs(place + length) - half));
+        if (blend.isEmpty()) {
+            nodes << QString("[%1][v%2]overlay=%3:eof_action=pass:repeatlast=0:format=auto:%4[%5]")
+                         .arg(visual, id, position, enable, next);
+            visual = next;
+            return;
+        }
+        // The picture is placed on a transparent canvas; its colours are blended with the
+        // picture below by the mode, and its alpha (shape, keys, opacity, fades) decides where
+        // and how much of the blended result shows.
+        nodes << QString("color=c=black@0.0:s=%1x%2:r=%3,trim=end_frame=%4,format=rgba[bc%5]")
+                     .arg(width)
+                     .arg(height)
+                     .arg(fps)
+                     .arg(r.frames)
+                     .arg(id);
+        nodes << QString("[bc%1][v%1]overlay=%2:eof_action=pass:repeatlast=0:format=auto:%3,"
+                         "format=gbrap,split[bl%1][ba%1]")
+                     .arg(id, position, enable);
+        nodes << QString("[%1]split[bd%2][bk%2]").arg(visual, id);
+        nodes << QString("[bd%1]format=gbrap[bg%1]").arg(id);
+        nodes << QString("[bg%1][bl%1]blend=all_mode=%2:%3[bx%1]").arg(id, blend, enable);
+        nodes << QString("[ba%1]alphaextract[bm%1]").arg(id);
+        nodes << QString("[bx%1][bm%1]alphamerge[by%1]").arg(id);
+        nodes << QString("[bk%1][by%1]overlay=0:0:eof_action=pass:repeatlast=0:format=auto:%2[%3]")
+                     .arg(id, enable, next);
         visual = next;
     };
     QVector<bool> emitted(clips.size());
@@ -1195,7 +1239,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                     x = QString("'%1-(%1+w)*pow(max(0,1-%2/0.45),3)'").arg(px).arg(local);
                 }
                 composite(f + ",setpts=PTS-STARTPTS", QString("x=%1:y=%2").arg(x).arg(py),
-                          visibleStart - from, visibleEnd - visibleStart);
+                          visibleStart - from, visibleEnd - visibleStart, c.blendMode);
                 continue;
             }
             if (n.title && QStringList{"rise", "pop", "fly"}.contains(c.textAnimation) &&
@@ -1277,7 +1321,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                               QString("x=%1:y=%2")
                                   .arg(qRound(c.x * width))
                                   .arg(top + qRound(c.y * height)),
-                              visibleStart - from, visibleEnd - visibleStart);
+                              visibleStart - from, visibleEnd - visibleStart, c.blendMode);
                     continue;
                 }
             }
@@ -1371,7 +1415,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                               QString("x=%1:y=%2")
                                   .arg(qRound(c.x * width))
                                   .arg(top + qRound(c.y * height)),
-                              visibleStart - from, visibleEnd - visibleStart);
+                              visibleStart - from, visibleEnd - visibleStart, c.blendMode);
                     continue;
                 }
             }
@@ -1408,13 +1452,13 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                         f += QString(",fade=t=out:st=%1:d=%2:alpha=1").arg(num(d - fd), num(fd));
                     }
                     composite(f + ",setpts=PTS-STARTPTS", overlayPosition(c, l0),
-                              visibleStart - from, visibleEnd - visibleStart);
+                              visibleStart - from, visibleEnd - visibleStart, c.blendMode);
                     continue;
                 }
             }
             composite(videoChain(n, visibleStart - c.start, visibleEnd - c.start),
                       overlayPosition(c, from - c.start), visibleStart - from,
-                      visibleEnd - visibleStart);
+                      visibleEnd - visibleStart, c.blendMode);
             continue;
         }
         // Each member is placed on its own transparent canvas and joined with xfade.

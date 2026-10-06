@@ -1,5 +1,24 @@
 # Validation record
 
+## Windows portable build — 2026-10-06, blend modes, luma key, edge crop, TXT captions (0.6 development)
+
+[GitHub Actions run 37526553602](https://github.com/HNXS/Cutlery/actions/runs/37526553602) on commit `07dc295541b76ae8106ae7ebacfdfe6a6fbcb201` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine tests:**
+  - `cropFlipBlendAndLumaKey`:
+    - cropping single edges changes the picture's shape, and the picture is fitted with that shape;
+    - upside down, alone and together with flip;
+    - multiply and screen give the expected colours, also at half opacity and with keyframed scale;
+    - the luma key removes black or white, and a transparent part of the image stays transparent;
+    - the settings are saved, invalid values are refused, and the opposite crop edge gives way in the editor.
+  - `plainTextCaptions`: a text file becomes captions, one per line, with long lines split after sentences, at most two lines of 42 characters, timed for reading and placed at the playhead.
+  - `recentProjectsAndBackups`: project versions keep their order even when saved in the same millisecond, or when a version carries a later time.
+- **Interface:** the blend-mode list, the brightness key with its sliders, and "Upside down".
+
+The previous run on this PR ([run 37525374969](https://github.com/HNXS/Cutlery/actions/runs/37525374969)) failed in `recentProjectsAndBackups`. It was the intermittent failure also seen on PRs 25 and 26: two saves in the same millisecond were listed in the wrong order. That is fixed in this PR.
+
 ## Windows portable build — 2026-10-06, GIF, still frames, OTIO and EDL (0.6 development)
 
 [GitHub Actions run 37520964820](https://github.com/HNXS/Cutlery/actions/runs/37520964820) on commit `1c1f9b0bbe0f8dc6a565a6123a130f47d87bb278` passed every step on its first attempt.

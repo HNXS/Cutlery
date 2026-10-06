@@ -132,8 +132,58 @@ QVector<Cue> parseAss(QString text) {
     std::stable_sort(cues.begin(), cues.end(), [](const Cue &x, const Cue &y) { return x.start < y.start; });
     return cues;
 }
+QVector<Cue> parseTxt(QString text, int maxChars) {
+    if (text.startsWith(QChar(0xfeff)))
+        text.remove(0, 1);
+    text.replace("\r\n", "\n").replace('\r', '\n');
+    QVector<Cue> cues;
+    double clock = 0;
+    auto add = [&](const QStringList &words) {
+        if (words.isEmpty())
+            return;
+        auto line = words.join(' ');
+        if (line.size() > maxChars) {
+            // Two lines, broken at the space nearest the middle.
+            int best = -1;
+            for (int i = 0; i < line.size(); ++i)
+                if (line[i] == ' ' && (best < 0 || std::abs(i - line.size() / 2) <
+                                                       std::abs(best - line.size() / 2)))
+                    best = i;
+            if (best > 0)
+                line[best] = '\n';
+        }
+        const double seconds = std::clamp(words.join(' ').size() / 15.0, 1.5, 7.0);
+        cues.push_back({clock, clock + seconds, line, {}});
+        clock += seconds;
+    };
+    for (const auto &raw : text.split('\n')) {
+        const auto words = raw.simplified().split(' ', Qt::SkipEmptyParts);
+        QStringList part;
+        int length = -1;
+        for (const auto &word : words) {
+            if (!part.isEmpty() && length + 1 + word.size() > 2 * maxChars) {
+                add(part);
+                part.clear();
+                length = -1;
+            }
+            part << word;
+            length += 1 + word.size();
+            // A sentence that fills a good part of the caption ends it.
+            static const QString ends = ".!?…";
+            if (length >= maxChars / 2 && ends.contains(word.back())) {
+                add(part);
+                part.clear();
+                length = -1;
+            }
+        }
+        add(part);
+    }
+    return cues;
+}
 QVector<Cue> parseSubtitles(const QString &text, const QString &suffix) {
     const auto kind = suffix.toLower();
+    if (kind == "txt")
+        return parseTxt(text);
     if (kind == "vtt")
         return parseVtt(text);
     if (kind == "ass" || kind == "ssa")

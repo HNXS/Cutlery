@@ -35,6 +35,13 @@ const Asset *Project::asset(const QString &id) const {
             return &a;
     return nullptr;
 }
+const QVector<QPair<QString, QString>> &blendModes() {
+    static const QVector<QPair<QString, QString>> modes{
+        {"multiply", "Multiply"}, {"screen", "Screen"},     {"overlay", "Overlay"},
+        {"softlight", "Soft light"}, {"darken", "Darken"},  {"lighten", "Lighten"},
+        {"addition", "Add"},      {"difference", "Difference"}};
+    return modes;
+}
 const QVector<QPair<QString, QString>> &transitionTypes() {
     static const QVector<QPair<QString, QString>> types{
         {"fade", "Dissolve"},          {"fadeblack", "Dip to black"},
@@ -73,7 +80,7 @@ static std::pair<double, double> propertyRange(const QString &p) {
     return {0, 4}; // volume
 }
 namespace {
-// Colour, look and sound values stored only when not 0.
+// Crop, colour, look and sound values stored only when not 0.
 const QVector<QPair<QString, double Clip::*>> &lookFields() {
     static const QVector<QPair<QString, double Clip::*>> fields{
         {"temperature", &Clip::temperature}, {"tint", &Clip::tint},
@@ -87,7 +94,9 @@ const QVector<QPair<QString, double Clip::*>> &lookFields() {
         {"deess", &Clip::deess},             {"motionBlur", &Clip::motionBlur},
         {"reverb", &Clip::reverb},           {"echo", &Clip::echo},
         {"pan", &Clip::pan},                 {"hslHue", &Clip::hslHue},
-        {"hslSaturation", &Clip::hslSaturation}, {"hslLightness", &Clip::hslLightness}};
+        {"hslSaturation", &Clip::hslSaturation}, {"hslLightness", &Clip::hslLightness},
+        {"cropLeft", &Clip::cropLeft},       {"cropRight", &Clip::cropRight},
+        {"cropTop", &Clip::cropTop},         {"cropBottom", &Clip::cropBottom}};
     return fields;
 }
 } // namespace
@@ -181,6 +190,7 @@ QSizeF Project::pictureSize(const Clip &c, double boxWidth, double boxHeight) co
     const auto *a = asset(c.assetId);
     double aspect = a && a->width > 0 && a->height > 0 ? double(a->width) / a->height
                                                        : double(width) / height;
+    aspect *= (1 - c.cropLeft - c.cropRight) / (1 - c.cropTop - c.cropBottom);
     if (c.shape == "circle")
         aspect = 1;
     if (boxWidth / boxHeight > aspect)
@@ -332,6 +342,15 @@ QJsonObject Project::json(const QString &base) const {
                 o[k] = c.*field;
         if (!c.slowMotion.isEmpty())
             o["slowMotion"] = c.slowMotion;
+        if (c.flipVertical)
+            o["flipVertical"] = true;
+        if (!c.blendMode.isEmpty())
+            o["blendMode"] = c.blendMode;
+        if (!c.lumaKey.isEmpty()) {
+            o["lumaKey"] = c.lumaKey;
+            o["lumaTolerance"] = c.lumaTolerance;
+            o["lumaSoftness"] = c.lumaSoftness;
+        }
         if (!c.fx.isEmpty()) {
             o["fx"] = c.fx;
             o["fxStrength"] = c.fxStrength;
@@ -555,6 +574,11 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         for (const auto &[k, field] : lookFields())
             c.*field = j[k].toDouble(0);
         c.slowMotion = j["slowMotion"].toString();
+        c.flipVertical = j["flipVertical"].toBool();
+        c.blendMode = j["blendMode"].toString();
+        c.lumaKey = j["lumaKey"].toString();
+        c.lumaTolerance = j["lumaTolerance"].toDouble(0.1);
+        c.lumaSoftness = j["lumaSoftness"].toDouble(0.05);
         c.fx = j["fx"].toString();
         c.fxStrength = j["fxStrength"].toDouble(0.5);
         c.stabilize = j["stabilize"].toBool(false);
@@ -727,6 +751,17 @@ void Project::validate() const {
                     QColor(c.keyColor).isValid() && bounded(c.keySimilarity, 0.01, 1) &&
                     bounded(c.keyBlend, 0, 1),
                 "Invalid overlay style");
+        require(QStringList{"", "dark", "light"}.contains(c.lumaKey) &&
+                    bounded(c.lumaTolerance, 0.01, 1) && bounded(c.lumaSoftness, 0, 1),
+                "Invalid luma key");
+        require(c.blendMode.isEmpty() ||
+                    std::any_of(blendModes().begin(), blendModes().end(),
+                                [&](const auto &m) { return m.first == c.blendMode; }),
+                "Invalid blend mode");
+        require(bounded(c.cropLeft, 0, 0.9) && bounded(c.cropRight, 0, 0.9) &&
+                    bounded(c.cropTop, 0, 0.9) && bounded(c.cropBottom, 0, 0.9) &&
+                    c.cropLeft + c.cropRight <= 0.9 + 1e-9 && c.cropTop + c.cropBottom <= 0.9 + 1e-9,
+                "Invalid crop");
         require(c.transitionFrames >= 0 && c.transitionFrames <= 100000000 &&
                     (c.transition.isEmpty() ||
                      std::any_of(transitionTypes().begin(), transitionTypes().end(),

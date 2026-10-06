@@ -857,6 +857,25 @@ class UiTest : public QObject {
         key->setProperty("checked", true);
         QVERIFY(QMetaObject::invokeMethod(key, "toggled"));
         QVERIFY(clip().chromaKey);
+        // Blend mode and luma key: chosen from their lists; tolerance sliders appear for the key.
+        auto *blend = findItem(window->contentItem(), "blendMode");
+        QVERIFY(blend && blend->isVisible());
+        QCOMPARE(blend->property("currentIndex").toInt(), 0);
+        blend->setProperty("currentIndex", 1);
+        QVERIFY(QMetaObject::invokeMethod(blend, "activated", Q_ARG(int, 1)));
+        QCOMPARE(clip().blendMode, QString("multiply"));
+        QVERIFY(!findItem(window->contentItem(), "lumaTolerance"));
+        auto *luma = findItem(window->contentItem(), "lumaKey");
+        QVERIFY(luma);
+        luma->setProperty("currentIndex", 2);
+        QVERIFY(QMetaObject::invokeMethod(luma, "activated", Q_ARG(int, 2)));
+        QCOMPARE(clip().lumaKey, QString("light"));
+        QTRY_VERIFY(findItem(window->contentItem(), "lumaTolerance"));
+        auto *upsideDown = findItem(window->contentItem(), "flipVertical");
+        QVERIFY(upsideDown);
+        upsideDown->setProperty("checked", true);
+        QVERIFY(QMetaObject::invokeMethod(upsideDown, "toggled"));
+        QVERIFY(clip().flipVertical);
         press("place-full");
         QCOMPARE(clip().scale, 1.);
         QCOMPARE(clip().x, 0.);

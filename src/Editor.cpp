@@ -471,6 +471,15 @@ QVariantMap Editor::state() const {
             PROP(contrast);
             PROP(saturation);
             PROP(crop);
+            PROP(cropLeft);
+            PROP(cropRight);
+            PROP(cropTop);
+            PROP(cropBottom);
+            PROP(flipVertical);
+            PROP(blendMode);
+            PROP(lumaKey);
+            PROP(lumaTolerance);
+            PROP(lumaSoftness);
             PROP(temperature);
             PROP(tint);
             PROP(vibrance);
@@ -974,12 +983,19 @@ void Editor::backUp(const QString &projectPath) {
     QFile name(folder + "/project.txt");
     if (name.open(QIODevice::WriteOnly | QIODevice::Truncate))
         name.write(QFileInfo(projectPath).absoluteFilePath().toUtf8());
-    const auto stamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz");
-    auto target = folder + "/" + stamp + ".cutlery";
-    for (int i = 1; QFileInfo::exists(target); ++i)
-        target = folder + "/" + stamp + "-" + QString::number(i) + ".cutlery";
-    QFile::copy(projectPath, target);
+    // Versions are named by time and listed in name order, so a new one must sort after every
+    // existing one: a save in the same millisecond as the last (the Windows clock is coarse)
+    // takes the next millisecond.
     auto files = QDir(folder).entryList({"*.cutlery"}, QDir::Files, QDir::Name);
+    auto stamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz");
+    if (!files.isEmpty() && stamp <= files.last().left(19)) {
+        auto last = QDateTime::fromString(files.last().left(19), "yyyyMMdd-HHmmss-zzz");
+        last.setTimeZone(QTimeZone::utc());
+        if (last.isValid())
+            stamp = last.addMSecs(1).toString("yyyyMMdd-HHmmss-zzz");
+    }
+    QFile::copy(projectPath, folder + "/" + stamp + ".cutlery");
+    files = QDir(folder).entryList({"*.cutlery"}, QDir::Files, QDir::Name);
     while (files.size() > keep)
         QFile::remove(folder + "/" + files.takeFirst());
 }
@@ -1773,7 +1789,20 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             c->textColor = v.toString();
         else if (key == "gradientColor")
             c->gradientColor = v.toString();
-        else if (key == "transition") {
+        else if (key == "cropLeft" || key == "cropRight" || key == "cropTop" ||
+                 key == "cropBottom") {
+            // The opposite edge gives way so that a tenth of the picture stays.
+            double &edge = key == "cropLeft"    ? c->cropLeft
+                           : key == "cropRight" ? c->cropRight
+                           : key == "cropTop"   ? c->cropTop
+                                                : c->cropBottom;
+            double &other = key == "cropLeft"    ? c->cropRight
+                            : key == "cropRight" ? c->cropLeft
+                            : key == "cropTop"   ? c->cropBottom
+                                                 : c->cropTop;
+            edge = std::clamp(v.toDouble(), 0., 0.9);
+            other = std::min(other, 0.9 - edge);
+        } else if (key == "transition") {
             c->transition = v.toString();
             // New transitions start at half a second, like a typical dissolve.
             if (!c->transition.isEmpty() && c->transitionFrames < 2)
@@ -1850,6 +1879,11 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(fadeOut, toDouble);
         FIELD(reverse, toBool);
         FIELD(flip, toBool);
+        FIELD(flipVertical, toBool);
+        FIELD(blendMode, toString);
+        FIELD(lumaKey, toString);
+        FIELD(lumaTolerance, toDouble);
+        FIELD(lumaSoftness, toDouble);
         FIELD(muted, toBool);
         FIELD(hidden, toBool);
         FIELD(radius, toDouble);
@@ -3451,7 +3485,13 @@ void Editor::pasteAttributes(const QString &group) {
         c->rotation = from.rotation;
         c->opacity = from.opacity;
         c->crop = from.crop;
+        c->cropLeft = from.cropLeft;
+        c->cropRight = from.cropRight;
+        c->cropTop = from.cropTop;
+        c->cropBottom = from.cropBottom;
         c->flip = from.flip;
+        c->flipVertical = from.flipVertical;
+        c->blendMode = from.blendMode;
         c->volume = from.volume;
         c->eqLow = from.eqLow;
         c->eqMid = from.eqMid;
@@ -3478,6 +3518,9 @@ void Editor::pasteAttributes(const QString &group) {
         c->keyColor = from.keyColor;
         c->keySimilarity = from.keySimilarity;
         c->keyBlend = from.keyBlend;
+        c->lumaKey = from.lumaKey;
+        c->lumaTolerance = from.lumaTolerance;
+        c->lumaSoftness = from.lumaSoftness;
         c->aiCutout = from.aiCutout;
         c->eyeContact = from.eyeContact;
     });
@@ -5091,7 +5134,10 @@ void Editor::cancelJob() {
 void Editor::importSrt(const QUrl &url) {
     try {
         const auto path = localPath(url);
-        const auto cues = parseSubtitles(readUtf8File(path), QFileInfo(path).suffix());
+        const auto suffix = QFileInfo(path).suffix().toLower();
+        const auto cues = parseSubtitles(readUtf8File(path), suffix);
+        // Plain text has no timing; its captions start at the playhead.
+        const qint64 offset = suffix == "txt" ? m_playhead : 0;
         mutate([&](Project &p) {
             if (p.trackSettings[p.tracks - 1].magnetic)
                 throw std::runtime_error("Turn off Magnet on the caption track before importing "
@@ -5102,8 +5148,8 @@ void Editor::importSrt(const QUrl &url) {
                 c.name = "Caption";
                 c.track = p.tracks - 1;
                 p.requireEditable(c.track);
-                c.start = qRound64(cue.start * p.fpsN / p.fpsD);
-                const auto end = qRound64(cue.end * p.fpsN / p.fpsD);
+                c.start = offset + qRound64(cue.start * p.fpsN / p.fpsD);
+                const auto end = offset + qRound64(cue.end * p.fpsN / p.fpsD);
                 c.duration = end - c.start;
                 c.text = cue.text;
                 c.fontSize = 48;

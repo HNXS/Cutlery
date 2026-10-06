@@ -11,7 +11,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 1. Drop local video, audio or image files into the media library, or directly onto a timeline track. Drag library items to the desired track/time. Double-click still appends to the chosen track.
 2. Add tracks with **+ Track**. Drag video, audio, images or titles along a track or between tracks; drag near the viewport edges to scroll. Escape cancels. Higher tracks appear on top. Free tracks allow overlaps in insertion order.
 3. Each track has **Snap** (align edges while dragging) and **Magnet** (keep clips together from frame 0). Enabling Magnet closes existing gaps/overlaps; Undo restores them. Other tracks retain their timing. Drag either clip edge to trim. Double-click a clip to seek its start; click the timeline to seek elsewhere. Split at the playhead, duplicate, delete, or adjust exact frame ranges in the inspector.
-4. Add titles, edit their text and click **Apply text**. Import SRT, WebVTT or ASS to create editable, burned-in captions.
+4. Add titles, edit their text and click **Apply text**. Import SRT, WebVTT, ASS or a plain-text script to create editable, burned-in captions.
 5. Adjust crop, position, scale, rotation, opacity, colour, speed, reverse, volume and fades. Changes are nondestructive.
 6. Click **Play** or press **Space** with the timeline focused. Playback starts immediately from the playhead; nothing is rendered in advance. Space pauses/resumes. Editing while playing applies the change and keeps playing. Previews, playback and exported files use the same composition compiler.
 7. Save a `.cutlery` project. **Export video** writes a new MP4, WebM or MOV. Pick a preset such as "YouTube (best quality, 4K upload)", or choose format, quality and resolution yourself. Keep your source media; the project references those files.
@@ -34,7 +34,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
   - Green/blue screen removal with automatic spill suppression.
   - Offline AI background removal for speakers without a green screen.
 - Offline AI upscaling (Real-ESRGAN) of low-resolution video clips to up to 4K. Both AI features use the GPU through DirectML when available, run in the background once per media file and need the separate [AI pack](docs/AI.md).
-- Static transforms, equal-edge crop, horizontal flip, opacity, brightness/contrast/saturation, blur, clip fades.
+- Static transforms, crop of all or single edges, horizontal and vertical flip, blend modes, colour and luma keys, opacity, brightness/contrast/saturation, blur, clip fades.
 - **Image sequences** (Project menu): numbered frames import as one video clip at a chosen frame rate, with transparency.
 - **Variable frame rate** (phone/screen recordings) is detected on import; "Convert to constant frame rate" makes an even editing copy.
 - **Collect project and media** (Project menu): one folder with the project, its media, LUTs and added fonts, for archiving or moving to another PC.
@@ -64,7 +64,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - **Remove pauses…** (inspector) finds the quiet moments in a clip's sound and cuts them out in one undoable step, keeping a little room around speech; detached audio is cut alongside.
 - Loudness normalisation on export: Cutlery measures the whole mix (EBU R128) and sets one gain for YouTube/streaming (−14 LUFS), podcasts (−16) or TV (−23), with peaks limited below full scale.
 - Level meters: left/right peak meters during playback, and a whole-mix loudness measurement (LUFS, true peak) in the export dialog.
-- Rasterized Unicode titles, manual captions, SRT/WebVTT/ASS import and export and subtitle burn-in.
+- Rasterized Unicode titles, manual captions, SRT/WebVTT/ASS import and export, TXT import and subtitle burn-in.
 - Automatic captions: **Captions → Generate captions (AI)** transcribes all audible clips offline with whisper.cpp and places the captions on their own track (needs the [AI pack](docs/AI.md)). Styles: karaoke (the spoken word is highlighted), plain, or one word at a time.
 - Live playback that starts in a fraction of a second, audio-clocked with frame skipping when the CPU falls behind; preview frames that render only the playhead frame; export progress and cancellation.
 - Export presets and controls: H.264, HEVC and AV1 in MP4, VP9 in WebM, ProRes 422 HQ in MOV, legacy MPEG-4; four quality levels; project size up to 4K. Cutlery tries NVIDIA NVENC, AMD AMF, Intel Quick Sync, then Windows Media Foundation, and uses the first that passes a short test encode. AV1 (SVT-AV1), VP9 and ProRes also work in software. Exports use Lanczos scaling, and higher resolutions re-render each source at that size.
