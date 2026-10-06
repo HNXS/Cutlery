@@ -19,7 +19,7 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F013 | Semantic media search and object search | Planned | Not implemented in this alpha. |
 | F014 | Person search with user labels | Planned | Not implemented in this alpha. |
 | F015 | Local templates and replaceable media slots | Planned | Not implemented in this alpha. |
-| F016 | Local brand styles and reusable assets | Planned | Not implemented in this alpha. |
+| F016 | Local brand styles and reusable assets | Partial | Text styles for every project (data folder, styles.json, up to 200): "Save…" in the text inspector keeps a title's font, size, colours and gradient, bold/italic, alignment, spacing, outline, shadow, box, highlight colour and build-up animation under a name (the same name replaces it); "Apply a style…" sets them on all selected titles in one undo step; styles can be removed. No brand colour palettes, logos or reusable asset collections. |
 | F017 | Interchange OTIO, EDL and loss report | Planned | Not implemented in this alpha. |
 | F018 | FCPXML and AAF interchange | Planned | Not implemented in this alpha. |
 | F019 | CapCut project import | Planned | Not implemented in this alpha. |

@@ -65,7 +65,7 @@ ApplicationWindow {
         { n: 24, d: 1, label: "24" }, { n: 25, d: 1, label: "25" }, { n: 30, d: 1, label: "30" },
         { n: 50, d: 1, label: "50" }, { n: 60, d: 1, label: "60" }, { n: 30000, d: 1001, label: "29.97" }
     ]
-    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
+    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || styleDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
         enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
@@ -1935,6 +1935,51 @@ ApplicationWindow {
                                         onValueModified: editor.setClip("fontSize", value)
                                     }
                                 }
+                                // Saved text styles (for every project): apply to the selected titles,
+                                // or save this title's look under a name.
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    ComboBox {
+                                        id: styleChoice
+                                        objectName: "textStyle"
+                                        Layout.fillWidth: true
+                                        readonly property var styles: win.s.textStyles || []
+                                        model: [styles.length ? "Apply a style…" : "No saved styles"].concat(styles.map(st => st.name))
+                                        enabled: styles.length > 0 && win.selection.locked !== true
+                                        onActivated: index => {
+                                            if (index > 0)
+                                                editor.applyTextStyle(styles[index - 1].name);
+                                            currentIndex = 0;
+                                        }
+                                    }
+                                    ToolButton {
+                                        objectName: "saveTextStyle"
+                                        text: "Save…"
+                                        enabled: !!win.selection.text
+                                        onClicked: styleDialog.open()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Keep this title's font, colours and effects as a style for every project"
+                                    }
+                                    ToolButton {
+                                        text: "⋯"
+                                        visible: styleChoice.styles.length > 0
+                                        onClicked: styleMenu.popup()
+                                        Menu {
+                                            id: styleMenu
+                                            title: "Remove a style"
+                                            Instantiator {
+                                                model: styleChoice.styles
+                                                delegate: MenuItem {
+                                                    required property var modelData
+                                                    text: "Remove “" + modelData.name + "”"
+                                                    onTriggered: editor.removeTextStyle(modelData.name)
+                                                }
+                                                onObjectAdded: (index, object) => styleMenu.insertItem(index, object)
+                                                onObjectRemoved: (index, object) => styleMenu.removeItem(object)
+                                            }
+                                        }
+                                    }
+                                }
                                 RowLayout {
                                     Layout.fillWidth: true
                                     TextField {
@@ -3722,6 +3767,28 @@ ApplicationWindow {
             const f = win.projectFormats[prefFormat.currentIndex], r = win.frameRates[prefRate.currentIndex];
             editor.setPreferences({ width: f.w, height: f.h, fpsN: r.n, fpsD: r.d, stillSeconds: prefStill.value / 10, backups: prefBackups.value, startScreen: prefStart.checked });
         }
+    }
+    // Names a text style to keep.
+    Dialog {
+        id: styleDialog
+        objectName: "styleDialog"
+        anchors.centerIn: parent
+        modal: true
+        title: "Save text style"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAboutToShow: {
+            styleName.text = "";
+            styleName.forceActiveFocus();
+        }
+        TextField {
+            id: styleName
+            objectName: "styleName"
+            width: 280
+            maximumLength: 60
+            placeholderText: "Style name, e.g. Channel title"
+            onAccepted: styleDialog.accept()
+        }
+        onAccepted: editor.saveTextStyle(styleName.text)
     }
     // Names a new folder (optionally moving one medium into it) or renames one.
     Dialog {

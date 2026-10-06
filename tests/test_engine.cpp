@@ -4527,6 +4527,61 @@ class EngineTest : public QObject {
         editor.addEffect("sparkle");
         QVERIFY(editor.state()["error"].toString().contains("Unknown"));
     }
+    void textStylesKit() {
+        FrameProvider frames;
+        {
+            Editor editor(&frames);
+            for (const auto &s : editor.textStyles())
+                editor.removeTextStyle(s.toMap()["name"].toString());
+            editor.addTitle();
+            const auto styled = editor.state()["selectedId"].toString();
+            editor.setClipValues({{"text", "Brand"}, {"fontFamily", "DejaVu Sans"}, {"fontSize", 96},
+                                  {"textColor", "#ffd23f"}, {"gradientColor", "#ff5000"},
+                                  {"bold", false}, {"italic", true}, {"align", "left"},
+                                  {"outline", 0.1}, {"outlineColor", "#112233"},
+                                  {"background", 0.5}, {"textAnimation", "rise"}});
+            editor.saveTextStyle("  ");
+            QVERIFY(editor.state()["error"].toString().contains("Name"));
+            editor.saveTextStyle("Channel");
+            QCOMPARE(editor.textStyles().size(), 1);
+            // Two plain titles get the style in one step; their text stays.
+            editor.addTitle();
+            const auto a = editor.state()["selectedId"].toString();
+            editor.addTitle();
+            const auto b = editor.state()["selectedId"].toString();
+            editor.toggleSelect(a);
+            editor.applyTextStyle("Channel");
+            for (const auto &id : {a, b}) {
+                const auto *c = editor.project().clip(id);
+                QCOMPARE(c->fontSize, 96);
+                QCOMPARE(c->textColor, QString("#ffd23f"));
+                QCOMPARE(c->gradientColor, QString("#ff5000"));
+                QCOMPARE(c->bold, false);
+                QCOMPARE(c->italic, true);
+                QCOMPARE(c->align, QString("left"));
+                QCOMPARE(c->outline, 0.1);
+                QCOMPARE(c->textAnimation, QString("rise"));
+                QVERIFY(c->text != "Brand");
+            }
+            editor.undo();
+            QCOMPARE(editor.project().clip(a)->fontSize, 72);
+            // Saving under the same name replaces the style.
+            editor.select(styled);
+            editor.setClip("fontSize", 120);
+            editor.saveTextStyle("channel");
+            QCOMPARE(editor.textStyles().size(), 1);
+            editor.applyTextStyle("Nope");
+            QVERIFY(editor.state()["error"].toString().contains("No such"));
+        }
+        {
+            // Kept for the next start; removed again.
+            Editor editor(&frames);
+            QCOMPARE(editor.textStyles().size(), 1);
+            QCOMPARE(editor.textStyles()[0].toMap()["values"].toMap()["fontSize"].toInt(), 120);
+            editor.removeTextStyle("channel");
+            QVERIFY(editor.textStyles().isEmpty());
+        }
+    }
     void curvesSelectiveAndAutoColour() {
         QVERIFY(validCurve("0/0 0.5/0.6 1/1") && !validCurve("0/0") && !validCurve("0.5/0 0.2/1") &&
                 !validCurve("0/0 1/1.2") && !validCurve("a/b c/d"));

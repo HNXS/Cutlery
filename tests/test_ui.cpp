@@ -627,6 +627,60 @@ class UiTest : public QObject {
         QVERIFY(findItem(window->contentItem(), "autoColour")->isEnabled());
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void textStylesAndAdjustment() {
+        QTemporaryDir dir;
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        for (const auto &st : editor.textStyles())
+            editor.removeTextStyle(st.toMap()["name"].toString());
+        editor.addTitle();
+        editor.setClipValues({{"fontSize", 110}, {"textColor", "#ff0000"}});
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        // Save the title's look as a style.
+        auto *save = findItem(window->contentItem(), "saveTextStyle");
+        QTRY_VERIFY(save && save->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+        auto *name = findItem(window->contentItem(), "styleName");
+        QTRY_VERIFY(name && name->isVisible());
+        name->setProperty("text", "Red heading");
+        QVERIFY(QMetaObject::invokeMethod(window->findChild<QObject *>("styleDialog"), "accept"));
+        QCOMPARE(editor.textStyles().size(), 1);
+        // Apply it to a new title from the list.
+        editor.addTitle();
+        const auto second = editor.state()["selectedId"].toString();
+        QCOMPARE(editor.project().clip(second)->fontSize, 72);
+        auto *choice = findItem(window->contentItem(), "textStyle");
+        QTRY_VERIFY(choice->isEnabled());
+        choice->setProperty("currentIndex", 1);
+        QVERIFY(QMetaObject::invokeMethod(choice, "activated", Q_ARG(int, 1)));
+        QCOMPARE(editor.project().clip(second)->fontSize, 110);
+        QCOMPARE(editor.project().clip(second)->textColor, QString("#ff0000"));
+        QCOMPARE(choice->property("currentIndex").toInt(), 0);
+        editor.removeTextStyle("Red heading");
+        // An adjustment layer from the Add tab shows its own inspector section.
+        findItem(window->contentItem(), "leftTabs")->setProperty("currentIndex", 1);
+        auto *adjust = findItem(window->contentItem(), "addAdjustment");
+        QTRY_VERIFY(adjust && adjust->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(adjust, "clicked"));
+        QCOMPARE(editor.project().clips.last().effect, QString("adjust"));
+        QTRY_VERIFY(findItem(window->contentItem(), "adjustStrength")->isVisible());
+        QVERIFY(findItem(window->contentItem(), "lookSection")->isVisible());
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void exportDialog() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;

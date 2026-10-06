@@ -68,6 +68,13 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     }
     loadPreferences();
     applyPreferences(m_project);
+    {
+        QFile styles(m_data + "/styles.json");
+        if (styles.open(QIODevice::ReadOnly) && styles.size() < 1024 * 1024)
+            for (const auto &v : QJsonDocument::fromJson(styles.readAll()).array())
+                if (v.isObject() && !v.toObject()["name"].toString().isEmpty() && m_textStyles.size() < 200)
+                    m_textStyles << v.toObject().toVariantMap();
+    }
     m_analysis = new MediaAnalysis(m_data + "/cache/waveforms", executable("ffmpeg"), this);
     m_thumbnails = new Thumbnails(m_data + "/cache/thumbnails", executable("ffmpeg"), this);
     m_encoders = new EncoderResolver(executable("ffmpeg"), this);
@@ -607,6 +614,7 @@ QVariantMap Editor::state() const {
             {"follow", m_follow},
             {"transcript", transcriptState()},
             {"autoColour", m_autoColour},
+            {"textStyles", m_textStyles},
             {"reframe", m_reframe},
             {"conform", m_conform},
             {"markers", [this] {
@@ -4111,6 +4119,90 @@ void Editor::autoColour() {
     });
     p->start(executable("ffmpeg"), args);
     emit changed();
+}
+// Text styles -------------------------------------------------------------------------------
+static const QStringList &textStyleKeys() {
+    static const QStringList keys{"fontFamily",  "fontSize",       "textColor",     "gradientColor",
+                                  "bold",        "italic",         "align",         "letterSpacing",
+                                  "lineSpacing", "outline",        "outlineColor",  "textShadow",
+                                  "background",  "backgroundColor", "textAnimation", "textAnimationTime",
+                                  "highlightColor"};
+    return keys;
+}
+QVariantList Editor::textStyles() const {
+    return m_textStyles;
+}
+void Editor::saveTextStyles() {
+    QDir().mkpath(m_data);
+    QSaveFile f(m_data + "/styles.json");
+    const auto data = QJsonDocument(QJsonArray::fromVariantList(m_textStyles)).toJson();
+    if (!f.open(QIODevice::WriteOnly) || f.write(data) != data.size() || !f.commit())
+        fail("Cannot save the text styles in " + m_data);
+}
+void Editor::saveTextStyle(const QString &name) {
+    const auto label = name.trimmed().left(60);
+    if (label.isEmpty())
+        return fail("Name the style");
+    const auto *c = m_project.clip(m_selected);
+    if (!c || !c->assetId.isEmpty() || !c->effect.isEmpty() || c->text.isEmpty())
+        return fail("Select a title to take the style from");
+    const auto selected = state()["selected"].toMap();
+    QVariantMap values;
+    for (const auto &k : textStyleKeys())
+        values[k] = selected.value(k);
+    QVariantMap style{{"name", label}, {"values", values}};
+    for (auto &s : m_textStyles)
+        if (s.toMap()["name"].toString().compare(label, Qt::CaseInsensitive) == 0) {
+            s = style;
+            saveTextStyles();
+            m_status = "Style updated: " + label;
+            emit changed();
+            return;
+        }
+    if (m_textStyles.size() >= 200)
+        return fail("Remove a style first (200 at most)");
+    m_textStyles << style;
+    saveTextStyles();
+    m_status = "Style saved: " + label;
+    emit changed();
+}
+void Editor::applyTextStyle(const QString &name) {
+    QVariantMap values;
+    for (const auto &s : m_textStyles)
+        if (s.toMap()["name"].toString() == name)
+            values = s.toMap()["values"].toMap();
+    if (values.isEmpty())
+        return fail("No such style");
+    QStringList targets;
+    for (const auto &id : selection())
+        if (const auto *c = m_project.clip(id); c && c->assetId.isEmpty() && c->effect.isEmpty())
+            targets << id;
+    if (targets.isEmpty())
+        return fail("Select the titles to style");
+    const auto selected = m_selected;
+    mutate([&](Project &p) {
+        for (const auto &id : targets) {
+            m_selected = id; // applyClipValue works on the selected clip
+            for (const auto &k : textStyleKeys())
+                if (values.contains(k) && values[k].isValid())
+                    applyClipValue(p, k, values[k]);
+        }
+    });
+    m_selected = selected;
+    m_status = QString("Applied the style %1 to %2 clip%3")
+                   .arg(name)
+                   .arg(targets.size())
+                   .arg(targets.size() == 1 ? "" : "s");
+    emit changed();
+}
+void Editor::removeTextStyle(const QString &name) {
+    for (int i = 0; i < m_textStyles.size(); ++i)
+        if (m_textStyles[i].toMap()["name"].toString() == name) {
+            m_textStyles.removeAt(i);
+            saveTextStyles();
+            emit changed();
+            return;
+        }
 }
 void Editor::removePauses() {
     if (m_pauses.status != "ready" || m_pauses.revision != m_revision || m_pauses.ranges.isEmpty())
