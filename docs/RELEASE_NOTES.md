@@ -4,6 +4,8 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Overwrite:** right-click media in the library → "Overwrite at the playhead" replaces what is on the track there without moving the rest.
+- **Captions:** "+ Caption" adds one at the playhead; automatic captions take a line length and one or two lines; the export can save the captions as an SRT or WebVTT file beside the video.
 - **Pick the screen colour:** "Pick" beside the green-screen colours, then click the screen in the viewer, for screens that are not pure green or blue.
 - **Cut on the beat:** "Split at markers" cuts a clip on every beat marker; "Cut on the beat" lines up the selected clips so each one ends on a beat.
 - **Stronger stabilizing:** a strength slider and "Zoom in" so no filled-in edge shows.

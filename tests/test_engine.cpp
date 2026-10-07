@@ -5494,6 +5494,123 @@ class EngineTest : public QObject {
         editor.exportWith(QUrl::fromLocalFile(dir.filePath("five.wav")), {{"format", "wav"}, {"channels", 5}});
         QVERIFY(editor.state()["error"].toString().contains("mono"));
     }
+    void captionLayoutOverwriteAndSidecar() {
+        // Caption lines: a long pause, a sentence end, a comma past 60 % and 7 seconds break.
+        auto word = [](double start, const QString &text) { return Cue{start, start + 0.3, text, {}}; };
+        QVector<Cue> words;
+        double t = 0;
+        for (const auto &w : QString("Heute schneiden wir, ganz in Ruhe ein Video").split(' '))
+            words << word(t += 0.35, w);
+        auto lines = groupWords(words, 30);
+        QCOMPARE(lines.size(), 2);
+        QCOMPARE(lines[0].text, QString("Heute schneiden wir,"));
+        QCOMPARE(lines[1].text, QString("ganz in Ruhe ein Video"));
+        QCOMPARE(lines[1].wordStarts.size(), 5);
+        QVector<Cue> slow;
+        for (int i = 0; i < 10; ++i)
+            slow << word(i * 0.9, "la");
+        lines = groupWords(slow, 80, 0.95, 4);
+        QVERIFY(lines.size() >= 2);
+        for (const auto &l : lines)
+            QVERIFY(l.end - l.start <= 4.01);
+        // Two lines: broken as evenly as possible, the first no shorter.
+        QCOMPARE(layoutCaption("Das ist ein Satz mit sehr vielen Wörtern drin", 2, 30),
+                 QString("Das ist ein Satz mit\nsehr vielen Wörtern drin"));
+        QCOMPARE(layoutCaption("Kurz und gut", 2, 30), QString("Kurz und gut"));
+        QCOMPARE(layoutCaption("Eins zwei drei vier fünf sechs sieben acht", 1, 20),
+                 QString("Eins zwei drei vier fünf sechs sieben acht"));
+        QVERIFY(captionWords("a b\nc").size() == 3); // word timing survives the break
+
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        // A 10 s title on the first track gives the timeline its length.
+        editor.addTitle();
+        editor.setClipValues({{"duration", 250}});
+        editor.moveClip(editor.state()["selectedId"].toString(), 0, 0);
+        QCOMPARE(editor.project().clips[0].track, 0);
+        // Quick captions at the playhead: 2 s, or up to the next one.
+        editor.addCaption();
+        auto last = [&] { return editor.project().clip(editor.state()["selectedId"].toString()); };
+        QCOMPARE(last()->start, 0);
+        QCOMPARE(last()->duration, 50);
+        QCOMPARE(last()->track, editor.project().tracks - 1);
+        editor.seek(80);
+        editor.addCaption();
+        editor.seek(60);
+        editor.addCaption();
+        QCOMPARE(last()->start, 60);
+        QCOMPARE(last()->duration, 20);
+        editor.seek(30);
+        editor.addCaption();
+        QVERIFY(editor.state()["error"].toString().contains("already"));
+        editor.clearError();
+        QCOMPARE(editor.project().clips.size(), size_t(4));
+
+        // Captions beside the export, timed from the start of the exported range.
+        editor.setInPoint(); // at 30
+        editor.seek(130);
+        editor.setOutPoint();
+        const auto video = dir.filePath("talk.mp4");
+        editor.exportWith(QUrl::fromLocalFile(video),
+                          {{"format", "mpeg4"}, {"range", "inout"}, {"captions", "srt"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(QFileInfo::exists(video), qPrintable(editor.state()["error"].toString()));
+        const auto srt = dir.filePath("talk.srt");
+        QVERIFY2(QFileInfo::exists(srt), qPrintable(editor.state()["status"].toString()));
+        const auto cues = parseSrt(readUtf8File(srt));
+        // The title (cut to the range) and the three captions.
+        QCOMPARE(cues.size(), 4);
+        QCOMPARE(cues[0].start, 0.);
+        QCOMPARE(cues[0].end, 4.04);   // the title, to the out point (frame 130 included)
+        QCOMPARE(cues[1].start, 0.);   // the first caption, cut to the range
+        QCOMPARE(cues[1].end, 0.8);
+        QCOMPARE(cues[2].start, 1.2);  // 60 - 30 frames
+        QVERIFY(editor.state()["status"].toString().contains("talk.srt"));
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("x.mp4")), {{"format", "mpeg4"}, {"captions", "ass"}});
+        QVERIFY(editor.state()["error"].toString().contains("SRT or VTT"));
+        editor.clearError();
+
+        // Overwrite: the new clip replaces what lies in its time; the rest stays put.
+        const auto source = dir.filePath("two.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=25:d=2", "-c:v", "ffv1", source});
+        QImage red(320, 180, QImage::Format_RGB32);
+        red.fill(Qt::red);
+        QVERIFY(red.save(dir.filePath("red.png")));
+        editor.newProject();
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("red.png")), QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        QString image, clip;
+        for (const auto &a : editor.project().assets)
+            (a.kind == "image" ? image : clip) = a.id;
+        editor.addAsset(image, 0);
+        editor.setClipValues({{"duration", 100}});
+        QVERIFY(editor.overwriteAsset(clip, 0, 20));
+        QStringList ranges;
+        for (const auto &c : editor.project().clips)
+            if (c.track == 0)
+                ranges << QString("%1-%2%3").arg(c.start, 3, 10, QChar('0')).arg(c.start + c.duration)
+                              .arg(c.assetId == clip ? "*" : "");
+        ranges.sort();
+        QCOMPARE(ranges, (QStringList{"000-20", "020-70*", "070-100"}));
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        // A clip entirely covered goes; the track's magnet stays on and nothing slides.
+        editor.setTrack(0, "magnetic", true);
+        QVERIFY(editor.overwriteAsset(clip, 0, 0));
+        QVERIFY(editor.overwriteAsset(clip, 0, 50));
+        ranges.clear();
+        for (const auto &c : editor.project().clips)
+            if (c.track == 0)
+                ranges << QString("%1-%2").arg(c.start, 3, 10, QChar('0')).arg(c.start + c.duration);
+        ranges.sort();
+        QCOMPARE(ranges, (QStringList{"000-50", "050-100"}));
+        QVERIFY(editor.project().trackSettings[0].magnetic);
+    }
     void adjustmentLayers() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

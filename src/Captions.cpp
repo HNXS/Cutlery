@@ -283,7 +283,7 @@ QVector<QPair<qint64, qint64>> wordCutRanges(const QVector<qint64> &starts,
     }
     return ranges;
 }
-QVector<Cue> groupWords(const QVector<Cue> &words, int maxChars, double pause) {
+QVector<Cue> groupWords(const QVector<Cue> &words, int maxChars, double pause, double maxSeconds) {
     QVector<Cue> lines;
     static const QRegularExpression sentenceEnd("[.!?…]$");
     for (const auto &w : words) {
@@ -300,8 +300,10 @@ QVector<Cue> groupWords(const QVector<Cue> &words, int maxChars, double pause) {
         const bool breakHere =
             lines.isEmpty() || w.start - lines.last().end > pause ||
             lines.last().text.size() + 1 + text.size() > maxChars ||
+            w.end - lines.last().start > maxSeconds ||
             (sentenceEnd.match(lines.last().text).hasMatch() &&
-             lines.last().wordStarts.size() >= 2);
+             lines.last().wordStarts.size() >= 2) ||
+            (lines.last().text.endsWith(',') && lines.last().text.size() >= 0.6 * maxChars);
         if (breakHere)
             lines.push_back({w.start, w.end, text, {w.start}});
         else {
@@ -311,6 +313,25 @@ QVector<Cue> groupWords(const QVector<Cue> &words, int maxChars, double pause) {
         }
     }
     return lines;
+}
+QString layoutCaption(const QString &text, int lines, int maxChars) {
+    if (lines < 2 || text.size() <= maxChars)
+        return text;
+    // The break that keeps the longer line shortest; on a tie the first line stays longer.
+    int best = -1, bestLongest = 0;
+    for (int i = 0; i < text.size(); ++i)
+        if (text[i] == ' ') {
+            const int longest = std::max<int>(i, text.size() - i - 1);
+            if (best < 0 || longest < bestLongest || (longest == bestLongest && i > best)) {
+                best = i;
+                bestLongest = longest;
+            }
+        }
+    if (best < 0)
+        return text;
+    auto laid = text;
+    laid[best] = '\n';
+    return laid;
 }
 bool speaks(const Project &p, const Clip &c) {
     const auto *a = p.asset(c.assetId);

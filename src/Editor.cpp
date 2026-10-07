@@ -1628,6 +1628,89 @@ void Editor::addTitle() {
     });
     select(id);
 }
+void Editor::addCaption() {
+    const auto id = newId();
+    mutate([&](Project &p) {
+        // The caption track: the automatic one if there is one, else the top track.
+        int track = p.tracks - 1;
+        for (int t = 0; t < p.tracks; ++t)
+            if (p.trackSettings[t].name == captionTrackName)
+                track = t;
+        p.requireEditable(track);
+        Clip c;
+        c.id = id;
+        c.name = "Caption";
+        c.text = "Caption";
+        c.track = track;
+        c.start = m_playhead;
+        c.fontSize = 48;
+        c.y = .32;
+        c.duration = qRound64(2. * p.fpsN / p.fpsD);
+        // Up to the next clip on the track, so captions follow each other without overlapping.
+        for (const auto &x : p.clips)
+            if (x.track == track && x.start + x.duration > c.start) {
+                if (x.start <= c.start)
+                    throw std::runtime_error("There is a caption at the playhead already");
+                c.duration = std::min(c.duration, x.start - c.start);
+            }
+        p.clips.push_back(c);
+    });
+    select(id);
+}
+bool Editor::overwriteAsset(const QString &assetId, int track, qint64 frame) {
+    QString added;
+    if (!mutate([&](Project &p) {
+            p.requireEditable(track);
+            const auto *a = p.asset(assetId);
+            if (!a)
+                throw std::runtime_error("Media no longer exists");
+            frame = std::max<qint64>(0, frame);
+            const qint64 end =
+                frame + std::max(qint64(1), qint64(std::floor(a->duration * p.fpsN / p.fpsD + 1e-6)));
+            // Edit without magnet so nothing slides; tracks keep their setting afterwards.
+            QVector<bool> magnetic;
+            for (auto &t : p.trackSettings) {
+                magnetic << t.magnetic;
+                t.magnetic = false;
+            }
+            // Cut whatever runs across the start and the end of the range, with its sound.
+            for (const qint64 cut : {frame, end}) {
+                QStringList across;
+                for (const auto &x : p.clips)
+                    if (x.track == track && x.start < cut && x.start + x.duration > cut)
+                        across << x.id;
+                for (const auto &id : across)
+                    for (const auto &g : QStringList{id} + p.linkedClips(id))
+                        p.split(g, cut);
+            }
+            // After splitting, remove every piece (with its sound) inside the range.
+            QStringList inside;
+            for (const auto &x : p.clips)
+                if (x.track == track && x.start >= frame && x.start + x.duration <= end)
+                    inside << x.id;
+            for (const auto &id : inside) {
+                for (const auto &partner : p.linkedClips(id))
+                    if (const auto *x = p.clip(partner); x && x->start >= frame &&
+                                                         x->start + x->duration <= end)
+                        p.remove(partner, false);
+                p.remove(id, false);
+            }
+            Clip c;
+            c.id = newId();
+            c.assetId = assetId;
+            c.name = a->name;
+            c.track = track;
+            c.start = frame;
+            c.duration = end - frame;
+            p.clips.push_back(c);
+            added = c.id;
+            for (int t = 0; t < p.trackSettings.size(); ++t)
+                p.trackSettings[t].magnetic = magnetic[t];
+        }))
+        return false;
+    select(added);
+    return true;
+}
 void Editor::addTitleTemplate(const QString &style) {
     if (!QStringList{"lowerThird", "lowerThirdLine", "titleCard"}.contains(style))
         return fail("Unknown title template");
@@ -3839,13 +3922,18 @@ QStringList Editor::speakingAssets() const {
             ids << c.assetId;
     return ids;
 }
-void Editor::generateCaptions(const QString &language, const QString &style) {
+void Editor::generateCaptions(const QString &language, const QString &style, int maxChars,
+                              int lines) {
     static const QRegularExpression code("^(auto|[a-z]{2,3})$");
     if (!code.match(language).hasMatch())
         return fail("Unknown caption language");
     if (!QStringList{"", "karaoke", "word"}.contains(style))
         return fail("Unknown caption style");
+    if (maxChars < 20 || maxChars > 80 || lines < 1 || lines > 2)
+        return fail("Captions take 20–80 characters on one or two lines");
     m_captionStyle = style;
+    m_captionChars = maxChars;
+    m_captionLines = style.isEmpty() ? lines : 1;
     if (!m_ai->available("transcribe"))
         return fail(m_ai->missing("transcribe") + " Download the AI pack next to Cutlery.exe.");
     m_captionLanguage = language;
@@ -4782,7 +4870,10 @@ void Editor::placeCaptions() {
                 w.start += r.start;
                 w.end += r.start;
             }
-            transcripts.insert(id, groupWords(words));
+            auto cues = groupWords(words, m_captionChars * m_captionLines);
+            for (auto &cue : cues)
+                cue.text = layoutCaption(cue.text, m_captionLines, m_captionChars);
+            transcripts.insert(id, cues);
         } catch (const std::exception &e) {
             m_captionAssets.clear();
             return fail(QString("Cannot read the transcript: ") + e.what());
@@ -4962,6 +5053,9 @@ static ExportSettings exportSettings(const QVariantMap &m) {
     s.loudness = m.value("loudness", 0).toDouble();
     s.fps = m.value("fps", 0).toDouble();
     s.bitrate = m.value("bitrate", 0).toInt();
+    const auto captions = m.value("captions").toString();
+    if (!QStringList{"", "srt", "vtt"}.contains(captions))
+        throw std::runtime_error("Captions beside the video are SRT or VTT");
     s.channels = m.value("channels", 2).toInt();
     s.sampleRate = m.value("sampleRate", 48000).toInt();
     if (s.channels != 1 && s.channels != 2)
@@ -5384,6 +5478,39 @@ void Editor::measureLoudness(const QString &output, QSize size, const Encoder &e
         fail(e.what());
     }
 }
+// The visible titles and captions of `p` between frames `from` and `to` (-1: the end) as a
+// subtitle file ("srt", "vtt" or "ass"), timed from `from`. Throws when there are none.
+static QString subtitleText(const Project &p, const QString &format, qint64 from, qint64 to) {
+    auto clips = p.clips;
+    std::stable_sort(clips.begin(), clips.end(),
+                     [](const Clip &a, const Clip &b) { return a.start < b.start; });
+    const qint64 end = to < 0 ? p.duration() : to;
+    auto seconds = [&](qint64 frame) { return frameTime(frame - from, p.fpsN, p.fpsD).seconds(); };
+    QVector<Cue> cues;
+    const Clip *first = nullptr;
+    for (const auto &c : clips)
+        if (c.assetId.isEmpty() && c.effect.isEmpty() && c.graphic.isEmpty() && !c.hidden &&
+            !p.trackSettings[c.track].hidden && c.start < end && c.start + c.duration > from) {
+            cues.push_back({seconds(std::max(c.start, from)),
+                            seconds(std::min(c.start + c.duration, end)), c.text});
+            if (!first)
+                first = &c;
+        }
+    if (cues.isEmpty())
+        throw std::runtime_error("No visible titles/captions to export");
+    // The ASS default style follows the first caption's font and size.
+    return writeSubtitles(cues, format, p.width, p.height,
+                          first->fontFamily.isEmpty() ? QString("Arial") : first->fontFamily,
+                          first->fontSize);
+}
+static void writeText(const QString &path, const QString &text) {
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly))
+        throw std::runtime_error("Cannot write the captions");
+    const auto data = text.toUtf8();
+    if (f.write(data) != data.size() || !f.commit())
+        throw std::runtime_error("Cannot save the captions");
+}
 void Editor::startRender(const QString &output, QSize size, const Encoder &encoder,
                          double gainDb) {
     try {
@@ -5494,6 +5621,20 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
             } else {
                 m_progress = 1;
                 m_status = "Export saved (" + label + "): " + output;
+                // Captions beside the video, named like it, timed like the exported range.
+                const auto captions = m_lastExportSettings.value("captions").toString();
+                if (!captions.isEmpty()) {
+                    const QFileInfo video(output);
+                    const auto path = video.absolutePath() + "/" + video.completeBaseName() + "." + captions;
+                    try {
+                        if (QFileInfo::exists(path))
+                            throw std::runtime_error("a file of that name exists");
+                        writeText(path, subtitleText(m_exportProject, captions, m_exportFrom, m_exportTo));
+                        m_status += " · captions " + QFileInfo(path).fileName();
+                    } catch (const std::exception &e) {
+                        m_status += QString(" · no caption file: ") + e.what();
+                    }
+                }
                 if (m_loudness.contains("measured"))
                     m_status += QString(" · loudness %1 → %2 LUFS")
                                     .arg(m_loudness["measured"].toDouble(), 0, 'f', 1)
@@ -5578,33 +5719,7 @@ bool Editor::exportSrt(const QUrl &url) {
         const auto path = localPath(url);
         const auto suffix = QFileInfo(path).suffix().toLower();
         const QString format = suffix == "vtt" ? "vtt" : suffix == "ass" ? "ass" : "srt";
-        auto clips = m_project.clips;
-        std::stable_sort(clips.begin(), clips.end(),
-                         [](const Clip &a, const Clip &b) { return a.start < b.start; });
-        auto seconds = [&](qint64 frame) {
-            return frameTime(frame, m_project.fpsN, m_project.fpsD).seconds();
-        };
-        QVector<Cue> cues;
-        const Clip *first = nullptr;
-        for (const auto &c : clips)
-            if (c.assetId.isEmpty() && c.effect.isEmpty() && c.graphic.isEmpty() && !c.hidden &&
-                !m_project.trackSettings[c.track].hidden) {
-                cues.push_back({seconds(c.start), seconds(c.start + c.duration), c.text});
-                if (!first)
-                    first = &c;
-            }
-        if (cues.isEmpty())
-            throw std::runtime_error("No visible titles/captions to export");
-        // The ASS default style follows the first caption's font and size.
-        const auto text = writeSubtitles(
-            cues, format, m_project.width, m_project.height,
-            first->fontFamily.isEmpty() ? QString("Arial") : first->fontFamily, first->fontSize);
-        QSaveFile f(path);
-        if (!f.open(QIODevice::WriteOnly))
-            throw std::runtime_error("Cannot write the captions");
-        const auto data = text.toUtf8();
-        if (f.write(data) != data.size() || !f.commit())
-            throw std::runtime_error("Cannot save the captions");
+        writeText(path, subtitleText(m_project, format, 0, -1));
         m_status = format.toUpper() + " saved";
         emit changed();
         return true;
