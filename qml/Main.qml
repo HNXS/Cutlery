@@ -30,6 +30,8 @@ ApplicationWindow {
     property color muted: "#8c9aa8"
     property real pixelsPerSecond: 48
     property int targetTrack: 0
+    // The library media the export dialog converts on its own instead of exporting the timeline.
+    property string convertAsset: ""
     // The next click on the viewer picks the selected clip's key colour.
     property bool pickingKey: false
     property var exportChoice: ({
@@ -1178,6 +1180,15 @@ ApplicationWindow {
                                             }
                                         }
                                         MenuItem {
+                                            objectName: "convertMedia"
+                                            text: "Convert or compress…"
+                                            enabled: ["video", "audio"].indexOf(mediaTile.modelData.kind) >= 0 && !win.s.busy
+                                            onTriggered: {
+                                                win.convertAsset = mediaTile.modelData.id;
+                                                exportSettings.open();
+                                            }
+                                        }
+                                        MenuItem {
                                             objectName: "overwriteAtPlayhead"
                                             text: "Overwrite at the playhead (track " + (Math.min(win.targetTrack, win.s.tracks - 1) + 1) + ")"
                                             onTriggered: editor.overwriteAsset(mediaTile.modelData.id, Math.min(win.targetTrack, win.s.tracks - 1), win.s.playhead)
@@ -2189,6 +2200,13 @@ ApplicationWindow {
                                         }
                                     }
                                 }
+                                CheckBox {
+                                    objectName: "titleSlide"
+                                    visible: (win.selection.titleStyle || "").startsWith("lowerThird")
+                                    text: "Slide in from the left"
+                                    checked: win.selection.titleSlide !== false
+                                    onToggled: editor.setClip("titleSlide", checked)
+                                }
                                 Label {
                                     Layout.fillWidth: true
                                     visible: (win.selection.titleStyle || "") !== ""
@@ -2975,6 +2993,22 @@ ApplicationWindow {
                                 runningText: "Upscaling…"
                                 doneText: "Sharper picture ready ✓"
                             }
+                            // Ready-made motions: keyframes for the selected clips in one step.
+                            ComboBox {
+                                objectName: "motionPreset"
+                                Layout.fillWidth: true
+                                visible: win.selection.audioOnly !== true && ((win.selection.assetId || "") === "" || win.selection.picture === true)
+                                enabled: win.selection.locked !== true
+                                readonly property var presets: ["", "popIn", "popOut", "slideLeft", "slideUp", "pulse", "wiggle", "none"]
+                                model: ["Add a motion…", "Pop in", "Pop out at the end", "Slide in from the left", "Slide up into place", "Pulse", "Wiggle", "Remove motion"]
+                                onActivated: {
+                                    if (currentIndex > 0)
+                                        editor.applyMotion(presets[currentIndex]);
+                                    currentIndex = 0;
+                                }
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Animates the selected clips with keyframes you can change afterwards"
+                            }
                             RowLayout {
                                 Layout.fillWidth: true
                                 Label {
@@ -3337,6 +3371,8 @@ ApplicationWindow {
                                         { key: "vibrance", name: "Vibrance", lo: -1, hi: 1, tip: "Saturates muted colours more than strong ones; skin stays natural" },
                                         { key: "shadows", name: "Shadows", lo: -1, hi: 1, tip: "Lift or deepen the dark parts" },
                                         { key: "highlights", name: "Highlights", lo: -1, hi: 1, tip: "Recover or brighten the bright parts" },
+                                        { key: "whites", name: "Whites", lo: -1, hi: 1, tip: "Where the brightest tones end: up makes them clip sooner, down softens them" },
+                                        { key: "blacks", name: "Blacks", lo: -1, hi: 1, tip: "Where the darkest tones end: down deepens them, up fades them like film" },
                                         { key: "sharpen", name: "Sharpen", lo: 0, hi: 1, tip: "Contrast-adaptive sharpening" },
                                         { key: "glow", name: "Glow", lo: 0, hi: 1, tip: "A soft glow around bright areas" },
                                         { key: "vignette", name: "Vignette", lo: 0, hi: 1, tip: "Darker corners draw the eye to the centre" },
@@ -4113,7 +4149,16 @@ ApplicationWindow {
         readonly property string extension: editor.exportPreview(win.exportChoice).extension || "mp4"
         defaultSuffix: extension
         nameFilters: [extension.toUpperCase() + " (*." + extension + ")"]
-        onAccepted: win.queueExport ? editor.queueExport(selectedFile, win.exportChoice) : editor.exportWith(selectedFile, win.exportChoice)
+        onRejected: win.convertAsset = ""
+        onAccepted: {
+            if (win.convertAsset.length > 0) {
+                editor.convertAsset(win.convertAsset, selectedFile, win.exportChoice);
+                win.convertAsset = "";
+            } else if (win.queueExport)
+                editor.queueExport(selectedFile, win.exportChoice);
+            else
+                editor.exportWith(selectedFile, win.exportChoice);
+        }
     }
     FileDialog {
         id: relinkDialog
@@ -4848,7 +4893,8 @@ ApplicationWindow {
         id: exportSettings
         objectName: "exportSettings"
         anchors.centerIn: parent
-        title: "Export video"
+        title: win.convertAsset.length > 0 ? "Convert or compress media" : "Export video"
+        onRejected: win.convertAsset = ""
         modal: true
         width: 480
         footer: DialogButtonBox {
@@ -4861,6 +4907,7 @@ ApplicationWindow {
             }
             Button {
                 objectName: "addToQueue"
+                visible: win.convertAsset.length === 0
                 text: "Add to queue…"
                 DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
                 onClicked: exportSettings.choose(true)

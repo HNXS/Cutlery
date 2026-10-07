@@ -5891,6 +5891,140 @@ class EngineTest : public QObject {
         QCOMPARE(editor.project().clips[0].cropLeft, 0.);
         QVERIFY(std::abs(editor.project().clips[0].scale - 0.5) < 1e-6);
     }
+    void motionsTonesSlideAndConvert() {
+        const auto ffmpeg = Editor::executable("ffmpeg"), ffprobe = Editor::executable("ffprobe");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.addTitle(); // 3 s
+        editor.setClipValues({{"scale", 0.8}, {"x", 0.1}});
+        const auto id = editor.state()["selectedId"].toString();
+        auto keys = [&](const QString &property) { return editor.project().clip(id)->keyframes.value(property); };
+        // Pop in: from small to a little larger than the clip's scale, then settling on it.
+        editor.applyMotion("popIn");
+        auto scale = keys("scale");
+        QCOMPARE(scale.size(), 3);
+        QCOMPARE(scale[0].value, 0.1);
+        QVERIFY(std::abs(scale[1].value - 0.92) < 1e-9);
+        QCOMPARE(scale[2].value, 0.8);
+        QCOMPARE(scale[2].frame, 10); // 0.4 s at 25 fps
+        QCOMPARE(scale[0].easing(), QString("out"));
+        // Slide in from the left ends where the clip was; pulse beats over the whole clip.
+        editor.applyMotion("slideLeft");
+        QVERIFY(std::abs(keys("x").first().value - (-0.9)) < 1e-9);
+        QCOMPARE(keys("x").last().value, 0.1);
+        editor.applyMotion("pulse");
+        QVERIFY(keys("scale").size() >= 10);
+        QCOMPARE(keys("scale").last().frame, editor.project().clip(id)->duration - 1);
+        editor.applyMotion("wiggle");
+        QCOMPARE(keys("rotation").last().value, 0.);
+        editor.applyMotion("popOut");
+        QCOMPARE(keys("scale").last().value, 0.1);
+        QCOMPARE(keys("scale").last().frame, 74);
+        // Remove motion: back to the clip's own values, without keyframes.
+        editor.applyMotion("none");
+        const auto *c = editor.project().clip(id);
+        QVERIFY(c->keyframes.isEmpty());
+        QCOMPARE(c->scale, 0.8);
+        QCOMPARE(c->x, 0.1);
+        editor.undo();
+        QVERIFY(!editor.project().clip(id)->keyframes.isEmpty());
+        editor.applyMotion("spin");
+        QVERIFY(editor.state()["error"].toString().contains("Unknown"));
+        editor.clearError();
+
+        // Whites and blacks move the ends of the tone curve.
+        QImage tones(160, 90, QImage::Format_RGB32);
+        tones.fill(QColor(20, 20, 20));
+        QPainter(&tones).fillRect(80, 0, 80, 90, QColor(235, 235, 235));
+        QVERIFY(tones.save(dir.filePath("tones.png")));
+        Project p;
+        p.width = 160;
+        p.height = 90;
+        Asset a;
+        a.id = "tones";
+        a.path = dir.filePath("tones.png");
+        a.kind = "image";
+        a.duration = 5;
+        a.width = 160;
+        a.height = 90;
+        p.assets = {a};
+        Clip t;
+        t.id = "t";
+        t.assetId = "tones";
+        t.duration = 10;
+        p.clips = {t};
+        auto levels = [&](const Project &project) {
+            RenderOptions options;
+            options.audio = false;
+            options.to = 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 160, 90, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            return std::pair{image.pixelColor(40, 45).green(), image.pixelColor(120, 45).green()};
+        };
+        const auto [dark, light] = levels(p);
+        p.clips[0].blacks = -1; // deeper blacks
+        p.clips[0].whites = 1;  // brighter whites
+        const auto [deeper, brighter] = levels(p);
+        QVERIFY2(deeper < dark - 10 && brighter > light + 10,
+                 qPrintable(QString("%1 %2 → %3 %4").arg(dark).arg(light).arg(deeper).arg(brighter)));
+        p.clips[0].blacks = 1; // faded blacks
+        p.clips[0].whites = -1;
+        const auto [faded, softer] = levels(p);
+        QVERIFY(faded > dark + 10 && softer < light - 10);
+        QCOMPARE(Project::fromJson(p.json(), {}).clips[0].whites, -1.);
+        p.clips[0].blacks = 2;
+        QVERIFY_EXCEPTION_THROWN(p.validate(), std::runtime_error);
+
+        // Lower thirds slide in, or only fade when sliding is off.
+        Project lower;
+        lower.width = 320;
+        lower.height = 180;
+        Clip l;
+        l.id = "l";
+        l.duration = 50;
+        l.titleStyle = "lowerThird";
+        l.text = "Name\nRole";
+        lower.clips = {l};
+        RenderOptions options;
+        options.audio = false;
+        QVERIFY(compileRender(lower, dir.filePath("work"), 320, 180, options).graph.contains("pow(max(0,1-"));
+        lower.clips[0].titleSlide = false;
+        QVERIFY(!compileRender(lower, dir.filePath("work"), 320, 180, options).graph.contains("pow(max(0,1-"));
+        QVERIFY(!Project::fromJson(lower.json(), {}).clips[0].titleSlide);
+
+        // Convert a library video on its own, at its own size and frame rate.
+        const auto source = dir.filePath("source.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=25:d=2", "-f", "lavfi",
+                     "-i", "sine=d=2", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest", source});
+        editor.newProject();
+        editor.configure(1920, 1080, 30, 1); // the timeline's own format does not matter
+        editor.importMedia({QUrl::fromLocalFile(source), QUrl::fromLocalFile(dir.filePath("tones.png"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        QString video, picture;
+        for (const auto &asset : editor.project().assets)
+            (asset.kind == "video" ? video : picture) = asset.id;
+        const auto out = dir.filePath("small.mp4");
+        editor.convertAsset(video, QUrl::fromLocalFile(out), {{"format", "mpeg4"}, {"quality", "small"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(QFileInfo::exists(out), qPrintable(editor.state()["error"].toString()));
+        const auto info = QString::fromUtf8(run(ffprobe, {"-v", "error", "-show_entries",
+            "stream=codec_type,width,height,r_frame_rate:format=duration", "-of", "compact", out}));
+        QVERIFY2(info.contains("width=640") && info.contains("height=360") &&
+                     info.contains("r_frame_rate=25/1") && info.contains("codec_type=audio"),
+                 qPrintable(info));
+        QVERIFY(editor.project().clips.empty()); // the timeline is untouched
+        editor.convertAsset(picture, QUrl::fromLocalFile(dir.filePath("picture.mp4")), {{"format", "mpeg4"}});
+        QVERIFY(editor.state()["error"].toString().contains("video or sound"));
+    }
     void adjustmentLayers() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

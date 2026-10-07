@@ -131,6 +131,10 @@ class Editor final : public QObject {
     Q_INVOKABLE void addEffect(const QString &effect);
     // Adds a shape (see graphicKinds()) at the playhead on the top track.
     Q_INVOKABLE void addGraphic(const QString &kind);
+    // A ready-made motion for the selected clips, as keyframes that replace those of the
+    // properties it moves: "popIn", "popOut", "slideLeft", "slideUp", "pulse", "wiggle", or
+    // "none" to remove scale, position and rotation keyframes.
+    Q_INVOKABLE void applyMotion(const QString &preset);
     // Arranges the selected pictures (lowest track first) on the canvas, in one undo step:
     // "side" (side by side), "stack" (one above the other), "grid" (2 × 2), "pip-tl", "pip-tr",
     // "pip-bl", "pip-br" (the lowest full, the others small in that corner), "presenter" (the
@@ -270,6 +274,9 @@ class Editor final : public QObject {
     // Saves the sound of the selected clip as heard on the timeline (trim, speed, volume, sound
     // tools, fades; other clips left out) as .wav, .mp3 or .m4a, like an export.
     Q_INVOKABLE void extractAudio(const QUrl &);
+    // Converts or compresses a video or sound from the library on its own, without the
+    // timeline: the whole file at its own size and frame rate, with the export settings.
+    Q_INVOKABLE void convertAsset(const QString &assetId, const QUrl &, const QVariantMap &settings);
     // The timeline for other editors: OpenTimelineIO (.otio) or a CMX 3600 EDL (.edl), by the
     // file's extension. The status names what the format could not carry.
     Q_INVOKABLE void exportTimeline(const QUrl &);

@@ -4,6 +4,10 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Motions:** "Add a motion…" in the inspector makes a picture, title or icon pop in, pop out, slide in, pulse or wiggle, as keyframes you can still change.
+- **Whites and blacks** sliders in the colour tools.
+- **Convert or compress:** right-click a video or sound in the library to save it in another format, size or quality without putting it on the timeline.
+- **Lower thirds** can fade in without sliding.
 - **Keyframe easing:** each keyframe can ease in and out, run linearly, start or end slowly, or hold until the next one.
 - **More formats:** MXF, MTS/M2TS/TS, MPEG/VOB and DV video; AVIF and HEIC/HEIF pictures.
 - **Collage fill:** "Fill each area (crop)" crops the arranged pictures to their areas, without empty edges.

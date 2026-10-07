@@ -1,5 +1,17 @@
 # Validation record
 
+## Windows portable build — 2026-10-07, motion presets, whites and blacks, convert or compress, lower thirds without slide (0.6 development)
+
+[GitHub Actions run 37678983296](https://github.com/HNXS/Cutlery/actions/runs/37678983296) on commit `f3cfddfa648ea09b57b493a4678729ad8f0b9fa1` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `motionsTonesSlideAndConvert`:**
+  - **Motion presets:** pop in, slide in, pulse, wiggle and pop out set the expected keyframes and easing around the clip's own values; "remove motion" returns the clip to them; undo works.
+  - **Whites and blacks:** they deepen or brighten the ends of the tone range, or fade and soften them.
+  - **Lower thirds:** with sliding switched off, they only fade.
+  - **Convert or compress:** a library video is converted at its own size and frame rate, with sound, without touching the timeline; a picture is refused.
+
 ## Windows portable build — 2026-10-07, keyframe easing, MXF/MTS/MPEG/DV import, AVIF and HEIC pictures, collage fill (0.6 development)
 
 [GitHub Actions run 37625847330](https://github.com/HNXS/Cutlery/actions/runs/37625847330) on commit `2c2bf12adcee72134f3b90c7615ccfd4af5f3191` passed every step on its first attempt.
