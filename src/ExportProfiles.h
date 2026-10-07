@@ -9,8 +9,9 @@
 namespace cutlery {
 // What the user asks for: a delivery format, a quality level and an output height.
 struct ExportSettings {
-    // Video: h264, hevc, av1, vp9, prores, mpeg4, gif (animated, no sound). Audio only: mp3,
-    // m4a (AAC), wav.
+    // Video: h264, hevc, av1, vp9, prores, prores4444 (with transparency), mpeg4, gif
+    // (animated, no sound), png (a numbered picture sequence in a folder, with transparency, no
+    // sound). Audio only: mp3, m4a (AAC), wav.
     QString format = "h264";
     QString quality = "high"; // max, high, balanced, small
     int height = 0;           // 0: project size
@@ -36,6 +37,10 @@ struct Encoder {
     // Filters after the picture's pixel format, before the encoder (e.g. GIF palette steps);
     // labels inside must not clash with the render graph's.
     QString videoTail;
+    // Transparent where nothing is on the timeline (an alpha channel in the output).
+    bool alpha = false;
+    // Numbered pictures into a folder instead of one file.
+    bool sequence = false;
     // Output frame rate for FFmpeg's -r ("30000/1001"); empty keeps the project's.
     QString frameRate;
     double frameRateValue = 0;

@@ -67,6 +67,8 @@ struct Clip {
     // width and height (0.5, 0.5: the centre).
     double anchorX = 0.5, anchorY = 0.5;
     double brightness = 0, contrast = 1, saturation = 1, crop = 0;
+    // Exposure in stops (−3..3): light multiplied by 2^exposure, applied before contrast.
+    double exposure = 0;
     // Crop of single edges, as fractions of the source width (left, right) and height (top,
     // bottom), before the equal-edge crop; each pair leaves at least a tenth of the picture.
     double cropLeft = 0, cropRight = 0, cropTop = 0, cropBottom = 0;
@@ -138,6 +140,8 @@ struct Clip {
     bool stabilize = false;
     // Room reverb and a distinct echo, 0..1.
     double reverb = 0, echo = 0;
+    // Pitch in semitones (−12..12) without changing the tempo.
+    double pitch = 0;
     double pan = 0; // -1 left .. 1 right
     // Look: 0..1, 0 off.
     double sharpen = 0, glow = 0, vignette = 0, grain = 0;

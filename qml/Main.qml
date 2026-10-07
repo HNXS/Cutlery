@@ -2998,6 +2998,13 @@ ApplicationWindow {
                                         step: .01
                                     },
                                     {
+                                        key: "exposure",
+                                        name: "Exposure (stops)",
+                                        lo: -3,
+                                        hi: 3,
+                                        step: .05
+                                    },
+                                    {
                                         key: "brightness",
                                         name: "Brightness",
                                         lo: -.5,
@@ -3153,7 +3160,8 @@ ApplicationWindow {
                                         { key: "deess", name: "De-esser", lo: 0, hi: 1, step: .01, tip: "Softens sharp S sounds" },
                                         { key: "compressor", name: "Compressor", lo: 0, hi: 1, step: .01, tip: "Evens out loud and quiet parts" },
                                         { key: "reverb", name: "Reverb", lo: 0, hi: 1, step: .01, tip: "The sound of a room" },
-                                        { key: "echo", name: "Echo", lo: 0, hi: 1, step: .01, tip: "Repeats a third of a second apart" }
+                                        { key: "echo", name: "Echo", lo: 0, hi: 1, step: .01, tip: "Repeats a third of a second apart" },
+                                        { key: "pitch", name: "Pitch (semitones)", lo: -12, hi: 12, step: .5, tip: "Higher or lower voice at the same speed" }
                                     ]
                                     RowLayout {
                                         id: soundRow
@@ -4721,8 +4729,10 @@ ApplicationWindow {
             { id: "av1", label: "AV1 · MP4 (smallest, modern devices)" },
             { id: "vp9", label: "VP9 · WebM (web)" },
             { id: "prores", label: "ProRes 422 HQ · MOV (editing master, large)" },
+            { id: "prores4444", label: "ProRes 4444 with transparency · MOV (overlays for other editors)" },
             { id: "mpeg4", label: "MPEG-4 Part 2 · MP4 (legacy, always available)" },
             { id: "gif", label: "Animated GIF (no sound; best at 480p or less)" },
+            { id: "png", label: "PNG picture sequence with transparency (a folder, no sound)" },
             { id: "mp3", label: "Audio only · MP3" },
             { id: "m4a", label: "Audio only · AAC (M4A)" },
             { id: "wav", label: "Audio only · WAV (uncompressed)" }
@@ -4855,7 +4865,7 @@ ApplicationWindow {
                 objectName: "exportBitrate"
                 Layout.fillWidth: true
                 model: exportSettings.bitrates.map(b => b === 0 ? "By quality" : (b / 1000) + " Mbit/s")
-                enabled: !exportSettings.preview.audio && ["gif", "prores"].indexOf(exportSettings.current.format) < 0
+                enabled: !exportSettings.preview.audio && ["gif", "prores", "prores4444", "png"].indexOf(exportSettings.current.format) < 0
                 onActivated: exportSettings.changed()
                 ToolTip.visible: hovered
                 ToolTip.text: "A fixed average bitrate (peaks up to 1.5×) instead of the quality setting, e.g. for platforms with an upload limit"
@@ -4899,7 +4909,7 @@ ApplicationWindow {
                 wrapMode: Text.Wrap
                 color: win.muted
                 font.pixelSize: 11
-                text: exportSettings.preview.audio ? "Output: the timeline's sound only, 48 kHz stereo · ." + exportSettings.preview.extension + (exportSettings.preview.extension === "wav" ? " (24-bit at Maximum quality, otherwise 16-bit)" : "") + "." : "Output " + (exportSettings.preview.width || 0) + " × " + (exportSettings.preview.height || 0) + " · ." + (exportSettings.preview.extension || "mp4") + ". Cutlery uses your graphics card's encoder (NVIDIA, AMD or Intel) when available, otherwise Windows' encoder; AV1, VP9 and ProRes also work in software. Higher resolutions re-render each source at that size with sharp Lanczos scaling, so 4K sources stay 4K."
+                text: exportSettings.current.format === "png" ? "Output: numbered PNG pictures (name_00001.png, …) in a new folder named like the file you choose, " + (exportSettings.preview.width || 0) + " × " + (exportSettings.preview.height || 0) + ", transparent where the timeline is empty." : exportSettings.preview.audio ? "Output: the timeline's sound only, 48 kHz stereo · ." + exportSettings.preview.extension + (exportSettings.preview.extension === "wav" ? " (24-bit at Maximum quality, otherwise 16-bit)" : "") + "." : "Output " + (exportSettings.preview.width || 0) + " × " + (exportSettings.preview.height || 0) + " · ." + (exportSettings.preview.extension || "mp4") + ". Cutlery uses your graphics card's encoder (NVIDIA, AMD or Intel) when available, otherwise Windows' encoder; AV1, VP9 and ProRes also work in software. Higher resolutions re-render each source at that size with sharp Lanczos scaling, so 4K sources stay 4K."
             }
             // The export queue: each job renders the timeline as it was when it was added, one
             // after the other, so you can queue several formats and keep editing.

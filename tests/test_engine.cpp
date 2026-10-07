@@ -5167,6 +5167,152 @@ class EngineTest : public QObject {
         }
         QDir(cache + "/play-newtest").removeRecursively();
     }
+    void pitchAndExposure() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto tone = dir.filePath("tone.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", tone});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(tone)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        editor.select(editor.project().clips.first().id);
+        // Frequency from zero crossings of the exported sound, and its length.
+        auto measure = [&](const QString &name) {
+            const auto out = dir.filePath(name);
+            editor.exportWith(QUrl::fromLocalFile(out), {{"format", "wav"}});
+            QTest::qWaitFor([&] { return !editor.state()["busy"].toBool(); }, 60000);
+            if (!QFileInfo::exists(out))
+                throw std::runtime_error(editor.state()["error"].toString().toStdString());
+            const auto pcm = run(ffmpeg, {"-v", "error", "-i", out, "-ac", "1", "-f", "s16le", "-"});
+            const auto *samples = reinterpret_cast<const qint16 *>(pcm.constData());
+            const int count = pcm.size() / 2;
+            int crossings = 0;
+            for (int i = 4800; i + 1 < count - 4800; ++i) // the middle, away from the ends
+                crossings += (samples[i] < 0) != (samples[i + 1] < 0);
+            return std::pair{crossings / 2.0 / ((count - 9600) / 48000.0), count / 48000.0};
+        };
+        const auto [plain, plainLength] = measure("plain.wav");
+        QVERIFY2(std::abs(plain - 440) < 5, qPrintable(QString::number(plain)));
+        editor.setClip("pitch", 12.0); // an octave up, same length
+        const auto [up, upLength] = measure("up.wav");
+        QVERIFY2(std::abs(up - 880) < 15, qPrintable(QString::number(up)));
+        QVERIFY2(std::abs(upLength - plainLength) < 0.05, qPrintable(QString("%1 %2").arg(upLength).arg(plainLength)));
+        editor.setClip("pitch", -5.0);
+        const auto [down, downLength] = measure("down.wav");
+        QVERIFY2(std::abs(down - 440 * std::pow(2., -5 / 12.)) < 8, qPrintable(QString::number(down)));
+        QVERIFY(std::abs(downLength - plainLength) < 0.05);
+        // Saved and validated.
+        QCOMPARE(Project::fromJson(editor.project().json(), {}).clips[0].pitch, -5.);
+        auto invalid = editor.project();
+        invalid.clips[0].pitch = 13;
+        QVERIFY_EXCEPTION_THROWN(invalid.validate(), std::runtime_error);
+
+        // Exposure: one stop up multiplies light by two (2^(1/2.2) on coded values).
+        QImage grey(128, 72, QImage::Format_RGB32);
+        grey.fill(QColor(100, 100, 100));
+        QVERIFY(grey.save(dir.filePath("grey.png")));
+        Project p;
+        p.width = 128;
+        p.height = 72;
+        Asset a;
+        a.id = "grey";
+        a.path = dir.filePath("grey.png");
+        a.kind = "image";
+        a.duration = 5;
+        a.width = 128;
+        a.height = 72;
+        p.assets = {a};
+        Clip c;
+        c.id = "c";
+        c.assetId = "grey";
+        c.duration = 10;
+        p.clips = {c};
+        auto level = [&](const Project &project) {
+            RenderOptions options;
+            options.audio = false;
+            options.to = 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 128, 72, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            return image.pixelColor(64, 36).green();
+        };
+        QVERIFY(std::abs(level(p) - 100) <= 3);
+        p.clips[0].exposure = 1;
+        QVERIFY2(std::abs(level(p) - 137) <= 4, qPrintable(QString::number(level(p))));
+        p.clips[0].exposure = -1;
+        QVERIFY2(std::abs(level(p) - 73) <= 4, qPrintable(QString::number(level(p))));
+        QCOMPARE(Project::fromJson(p.json(), {}).clips[0].exposure, -1.);
+        p.clips[0].exposure = 4;
+        QVERIFY_EXCEPTION_THROWN(p.validate(), std::runtime_error);
+    }
+    void transparentExports() {
+        const auto ffmpeg = Editor::executable("ffmpeg"), ffprobe = Editor::executable("ffprobe");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        // A title alone: transparent around the letters.
+        editor.addTitle();
+        editor.setClipValues({{"duration", 10}, {"text", "HELLO"}, {"fontSize", 200}});
+        auto alphaAt = [&](const QString &picture, int x, int y) {
+            return QImage(picture).convertToFormat(QImage::Format_ARGB32).pixelColor(x, y).alpha();
+        };
+        auto opaqueCount = [&](const QString &picture) {
+            const auto image = QImage(picture).convertToFormat(QImage::Format_ARGB32);
+            int n = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x)
+                    n += image.pixelColor(x, y).alpha() > 200;
+            return n;
+        };
+        // ProRes 4444 with an alpha channel.
+        const auto mov = dir.filePath("title.mov");
+        editor.exportWith(QUrl::fromLocalFile(mov), {{"format", "prores4444"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(QFileInfo::exists(mov), qPrintable(editor.state()["error"].toString()));
+        const auto probe = QString::fromUtf8(run(ffprobe,
+            {"-v", "error", "-show_entries", "stream=codec_name,pix_fmt,profile", "-of", "compact", mov}));
+        QVERIFY2(probe.contains("codec_name=prores") && probe.contains("pix_fmt=yuva444p"), qPrintable(probe));
+        const auto still = dir.filePath("still.png");
+        run(ffmpeg, {"-v", "error", "-i", mov, "-frames:v", "1", "-pix_fmt", "rgba", still});
+        QCOMPARE(alphaAt(still, 2, 2), 0);
+        QVERIFY(opaqueCount(still) > 200);
+        // A PNG sequence: a new folder named like the file, one picture per frame.
+        const auto seq = dir.filePath("title.png");
+        editor.exportWith(QUrl::fromLocalFile(seq), {{"format", "png"}, {"loudness", -14}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        const QDir folder(dir.filePath("title"));
+        QVERIFY2(folder.exists(), qPrintable(editor.state()["error"].toString()));
+        const auto pictures = folder.entryList({"*.png"}, QDir::Files, QDir::Name);
+        QCOMPARE(pictures.size(), 10);
+        QCOMPARE(pictures.first(), QString("title_00001.png"));
+        QCOMPARE(QImage(folder.filePath(pictures.first())).size(), QSize(320, 180));
+        QCOMPARE(alphaAt(folder.filePath(pictures.first()), 2, 2), 0);
+        QVERIFY(opaqueCount(folder.filePath(pictures.first())) > 200);
+        QVERIFY(!QFileInfo::exists(seq));
+        // No work folder is left behind, and the folder is not overwritten.
+        QCOMPARE(QDir(dir.path()).entryList({".cutlery-*"}, QDir::AllEntries | QDir::Hidden).size(), 0);
+        editor.exportWith(QUrl::fromLocalFile(seq), {{"format", "png"}});
+        QVERIFY(editor.state()["error"].toString().contains("folder"));
+        editor.clearError();
+        // Other formats stay opaque.
+        const auto mp4 = dir.filePath("title.mp4");
+        editor.exportWith(QUrl::fromLocalFile(mp4), {{"format", "mpeg4"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        const auto opaque = dir.filePath("opaque.png");
+        run(ffmpeg, {"-v", "error", "-i", mp4, "-frames:v", "1", "-pix_fmt", "rgba", opaque});
+        QCOMPARE(alphaAt(opaque, 2, 2), 255);
+    }
     void adjustmentLayers() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

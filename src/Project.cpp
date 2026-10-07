@@ -96,12 +96,13 @@ const QVector<QPair<QString, double Clip::*>> &lookFields() {
         {"pan", &Clip::pan},                 {"hslHue", &Clip::hslHue},
         {"hslSaturation", &Clip::hslSaturation}, {"hslLightness", &Clip::hslLightness},
         {"cropLeft", &Clip::cropLeft},       {"cropRight", &Clip::cropRight},
-        {"cropTop", &Clip::cropTop},         {"cropBottom", &Clip::cropBottom}};
+        {"cropTop", &Clip::cropTop},         {"cropBottom", &Clip::cropBottom},
+        {"pitch", &Clip::pitch},             {"exposure", &Clip::exposure}};
     return fields;
 }
 } // namespace
 const QStringList &Clip::lookProperties() {
-    static const QStringList names{"brightness", "contrast",   "saturation", "blur",
+    static const QStringList names{"exposure", "brightness", "contrast",   "saturation", "blur",
                                    "temperature", "tint",      "vibrance",   "shadows",
                                    "highlights", "sharpen",    "glow",       "vignette",
                                    "grain",      "lut",        "lutStrength", "curveMaster",
@@ -813,8 +814,10 @@ void Project::validate() const {
         require(bounded(c.eqLow, -12, 12) && bounded(c.eqMid, -12, 12) &&
                     bounded(c.eqHigh, -12, 12) && bounded(c.lowCut, 0, 300) &&
                     bounded(c.compressor, 0, 1) && bounded(c.gate, 0, 1) &&
-                    bounded(c.denoise, 0, 1) && bounded(c.deess, 0, 1),
+                    bounded(c.denoise, 0, 1) && bounded(c.deess, 0, 1) &&
+                    bounded(c.pitch, -12, 12),
                 "Invalid sound setting");
+        require(bounded(c.exposure, -3, 3), "Invalid exposure");
         for (const auto *curve : {&c.curveMaster, &c.curveRed, &c.curveGreen, &c.curveBlue})
             require(curve->isEmpty() || validCurve(*curve), "Invalid colour curve");
         require(bounded(c.hslHue, -180, 180) && bounded(c.hslSaturation, -1, 1) &&

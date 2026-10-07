@@ -806,7 +806,7 @@ class UiTest : public QObject {
         QTRY_VERIFY(findItem(window->contentItem(), "exportRange")->isVisible());
         editor.toggleMarker();
         QTRY_VERIFY(findItem(window->contentItem(), "marker-0"));
-        choose("exportFormat", 7); // MP3: audio only, no resolution
+        choose("exportFormat", 9); // MP3: audio only, no resolution
         QCOMPARE(dialog->property("preview").toMap()["extension"].toString(), QString("mp3"));
         QTRY_VERIFY(!findItem(window->contentItem(), "exportHeight")->isEnabled());
         choose("exportFormat", 0);
