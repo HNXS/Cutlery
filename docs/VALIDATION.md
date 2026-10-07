@@ -1,5 +1,20 @@
 # Validation record
 
+## Windows portable build — 2026-10-07, keyframe easing, MXF/MTS/MPEG/DV import, AVIF and HEIC pictures, collage fill (0.6 development)
+
+[GitHub Actions run 37625847330](https://github.com/HNXS/Cutlery/actions/runs/37625847330) on commit `2c2bf12adcee72134f3b90c7615ccfd4af5f3191` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `keyframeEasingFormatsAndFill`:**
+  - **Keyframe easing:**
+    - every easing gives the expected value part-way between two keyframes;
+    - a moving picture renders where each easing puts it;
+    - the easing of the keyframe at the playhead is set in the editor;
+    - files store it compatibly with older versions, and unknown easings are refused.
+  - **Formats:** MPEG-2 in MXF, MTS and VOB imports, plays and exports; an AVIF picture is imported as a still.
+  - **Collage fill:** two side-by-side pictures are cropped to fill their halves, and fitting again removes the crop.
+
 ## Windows portable build — 2026-10-07, spin, glitch and light-leak transitions, undo steps, unreadable thumbnails (0.6 development)
 
 [GitHub Actions run 37621086944](https://github.com/HNXS/Cutlery/actions/runs/37621086944) on commit `bc3e218c34e3841ca06af7c39a297509246136e8` passed every step on its first attempt.
