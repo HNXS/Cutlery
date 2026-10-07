@@ -1178,6 +1178,11 @@ ApplicationWindow {
                                             }
                                         }
                                         MenuItem {
+                                            objectName: "overwriteAtPlayhead"
+                                            text: "Overwrite at the playhead (track " + (Math.min(win.targetTrack, win.s.tracks - 1) + 1) + ")"
+                                            onTriggered: editor.overwriteAsset(mediaTile.modelData.id, Math.min(win.targetTrack, win.s.tracks - 1), win.s.playhead)
+                                        }
+                                        MenuItem {
                                             text: "Replace with another file…"
                                             onTriggered: {
                                                 win.relinkAsset = mediaTile.modelData.id;
@@ -1228,6 +1233,14 @@ ApplicationWindow {
                                         text: "+ Add title"
                                         Layout.fillWidth: true
                                         onClicked: editor.addTitle()
+                                    }
+                                    Action {
+                                        objectName: "addCaption"
+                                        text: "+ Caption"
+                                        Layout.fillWidth: true
+                                        onClicked: editor.addCaption()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "A caption at the playhead on the caption track, 2 seconds or up to the next one"
                                     }
                                     // Sound effects: clicks, typing and swooshes for tutorials and screen videos.
                                     Action {
@@ -4669,7 +4682,7 @@ ApplicationWindow {
                 text: "Generate"
                 enabled: captionDialog.missing === "" && captionDialog.state.running !== true
                 DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
-                onClicked: editor.generateCaptions(captionDialog.languages[captionLanguage.currentIndex].id, captionStyleChoice.styles[captionStyleChoice.currentIndex])
+                onClicked: editor.generateCaptions(captionDialog.languages[captionLanguage.currentIndex].id, captionStyleChoice.styles[captionStyleChoice.currentIndex], captionChars.value, captionLines.currentIndex + 1)
             }
             Button {
                 text: captionDialog.state.running === true ? "Stop" : "Close"
@@ -4710,6 +4723,30 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 readonly property var styles: ["karaoke", "", "word"]
                 model: ["Karaoke: highlight the spoken word", "Plain captions", "One word at a time (big)"]
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "Characters per line"
+                    color: win.muted
+                }
+                SpinBox {
+                    id: captionChars
+                    objectName: "captionChars"
+                    from: 20
+                    to: 80
+                    value: 42
+                    editable: true
+                }
+                ComboBox {
+                    id: captionLines
+                    objectName: "captionLines"
+                    Layout.fillWidth: true
+                    enabled: captionStyleChoice.currentIndex === 1
+                    model: ["One line", "Two lines"]
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Two lines hold more text per caption; for plain captions"
+                }
             }
             ProgressBar {
                 Layout.fillWidth: true
@@ -4837,6 +4874,11 @@ ApplicationWindow {
             { value: 59.94, label: "59.94" }, { value: 60, label: "60" }
         ]
         readonly property var bitrates: [0, 2000, 4000, 8000, 12000, 16000, 25000, 40000, 60000, 100000]
+        readonly property var captionFiles: [
+            { id: "", label: "None" },
+            { id: "srt", label: "SRT beside the video" },
+            { id: "vtt", label: "WebVTT beside the video" }
+        ]
         readonly property var soundFormats: [
             { channels: 2, sampleRate: 48000, label: "Stereo · 48 kHz" },
             { channels: 2, sampleRate: 44100, label: "Stereo · 44.1 kHz (CD, some music services)" },
@@ -4867,6 +4909,7 @@ ApplicationWindow {
             exportLoudness.currentIndex = Math.max(0, loudnessTargets.findIndex(l => l.value === (settings.loudness || 0)));
             exportFps.currentIndex = Math.max(0, frameRates.findIndex(r => r.value === (settings.fps || 0)));
             exportBitrate.currentIndex = Math.max(0, bitrates.indexOf(settings.bitrate || 0));
+            exportCaptions.currentIndex = Math.max(0, captionFiles.findIndex(f => f.id === (settings.captions || "")));
             exportSound.currentIndex = Math.max(0, soundFormats.findIndex(f => f.channels === (settings.channels || 2) && f.sampleRate === (settings.sampleRate || 48000)));
         }
         function changed() {
@@ -4877,10 +4920,11 @@ ApplicationWindow {
                 loudness: loudnessTargets[exportLoudness.currentIndex].value,
                 fps: frameRates[exportFps.currentIndex].value,
                 bitrate: bitrates[exportBitrate.currentIndex],
+                captions: captionFiles[exportCaptions.currentIndex].id,
                 channels: soundFormats[exportSound.currentIndex].channels,
                 sampleRate: soundFormats[exportSound.currentIndex].sampleRate
             };
-            const match = presets.findIndex(p => p.settings && p.settings.format === current.format && p.settings.quality === current.quality && p.settings.height === current.height && p.settings.loudness === current.loudness && current.fps === 0 && current.bitrate === 0 && current.channels === 2 && current.sampleRate === 48000);
+            const match = presets.findIndex(p => p.settings && p.settings.format === current.format && p.settings.quality === current.quality && p.settings.height === current.height && p.settings.loudness === current.loudness && current.fps === 0 && current.bitrate === 0 && current.channels === 2 && current.sampleRate === 48000 && current.captions === "");
             exportPreset.currentIndex = Math.max(0, match);
         }
         onAboutToShow: apply(win.exportChoice)
@@ -4964,6 +5008,17 @@ ApplicationWindow {
                 onActivated: exportSettings.changed()
                 ToolTip.visible: hovered
                 ToolTip.text: "A fixed average bitrate (peaks up to 1.5×) instead of the quality setting, e.g. for platforms with an upload limit"
+            }
+            Label { text: "Captions" }
+            ComboBox {
+                id: exportCaptions
+                objectName: "exportCaptions"
+                Layout.fillWidth: true
+                model: exportSettings.captionFiles
+                textRole: "label"
+                onActivated: exportSettings.changed()
+                ToolTip.visible: hovered
+                ToolTip.text: "Also saves the titles and captions as a subtitle file named like the video, for YouTube or players that switch subtitles on and off"
             }
             Label { text: "Sound" }
             ComboBox {

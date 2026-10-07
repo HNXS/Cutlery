@@ -1,5 +1,20 @@
 # Validation record
 
+## Windows portable build — 2026-10-07, overwrite, quick captions, caption layout, subtitle file beside the export (0.6 development)
+
+[GitHub Actions run 37600363235](https://github.com/HNXS/Cutlery/actions/runs/37600363235) (attempt 3) on commit `dd988d0fff2569bda8c62a7ea784857d08337349` passed every step. Attempts 1 and 2 never started: GitHub refused the job because the Actions spending limit was reached. No build or test step ran in them. The repository was then made public, and attempt 3 ran.
+
+New coverage:
+
+- **Engine tests (`captionLayoutOverwriteAndSidecar`):**
+  - **Caption layout:** lines break after a comma past 60 % and at the length limit, two lines are balanced, and text that fits stays as it is.
+  - **Quick captions:** each lasts 2 s or runs up to the next caption, and a caption at an occupied playhead is refused.
+  - **Subtitle file beside the export:** an in/out export with `captions: srt` writes an SRT named like the video, with the title and captions cut and shifted to the range; an unsupported caption format is refused.
+  - **Overwrite at the playhead:**
+    - the new clip replaces exactly its time on the track, and undo restores the original;
+    - on a magnetic track nothing slides and the magnet stays on.
+- **Interface:** the export dialog's "Captions" list feeds the choice.
+
 ## Windows portable build — 2026-10-07, key colour picker, cutting on markers, stabilize strength, mono and 44.1 kHz export (0.6 development)
 
 [GitHub Actions run 37596464638](https://github.com/HNXS/Cutlery/actions/runs/37596464638) on commit `bb9c3bf4e28e6f07c5e072b5e7d78b2fadba126c` passed every step on its first attempt.

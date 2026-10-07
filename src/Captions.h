@@ -10,9 +10,14 @@ struct Cue {
     QString text;
     QVector<double> wordStarts; // per word of `text`, when known
 };
-// Caption lines from one-word cues: at most `maxChars` characters, broken at pauses longer than
-// `pause` seconds and after sentence ends. Each line keeps its words' start times.
-QVector<Cue> groupWords(const QVector<Cue> &words, int maxChars = 42, double pause = 0.6);
+// Caption lines from one-word cues: at most `maxChars` characters and `maxSeconds` long, broken
+// at pauses longer than `pause` seconds, after sentence ends, and after a comma once the line is
+// past 60 % of its length. Each line keeps its words' start times.
+QVector<Cue> groupWords(const QVector<Cue> &words, int maxChars = 42, double pause = 0.6,
+                        double maxSeconds = 7);
+// `text` on up to `lines` lines: broken at the space that makes the lines most even (the first
+// line no shorter), unless it fits on one line of `maxChars`.
+QString layoutCaption(const QString &text, int lines, int maxChars);
 // SubRip (SRT) cues in file order. Throws on malformed timing; an empty text yields no cues.
 QVector<Cue> parseSrt(QString text);
 // A hesitation sound rather than a word ("äh", "ähm", "uh", "um", "hmm", ...), ignoring case and

@@ -359,7 +359,16 @@ class Editor final : public QObject {
     // Automatic captions: transcribes every audible clip's media (language "auto", "de", "en",
     // ...) and puts the captions on the "AI captions" track, replacing earlier ones.
     // `style`: "" plain lines, "karaoke" (spoken word highlighted), "word" (one word at a time).
-    Q_INVOKABLE void generateCaptions(const QString &language, const QString &style = {});
+    // `maxChars` (20–80) per line and `lines` (1–2) per caption; two lines only for the plain
+    // style, where a caption holds up to twice the characters, broken as evenly as possible.
+    Q_INVOKABLE void generateCaptions(const QString &language, const QString &style = {},
+                                      int maxChars = 42, int lines = 1);
+    // A caption (a title on the caption track) at the playhead, 2 seconds or up to the next
+    // caption, ready to type into.
+    Q_INVOKABLE void addCaption();
+    // Puts the asset at `frame` on `track` over whatever is there: clips (and their detached
+    // sound) in that time are cut away, the rest of the track stays where it is.
+    Q_INVOKABLE bool overwriteAsset(const QString &assetId, int track, qint64 frame);
     static constexpr auto captionTrackName = "AI captions";
     Q_INVOKABLE QVariantMap thumbnails(const QString &assetId) const {
         return m_thumbnails->strip(assetId);
@@ -549,6 +558,7 @@ class Editor final : public QObject {
     void placeCaptions();
     QVariantMap captionState() const;
     QString m_captionLanguage = "auto", m_captionStyle;
+    int m_captionChars = 42, m_captionLines = 1;
     QStringList m_captionAssets; // media of a running caption request
     static int upscaleHeight(const Asset &);
     void addAiMedia(RenderOptions &) const;

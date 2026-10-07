@@ -830,6 +830,10 @@ class UiTest : public QObject {
         QCOMPARE(dialog->property("current").toMap()["channels"].toInt(), 1);
         QCOMPARE(dialog->property("current").toMap()["sampleRate"].toInt(), 48000);
         choose("exportSound", 0);
+        choose("exportCaptions", 1); // an SRT beside the video
+        QCOMPARE(dialog->property("current").toMap()["captions"].toString(), QString("srt"));
+        QCOMPARE(preset->property("currentIndex").toInt(), 0);
+        choose("exportCaptions", 0);
         auto *result = findItem(window->contentItem(), "loudnessResult");
         QVERIFY(result && findItem(window->contentItem(), "measureLoudness"));
         QVERIFY(result->property("text").toString().contains("Integrated loudness"));
