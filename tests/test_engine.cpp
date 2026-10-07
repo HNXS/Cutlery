@@ -5728,6 +5728,169 @@ class EngineTest : public QObject {
         QCOMPARE(thumbnails.strip("clip")["status"].toString(), QString("ready"));
         QVERIFY(QImageReader(cache + "/" + key + ".jpg").canRead());
     }
+    void keyframeEasingFormatsAndFill() {
+        // Each easing at a quarter of the way between two keyframes (0 → 1).
+        Clip c;
+        c.duration = 100;
+        c.keyframes["x"] = {{0, 0, true}, {40, 1, true}};
+        QCOMPARE(c.valueAt("x", 10), 0.15625); // smooth: u²(3−2u) at u = ¼
+        for (auto [ease, expected] : {std::pair{"linear", 0.25}, {"in", 0.0625}, {"out", 0.4375},
+                                      {"hold", 0.}, {"smooth", 0.15625}}) {
+            c.keyframes["x"][0].ease = ease;
+            QCOMPARE(c.valueAt("x", 10), expected);
+        }
+        QCOMPARE(c.valueAt("x", 40), 1.); // every easing arrives at the next value
+        // Saved: smooth and linear as before, the others as a fourth element; old files load.
+        Project p;
+        c.id = "c";
+        c.text = "x";
+        c.keyframes["x"][0].ease = "out";
+        p.clips = {c};
+        auto json = p.json();
+        const auto saved = json["clips"].toArray()[0].toObject()["keyframes"].toObject()["x"].toArray();
+        QCOMPARE(saved[0].toArray().size(), 4);
+        QCOMPARE(saved[1].toArray().size(), 3);
+        QCOMPARE(Project::fromJson(json, {}).clips[0].keyframes["x"][0].easing(), QString("out"));
+        p.clips[0].keyframes["x"][0].ease = "bounce";
+        QVERIFY_EXCEPTION_THROWN(p.validate(), std::runtime_error);
+
+        // Rendered positions follow the easing: a hold keeps the start, linear moves a quarter.
+        const auto ffmpeg = Editor::executable("ffmpeg"), ffprobe = Editor::executable("ffprobe");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        QImage dot(40, 40, QImage::Format_RGB32);
+        dot.fill(Qt::red);
+        QVERIFY(dot.save(dir.filePath("dot.png")));
+        Project moving;
+        moving.width = 320;
+        moving.height = 180;
+        Asset a;
+        a.id = "dot";
+        a.path = dir.filePath("dot.png");
+        a.kind = "image";
+        a.duration = 5;
+        a.width = 40;
+        a.height = 40;
+        moving.assets = {a};
+        Clip m;
+        m.id = "m";
+        m.assetId = "dot";
+        m.duration = 60;
+        m.scale = 0.2; // 36 px high
+        m.keyframes["x"] = {{0, 0, false}, {40, 0.4, false}};
+        moving.clips = {m};
+        auto redColumn = [&](const QString &ease) {
+            auto project = moving;
+            project.clips[0].keyframes["x"][0].ease = ease;
+            RenderOptions options;
+            options.audio = false;
+            options.from = 10;
+            options.to = 11;
+            const auto plan = compileRender(project, dir.filePath("work"), 320, 180, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            int sum = 0, n = 0;
+            for (int x = 0; x < image.width(); ++x)
+                if (image.pixelColor(x, 90).red() > 200)
+                    sum += x, ++n;
+            return n ? sum / n : -1;
+        };
+        QVERIFY(std::abs(redColumn("hold") - 160) <= 3);
+        QVERIFY2(std::abs(redColumn("linear") - (160 + 32)) <= 3, qPrintable(QString::number(redColumn("linear"))));
+        QVERIFY(std::abs(redColumn("out") - (160 + 56)) <= 3);
+
+        // Editor: the easing of the keyframe at the playhead.
+        FrameProvider frames;
+        Editor editor(&frames);
+        saveProject(moving, dir.filePath("moving.cutlery"));
+        QVERIFY(editor.openProject(QUrl::fromLocalFile(dir.filePath("moving.cutlery"))));
+        editor.select("m");
+        editor.seek(0);
+        QCOMPARE(editor.state()["selected"].toMap()["keyEasing"].toMap()["x"].toString(), QString("linear"));
+        editor.setKeyframeEasing("x", "in");
+        QCOMPARE(editor.project().clips[0].keyframes["x"][0].easing(), QString("in"));
+        editor.seek(20);
+        editor.setKeyframeEasing("x", "out");
+        QVERIFY(editor.state()["error"].toString().contains("No keyframe"));
+        editor.clearError();
+
+        // Broadcast and camera formats, and AVIF stills.
+        QStringList files;
+        for (const auto &[name, args] :
+             {std::pair{QString("clip.mxf"), QStringList{"-c:v", "mpeg2video", "-c:a", "pcm_s16le"}},
+              {QString("clip.mts"), QStringList{"-c:v", "mpeg2video", "-c:a", "mp2", "-f", "mpegts"}},
+              {QString("clip.vob"), QStringList{"-c:v", "mpeg2video", "-c:a", "mp2", "-f", "vob"}}}) {
+            run(ffmpeg, QStringList{"-v", "error", "-f", "lavfi", "-i", "color=c=green:s=320x180:r=25:d=2",
+                                    "-f", "lavfi", "-i", "sine=d=2:sample_rate=48000"} +
+                            args + QStringList{"-shortest", dir.filePath(name)});
+            files << dir.filePath(name);
+        }
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=320x180", "-frames:v", "1",
+                     "-c:v", "libaom-av1", "-still-picture", "1", dir.filePath("still.avif")});
+        files << dir.filePath("still.avif");
+        editor.newProject();
+        editor.configure(320, 180, 25, 1);
+        QList<QUrl> urls;
+        for (const auto &f : files)
+            urls << QUrl::fromLocalFile(f);
+        editor.importMedia(urls);
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["importing"].toBool(), 30000);
+        QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+        QCOMPARE(editor.project().assets.size(), 4);
+        for (const auto &asset : editor.project().assets) {
+            if (asset.name == "still.png") { // decoded to a PNG on import, like SVG
+                QCOMPARE(asset.kind, QString("image"));
+                QCOMPARE(asset.width, 320);
+            } else {
+                QVERIFY2(asset.kind == "video" && asset.hasAudio, qPrintable(asset.name));
+                QVERIFY(std::abs(asset.duration - 2) < 0.2);
+            }
+            editor.addAsset(asset.id, 0);
+        }
+        // Each renders (green videos, the blue picture last).
+        RenderOptions options;
+        options.audio = false;
+        options.from = editor.project().duration() - 1;
+        options.to = editor.project().duration();
+        const auto plan = compileRender(editor.project(), dir.filePath("work"), 320, 180, options);
+        QFile g(dir.filePath("graph.txt"));
+        QVERIFY(g.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        g.write(plan.graph.toUtf8());
+        g.close();
+        QImage last;
+        QVERIFY(last.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG"));
+        QVERIFY2(last.pixelColor(160, 90).blue() > 200, qPrintable(last.pixelColor(160, 90).name()));
+        const auto mp4 = dir.filePath("all.mp4");
+        editor.exportWith(QUrl::fromLocalFile(mp4), {{"format", "mpeg4"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(QFileInfo::exists(mp4), qPrintable(editor.state()["error"].toString()));
+
+        // Arranging with fill crops each picture to its area.
+        editor.newProject();
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(files[0]), QUrl::fromLocalFile(files[3])});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 30000);
+        editor.addAsset(editor.project().assets[0].id, 0);
+        const auto first = editor.state()["selectedId"].toString();
+        editor.addAsset(editor.project().assets[1].id, 1);
+        editor.toggleSelect(first);
+        editor.arrange("side", true);
+        for (const auto &clip : editor.project().clips) {
+            QVERIFY2(std::abs(clip.cropLeft - 0.25) < 1e-6 && std::abs(clip.cropRight - 0.25) < 1e-6,
+                     qPrintable(QString::number(clip.cropLeft)));
+            const auto size = editor.project().pictureSize(clip, 320 * clip.scale, 180 * clip.scale);
+            QVERIFY2(std::abs(size.width() - 160) < 1 && std::abs(size.height() - 180) < 1,
+                     qPrintable(QString("%1x%2").arg(size.width()).arg(size.height())));
+        }
+        editor.arrange("side", false); // fitting again resets the crop
+        QCOMPARE(editor.project().clips[0].cropLeft, 0.);
+        QVERIFY(std::abs(editor.project().clips[0].scale - 0.5) < 1e-6);
+    }
     void adjustmentLayers() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

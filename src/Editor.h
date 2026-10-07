@@ -135,7 +135,9 @@ class Editor final : public QObject {
     // "side" (side by side), "stack" (one above the other), "grid" (2 × 2), "pip-tl", "pip-tr",
     // "pip-bl", "pip-br" (the lowest full, the others small in that corner), "presenter" (the
     // lowest large on the left, the next round in the lower right) or "full" (all full size).
-    Q_INVOKABLE void arrange(const QString &layout);
+    // With `fill`, each picture is cropped (equally on two opposite edges) to the shape of its
+    // area and fills it; otherwise it fits inside. Arranging resets the single-edge crops.
+    Q_INVOKABLE void arrange(const QString &layout, bool fill = false);
     Q_INVOKABLE void select(const QString &id);
     Q_INVOKABLE void seek(qint64 frame);
     Q_INVOKABLE void setClip(const QString &key, const QVariant &value);
@@ -169,6 +171,9 @@ class Editor final : public QObject {
     Q_INVOKABLE void split();
     // Adds a keyframe at the playhead with the current value, or removes the one there.
     Q_INVOKABLE void toggleKeyframe(const QString &property);
+    // How the selected clip's keyframe of `property` at the playhead moves on to the next one:
+    // one of keyframeEasings().
+    Q_INVOKABLE void setKeyframeEasing(const QString &property, const QString &easing);
     // Previous/next keyframe position of the selected clip (the playhead when there is none).
     Q_INVOKABLE qint64 adjacentKeyframe(bool forward) const;
     // Markers: add one at the playhead or remove the one there; rename or recolour by index.

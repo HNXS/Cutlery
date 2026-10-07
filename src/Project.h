@@ -49,8 +49,18 @@ struct Keyframe {
     qint64 frame = 0;
     double value = 0;
     bool smooth = true;
+    // How the value moves to the next keyframe: "linear", "smooth" (ease in and out), "in"
+    // (slow start), "out" (slow end) or "hold" (jumps at the next keyframe). Empty: from
+    // `smooth`.
+    QString ease;
+    QString easing() const {
+        return ease.isEmpty() ? QString(smooth ? "smooth" : "linear") : ease;
+    }
     bool operator==(const Keyframe &) const = default;
 };
+// Keyframe easings, and the eased progress for one at u (0..1).
+const QStringList &keyframeEasings();
+double eased(const QString &easing, double u);
 struct Clip {
     QString id, assetId, name;
     // Clips with the same link (picture and its detached sound) move and trim together while

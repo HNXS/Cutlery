@@ -1331,6 +1331,13 @@ ApplicationWindow {
                                 Caption {
                                     text: "ARRANGE SELECTED"
                                 }
+                                CheckBox {
+                                    id: arrangeFill
+                                    objectName: "arrangeFill"
+                                    text: "Fill each area (crop)"
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Crops each picture to the shape of its area so there are no empty edges; off fits the whole picture inside"
+                                }
                                 GridLayout {
                                     Layout.fillWidth: true
                                     columns: 2
@@ -1351,7 +1358,7 @@ ApplicationWindow {
                                             Layout.fillWidth: true
                                             text: modelData.label
                                             enabled: (win.s.selectedIds || []).length > (modelData.id === "full" ? 0 : 1)
-                                            onClicked: editor.arrange(modelData.id)
+                                            onClicked: editor.arrange(modelData.id, arrangeFill.checked)
                                             ToolTip.visible: hovered
                                             ToolTip.text: modelData.tip + ". Select the clips first (Ctrl+click)."
                                         }
@@ -3163,6 +3170,18 @@ ApplicationWindow {
                                             ToolTip.text: (win.selection.keyed || {})[modelData.key] ? "Remove keyframe" : "Add keyframe at playhead"
                                         }
                                     }
+                                    // The keyframe at the playhead: how it moves on to the next one.
+                                    ComboBox {
+                                        objectName: "keyframeEasing-" + modelData.key
+                                        Layout.fillWidth: true
+                                        visible: (win.selection.keyed || {})[modelData.key] === true
+                                        readonly property var easings: ["smooth", "linear", "in", "out", "hold"]
+                                        model: ["Ease in and out", "Linear", "Ease in (slow start)", "Ease out (slow end)", "Hold until the next keyframe"]
+                                        currentIndex: Math.max(0, easings.indexOf((win.selection.keyEasing || {})[modelData.key] || "smooth"))
+                                        onActivated: editor.setKeyframeEasing(modelData.key, easings[currentIndex])
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "How the value moves from this keyframe to the next"
+                                    }
                                     Slider {
                                         Layout.fillWidth: true
                                         from: modelData.lo
@@ -4046,7 +4065,7 @@ ApplicationWindow {
         id: importDialog
         title: "Import local media"
         fileMode: FileDialog.OpenFiles
-        nameFilters: ["Media files (*.mp4 *.mov *.mkv *.webm *.avi *.mp3 *.wav *.m4a *.aac *.flac *.ogg *.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.gif *.svg)", "All files (*)"]
+        nameFilters: ["Media files (*.mp4 *.mov *.mkv *.webm *.avi *.m4v *.mts *.m2ts *.ts *.mpg *.mpeg *.vob *.mxf *.dv *.wmv *.flv *.3gp *.mp3 *.wav *.m4a *.aac *.flac *.ogg *.opus *.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.gif *.svg *.avif *.heic *.heif)", "All files (*)"]
         onAccepted: editor.importMedia(selectedFiles)
     }
     FileDialog {
