@@ -138,6 +138,10 @@ struct Clip {
     QString fx;
     double fxStrength = 0.5, motionBlur = 0;
     bool stabilize = false;
+    // How far stabilizing may move the picture (0..1: about 16 to 64 pixels of the source), and
+    // whether it zooms in that far so no mirrored edge shows.
+    double stabilizeStrength = 0.33;
+    bool stabilizeZoom = false;
     // Room reverb and a distinct echo, 0..1.
     double reverb = 0, echo = 0;
     // Pitch in semitones (−12..12) without changing the tempo.

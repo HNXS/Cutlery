@@ -38,7 +38,7 @@ QSize exportSize(const Project &p, int height) {
     const int width = std::max(2, int(std::lround(double(p.width) * height / p.height / 2)) * 2);
     return {width, height / 2 * 2};
 }
-QVector<Encoder> encoderCandidates(const ExportSettings &s, QSize size, double fps) {
+static QVector<Encoder> baseCandidates(const ExportSettings &s, QSize size, double fps) {
     const int q = std::max<qsizetype>(0, QStringList{"max", "high", "balanced", "small"}.indexOf(
                                              s.quality));
     const auto pick = [q](std::initializer_list<int> values) {
@@ -166,14 +166,24 @@ QVector<Encoder> encoderCandidates(const ExportSettings &s, QSize size, double f
     } else {
         add("mpeg4", "MPEG-4 Part 2 (software)", {"-q:v", pick({2, 3, 5, 8}), "-g", gop}, false);
     }
+    return c;
+}
+QVector<Encoder> encoderCandidates(const ExportSettings &s, QSize size, double fps) {
+    auto c = baseCandidates(s, size, fps);
     for (auto &e : c) {
+        if (!e.noAudio) {
+            if (s.channels == 1)
+                e.audioArguments << "-ac" << "1";
+            if (s.sampleRate != 48000)
+                e.audioArguments << "-ar" << QString::number(s.sampleRate);
+        }
         if (s.fps > 0)
             for (const auto &[rate, value] : exportFrameRates())
                 if (std::abs(value - s.fps) < 0.01) {
                     e.frameRate = rate;
                     e.frameRateValue = value;
                 }
-        if (s.bitrate <= 0 || e.name == "prores_ks")
+        if (s.bitrate <= 0 || e.name == "prores_ks" || e.sequence || e.audioOnly)
             continue;
         // A set bitrate replaces the quality-based rate control: the quality options are
         // dropped and an average bitrate with a 1.5× peak is asked for.

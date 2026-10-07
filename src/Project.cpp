@@ -360,8 +360,11 @@ QJsonObject Project::json(const QString &base) const {
             o["fx"] = c.fx;
             o["fxStrength"] = c.fxStrength;
         }
-        if (c.stabilize)
+        if (c.stabilize) {
             o["stabilize"] = true;
+            o["stabilizeStrength"] = c.stabilizeStrength;
+            o["stabilizeZoom"] = c.stabilizeZoom;
+        }
         if (!c.graphic.isEmpty()) {
             o["graphic"] = c.graphic;
             o["fillColor"] = c.fillColor;
@@ -591,6 +594,8 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.fx = j["fx"].toString();
         c.fxStrength = j["fxStrength"].toDouble(0.5);
         c.stabilize = j["stabilize"].toBool(false);
+        c.stabilizeStrength = j["stabilizeStrength"].toDouble(0.33);
+        c.stabilizeZoom = j["stabilizeZoom"].toBool(false);
         c.graphic = j["graphic"].toString();
         c.fillColor = j["fillColor"].toString("#ffd23f");
         c.strokeColor = j["strokeColor"].toString("#000000");
@@ -828,6 +833,7 @@ void Project::validate() const {
                 "Invalid selective colour");
         require(QStringList{"", "shake", "glitch", "vhs", "film"}.contains(c.fx) &&
                     bounded(c.fxStrength, 0, 1) && bounded(c.motionBlur, 0, 1) &&
+                    bounded(c.stabilizeStrength, 0, 1) &&
                     bounded(c.reverb, 0, 1) && bounded(c.echo, 0, 1) && bounded(c.pan, -1, 1) &&
                     bounded(c.anchorX, 0, 1) && bounded(c.anchorY, 0, 1),
                 "Invalid effect setting");

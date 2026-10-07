@@ -5313,6 +5313,187 @@ class EngineTest : public QObject {
         run(ffmpeg, {"-v", "error", "-i", mp4, "-frames:v", "1", "-pix_fmt", "rgba", opaque});
         QCOMPARE(alphaAt(opaque, 2, 2), 255);
     }
+    void keyPickerMarkersStabilizeAndSound() {
+        const auto ffmpeg = Editor::executable("ffmpeg"), ffprobe = Editor::executable("ffprobe");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        QImage blue(160, 90, QImage::Format_RGB32), screen(160, 90, QImage::Format_RGB32);
+        blue.fill(Qt::blue);
+        screen.fill(QColor(48, 192, 96)); // an uneven green screen colour
+        QPainter(&screen).fillRect(60, 25, 40, 40, Qt::red);
+        QVERIFY(blue.save(dir.filePath("blue.png")) && screen.save(dir.filePath("screen.png")));
+        Project p;
+        p.width = 160;
+        p.height = 90;
+        for (auto [id, file] : {std::pair{"bg", "blue.png"}, {"screen", "screen.png"}}) {
+            Asset a;
+            a.id = id;
+            a.path = dir.filePath(file);
+            a.kind = "image";
+            a.duration = 5;
+            a.width = 160;
+            a.height = 90;
+            p.assets.push_back(a);
+        }
+        Clip bg;
+        bg.id = "bg";
+        bg.assetId = "bg";
+        bg.duration = 100;
+        Clip pip = bg;
+        pip.id = "pip";
+        pip.assetId = "screen";
+        pip.track = 1;
+        pip.scale = .5;
+        p.clips = {bg, pip};
+        const auto file = dir.filePath("p.cutlery");
+        saveProject(p, file);
+        FrameProvider frames;
+        Editor editor(&frames);
+        QVERIFY(editor.openProject(QUrl::fromLocalFile(file)));
+        editor.select("pip");
+        // A click on the screen colour of the picture (centred at half size) picks it.
+        editor.pickKeyColor(0.3, 0.3);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().clip("pip")->chromaKey, 20000);
+        const QColor picked(editor.project().clip("pip")->keyColor);
+        QVERIFY2(std::abs(picked.red() - 48) < 12 && std::abs(picked.green() - 192) < 12 &&
+                     std::abs(picked.blue() - 96) < 12,
+                 qPrintable(picked.name()));
+        editor.undo(); // one step
+        QVERIFY(!editor.project().clip("pip")->chromaKey);
+        // Outside the picture there is nothing to pick.
+        editor.pickKeyColor(0.05, 0.05);
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["error"].toString().isEmpty(), 20000);
+        QVERIFY(editor.state()["error"].toString().contains("screen colour"));
+        editor.clearError();
+
+        // Markers: split at those inside the clip, with its detached sound.
+        editor.select("bg");
+        for (qint64 frame : {20, 45, 60})
+            editor.seek(frame), editor.toggleMarker();
+        editor.splitAtMarkers();
+        QStringList pieces;
+        for (const auto &c : editor.project().clips)
+            if (c.assetId == "bg")
+                pieces << QString("%1+%2").arg(c.start).arg(c.duration);
+        pieces.sort();
+        QCOMPARE(pieces, (QStringList{"0+20", "20+25", "45+15", "60+40"}));
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+
+        // Cut on the beat: each selected clip ends on the marker nearest to its own end.
+        Project beats;
+        beats.width = 160;
+        beats.height = 90;
+        beats.fpsN = 25;
+        beats.assets = p.assets;
+        Clip a = bg;
+        a.id = "a";
+        a.duration = 25;
+        Clip b = a;
+        b.id = "b";
+        b.start = 25;
+        b.duration = 30;
+        Clip c = a;
+        c.id = "c";
+        c.start = 55;
+        c.duration = 40;
+        beats.clips = {a, b, c};
+        beats.markers = {{20}, {45}, {60}, {100}};
+        saveProject(beats, file);
+        QVERIFY(editor.openProject(QUrl::fromLocalFile(file)));
+        editor.select("a");
+        editor.toggleSelect("b");
+        editor.toggleSelect("c");
+        editor.fitToMarkers();
+        auto range = [&](const QString &id) {
+            const auto *x = editor.project().clip(id);
+            return QString("%1-%2").arg(x->start).arg(x->start + x->duration);
+        };
+        QCOMPARE(range("a"), QString("0-20"));
+        QCOMPARE(range("b"), QString("20-45"));
+        QCOMPARE(range("c"), QString("45-100"));
+        QVERIFY(editor.state()["status"].toString().contains("3 of 3"));
+        editor.undo();
+        QCOMPARE(range("c"), QString("55-95"));
+        // A video clip only reaches the markers its media lasts to.
+        const auto video = dir.filePath("two.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "testsrc2=s=160x90:r=25:d=2", "-c:v",
+                     "ffv1", video});
+        editor.importMedia({QUrl::fromLocalFile(video)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 3, 15000);
+        editor.addAsset(editor.project().assets.last().id, 1); // 50 frames at 0 on track 2
+        const auto clipId = editor.state()["selectedId"].toString();
+        editor.seek(0);
+        editor.fitToMarkers(); // natural end 50: 45 is nearest; 60 and 100 are out of reach
+        QCOMPARE(range(clipId), QString("0-45"));
+        // Nothing selected or no markers: explained.
+        editor.newProject();
+        editor.addTitle();
+        editor.fitToMarkers();
+        QVERIFY(editor.state()["error"].toString().contains("markers"));
+        editor.clearError();
+
+        // Stabilizing: strength sets the search range, zoom crops the uncovered edges.
+        Project shaky = p;
+        shaky.clips = {pip};
+        auto &s = shaky.clips[0];
+        s.assetId = "video";
+        Asset v;
+        v.id = "video";
+        v.path = video;
+        v.kind = "video";
+        v.duration = 2;
+        v.width = 160;
+        v.height = 90;
+        v.frameRate = 25;
+        shaky.assets.push_back(v);
+        s.stabilize = true;
+        s.stabilizeStrength = 1;
+        s.stabilizeZoom = true;
+        s.duration = 30;
+        RenderOptions options;
+        options.audio = false;
+        options.to = 1;
+        auto plan = compileRender(shaky, dir.filePath("work"), 160, 90, options);
+        QVERIFY2(plan.graph.contains("deshake=rx=64:ry=64") && plan.graph.contains("crop=w='iw-2*64'"),
+                 qPrintable(plan.graph));
+        {
+            QFile g(dir.filePath("graph.txt"));
+            QVERIFY(g.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            g.write(plan.graph.toUtf8());
+        }
+        QImage still;
+        QVERIFY(still.loadFromData(run(ffmpeg, renderArguments(plan, dir.filePath("graph.txt"), {}, "", 0)), "PNG"));
+        s.stabilizeStrength = 0.33;
+        s.stabilizeZoom = false;
+        plan = compileRender(shaky, dir.filePath("work"), 160, 90, options);
+        QVERIFY(plan.graph.contains("deshake=rx=32:ry=32") && !plan.graph.contains("iw-2*"));
+        s.stabilizeStrength = 0.8;
+        s.stabilizeZoom = true;
+        const auto back = Project::fromJson(shaky.json(), {}).clips[0];
+        QCOMPARE(back.stabilizeStrength, 0.8);
+        QVERIFY(back.stabilizeZoom);
+
+        // Sound as mono at 44.1 kHz.
+        const auto tone = dir.filePath("tone.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", tone});
+        editor.newProject();
+        editor.importMedia({QUrl::fromLocalFile(tone)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        for (const auto &[name, format] : {std::pair{"mono.wav", "wav"}, {"mono.m4a", "m4a"}}) {
+            const auto out = dir.filePath(name);
+            editor.exportWith(QUrl::fromLocalFile(out),
+                              {{"format", format}, {"channels", 1}, {"sampleRate", 44100}});
+            QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+            QVERIFY2(QFileInfo::exists(out), qPrintable(editor.state()["error"].toString()));
+            const auto info = QString::fromUtf8(run(ffprobe, {"-v", "error", "-show_entries",
+                                                              "stream=channels,sample_rate", "-of", "compact", out}));
+            QVERIFY2(info.contains("channels=1") && info.contains("sample_rate=44100"), qPrintable(info));
+        }
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("five.wav")), {{"format", "wav"}, {"channels", 5}});
+        QVERIFY(editor.state()["error"].toString().contains("mono"));
+    }
     void adjustmentLayers() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

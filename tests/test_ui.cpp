@@ -826,6 +826,10 @@ class UiTest : public QObject {
         choose("exportFps", 0);
         choose("exportBitrate", 0);
         choose("exportFormat", 0);
+        choose("exportSound", 2); // mono, 48 kHz
+        QCOMPARE(dialog->property("current").toMap()["channels"].toInt(), 1);
+        QCOMPARE(dialog->property("current").toMap()["sampleRate"].toInt(), 48000);
+        choose("exportSound", 0);
         auto *result = findItem(window->contentItem(), "loudnessResult");
         QVERIFY(result && findItem(window->contentItem(), "measureLoudness"));
         QVERIFY(result->property("text").toString().contains("Integrated loudness"));
@@ -929,6 +933,13 @@ class UiTest : public QObject {
         key->setProperty("checked", true);
         QVERIFY(QMetaObject::invokeMethod(key, "toggled"));
         QVERIFY(clip().chromaKey);
+        // "Pick" turns the viewer into a colour picker until the next click.
+        auto *picker = findItem(window->contentItem(), "keyPicker");
+        QVERIFY(picker && !picker->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "pickKeyColor"), "clicked"));
+        QTRY_VERIFY(picker->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "pickKeyColor"), "clicked"));
+        QTRY_VERIFY(!picker->isVisible());
         // Blend mode and luma key: chosen from their lists; tolerance sliders appear for the key.
         auto *blend = findItem(window->contentItem(), "blendMode");
         QVERIFY(blend && blend->isVisible());

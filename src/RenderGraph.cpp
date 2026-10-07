@@ -912,8 +912,14 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                           .arg(fps, num(std::fmod(std::max(0., seek - pre), n.asset->duration)));
         QString f = timing(source, !n.image);
         // Camera shake is measured on the source picture, before scaling.
-        if (c.stabilize && !n.image)
-            f += ",deshake=rx=32:ry=32:edge=mirror";
+        if (c.stabilize && !n.image) {
+            // The search range in source pixels (FFmpeg allows up to 64); zooming in by it on
+            // every side hides the edges the correction uncovers.
+            const int range = std::clamp(int(std::lround(16 + 48 * c.stabilizeStrength)), 16, 64);
+            f += QString(",deshake=rx=%1:ry=%1:edge=mirror").arg(range);
+            if (c.stabilizeZoom)
+                f += QString(",crop=w='iw-2*%1':h='ih-2*%1*ih/iw'").arg(range);
+        }
         const bool moving = animatedGeometry(c);
         // Animated geometry first fits the canvas at scale 1 and is resized per frame below;
         // otherwise the clip is scaled once.

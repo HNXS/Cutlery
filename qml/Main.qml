@@ -30,6 +30,8 @@ ApplicationWindow {
     property color muted: "#8c9aa8"
     property real pixelsPerSecond: 48
     property int targetTrack: 0
+    // The next click on the viewer picks the selected clip's key colour.
+    property bool pickingKey: false
     property var exportChoice: ({
             format: "h264",
             quality: "high",
@@ -1493,6 +1495,19 @@ ApplicationWindow {
                                 visible: win.s.duration > 0
                                 Component.onCompleted: editor.setVideoSink(videoSink)
                             }
+                            // Picking the key colour: a click on the canvas takes the selected clip's
+                            // colour there.
+                            MouseArea {
+                                objectName: "keyPicker"
+                                anchors.fill: parent
+                                z: 10
+                                visible: win.pickingKey && win.s.selectedId.length > 0
+                                cursorShape: Qt.CrossCursor
+                                onClicked: function (mouse) {
+                                    win.pickingKey = false;
+                                    editor.pickKeyColor(mouse.x / width, mouse.y / height);
+                                }
+                            }
                             // Selected clip on the canvas: drag inside to move, drag a corner to
                             // resize around the centre. One undo step on release; animated
                             // properties get a keyframe at the playhead.
@@ -2596,6 +2611,24 @@ ApplicationWindow {
                                                 }
                                             }
                                         }
+                                        Rectangle {
+                                            // A picked colour that is none of the presets.
+                                            visible: ["#00ff00", "#00b140", "#0047bb"].indexOf(win.selection.keyColor || "") < 0
+                                            width: 20
+                                            height: 20
+                                            radius: 10
+                                            color: win.selection.keyColor || "transparent"
+                                            border.width: 3
+                                            border.color: win.mint
+                                        }
+                                        Action {
+                                            objectName: "pickKeyColor"
+                                            text: win.pickingKey ? "Click the screen…" : "Pick"
+                                            padding: 6
+                                            onClicked: win.pickingKey = !win.pickingKey
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Click the green or blue screen in the viewer to key out exactly that colour"
+                                        }
                                     }
                                     Repeater {
                                         model: [
@@ -2836,6 +2869,29 @@ ApplicationWindow {
                                     objectName: "beatEvery"
                                     Layout.preferredWidth: 110
                                     model: ["every beat", "every 2nd", "every 4th"]
+                                }
+                            }
+                            // Cutting on the markers (beats or your own).
+                            RowLayout {
+                                Layout.fillWidth: true
+                                visible: (win.s.markers || []).length > 0
+                                Action {
+                                    objectName: "splitAtMarkers"
+                                    Layout.fillWidth: true
+                                    enabled: win.selection.locked !== true
+                                    text: "Split at markers"
+                                    onClicked: editor.splitAtMarkers()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Cuts the clip at every marker inside it, e.g. on every beat"
+                                }
+                                Action {
+                                    objectName: "fitToMarkers"
+                                    Layout.fillWidth: true
+                                    enabled: win.selection.locked !== true
+                                    text: "Cut on the beat"
+                                    onClicked: editor.fitToMarkers()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Puts the selected clips (Ctrl+click several) one after another, each ending on the marker nearest to its end"
                                 }
                             }
                             // Phone and screen recordings often have a variable frame rate.
@@ -3619,6 +3675,36 @@ ApplicationWindow {
                                     onToggled: editor.setClip("stabilize", checked)
                                     ToolTip.visible: hovered
                                     ToolTip.text: "Smooths a shaky hand-held camera; the edges are filled in"
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    visible: win.selection.video === true && win.selection.stabilize === true
+                                    Label {
+                                        text: "Strength"
+                                        color: win.muted
+                                    }
+                                    Slider {
+                                        objectName: "stabilizeStrength"
+                                        Layout.fillWidth: true
+                                        from: 0
+                                        to: 1
+                                        stepSize: .05
+                                        value: win.selection.stabilizeStrength ?? .33
+                                        onPressedChanged: if (!pressed)
+                                            editor.setClip("stabilizeStrength", value)
+                                        onMoved: if (!pressed)
+                                            editor.setClip("stabilizeStrength", value)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "How much shake is evened out; stronger may also smooth intended camera moves"
+                                    }
+                                    CheckBox {
+                                        objectName: "stabilizeZoom"
+                                        text: "Zoom in"
+                                        checked: win.selection.stabilizeZoom === true
+                                        onToggled: editor.setClip("stabilizeZoom", checked)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Zooms in a little so no filled-in edge shows"
+                                    }
                                 }
                             }
                             RowLayout {
@@ -4751,6 +4837,12 @@ ApplicationWindow {
             { value: 59.94, label: "59.94" }, { value: 60, label: "60" }
         ]
         readonly property var bitrates: [0, 2000, 4000, 8000, 12000, 16000, 25000, 40000, 60000, 100000]
+        readonly property var soundFormats: [
+            { channels: 2, sampleRate: 48000, label: "Stereo · 48 kHz" },
+            { channels: 2, sampleRate: 44100, label: "Stereo · 44.1 kHz (CD, some music services)" },
+            { channels: 1, sampleRate: 48000, label: "Mono · 48 kHz (speech, podcasts)" },
+            { channels: 1, sampleRate: 44100, label: "Mono · 44.1 kHz" }
+        ]
         readonly property var loudnessTargets: [
             { value: 0, label: "Keep as mixed" },
             { value: -14, label: "YouTube & streaming (−14 LUFS)" },
@@ -4775,6 +4867,7 @@ ApplicationWindow {
             exportLoudness.currentIndex = Math.max(0, loudnessTargets.findIndex(l => l.value === (settings.loudness || 0)));
             exportFps.currentIndex = Math.max(0, frameRates.findIndex(r => r.value === (settings.fps || 0)));
             exportBitrate.currentIndex = Math.max(0, bitrates.indexOf(settings.bitrate || 0));
+            exportSound.currentIndex = Math.max(0, soundFormats.findIndex(f => f.channels === (settings.channels || 2) && f.sampleRate === (settings.sampleRate || 48000)));
         }
         function changed() {
             current = {
@@ -4783,9 +4876,11 @@ ApplicationWindow {
                 height: heights[exportHeight.currentIndex],
                 loudness: loudnessTargets[exportLoudness.currentIndex].value,
                 fps: frameRates[exportFps.currentIndex].value,
-                bitrate: bitrates[exportBitrate.currentIndex]
+                bitrate: bitrates[exportBitrate.currentIndex],
+                channels: soundFormats[exportSound.currentIndex].channels,
+                sampleRate: soundFormats[exportSound.currentIndex].sampleRate
             };
-            const match = presets.findIndex(p => p.settings && p.settings.format === current.format && p.settings.quality === current.quality && p.settings.height === current.height && p.settings.loudness === current.loudness && current.fps === 0 && current.bitrate === 0);
+            const match = presets.findIndex(p => p.settings && p.settings.format === current.format && p.settings.quality === current.quality && p.settings.height === current.height && p.settings.loudness === current.loudness && current.fps === 0 && current.bitrate === 0 && current.channels === 2 && current.sampleRate === 48000);
             exportPreset.currentIndex = Math.max(0, match);
         }
         onAboutToShow: apply(win.exportChoice)
@@ -4869,6 +4964,16 @@ ApplicationWindow {
                 onActivated: exportSettings.changed()
                 ToolTip.visible: hovered
                 ToolTip.text: "A fixed average bitrate (peaks up to 1.5×) instead of the quality setting, e.g. for platforms with an upload limit"
+            }
+            Label { text: "Sound" }
+            ComboBox {
+                id: exportSound
+                objectName: "exportSound"
+                Layout.fillWidth: true
+                model: exportSettings.soundFormats
+                textRole: "label"
+                enabled: ["gif", "png"].indexOf(exportSettings.current.format) < 0
+                onActivated: exportSettings.changed()
             }
             Label { text: "Loudness" }
             ComboBox {
