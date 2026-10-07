@@ -137,10 +137,23 @@ double Clip::valueAt(const QString &p, double frame) const {
     int i = 0;
     while (frame >= k[i + 1].frame)
         ++i;
-    double u = (frame - k[i].frame) / double(k[i + 1].frame - k[i].frame);
-    if (k[i].smooth)
-        u = u * u * (3 - 2 * u);
-    return k[i].value + (k[i + 1].value - k[i].value) * u;
+    const double u = (frame - k[i].frame) / double(k[i + 1].frame - k[i].frame);
+    return k[i].value + (k[i + 1].value - k[i].value) * eased(k[i].easing(), u);
+}
+const QStringList &keyframeEasings() {
+    static const QStringList easings{"smooth", "linear", "in", "out", "hold"};
+    return easings;
+}
+double eased(const QString &easing, double u) {
+    if (easing == "smooth")
+        return u * u * (3 - 2 * u);
+    if (easing == "in")
+        return u * u;
+    if (easing == "out")
+        return 1 - (1 - u) * (1 - u);
+    if (easing == "hold")
+        return 0;
+    return u;
 }
 void Clip::shiftKeyframes(qint64 delta) {
     for (auto &list : keyframes)
@@ -412,7 +425,13 @@ QJsonObject Project::json(const QString &base) const {
             for (auto it = c.keyframes.begin(); it != c.keyframes.end(); ++it) {
                 QJsonArray list;
                 for (const auto &k : *it)
-                    list.append(QJsonArray{QString::number(k.frame), k.value, k.smooth});
+                {
+                    QJsonArray key{QString::number(k.frame), k.value, k.smooth};
+                    // Easings other than smooth/linear are stored as a fourth element.
+                    if (!k.ease.isEmpty() && k.ease != "smooth" && k.ease != "linear")
+                        key.append(k.ease);
+                    list.append(key);
+                }
                 animated[it.key()] = list;
             }
             o["keyframes"] = animated;
@@ -638,8 +657,13 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
             require(list.size() <= 1000, "Too many keyframes");
             for (const auto &v : list) {
                 const auto k = v.toArray();
-                require(k.size() == 3 && k[1].isDouble() && k[2].isBool(), "Invalid keyframe");
-                c.keyframes[it.key()].push_back({integer(k[0]), k[1].toDouble(), k[2].toBool()});
+                require((k.size() == 3 || (k.size() == 4 && k[3].isString())) && k[1].isDouble() &&
+                            k[2].isBool(),
+                        "Invalid keyframe");
+                Keyframe key{integer(k[0]), k[1].toDouble(), k[2].toBool()};
+                if (k.size() == 4)
+                    key.ease = k[3].toString();
+                c.keyframes[it.key()].push_back(key);
             }
         }
         c.shape = j["shape"].toString("rect");
@@ -756,6 +780,7 @@ void Project::validate() const {
             const auto [lo, hi] = propertyRange(it.key());
             for (int i = 0; i < it->size(); ++i) {
                 const auto &k = it->at(i);
+                require(keyframeEasings().contains(k.easing()), "Invalid keyframe easing");
                 require(std::abs(k.frame) <= 100000000 && bounded(k.value, lo, hi) &&
                             (i == 0 || it->at(i - 1).frame < k.frame),
                         "Invalid keyframe");

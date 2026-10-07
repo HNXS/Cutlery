@@ -174,7 +174,13 @@ static QString curve(const Clip &c, const QString &property, const QString &fram
     for (auto i = k.size() - 2; i >= 0; --i) {
         const auto u = QString("((%1-%2)/%3)").arg(frame).arg(k[i].frame).arg(
             k[i + 1].frame - k[i].frame);
-        const auto eased = k[i].smooth ? QString("(%1*%1*(3-2*%1))").arg(u) : u;
+        // Matches eased() in Project.cpp.
+        const auto easing = k[i].easing();
+        const auto eased = easing == "smooth" ? QString("(%1*%1*(3-2*%1))").arg(u)
+                           : easing == "in"   ? QString("(%1*%1)").arg(u)
+                           : easing == "out"  ? QString("(1-(1-%1)*(1-%1))").arg(u)
+                           : easing == "hold" ? QString("0")
+                                              : u;
         expr = QString("if(lt(%1,%2),%3+(%4)*%5,%6)")
                    .arg(frame)
                    .arg(k[i + 1].frame)

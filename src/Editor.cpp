@@ -449,14 +449,18 @@ QVariantMap Editor::state() const {
                                          m_project.asset(c.assetId)->hasAudio}};
             // Animated values and keyframe state at the playhead for the inspector.
             const auto local = m_playhead - c.start;
-            QVariantMap animated, keyed, counts;
+            QVariantMap animated, keyed, counts, easing;
             for (const auto &property : animatableProperties()) {
                 const auto list = c.keyframes.value(property);
                 animated[property] = c.valueAt(property, local);
                 keyed[property] = std::any_of(list.begin(), list.end(),
                                               [&](const Keyframe &k) { return k.frame == local; });
                 counts[property] = list.size();
+                for (const auto &k : list)
+                    if (k.frame == local)
+                        easing[property] = k.easing();
             }
+            selected["keyEasing"] = easing;
             selected["animated"] = animated;
             selected["keyed"] = keyed;
             selected["keyframeCount"] = counts;
@@ -1239,7 +1243,8 @@ QList<Editor::ImportRequest> Editor::importRequests(const QList<QUrl> &urls,
     static const QStringList media{
         "mp4", "mov", "mkv", "webm", "avi", "m4v", "mts", "m2ts", "mpg", "mpeg", "wmv", "flv",
         "3gp", "mp3", "wav", "m4a", "aac", "flac", "ogg", "opus", "wma", "aif", "aiff", "png",
-        "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif", "svg"};
+        "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif", "svg", "mxf", "vob", "ts", "m2t",
+        "dv", "avif", "heic", "heif"};
     QList<ImportRequest> requests;
     for (const auto &url : urls) {
         const QFileInfo info(url.toLocalFile());
@@ -1424,6 +1429,31 @@ QString rasterizeSvg(const QString &svg, const QString &folder, int longest) {
         throw std::runtime_error("Cannot write the picture of the SVG file");
     return png;
 }
+// AVIF and HEIC/HEIF pictures as a PNG in `folder` (FFmpeg decodes them, but only image files
+// can be looped as stills), one folder per file content so the picture keeps the file's name.
+static QString convertPicture(const QString &picture, const QString &ffmpeg, const QString &folder) {
+    QFile source(picture);
+    if (!source.open(QIODevice::ReadOnly))
+        throw std::runtime_error("Cannot read this picture");
+    QCryptographicHash hash(QCryptographicHash::Sha1);
+    if (!hash.addData(&source))
+        throw std::runtime_error("Cannot read this picture");
+    const auto dir = folder + "/" + QString::fromLatin1(hash.result().toHex().left(12));
+    const auto png = dir + "/" + QFileInfo(picture).completeBaseName() + ".png";
+    if (QFileInfo::exists(png))
+        return png;
+    QDir().mkpath(dir);
+    QProcess p;
+    p.start(ffmpeg, {"-hide_banner", "-nostdin", "-v", "error", "-y", "-i", picture, "-frames:v",
+                     "1", "-update", "1", png});
+    if (!p.waitForFinished(60000) || p.exitCode() != 0 || !QFileInfo::exists(png)) {
+        p.kill();
+        QFile::remove(png);
+        throw std::runtime_error("Cannot decode this picture: " +
+                                 QString::fromUtf8(p.readAllStandardError()).left(300).toStdString());
+    }
+    return png;
+}
 void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_ptr<DropBatch> drop,
                        const QString &folder) {
     QString path;
@@ -1434,6 +1464,8 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
         // Vector graphics become a sharp, transparent picture that is imported instead.
         if (QFileInfo(path).suffix().compare("svg", Qt::CaseInsensitive) == 0)
             path = rasterizeSvg(path, m_data + "/svg");
+        else if (QStringList{"avif", "heic", "heif"}.contains(QFileInfo(path).suffix().toLower()))
+            path = convertPicture(path, executable("ffmpeg"), m_data + "/pictures");
     } catch (const std::exception &e) {
         m_importErrors << QString::fromUtf8(e.what()) + ": " + url.fileName();
         fail(e.what());
@@ -1500,7 +1532,9 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                 }
                 const auto ext = QFileInfo(path).suffix().toLower();
                 const bool still =
-                    QStringList{"png", "jpg", "jpeg", "bmp", "webp", "tif", "tiff"}.contains(ext);
+                    QStringList{"png", "jpg", "jpeg", "bmp", "webp", "tif", "tiff", "avif", "heic",
+                                "heif"}
+                        .contains(ext);
                 a.kind = still ? "image" : (a.width > 0 ? "video" : "audio");
                 // An animated GIF plays in a loop, like a sticker.
                 a.loops = ext == "gif" && a.kind == "video";
@@ -1755,7 +1789,7 @@ void Editor::addEffect(const QString &effect) {
     });
     select(id);
 }
-void Editor::arrange(const QString &layout) {
+void Editor::arrange(const QString &layout, bool fill) {
     static const QStringList layouts{"side",   "stack",  "grid",   "pip-tl",    "pip-tr",
                                      "pip-bl", "pip-br", "presenter", "full"};
     if (!layouts.contains(layout))
@@ -1808,14 +1842,28 @@ void Editor::arrange(const QString &layout) {
             p.requireEditable(c->track);
             for (const auto &k : {"scale", "x", "y"})
                 c->keyframes.remove(k);
+            c->cropLeft = c->cropRight = c->cropTop = c->cropBottom = 0;
+            // Crops the picture to the shape of a w × h area (canvas pixels).
+            auto cropTo = [&](double w, double h) {
+                const auto size = p.pictureSize(*c, W, H);
+                const double picture = size.width() / size.height(), area = w / h;
+                if (picture > area)
+                    c->cropLeft = c->cropRight = (1 - area / picture) / 2;
+                else
+                    c->cropTop = c->cropBottom = (1 - picture / area) / 2;
+            };
             if (layout == "full") {
-                c->scale = 1;
-                c->x = c->y = 0;
                 if (c->shape == "circle")
                     c->shape = "rect";
+                if (fill)
+                    cropTo(W, H);
+                c->scale = 1;
+                c->x = c->y = 0;
                 continue;
             }
             const auto &slot = areas[i];
+            if (fill && !slot.round)
+                cropTo(slot.w * W, slot.h * H);
             if (slot.round)
                 c->shape = "circle";
             else if (c->shape == "circle")
@@ -2194,6 +2242,24 @@ void Editor::placeClip(const QString &corner) {
                  dy = 0.5 - (size.height() / 2 + border + margin) / m_project.height;
     const double x = corner.endsWith("Left") ? -dx : dx, y = corner.startsWith("top") ? -dy : dy;
     setClipValues({{"scale", scale}, {"x", x}, {"y", y}});
+}
+void Editor::setKeyframeEasing(const QString &property, const QString &easing) {
+    if (!keyframeEasings().contains(easing))
+        return fail("Unknown easing");
+    mutate([&](Project &p) {
+        auto *c = p.clip(m_selected);
+        if (!c)
+            return;
+        p.requireEditable(c->track);
+        const auto frame = m_playhead - c->start;
+        for (auto &k : c->keyframes[property])
+            if (k.frame == frame) {
+                k.ease = easing;
+                k.smooth = easing != "linear";
+                return;
+            }
+        throw std::runtime_error("No keyframe at the playhead");
+    });
 }
 void Editor::toggleKeyframe(const QString &property) {
     mutate([&](Project &p) {

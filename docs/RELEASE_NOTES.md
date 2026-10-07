@@ -4,6 +4,9 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Keyframe easing:** each keyframe can ease in and out, run linearly, start or end slowly, or hold until the next one.
+- **More formats:** MXF, MTS/M2TS/TS, MPEG/VOB and DV video; AVIF and HEIC/HEIF pictures.
+- **Collage fill:** "Fill each area (crop)" crops the arranged pictures to their areas, without empty edges.
 - **New transitions:** spin, glitch and light leak.
 - **Undo steps:** choose in Preferences how far Undo goes back (10–500 steps).
 - **Overwrite:** right-click media in the library → "Overwrite at the playhead" replaces what is on the track there without moving the rest.
