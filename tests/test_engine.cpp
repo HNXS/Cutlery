@@ -10,6 +10,7 @@
 #include "SoundLibrary.h"
 #include "Thumbnails.h"
 #include <QJsonArray>
+#include <QImageReader>
 #include <QPainter>
 #include <QJsonDocument>
 #include <QStandardPaths>
@@ -5610,6 +5611,122 @@ class EngineTest : public QObject {
         ranges.sort();
         QCOMPARE(ranges, (QStringList{"000-50", "050-100"}));
         QVERIFY(editor.project().trackSettings[0].magnetic);
+    }
+    void ownTransitionsUndoStepsAndBrokenThumbnails() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        QImage red(160, 90, QImage::Format_RGB32), blue(160, 90, QImage::Format_RGB32);
+        red.fill(QColor(220, 30, 30));
+        blue.fill(QColor(30, 30, 220));
+        QVERIFY(red.save(dir.filePath("red.png")) && blue.save(dir.filePath("blue.png")));
+        Project p;
+        p.width = 160;
+        p.height = 90;
+        p.fpsN = 25;
+        for (auto [id, file] : {std::pair{"red", "red.png"}, {"blue", "blue.png"}}) {
+            Asset a;
+            a.id = id;
+            a.path = dir.filePath(file);
+            a.kind = "image";
+            a.duration = 5;
+            a.width = 160;
+            a.height = 90;
+            p.assets.push_back(a);
+        }
+        Clip a;
+        a.id = "a";
+        a.assetId = "red";
+        a.duration = 30;
+        Clip b = a;
+        b.id = "b";
+        b.assetId = "blue";
+        b.start = 30;
+        b.transitionFrames = 10; // frames 25..35 around the cut
+        p.clips = {a, b};
+        auto still = [&](const QString &transition, qint64 frame) {
+            auto project = p;
+            project.clips[1].transition = transition;
+            project.validate();
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 160, 90, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        // Outside the transition every kind shows the clips as they are.
+        for (const auto *kind : {"spin", "glitch", "lightleak"}) {
+            QCOMPARE(still(kind, 10).pixelColor(80, 45).red(), still("fade", 10).pixelColor(80, 45).red());
+            QVERIFY(still(kind, 50).pixelColor(80, 45).blue() > 200);
+        }
+        // At the cut a dissolve is purple; spin turns the frame, so the corners show what is
+        // below (black); the light leak warms it up; glitch moves the colours apart.
+        const auto fade = still("fade", 30);
+        const auto middle = fade.pixelColor(80, 45);
+        QVERIFY2(middle.red() > 80 && middle.blue() > 80, qPrintable(middle.name()));
+        // (Part-way through, about 80°; at the cut itself it is upside down.)
+        const auto spin = still("spin", 28);
+        QVERIFY2(spin.pixelColor(1, 1).value() < 40, qPrintable(spin.pixelColor(1, 1).name()));
+        QVERIFY(spin.pixelColor(80, 45).value() > 60);
+        QVERIFY(still("spin", 30).pixelColor(1, 1).value() > 60);
+        const auto leak = still("lightleak", 30).pixelColor(80, 45);
+        QVERIFY2(leak.green() > middle.green() + 60, qPrintable(leak.name() + " " + middle.name()));
+        bool differs = false;
+        for (qint64 f : {27, 28, 29, 30, 31, 32})
+            differs = differs || still("glitch", f) != still("fade", f);
+        QVERIFY(differs);
+        QCOMPARE(transitionTypes().last().first, QString("lightleak"));
+
+        // Undo steps are a preference (10–500).
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.setPreferences({{"undoSteps", 10}});
+        editor.addTitle();
+        for (int i = 0; i < 15; ++i)
+            editor.setClipValues({{"x", 0.01 * (i + 1)}});
+        int steps = 0;
+        while (editor.state()["canUndo"].toBool() && steps < 100) {
+            editor.undo();
+            ++steps;
+        }
+        QCOMPARE(steps, 10);
+        editor.setPreferences({{"undoSteps", 5}});
+        QVERIFY(editor.state()["error"].toString().contains("undo"));
+        editor.clearError();
+        editor.setPreferences({{"undoSteps", 60}});
+
+        // A thumbnail strip that cannot be read is made again.
+        const auto video = dir.filePath("clip.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "testsrc2=s=160x90:r=25:d=1", "-c:v", "ffv1", video});
+        const auto cache = dir.filePath("thumbs");
+        Thumbnails thumbnails(cache, ffmpeg);
+        Asset asset;
+        asset.id = "clip";
+        asset.path = video;
+        asset.kind = "video";
+        asset.duration = 1;
+        asset.width = 160;
+        asset.height = 90;
+        const auto key = MediaAnalysis::fingerprint(asset) + "-thumb-v1";
+        QVERIFY(QDir().mkpath(cache));
+        {
+            QFile broken(cache + "/" + key + ".jpg");
+            QVERIFY(broken.open(QIODevice::WriteOnly));
+            broken.write("not a picture");
+        }
+        thumbnails.setAssets({asset});
+        QVERIFY(thumbnails.strip("clip")["status"].toString() != "ready"); // not trusted
+        QTRY_VERIFY_WITH_TIMEOUT(!thumbnails.busy(), 30000);
+        QCOMPARE(thumbnails.strip("clip")["status"].toString(), QString("ready"));
+        QVERIFY(QImageReader(cache + "/" + key + ".jpg").canRead());
     }
     void adjustmentLayers() {
         const auto ffmpeg = Editor::executable("ffmpeg");

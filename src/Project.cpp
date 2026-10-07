@@ -58,7 +58,8 @@ const QVector<QPair<QString, QString>> &transitionTypes() {
         {"smoothright", "Smooth right"}, {"circleclose", "Circle close"},
         {"hblur", "Blur"},             {"fadegrays", "Fade through grey"},
         {"squeezeh", "Squeeze"},       {"dissolve", "Pixel dissolve"},
-        {"hlwind", "Wind"}};
+        {"hlwind", "Wind"},            {"spin", "Spin"},
+        {"glitch", "Glitch"},          {"lightleak", "Light leak"}};
     return types;
 }
 const QStringList &animatableProperties() {
