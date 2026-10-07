@@ -2,6 +2,7 @@
 #include "MediaAnalysis.h"
 #include <QDir>
 #include <QFileInfo>
+#include <QImageReader>
 #include <QImage>
 #include <QImageWriter>
 #include <QSaveFile>
@@ -59,7 +60,8 @@ void Thumbnails::setAssets(const QVector<Asset> &assets) {
             continue;
         updated = true;
         m_queue.removeAll(a.id);
-        if (QFileInfo(path(key)).isFile())
+        // A strip that cannot be read (a crash while writing, a damaged disk) is made again.
+        if (QFileInfo(path(key)).isFile() && QImageReader(path(key)).canRead())
             m_strips[a.id] = {key, "ready"};
         else {
             m_strips[a.id] = {key, "queued"};

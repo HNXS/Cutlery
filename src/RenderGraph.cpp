@@ -1555,9 +1555,43 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                 continue;
             }
             const auto joined = "x" + id;
-            nodes << QString("[%1][mc%2]xfade=transition=%3:duration=%4:offset=%5[%6]")
-                         .arg(accumulated, id, c.transition, num(secs(n.inLength)),
-                              num(secs(r0 - gs)), joined);
+            // Cutlery's own transitions are a dissolve with an effect over the transition time.
+            const bool own = QStringList{"spin", "glitch", "lightleak"}.contains(c.transition);
+            const double off = secs(r0 - gs), length = secs(n.inLength);
+            const auto during = QString("between(t,%1,%2)").arg(num(off), num(off + length));
+            // Progress 0..1 through the transition, eased in and out.
+            const auto u = QString("clip((t-%1)/%2,0,1)").arg(num(off), num(length));
+            const auto eased = QString("(%1)*(%1)*(3-2*(%1))").arg(u);
+            QString effect;
+            if (c.transition == "spin")
+                // One full turn, the dissolve happening on the way.
+                effect = QString(",rotate=a='2*PI*%1':c=black@0:enable='%2'").arg(eased, during);
+            else if (c.transition == "glitch") {
+                // Colour channels jump apart and noise flickers, strongest at the cut.
+                const int shift = std::max(4, width / 60);
+                effect = QString(",format=gbrap,rgbashift=rh=%1:bh=-%1:gv=%2:enable='%3*lt(mod(t*12,1),0.6)',"
+                                 "noise=alls=40:allf=t+u:enable='%3*lt(abs(%4-0.5),0.3)',format=rgba")
+                             .arg(shift)
+                             .arg(shift / 2)
+                             .arg(during, u);
+            }
+            nodes << QString("[%1][mc%2]xfade=transition=%3:duration=%4:offset=%5%7[%6]")
+                         .arg(accumulated, id, own ? QString("fade") : c.transition,
+                              num(length), num(off), (c.transition == "lightleak" ? "a" : "") + joined,
+                              effect);
+            if (c.transition == "lightleak") {
+                // A warm, slowly turning glow that flares up to the cut and fades away.
+                nodes << QString("gradients=s=%1x%2:r=%3:c0=0xffd27a:c1=0xff6a2a:n=2:x0=0:y0=%2:"
+                                 "x1=%1:y1=0:speed=0.03:seed=1:d=%4,format=rgba,"
+                                 "colorchannelmixer=aa=0.85,fade=t=in:st=0:d=%5:alpha=1,"
+                                 "fade=t=out:st=%5:d=%5:alpha=1,setpts=PTS+%6/TB[lk%7]")
+                             .arg(width)
+                             .arg(height)
+                             .arg(fps, num(length), num(length / 2), num(off))
+                             .arg(id);
+                nodes << QString("[a%1][lk%2]overlay=eof_action=pass:repeatlast=0:format=auto[%1]")
+                             .arg(joined, id);
+            }
             accumulated = joined;
         }
         composite(QString("[%1]trim=start_frame=%2:end_frame=%3,setpts=PTS-STARTPTS")

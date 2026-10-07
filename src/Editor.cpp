@@ -713,7 +713,7 @@ bool Editor::mutate(const std::function<void(Project &)> &fn) {
         if (next.json() == m_project.json())
             return true;
         m_undo.push_back(m_project);
-        if (m_undo.size() > 60)
+        while (m_undo.size() > m_prefs.value("undoSteps", 60).toInt())
             m_undo.removeFirst();
         m_redo.clear();
         m_project = std::move(next);
@@ -884,7 +884,7 @@ bool Editor::save(const QUrl &url) {
 static QVariantMap defaultPreferences() {
     return {{"width", 1920},     {"height", 1080},  {"fpsN", 30},
             {"fpsD", 1},         {"stillSeconds", 5.}, {"backups", 20},
-            {"startScreen", true}, {"cacheGB", 20}};
+            {"startScreen", true}, {"cacheGB", 20}, {"undoSteps", 60}};
 }
 // The valid preferences in `values`, over `base`; throws on an invalid value.
 static QVariantMap checkedPreferences(const QVariantMap &base, const QVariantMap &values) {
@@ -906,6 +906,9 @@ static QVariantMap checkedPreferences(const QVariantMap &base, const QVariantMap
     const int backups = p["backups"].toInt();
     if (backups < 0 || backups > 100)
         throw std::runtime_error("Keep 0–100 earlier versions");
+    const int undo = p["undoSteps"].toInt();
+    if (undo < 10 || undo > 500)
+        throw std::runtime_error("Keep 10–500 undo steps");
     const int cache = p["cacheGB"].toInt();
     if (cache < 1 || cache > 2000)
         throw std::runtime_error("The cache limit must be 1–2000 GB");
@@ -916,7 +919,8 @@ static QVariantMap checkedPreferences(const QVariantMap &base, const QVariantMap
             {"stillSeconds", still},
             {"backups", backups},
             {"startScreen", p["startScreen"].toBool()},
-            {"cacheGB", cache}};
+            {"cacheGB", cache},
+            {"undoSteps", undo}};
 }
 void Editor::loadPreferences() {
     m_prefs = defaultPreferences();

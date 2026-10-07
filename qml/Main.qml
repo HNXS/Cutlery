@@ -4266,6 +4266,7 @@ ApplicationWindow {
             prefBackups.value = prefs.backups ?? 20;
             prefStart.checked = prefs.startScreen !== false;
             prefCache.value = prefs.cacheGB ?? 20;
+            prefUndo.value = prefs.undoSteps ?? 60;
             cacheUsage = editor.cacheUsage();
         }
         property var cacheUsage: ({})
@@ -4315,6 +4316,17 @@ ApplicationWindow {
                 Layout.columnSpan: 2
                 text: "Show the start screen when Cutlery opens"
             }
+            Label { text: "Undo steps" }
+            SpinBox {
+                id: prefUndo
+                objectName: "prefUndo"
+                from: 10
+                to: 500
+                stepSize: 10
+                editable: true
+                ToolTip.visible: hovered
+                ToolTip.text: "How many edits Undo can go back; more steps use more memory with long projects"
+            }
             Label { text: "Cache limit" }
             SpinBox {
                 id: prefCache
@@ -4349,7 +4361,7 @@ ApplicationWindow {
         }
         onAccepted: {
             const f = win.projectFormats[prefFormat.currentIndex], r = win.frameRates[prefRate.currentIndex];
-            editor.setPreferences({ width: f.w, height: f.h, fpsN: r.n, fpsD: r.d, stillSeconds: prefStill.value / 10, backups: prefBackups.value, startScreen: prefStart.checked, cacheGB: prefCache.value });
+            editor.setPreferences({ width: f.w, height: f.h, fpsN: r.n, fpsD: r.d, stillSeconds: prefStill.value / 10, backups: prefBackups.value, startScreen: prefStart.checked, cacheGB: prefCache.value, undoSteps: prefUndo.value });
         }
     }
     // Names a template made from the current project.

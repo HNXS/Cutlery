@@ -4,6 +4,8 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **New transitions:** spin, glitch and light leak.
+- **Undo steps:** choose in Preferences how far Undo goes back (10–500 steps).
 - **Overwrite:** right-click media in the library → "Overwrite at the playhead" replaces what is on the track there without moving the rest.
 - **Captions:** "+ Caption" adds one at the playhead; automatic captions take a line length and one or two lines; the export can save the captions as an SRT or WebVTT file beside the video.
 - **Pick the screen colour:** "Pick" beside the green-screen colours, then click the screen in the viewer, for screens that are not pure green or blue.
@@ -49,7 +51,7 @@ Projects are saved as schema 11; 0.5 cannot open them.
 - **Anchor point:** zoom and rotate around a corner or edge, also with keyframes.
 - **GIF and SVG:** animated GIFs loop for as long as the clip runs; SVG graphics import sharp and transparent.
 - **Freeze frame:** holds the picture at the playhead for 2 seconds; the rest of the clip and its sound continue afterwards.
-- **29 transitions:** new push, reveal, blur, fade through grey, squeeze, pixel dissolve, wind and more.
+- **29 transitions (now 32):** new push, reveal, blur, fade through grey, squeeze, pixel dissolve, wind and more.
 - **Pan:** move a clip's sound left or right.
 - **Open recent** and **Restore an earlier version:** every save keeps the version before it (the last 20).
 - **Sound effects:** mouse click, double click, keyboard typing and swooshes made by Cutlery, plus recorded CC0 clicks, typing and whooshes; listen, add at the playhead, or a whoosh on every transition (loudest at the cut).

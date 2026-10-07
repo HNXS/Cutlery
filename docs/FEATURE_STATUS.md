@@ -12,8 +12,8 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F006 | Collect Project and portable media bundle | Implemented (alpha) | Project → "Collect project and media…" copies every media file, LUT and font added in Cutlery that the project uses into an empty folder (media/, luts/, fonts/ with clashing names numbered) and saves <folder>.cutlery there with relative paths, in the background with progress. Opening a project loads the fonts beside it. Refuses projects with missing media; no trimming of unused source ranges. |
 | F007 | Project schema migrations | Implemented (alpha) | Reads schema 1/2 without moving clips; writes schema 3 with stable track IDs and snapping/magnetic modes. Older versions cannot read new saves. |
 | F008 | Atomic save, autosave and rolling backup | Implemented (alpha) | Atomic save and one recovery file; each save keeps the previous project file as a version in the data folder (the newest 20 per project), and Project → Restore an earlier version… puts one back after keeping the current file as a version too. Backups are whole project files; media is not copied. |
-| F009 | Undo/redo and deep edit history | Partial | 60 whole-project snapshots; no deep history persistence. |
-| F010 | Crash and corrupted-cache recovery | Partial | Recovery snapshot only. |
+| F009 | Undo/redo and deep edit history | Partial | Whole-project undo snapshots, 60 by default and 10–500 in Preferences. No history kept across sessions. |
+| F010 | Crash and corrupted-cache recovery | Partial | Recovery snapshot; waveform cache files that fail validation and thumbnail strips that cannot be read are made again; work folders left by a crash are removed at the next start (see F164); nested renders missing from the cache are rendered again. No crash reporter. |
 | F011 | Multiple open projects and project versions | Planned | Not implemented in this alpha. |
 | F012 | Local search index for metadata and dialogue | Planned | Not implemented in this alpha. |
 | F013 | Semantic media search and object search | Planned | Not implemented in this alpha. |
@@ -59,8 +59,8 @@ The original 187 rows remain the design scope, not a claim of completion. “Imp
 | F053 | Camera-like and pseudo-3D effects | Planned | Not implemented in this alpha. |
 | F054 | Dissolve, fade and dip to color | Implemented (alpha) | Two-clip dissolve and dip to black/white centred on a cut, with equal-power audio crossfades; clip fades as before. |
 | F055 | Wipe, slide, push and directional transitions | Implemented (alpha) | Wipe left/right/up/down, slide left/right/up/down, smooth left/right, push in from each side (cover) and reveal left/right (FFmpeg xfade). |
-| F056 | Zoom, spin, stretch and geometric transitions | Partial | Zoom in, circle open/close, radial and squeeze. No spin. |
-| F057 | Blur, glitch and light transitions | Partial | Pixelize, blur, fade through grey, pixel dissolve, wind, and dips to black or white. No glitch or light-leak transitions. |
+| F056 | Zoom, spin, stretch and geometric transitions | Implemented (alpha) | Zoom in, circle open/close, radial, squeeze, and spin: the frame makes one eased full turn while the clips dissolve, showing what lies below at the corners. |
+| F057 | Blur, glitch and light transitions | Implemented (alpha) | Pixelize, blur, fade through grey, pixel dissolve, wind, dips to black or white; glitch (colour channels jump apart in a 12 Hz flicker with noise around the cut, over a dissolve) and light leak (a warm, slowly turning glow that flares to the cut and fades, over a dissolve). |
 | F058 | Transition duration and curve editing | Partial | Duration 0.1–3 s in the inspector, limited by both clips. No easing curves. |
 | F059 | Audio extraction and linked source streams | Partial | Detach audio reuses source media on an independent track. "Save sound as file…" in the sound section writes the selected clip's sound as heard (trim, speed, volume, sound tools, fades; other clips left out) to WAV, MP3 or M4A through the audio export. No resync of detached pairs. |
 | F060 | Waveform generation and peak pyramids | Partial | Async bounded mono waveform overview cached by file fingerprint; follows trim/speed/reverse. No multilevel pyramid. |

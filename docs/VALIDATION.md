@@ -1,5 +1,22 @@
 # Validation record
 
+## Windows portable build — 2026-10-07, spin, glitch and light-leak transitions, undo steps, unreadable thumbnails (0.6 development)
+
+[GitHub Actions run 37621086944](https://github.com/HNXS/Cutlery/actions/runs/37621086944) on commit `bc3e218c34e3841ca06af7c39a297509246136e8` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `ownTransitionsUndoStepsAndBrokenThumbnails`:**
+  - **Transitions:**
+    - outside the transition, spin, glitch and light leak leave the clips unchanged;
+    - at the cut, the light leak is far warmer than a plain dissolve;
+    - spin exposes the corners part-way through and is upside down at the cut;
+    - glitch differs from the dissolve around the cut.
+  - **Undo steps:** Undo goes back exactly the configured number of steps, and invalid values are refused.
+  - **Thumbnails:** a damaged thumbnail strip in the cache is extracted again.
+
+The previous commit on `main` was built and uploaded as a portable package and AI pack in [run 37620230177](https://github.com/HNXS/Cutlery/actions/runs/37620230177) (manual run with upload). Those artifacts expire on 2026-10-10.
+
 ## Windows portable build — 2026-10-07, overwrite, quick captions, caption layout, subtitle file beside the export (0.6 development)
 
 [GitHub Actions run 37600363235](https://github.com/HNXS/Cutlery/actions/runs/37600363235) (attempt 3) on commit `dd988d0fff2569bda8c62a7ea784857d08337349` passed every step. Attempts 1 and 2 never started: GitHub refused the job because the Actions spending limit was reached. No build or test step ran in them. The repository was then made public, and attempt 3 ran.

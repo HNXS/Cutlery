@@ -215,7 +215,8 @@ bool validCurve(const QString &points);
 QStringList captionWords(const QString &text);
 // Blend modes other than normal: FFmpeg blend names paired with display labels.
 const QVector<QPair<QString, QString>> &blendModes();
-// Supported transitions: FFmpeg xfade names paired with display labels.
+// Supported transitions: FFmpeg xfade names paired with display labels, plus Cutlery's own
+// "spin", "glitch" and "lightleak", which dissolve and add their effect around the cut.
 const QVector<QPair<QString, QString>> &transitionTypes();
 // A named point on the timeline.
 struct Marker {
