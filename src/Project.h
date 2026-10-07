@@ -110,6 +110,8 @@ struct Clip {
     // no plate), "titleCard" (large centred text on a plate); "" is the plain centred title.
     // The first text line is the name or headline, further lines the role or subtitle.
     QString titleStyle;
+    // Lower thirds slide in from the left (and fade); off, they only fade.
+    bool titleSlide = true;
     QString accentColor = "#64d8bc";
     // Plain titles can build up: "typewriter" shows one character after another, "words" one
     // word after another, all of them within textAnimationTime seconds from the clip's start.
@@ -138,6 +140,8 @@ struct Clip {
     // Colour: warmer/cooler, magenta/green, gentle saturation of muted colours, and lifted or
     // lowered shadows and highlights, each −1..1 with 0 unchanged.
     double temperature = 0, tint = 0, vibrance = 0, shadows = 0, highlights = 0;
+    // The brightest and darkest tones moved down/up or up/down, −1..1 (0 unchanged).
+    double whites = 0, blacks = 0;
     // Sound: three-band EQ in dB (−12..12; low shelf 100 Hz, peak 2.5 kHz, high shelf 8 kHz), a
     // low cut in Hz (0 off, up to 300), and 0..1 amounts of compression, noise gate, noise
     // reduction and de-essing.

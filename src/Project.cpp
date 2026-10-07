@@ -98,14 +98,15 @@ const QVector<QPair<QString, double Clip::*>> &lookFields() {
         {"hslSaturation", &Clip::hslSaturation}, {"hslLightness", &Clip::hslLightness},
         {"cropLeft", &Clip::cropLeft},       {"cropRight", &Clip::cropRight},
         {"cropTop", &Clip::cropTop},         {"cropBottom", &Clip::cropBottom},
-        {"pitch", &Clip::pitch},             {"exposure", &Clip::exposure}};
+        {"pitch", &Clip::pitch},             {"exposure", &Clip::exposure},
+        {"whites", &Clip::whites},           {"blacks", &Clip::blacks}};
     return fields;
 }
 } // namespace
 const QStringList &Clip::lookProperties() {
     static const QStringList names{"exposure", "brightness", "contrast",   "saturation", "blur",
                                    "temperature", "tint",      "vibrance",   "shadows",
-                                   "highlights", "sharpen",    "glow",       "vignette",
+                                   "highlights", "whites", "blacks", "sharpen",    "glow",       "vignette",
                                    "grain",      "lut",        "lutStrength", "curveMaster",
                                    "curveRed",   "curveGreen", "curveBlue",   "hslColors",
                                    "hslHue",     "hslSaturation", "hslLightness"};
@@ -347,6 +348,8 @@ QJsonObject Project::json(const QString &base) const {
         if (!c.titleStyle.isEmpty()) {
             o["titleStyle"] = c.titleStyle;
             o["accentColor"] = c.accentColor;
+            if (!c.titleSlide)
+                o["titleSlide"] = false;
         }
         if (!c.effect.isEmpty()) {
             o["effect"] = c.effect;
@@ -594,6 +597,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.background = j["background"].toDouble(0);
         c.backgroundColor = j["backgroundColor"].toString("#000000");
         c.titleStyle = j["titleStyle"].toString();
+        c.titleSlide = j["titleSlide"].toBool(true);
         c.textAnimation = j["textAnimation"].toString();
         c.textAnimationTime = j["textAnimationTime"].toDouble(1.5);
         c.gradientColor = j["gradientColor"].toString();
@@ -838,6 +842,7 @@ void Project::validate() const {
         require(bounded(c.temperature, -1, 1) && bounded(c.tint, -1, 1) &&
                     bounded(c.vibrance, -1, 1) && bounded(c.shadows, -1, 1) &&
                     bounded(c.highlights, -1, 1) && bounded(c.sharpen, 0, 1) &&
+                    bounded(c.whites, -1, 1) && bounded(c.blacks, -1, 1) &&
                     bounded(c.glow, 0, 1) && bounded(c.vignette, 0, 1) && bounded(c.grain, 0, 1) &&
                     bounded(c.lutStrength, 0, 1) && c.lut.size() <= 4096 &&
                     QStringList{"", "blend", "flow"}.contains(c.slowMotion),

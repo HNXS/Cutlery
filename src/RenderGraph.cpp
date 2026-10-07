@@ -769,9 +769,19 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             f += QString(",colorchannelmixer=rr=%1:bb=%1").arg(num(1 + 0.2 * c.tint));
         if (c.vibrance != 0)
             f += ",vibrance=intensity=" + num(c.vibrance);
-        if (c.shadows != 0 || c.highlights != 0)
-            f += QString(",curves=m='0/0 0.25/%1 0.75/%2 1/1'")
-                     .arg(num(0.25 + 0.12 * c.shadows), num(0.75 + 0.12 * c.highlights));
+        if (c.shadows != 0 || c.highlights != 0 || c.whites != 0 || c.blacks != 0) {
+            // Blacks and whites move the ends of the master curve (lifting blacks fades the
+            // darkest tones, lowering whites softens the brightest), keeping it rising.
+            const double black = std::clamp(0.15 * c.blacks, -0.15, 0.15),
+                         white = std::clamp(1 + 0.15 * c.whites, 0.85, 1.15);
+            const auto end = [](double x, double y) {
+                // A point past 0 or 1 becomes the input level that reaches 0 or 1.
+                return y < 0 ? QString("%1/0").arg(num(-y)) : y > 1 ? QString("%1/1").arg(num(2 - y)) : QString("%1/%2").arg(num(x), num(y));
+            };
+            f += QString(",curves=m='%1 0.25/%2 0.75/%3 %4'")
+                     .arg(end(0, black), num(0.25 + 0.12 * c.shadows),
+                          num(0.75 + 0.12 * c.highlights), end(1, white));
+        }
         // Tone curves, and a selective change to some colours (FFmpeg's huesaturation).
         {
             QStringList curves;
@@ -1309,7 +1319,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                 const auto px = plate.position.x() + qRound(c.x * width),
                            py = plate.position.y() + qRound(c.y * height);
                 QString x = QString::number(px);
-                if (c.titleStyle != "titleCard") {
+                if (c.titleStyle != "titleCard" && c.titleSlide) {
                     const auto local = QString("(t+%1)").arg(num(secs(from - c.start)));
                     x = QString("'%1-(%1+w)*pow(max(0,1-%2/0.45),3)'").arg(px).arg(local);
                 }

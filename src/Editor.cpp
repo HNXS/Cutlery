@@ -517,6 +517,9 @@ QVariantMap Editor::state() const {
             PROP(stabilize);
             PROP(reverb);
             PROP(pitch);
+            PROP(whites);
+            PROP(blacks);
+            PROP(titleSlide);
             PROP(stabilizeStrength);
             PROP(stabilizeZoom);
             PROP(exposure);
@@ -1878,6 +1881,81 @@ void Editor::arrange(const QString &layout, bool fill) {
     m_status = "Arranged " + QString::number(clips.size()) + " pictures";
     emit changed();
 }
+void Editor::applyMotion(const QString &preset) {
+    static const QStringList presets{"popIn", "popOut", "slideLeft", "slideUp", "pulse", "wiggle", "none"};
+    if (!presets.contains(preset))
+        return fail("Unknown motion");
+    const auto ids = selection();
+    if (ids.isEmpty())
+        return fail("Select a clip to animate");
+    mutate([&](Project &p) {
+        const double fps = double(p.fpsN) / p.fpsD;
+        for (const auto &id : ids) {
+            auto *c = p.clip(id);
+            if (!c || c->audioOnly)
+                continue;
+            if (const auto *a = p.asset(c->assetId); a && a->kind == "audio")
+                continue;
+            p.requireEditable(c->track);
+            const auto at = [&](double seconds) {
+                return std::clamp<qint64>(qRound64(seconds * fps), 0, c->duration - 1);
+            };
+            const auto end = c->duration - 1;
+            // Motions move around the clip's own (static) value, which they leave as it is, so
+            // removing them returns the clip to it.
+            auto rest = [&](const QString &property) { return c->staticValue(property); };
+            auto set = [&](const QString &property, QVector<Keyframe> keys) {
+                QVector<Keyframe> sorted;
+                for (const auto &k : keys)
+                    if (sorted.isEmpty() || k.frame > sorted.last().frame)
+                        sorted << k;
+                if (sorted.size() < 2)
+                    c->keyframes.remove(property);
+                else
+                    c->keyframes[property] = sorted;
+            };
+            const double scale = rest("scale"), x = rest("x"), y = rest("y");
+            auto key = [](qint64 frame, double value, const QString &ease) {
+                Keyframe k{frame, value, ease != "linear"};
+                k.ease = ease;
+                return k;
+            };
+            if (preset == "none") {
+                for (const auto *property : {"scale", "x", "y", "rotation"})
+                    set(property, {});
+            } else if (preset == "popIn") {
+                set("scale", {key(0, 0.1, "out"), key(at(0.25), std::min(5., scale * 1.15), "smooth"),
+                              key(at(0.4), scale, "smooth")});
+            } else if (preset == "popOut") {
+                set("scale", {key(std::max<qint64>(0, end - at(0.3)), scale, "in"), key(end, 0.1, "linear")});
+            } else if (preset == "slideLeft") {
+                set("x", {key(0, std::max(-2., x - 1), "out"), key(at(0.5), x, "smooth")});
+            } else if (preset == "slideUp") {
+                set("y", {key(0, std::min(2., y + 1), "out"), key(at(0.5), y, "smooth")});
+            } else if (preset == "pulse") {
+                // Beats of 0.6 s over the whole clip (at most 400 keyframes).
+                QVector<Keyframe> keys;
+                for (int i = 0; i < 400; ++i) {
+                    const auto frame = at(0.3 * i);
+                    keys << key(frame, i % 2 ? std::min(5., scale * 1.12) : scale, "smooth");
+                    if (frame >= end)
+                        break;
+                }
+                set("scale", keys);
+            } else if (preset == "wiggle") {
+                // A short shake of ±8° that settles within a second.
+                const double angle = rest("rotation");
+                QVector<Keyframe> keys;
+                for (int i = 0; i <= 8; ++i)
+                    keys << key(at(0.12 * i),
+                                angle + (i == 8 ? 0 : (i % 2 ? 8. : -8.) * (1 - i / 8.)), "smooth");
+                set("rotation", keys);
+            }
+        }
+    });
+    m_status = preset == "none" ? QString("Motion removed") : "Motion applied: " + preset;
+    emit changed();
+}
 void Editor::addGraphic(const QString &kind) {
     if (!graphicKinds().contains(kind))
         return fail("Unknown shape");
@@ -2130,6 +2208,9 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(stabilize, toBool);
         FIELD(reverb, toDouble);
         FIELD(pitch, toDouble);
+        FIELD(whites, toDouble);
+        FIELD(blacks, toDouble);
+        FIELD(titleSlide, toBool);
         FIELD(stabilizeStrength, toDouble);
         FIELD(stabilizeZoom, toBool);
         FIELD(exposure, toDouble);
@@ -3760,6 +3841,8 @@ void Editor::pasteAttributes(const QString &group) {
         c->tint = from.tint;
         c->vibrance = from.vibrance;
         c->shadows = from.shadows;
+        c->whites = from.whites;
+        c->blacks = from.blacks;
         c->highlights = from.highlights;
         c->sharpen = from.sharpen;
         c->glow = from.glow;
@@ -5308,6 +5391,49 @@ void Editor::extractAudio(const QUrl &url) {
         p.markers.clear();
         p.inPoint = p.outPoint = -1;
         exportProject(p, url, {{"format", suffix}, {"quality", "max"}});
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
+void Editor::convertAsset(const QString &assetId, const QUrl &url, const QVariantMap &settings) {
+    try {
+        const auto *a = m_project.asset(assetId);
+        if (!a || a->kind == "image" || a->isNested())
+            throw std::runtime_error("Choose a video or sound file to convert");
+        Project p;
+        p.name = QFileInfo(a->path).completeBaseName();
+        p.assets = {*a};
+        if (a->width > 0 && a->height > 0) {
+            p.width = std::max(64, a->width / 2 * 2);
+            p.height = std::max(64, a->height / 2 * 2);
+        } else {
+            p.width = m_project.width;
+            p.height = m_project.height;
+        }
+        // The file's own frame rate, with the usual NTSC rates kept exact.
+        p.fpsN = m_project.fpsN;
+        p.fpsD = m_project.fpsD;
+        if (a->frameRate > 0) {
+            for (const auto &[n, d] : {std::pair{24000, 1001}, {30000, 1001}, {60000, 1001}})
+                if (std::abs(a->frameRate - double(n) / d) < 0.01) {
+                    p.fpsN = n;
+                    p.fpsD = d;
+                }
+            if (p.fpsD == m_project.fpsD && p.fpsN == m_project.fpsN &&
+                std::abs(a->frameRate - double(p.fpsN) / p.fpsD) >= 0.01) {
+                p.fpsN = std::clamp(int(std::lround(a->frameRate)), 1, 120);
+                p.fpsD = 1;
+            }
+        }
+        Clip c;
+        c.id = newId();
+        c.assetId = a->id;
+        c.name = a->name;
+        c.duration = std::max(qint64(1), qint64(std::floor(a->duration * p.fpsN / p.fpsD + 1e-6)));
+        p.clips = {c};
+        auto all = settings;
+        all["range"] = "all";
+        exportProject(p, url, all);
     } catch (const std::exception &e) {
         fail(e.what());
     }
