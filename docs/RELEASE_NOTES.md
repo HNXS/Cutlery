@@ -4,6 +4,9 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Pitch:** make a voice higher or lower (up to an octave) without changing its speed, in the sound tools.
+- **Exposure:** brighten or darken a clip in photographic stops, like a camera.
+- **Export with transparency:** ProRes 4444 MOV or a PNG picture sequence keep everything transparent that is not on the timeline, e.g. animated titles or lower thirds to use in other editors.
 - **Soft edges:** fade a picture-in-picture out at its border (any shape) with the new "Soft edge" slider.
 - **Frame rate and bitrate in the export:** export at 24, 25, 30, 50 or 60 fps (and the 23.976/29.97/59.94 rates) and with a fixed bitrate when a platform asks for one.
 - **Try export again:** a failed export can be repeated with one click; when a graphics-card encoder fails part-way, Cutlery switches to the next encoder by itself.

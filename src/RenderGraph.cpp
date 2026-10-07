@@ -614,11 +614,12 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
     QStringList nodes, audioLabels;
     QString visual = "base";
     if (o.video)
-        nodes << QString("color=c=black:s=%1x%2:r=%3:d=%4,trim=end_frame=%5,format=rgba[base]")
+        nodes << QString("color=c=%6:s=%1x%2:r=%3:d=%4,trim=end_frame=%5,format=rgba[base]")
                      .arg(width)
                      .arg(height)
                      .arg(fps, num(r.duration))
-                     .arg(r.frames);
+                     .arg(r.frames)
+                     .arg(o.transparent ? "black@0.0" : "black");
     if (audio) {
         nodes << QString("anullsrc=r=48000:cl=stereo,atrim=end_sample=%1[asilence]")
                      .arg(qRound64(r.duration * 48000));
@@ -740,9 +741,12 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
     // Colour and look of a clip appended to the chain `f` of a picture `w` pixels wide; filters
     // that mix with the picture go through split branches added to `nodes`.
     auto appendLook = [&](QString &f, const Clip &c, int w) {
-        if (c.brightness != 0 || c.contrast != 1) {
-            const QString expr = QString("clip((val-128)*%1+128+%2,0,255)")
-                                     .arg(num(c.contrast), num(c.brightness * 255));
+        if (c.exposure != 0 || c.brightness != 0 || c.contrast != 1) {
+            // Exposure scales linear light by 2^stops; with the 2.2 gamma of video that is a
+            // gain of 2^(stops/2.2) on the coded values.
+            const QString expr = QString("clip((val*%3-128)*%1+128+%2,0,255)")
+                                     .arg(num(c.contrast), num(c.brightness * 255),
+                                          num(std::pow(2., c.exposure / 2.2)));
             f += QString(",lutrgb=r='%1':g='%1':b='%1'").arg(expr);
         }
         if (c.saturation != 1)
@@ -1588,8 +1592,14 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             tempo *= 2;
         }
         a += ",atempo=" + num(tempo);
-        a += ",aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS+" +
-             num(t0 + k) + "/TB";
+        a += ",aresample=48000";
+        if (c.pitch != 0) {
+            // Played faster or slower at the same sample rate, which moves the pitch, then
+            // brought back to the original tempo.
+            const int rate = qRound(48000 * std::pow(2., c.pitch / 12));
+            a += QString(",asetrate=%1,aresample=48000,atempo=%2").arg(rate).arg(num(48000. / rate));
+        }
+        a += ",aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS+" + num(t0 + k) + "/TB";
         if (c.keyframes.contains("volume"))
             // Audio timestamps here are clip-local seconds plus the handle.
             a += QString(",volume=eval=frame:volume='%1'")

@@ -37,6 +37,8 @@ struct RenderOptions {
     QString pixelFormat = "yuv420p";
     // Filters appended to the picture after its pixel format (export only, e.g. a GIF palette).
     QString videoTail;
+    // The picture starts transparent instead of black, for exports with an alpha channel.
+    bool transparent = false;
     // Master audio: gain before the output limiter (loudness normalisation) and the limiter's
     // ceiling as linear amplitude. `measureLoudness` replaces the limiter with an EBU R128 meter
     // whose summary FFmpeg logs at the "info" level (see parseIntegratedLoudness).

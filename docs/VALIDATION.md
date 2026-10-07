@@ -1,5 +1,22 @@
 # Validation record
 
+## Windows portable build — 2026-10-07, pitch, exposure, transparent ProRes 4444 and PNG sequence export (0.6 development)
+
+[GitHub Actions run 37590197487](https://github.com/HNXS/Cutlery/actions/runs/37590197487) on commit `df7b8062958687a2a0c4ae4b3c9434f7177c2ff1` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine tests:**
+  - `pitchAndExposure`:
+    - pitch: an exported 440 Hz tone rises to about 880 Hz at +12 semitones and drops by the expected amount at −5, each time at the same length;
+    - exposure: mid grey becomes brighter at +1 stop and darker at −1;
+    - both are saved and validated.
+  - `transparentExports`:
+    - a title-only ProRes 4444 export has an alpha stream, transparent around the letters;
+    - a PNG sequence lands in a new folder named like the file, one transparent picture per frame, with no work folder left behind;
+    - an existing folder of that name is refused, and MPEG-4 stays opaque.
+- **Interface:** the export format list includes the two new formats.
+
 ## Windows portable build — 2026-10-06, soft mask edges, export frame rate and bitrate, export retry, cache limit (0.6 development)
 
 [GitHub Actions run 37534841625](https://github.com/HNXS/Cutlery/actions/runs/37534841625) on commit `8ecec29520c1af75bd648d84a7972f99f59a0f2f` passed every step on its first attempt.

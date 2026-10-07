@@ -28,7 +28,7 @@ void noteLosses(const Clip &c, QMap<QString, int> &what) {
         what["keyframed animation"]++;
     if (c.brightness != 0 || c.contrast != 1 || c.saturation != 1 || c.temperature != 0 ||
         c.tint != 0 || c.vibrance != 0 || c.shadows != 0 || c.highlights != 0 || !c.lut.isEmpty() ||
-        !c.curveMaster.isEmpty() || c.hslSaturation != 0 || c.hslHue != 0)
+        !c.curveMaster.isEmpty() || c.hslSaturation != 0 || c.hslHue != 0 || c.exposure != 0)
         what["colour settings"]++;
     if (c.scale != 1 || c.x != 0 || c.y != 0 || c.rotation != 0 || c.crop != 0 || c.flip ||
         c.flipVertical || c.cropLeft != 0 || c.cropRight != 0 || c.cropTop != 0 ||
@@ -38,7 +38,7 @@ void noteLosses(const Clip &c, QMap<QString, int> &what) {
         what["transitions (as straight cuts)"]++;
     if (!c.fx.isEmpty() || c.blur > 0 || c.sharpen > 0 || c.glow > 0 || c.vignette > 0 ||
         c.grain > 0 || c.stabilize || c.chromaKey || c.aiCutout ||
-        !c.lumaKey.isEmpty() || !c.blendMode.isEmpty())
+        !c.lumaKey.isEmpty() || !c.blendMode.isEmpty() || c.pitch != 0)
         what["effects"]++;
     if (c.reverse)
         what["reversed clips (exported forwards)"]++;

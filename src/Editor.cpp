@@ -231,8 +231,8 @@ Editor::~Editor() {
             p->kill();
             p->waitForFinished(1500);
         }
-    if (!m_jobTemp.isEmpty())
-        QFile::remove(m_jobTemp);
+    if (!m_jobTemp.isEmpty() && !QFile::remove(m_jobTemp))
+        QDir(m_jobTemp).removeRecursively(); // a picture sequence's folder
 }
 QVariantList Editor::assets() const {
     QVariantList result;
@@ -512,6 +512,8 @@ QVariantMap Editor::state() const {
             PROP(motionBlur);
             PROP(stabilize);
             PROP(reverb);
+            PROP(pitch);
+            PROP(exposure);
             PROP(echo);
             PROP(pan);
             PROP(textAnimation);
@@ -1990,6 +1992,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(motionBlur, toDouble);
         FIELD(stabilize, toBool);
         FIELD(reverb, toDouble);
+        FIELD(pitch, toDouble);
+        FIELD(exposure, toDouble);
         FIELD(echo, toDouble);
         FIELD(pan, toDouble);
         FIELD(textAnimation, toString);
@@ -3644,6 +3648,7 @@ void Editor::pasteAttributes(const QString &group) {
         c->denoise = from.denoise;
         c->deess = from.deess;
         c->reverb = from.reverb;
+        c->pitch = from.pitch;
         c->echo = from.echo;
         c->pan = from.pan;
         c->fadeIn = from.fadeIn;
@@ -4785,6 +4790,11 @@ void Editor::exportVideo(const QUrl &url, const QString &profile) {
     }
     exportWith(url, {{"format", profile == "webm" ? "vp9" : profile}, {"quality", "balanced"}});
 }
+// The folder a picture sequence chosen as "name.png" is written to: "name" beside it.
+static QString sequenceFolder(const QString &output) {
+    const QFileInfo file(output);
+    return file.absolutePath() + "/" + file.completeBaseName();
+}
 static ExportSettings exportSettings(const QVariantMap &m) {
     ExportSettings s;
     s.format = m.value("format", s.format).toString();
@@ -4830,6 +4840,9 @@ void Editor::queueExport(const QUrl &url, const QVariantMap &settings) {
         const auto s = exportSettings(settings);
         if (QFileInfo::exists(output))
             throw std::runtime_error("That output file already exists. Choose a new filename.");
+        // A picture sequence goes into a new folder named like the file.
+        if (s.format == "png" && QFileInfo::exists(sequenceFolder(output)))
+            throw std::runtime_error("A folder of that name already exists. Choose a new filename.");
         if (QFileInfo(output).suffix().compare(formatExtension(s.format), Qt::CaseInsensitive))
             throw std::runtime_error(
                 ("Use a ." + formatExtension(s.format) + " filename for this format").toStdString());
@@ -4860,7 +4873,8 @@ void Editor::advanceQueue() {
     // The running export finished: its file tells whether it worked.
     for (auto &q : m_queue)
         if (q.status == "exporting" && !m_busy) {
-            if (QFileInfo::exists(localPath(q.url)))
+            const auto path = localPath(q.url);
+            if (QFileInfo::exists(q.settings.value("format") == "png" ? sequenceFolder(path) : path))
                 q.status = "done";
             else if (m_cancelled) {
                 q.status = "cancelled";
@@ -4877,7 +4891,7 @@ void Editor::advanceQueue() {
         if (q.status == "waiting") {
             q.status = "exporting";
             exportProject(q.project, q.url, q.settings);
-            if (!m_busy && !QFileInfo::exists(localPath(q.url)))
+            if (!m_busy)
                 q.status = "failed";
             else
                 m_queueTimer.start();
@@ -5012,6 +5026,8 @@ void Editor::exportProject(const Project &project, const QUrl &url, const QVaria
         const auto s = exportSettings(settings);
         if (QFileInfo::exists(output))
             throw std::runtime_error("That output file already exists. Choose a new filename.");
+        if (s.format == "png" && QFileInfo::exists(sequenceFolder(output)))
+            throw std::runtime_error("A folder of that name already exists. Choose a new filename.");
         if (QFileInfo(output).suffix().compare(formatExtension(s.format), Qt::CaseInsensitive))
             throw std::runtime_error(
                 ("Use a ." + formatExtension(s.format) + " filename for this format").toStdString());
@@ -5213,6 +5229,7 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
         options.highQuality = true;
         options.pixelFormat = encoder.pixelFormat;
         options.videoTail = encoder.videoTail;
+        options.transparent = encoder.alpha;
         options.video = !encoder.audioOnly;
         options.audio = !encoder.noAudio;
         options.from = m_exportFrom;
@@ -5228,8 +5245,14 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
             compileRender(m_exportProject, work->path(), size.width(), size.height(), options);
         const auto graph = work->filePath("graph.txt");
         writeGraph(graph, plan.graph);
-        const QString temp =
-            QFileInfo(output).absolutePath() + "/.cutlery-" + newId() + "." + encoder.extension;
+        const QString temp = QFileInfo(output).absolutePath() + "/.cutlery-" + newId() +
+                             (encoder.sequence ? QString() : "." + encoder.extension);
+        // A sequence is written into a work folder that becomes the output folder at the end.
+        const QString target = encoder.sequence ? sequenceFolder(output) : output;
+        if (encoder.sequence && !QDir().mkpath(temp))
+            throw std::runtime_error("Cannot write to the output folder");
+        const QString written =
+            encoder.sequence ? temp + "/" + QFileInfo(target).fileName() + "_%05d.png" : temp;
         m_resumeTimer.stop();
         stopPlayback();
         auto *process = new QProcess(this);
@@ -5267,18 +5290,22 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
                     }
                     emit changed();
                 });
-        auto complete = [this, process, work, output, temp, log, label = encoder.label,
+        auto complete = [this, process, work, output = target, temp, log, label = encoder.label,
                          name = encoder.name, probed = encoder.probe](bool success) {
+            const auto discard = [temp] {
+                if (!QFile::remove(temp))
+                    QDir(temp).removeRecursively();
+            };
             *log += process->readAllStandardError();
             m_job = nullptr;
             m_jobTemp.clear();
             m_busy = false;
             process->deleteLater();
             if (m_cancelled) {
-                QFile::remove(temp);
+                discard();
                 m_status = "Render cancelled";
             } else if (!success) {
-                QFile::remove(temp);
+                discard();
                 m_exportFailed = true;
                 if (probed && m_failedEncoders.isEmpty()) {
                     // A hardware encoder that passed its test can still fail on the real video
@@ -5295,8 +5322,8 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
                 }
                 fail("Render failed. " + QString::fromUtf8(*log).right(4000));
                 m_status = "Render failed";
-            } else if (!QFile::rename(temp, output)) {
-                QFile::remove(temp);
+            } else if (!QDir().rename(temp, output)) {
+                discard();
                 fail("Cannot publish output. Check the folder permissions and choose a new "
                      "filename.");
             } else {
@@ -5320,7 +5347,7 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
             if (e == QProcess::FailedToStart)
                 complete(false);
         });
-        process->start(executable("ffmpeg"), exportArguments(plan, graph, temp, encoder));
+        process->start(executable("ffmpeg"), exportArguments(plan, graph, written, encoder));
         emit changed();
     } catch (const std::exception &e) {
         m_busy = false;

@@ -6,8 +6,8 @@
 
 namespace cutlery {
 const QStringList &exportFormats() {
-    static const QStringList formats{"h264", "hevc", "av1", "vp9", "prores",
-                                     "mpeg4", "gif", "mp3", "m4a", "wav"};
+    static const QStringList formats{"h264", "hevc", "av1", "vp9", "prores", "prores4444",
+                                     "mpeg4", "gif", "png", "mp3", "m4a", "wav"};
     return formats;
 }
 const QVector<QPair<QString, double>> &exportFrameRates() {
@@ -24,8 +24,10 @@ QString formatExtension(const QString &format) {
         return format;
     if (format == "vp9")
         return "webm";
-    if (format == "prores")
+    if (format == "prores" || format == "prores4444")
         return "mov";
+    if (format == "png")
+        return "png";
     if (format == "gif")
         return "gif";
     return "mp4";
@@ -95,6 +97,19 @@ QVector<Encoder> encoderCandidates(const ExportSettings &s, QSize size, double f
                           .arg(pick({25, 15, 12, 10}), pick({256, 256, 192, 128}));
         return {e};
     }
+    if (s.format == "png") {
+        // Lossless pictures with transparency, one file per frame.
+        Encoder e;
+        e.name = "png";
+        e.label = "PNG sequence";
+        e.extension = "png";
+        e.noAudio = true;
+        e.alpha = true;
+        e.sequence = true;
+        e.pixelFormat = "rgba";
+        e.videoArguments = {"-c:v", "png", "-compression_level", pick({6, 6, 4, 3})};
+        return {e};
+    }
     if (s.format == "h264" || s.format == "hevc") {
         const bool h264 = s.format == "h264";
         const QString codec = h264 ? "h264" : "hevc";
@@ -134,6 +149,15 @@ QVector<Encoder> encoderCandidates(const ExportSettings &s, QSize size, double f
              pick({1, 2, 3, 4}), "-row-mt", "1", "-g", gop},
             false);
         c.last().audioArguments = {"-c:a", "libopus", "-b:a", pick({256, 192, 160, 128}) + "k"};
+    } else if (s.format == "prores4444") {
+        // ProRes 4444 keeps an alpha channel: transparent where the timeline shows nothing.
+        add("prores_ks", "ProRes 4444 with alpha (software)",
+            {"-profile:v", "4", "-vendor", "apl0", "-alpha_bits", "16", "-qscale:v",
+             pick({4, 6, 9, 12})},
+            false);
+        c.last().pixelFormat = "yuva444p10le";
+        c.last().alpha = true;
+        c.last().audioArguments = {"-c:a", "pcm_s16le"};
     } else if (s.format == "prores") {
         add("prores_ks", "ProRes 422 (software)",
             {"-profile:v", pick({3, 3, 2, 1}), "-vendor", "apl0"}, false);
