@@ -225,7 +225,7 @@ Editor::~Editor() {
             delete t;
         }
     for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess, m_sceneProcess,
-                    m_nestedProcess, m_autoColourProcess, m_frameProcess})
+                    m_nestedProcess, m_autoColourProcess, m_frameProcess, m_pickProcess})
         if (p) {
             p->disconnect(this);
             p->kill();
@@ -513,6 +513,8 @@ QVariantMap Editor::state() const {
             PROP(stabilize);
             PROP(reverb);
             PROP(pitch);
+            PROP(stabilizeStrength);
+            PROP(stabilizeZoom);
             PROP(exposure);
             PROP(echo);
             PROP(pan);
@@ -1993,6 +1995,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(stabilize, toBool);
         FIELD(reverb, toDouble);
         FIELD(pitch, toDouble);
+        FIELD(stabilizeStrength, toDouble);
+        FIELD(stabilizeZoom, toBool);
         FIELD(exposure, toDouble);
         FIELD(echo, toDouble);
         FIELD(pan, toDouble);
@@ -3937,6 +3941,161 @@ void Editor::findPauses(double thresholdDb, double minPause) {
               "-f", "null", "-"});
     emit changed();
 }
+void Editor::splitAtMarkers() {
+    const auto *c = m_project.clip(m_selected);
+    if (!c)
+        return fail("Select a clip to split");
+    QVector<qint64> cuts;
+    for (const auto &m : m_project.markers)
+        if (m.frame > c->start && m.frame < c->start + c->duration)
+            cuts << m.frame;
+    if (cuts.isEmpty())
+        return fail("No markers inside the clip. Add markers (M) or let Cutlery mark the beats.");
+    const auto id = c->id;
+    if (mutate([&](Project &p) {
+            const auto linked = p.linkedClips(id);
+            // From the end, so the original keeps its id as the first piece.
+            for (auto it = cuts.rbegin(); it != cuts.rend(); ++it)
+                for (const auto &clipId : QStringList{id} + linked)
+                    p.split(clipId, *it);
+        })) {
+        m_status = QString("Split into %1 pieces at the markers").arg(cuts.size() + 1);
+        emit changed();
+    }
+}
+void Editor::fitToMarkers() {
+    auto ids = selection();
+    if (ids.isEmpty())
+        return fail("Select the clips to put on the beat");
+    if (m_project.markers.isEmpty())
+        return fail("Add markers first (M), or let Cutlery mark the beats of a music clip");
+    std::sort(ids.begin(), ids.end(), [&](const QString &a, const QString &b) {
+        return m_project.clip(a)->start < m_project.clip(b)->start;
+    });
+    const int track = m_project.clip(ids.first())->track;
+    for (const auto &id : ids)
+        if (m_project.clip(id)->track != track)
+            return fail("Select clips on one track");
+    int fitted = 0;
+    if (mutate([&](Project &p) {
+            qint64 t = p.clip(ids.first())->start;
+            const double fps = double(p.fpsN) / p.fpsD;
+            for (const auto &id : ids) {
+                auto *c = p.clip(id);
+                // The longest the clip can run with its media (pictures and titles: any).
+                qint64 longest = std::numeric_limits<qint64>::max();
+                if (const auto *a = p.asset(c->assetId); a && a->kind != "image" && !a->loops)
+                    longest = std::max<qint64>(
+                        1, qint64(std::floor((a->duration - c->sourceIn.seconds()) /
+                                             c->speed.seconds() * fps + 1e-6)));
+                // The marker nearest to where the clip would end anyway, among those it can
+                // reach; without one it keeps its length.
+                qint64 best = -1;
+                for (const auto &m : p.markers)
+                    if (m.frame > t && m.frame - t <= longest &&
+                        (best < 0 || std::abs(m.frame - t - c->duration) <
+                                         std::abs(best - t - c->duration)))
+                        best = m.frame;
+                const qint64 duration = best > 0 ? best - t : c->duration;
+                const auto linked = p.linkedClips(id);
+                for (const auto &clipId : QStringList{id} + linked)
+                    if (auto *x = p.clip(clipId)) {
+                        x->start = t;
+                        x->duration = duration;
+                    }
+                fitted += best > 0;
+                t += duration;
+            }
+            if (p.trackSettings[track].magnetic)
+                p.packTrack(track, p.trackOrder(track));
+        })) {
+        m_status = QString("%1 of %2 clips end on a marker").arg(fitted).arg(ids.size());
+        emit changed();
+    }
+}
+void Editor::pickKeyColor(double x, double y) {
+    try {
+        const auto *c = m_project.clip(m_selected);
+        if (!c || c->assetId.isEmpty() || c->audioOnly)
+            throw std::runtime_error("Select the clip with the green or blue screen");
+        if (m_pickProcess)
+            return;
+        auto work = std::make_shared<QTemporaryDir>(m_data + "/cache/still-XXXXXX");
+        if (!work->isValid())
+            throw std::runtime_error("Cannot create a work folder");
+        // The clip alone, without its keys, where it sits on the canvas.
+        Project alone = m_project;
+        Clip clip = *c;
+        clip.chromaKey = false;
+        clip.lumaKey.clear();
+        clip.aiCutout = false;
+        clip.blendMode.clear();
+        alone.clips = {clip};
+        const int width = std::min(640, m_project.width) / 2 * 2;
+        const int height = std::max(2, int(std::lround(double(width) * m_project.height /
+                                                       m_project.width / 2)) * 2);
+        RenderOptions options;
+        options.audio = false;
+        options.transparent = true;
+        options.pixelFormat = "rgba";
+        options.from = std::clamp<qint64>(m_playhead, c->start, c->start + c->duration - 1);
+        options.to = options.from + 1;
+        const auto plan = compileRender(alone, work->path(), width, height, options);
+        const auto graph = work->filePath("graph.txt");
+        writeGraph(graph, plan.graph);
+        auto *p = new QProcess(this);
+        m_pickProcess = p;
+        auto png = std::make_shared<QByteArray>();
+        connect(p, &QProcess::readyReadStandardOutput, this, [p, png] { *png += p->readAllStandardOutput(); });
+        const auto id = c->id;
+        auto complete = [this, p, png, work, id, x, y](bool success) {
+            *png += p->readAllStandardOutput();
+            p->deleteLater();
+            m_pickProcess = nullptr;
+            QImage image;
+            if (!success || !image.loadFromData(*png, "PNG"))
+                return fail("Cannot read the picture to pick a colour from");
+            image = image.convertToFormat(QImage::Format_ARGB32);
+            const int px = std::clamp(int(x * image.width()), 0, image.width() - 1),
+                      py = std::clamp(int(y * image.height()), 0, image.height() - 1);
+            // The average of a small square around the point, to step over noise.
+            double r = 0, g = 0, b = 0;
+            int n = 0;
+            for (int j = std::max(0, py - 2); j <= std::min(image.height() - 1, py + 2); ++j)
+                for (int i = std::max(0, px - 2); i <= std::min(image.width() - 1, px + 2); ++i) {
+                    const auto colour = image.pixelColor(i, j);
+                    if (colour.alpha() < 250)
+                        continue;
+                    r += colour.red();
+                    g += colour.green();
+                    b += colour.blue();
+                    ++n;
+                }
+            if (n == 0)
+                return fail("Click on the clip's screen colour in the viewer");
+            const QColor picked(qRound(r / n), qRound(g / n), qRound(b / n));
+            const auto selected = m_selected;
+            m_selected = id;
+            mutate([&](Project &project) {
+                applyClipValue(project, "keyColor", picked.name());
+                applyClipValue(project, "chromaKey", true);
+            });
+            m_selected = selected;
+            m_status = "Key colour " + picked.name();
+            emit changed();
+        };
+        connect(p, &QProcess::finished, this, [complete](int code, QProcess::ExitStatus status) {
+            complete(code == 0 && status == QProcess::NormalExit);
+        });
+        connect(p, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+            if (e == QProcess::FailedToStart)
+                complete(false);
+        });
+        p->start(executable("ffmpeg"), renderArguments(plan, graph, {}, "", 0));
+    } catch (const std::exception &e) {
+        fail(e.what());
+    }
+}
 void Editor::splitAtScenes(double sensitivity) {
     const auto *c = m_project.clip(m_selected);
     const auto *a = c ? m_project.asset(c->assetId) : nullptr;
@@ -4803,6 +4962,12 @@ static ExportSettings exportSettings(const QVariantMap &m) {
     s.loudness = m.value("loudness", 0).toDouble();
     s.fps = m.value("fps", 0).toDouble();
     s.bitrate = m.value("bitrate", 0).toInt();
+    s.channels = m.value("channels", 2).toInt();
+    s.sampleRate = m.value("sampleRate", 48000).toInt();
+    if (s.channels != 1 && s.channels != 2)
+        throw std::runtime_error("Export sound in mono (1) or stereo (2)");
+    if (s.sampleRate != 48000 && s.sampleRate != 44100)
+        throw std::runtime_error("Export sound at 48000 or 44100 Hz");
     if (s.fps != 0 && std::none_of(exportFrameRates().begin(), exportFrameRates().end(),
                                    [&](const auto &r) { return std::abs(r.second - s.fps) < 0.01; }))
         throw std::runtime_error("Unknown export frame rate");

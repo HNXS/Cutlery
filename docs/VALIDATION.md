@@ -1,5 +1,25 @@
 # Validation record
 
+## Windows portable build — 2026-10-07, key colour picker, cutting on markers, stabilize strength, mono and 44.1 kHz export (0.6 development)
+
+[GitHub Actions run 37596464638](https://github.com/HNXS/Cutlery/actions/runs/37596464638) on commit `bb9c3bf4e28e6f07c5e072b5e7d78b2fadba126c` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine tests (`keyPickerMarkersStabilizeAndSound`):**
+  - **Key colour picker:**
+    - a click on an uneven green screen in the viewer picks that colour and turns the key on, in one undo step;
+    - a click outside the picture is reported.
+  - **Markers:**
+    - "Split at markers" cuts a clip at every marker inside it;
+    - "Cut on the beat" ends each selected clip on the marker nearest to its end, within what its media reaches;
+    - a missing selection or missing markers is explained.
+  - **Stabilizing:** strength 1 with "Zoom in" uses a 64-pixel search and crops the edges, and the default stays at 32 pixels; the settings are saved.
+  - **Sound format:** WAV and M4A exports in mono at 44.1 kHz; invalid channel counts are refused.
+- **Interface:**
+  - "Pick" turns the viewer into a colour picker until it is pressed again;
+  - the export dialog's "Sound" list sets channels and sample rate.
+
 ## Windows portable build — 2026-10-07, pitch, exposure, transparent ProRes 4444 and PNG sequence export (0.6 development)
 
 [GitHub Actions run 37590197487](https://github.com/HNXS/Cutlery/actions/runs/37590197487) on commit `df7b8062958687a2a0c4ae4b3c9434f7177c2ff1` passed every step on its first attempt.

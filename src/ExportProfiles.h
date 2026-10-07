@@ -22,6 +22,8 @@ struct ExportSettings {
     // dropped to reach it. Video bitrate in kbit/s (0: by quality), for encoders that take one.
     double fps = 0;
     int bitrate = 0;
+    // Sound: 2 (stereo) or 1 (mono) channels, at 48000 or 44100 Hz.
+    int channels = 2, sampleRate = 48000;
 };
 // Frame rates an export can be set to, as FFmpeg rates ("30000/1001") paired with their value.
 const QVector<QPair<QString, double>> &exportFrameRates();

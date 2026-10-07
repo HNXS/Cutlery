@@ -4,6 +4,10 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Pick the screen colour:** "Pick" beside the green-screen colours, then click the screen in the viewer, for screens that are not pure green or blue.
+- **Cut on the beat:** "Split at markers" cuts a clip on every beat marker; "Cut on the beat" lines up the selected clips so each one ends on a beat.
+- **Stronger stabilizing:** a strength slider and "Zoom in" so no filled-in edge shows.
+- **Mono and 44.1 kHz:** export the sound in mono or stereo, at 48 or 44.1 kHz.
 - **Pitch:** make a voice higher or lower (up to an octave) without changing its speed, in the sound tools.
 - **Exposure:** brighten or darken a clip in photographic stops, like a camera.
 - **Export with transparency:** ProRes 4444 MOV or a PNG picture sequence keep everything transparent that is not on the timeline, e.g. animated titles or lower thirds to use in other editors.

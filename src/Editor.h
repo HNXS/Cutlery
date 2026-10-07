@@ -331,6 +331,14 @@ class Editor final : public QObject {
     // Finds the shot changes in the selected video clip and splits it there, with any detached
     // audio, in one undo step. Sensitivity 0..1: higher finds subtler cuts.
     Q_INVOKABLE void splitAtScenes(double sensitivity = 0.5);
+    // Splits the selected clip, with any detached audio, at every timeline marker inside it.
+    Q_INVOKABLE void splitAtMarkers();
+    // Puts the selected clips (one track, in timeline order) one after another from the first,
+    // each ending on the next marker it can reach with its media: a cut on every beat.
+    Q_INVOKABLE void fitToMarkers();
+    // Sets the selected clip's key colour from its own picture (keys off) at a point of the
+    // canvas (fractions of its width and height) at the playhead, and turns the colour key on.
+    Q_INVOKABLE void pickKeyColor(double x, double y);
     // Finds the beats in the selected clip's sound and puts a timeline marker on every
     // `every`-th one (1, 2 or 4), asynchronously (state "beats": status finding|done|failed,
     // count, bpm). Existing markers stay; one undo step.
@@ -407,7 +415,7 @@ class Editor final : public QObject {
     QVariantList m_textStyles, m_templates;
     void listTemplates();
     void saveTextStyles();
-    QProcess *m_autoColourProcess = nullptr, *m_frameProcess = nullptr;
+    QProcess *m_autoColourProcess = nullptr, *m_frameProcess = nullptr, *m_pickProcess = nullptr;
     // The selected clip's words in clip-local frames, cached per clip, transcript and revision.
     // Words of the run of back-to-back pieces of the selected clip's recording on its track (as
     // cuts leave them), in timeline order; start and end are local to the word's piece.
