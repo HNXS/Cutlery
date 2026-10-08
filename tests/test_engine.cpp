@@ -16,8 +16,10 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <array>
 #include <functional>
 #include <limits>
+#include <numbers>
 #include <tuple>
 using namespace cutlery;
 class EngineTest : public QObject {
