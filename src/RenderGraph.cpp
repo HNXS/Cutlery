@@ -13,6 +13,7 @@
 #include <QPainterPath>
 #include <QTransform>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 #include <stdexcept>
@@ -823,6 +824,25 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             f += QString(",colorchannelmixer=rr=%1:bb=%1").arg(num(1 + 0.2 * c.tint));
         if (c.vibrance != 0)
             f += ",vibrance=intensity=" + num(c.vibrance);
+        if (c.liftX != 0 || c.liftY != 0 || c.gammaX != 0 || c.gammaY != 0 || c.gainX != 0 ||
+            c.gainY != 0) {
+            // Colour wheels, as lift, gamma and gain per channel: each point is turned into red,
+            // green and blue amounts along its direction (a third of a turn apart, adding up to
+            // zero so the lightness stays about the same), at most ±0.25. Then for each channel
+            // out = (gain × (v + lift × (1 − v)))^(1 / gamma), as one look-up table.
+            auto rgb = [](double x, double y) {
+                const double a = std::atan2(y, x), r = std::min(1., std::hypot(x, y)) * 0.25;
+                return std::array<double, 3>{r * std::cos(a), r * std::cos(a - 2 * std::numbers::pi / 3),
+                                             r * std::cos(a + 2 * std::numbers::pi / 3)};
+            };
+            const auto lift = rgb(c.liftX, c.liftY), gamma = rgb(c.gammaX, c.gammaY),
+                       gain = rgb(c.gainX, c.gainY);
+            QStringList channels;
+            for (int i = 0; i < 3; ++i)
+                channels << QString("255*pow(clip(%1*(val/255+%2*(1-val/255)),0,1),%3)")
+                                .arg(num(1 + gain[i]), num(lift[i]), num(1 / (1 + gamma[i])));
+            f += QString(",lutrgb=r='%1':g='%2':b='%3'").arg(channels[0], channels[1], channels[2]);
+        }
         if (c.shadows != 0 || c.highlights != 0 || c.whites != 0 || c.blacks != 0) {
             // Blacks and whites move the ends of the master curve (lifting blacks fades the
             // darkest tones, lowering whites softens the brightest), keeping it rising.

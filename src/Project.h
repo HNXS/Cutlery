@@ -149,6 +149,10 @@ struct Clip {
     double temperature = 0, tint = 0, vibrance = 0, shadows = 0, highlights = 0;
     // The brightest and darkest tones moved down/up or up/down, −1..1 (0 unchanged).
     double whites = 0, blacks = 0;
+    // Colour wheels: a colour pushed into the shadows (lift), midtones (gamma) and highlights
+    // (gain), as a point in the wheel, x and y −1..1 (the angle picks the hue, the distance from
+    // the centre how much; red at 0°, green at 120°, blue at 240°). Lightness is kept.
+    double liftX = 0, liftY = 0, gammaX = 0, gammaY = 0, gainX = 0, gainY = 0;
     // Sound: three-band EQ in dB (−12..12; low shelf 100 Hz, peak 2.5 kHz, high shelf 8 kHz), a
     // low cut in Hz (0 off, up to 300), and 0..1 amounts of compression, noise gate, noise
     // reduction and de-essing.

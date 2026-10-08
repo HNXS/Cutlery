@@ -70,7 +70,7 @@ ApplicationWindow {
         { n: 24, d: 1, label: "24" }, { n: 25, d: 1, label: "25" }, { n: 30, d: 1, label: "30" },
         { n: 50, d: 1, label: "50" }, { n: 60, d: 1, label: "60" }, { n: 30000, d: 1001, label: "29.97" }
     ]
-    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || frameDialog.visible || audioFileDialog.visible || timelineFileDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || styleDialog.visible || templateDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || commandSearch.visible || timelinePanel.dialogOpen
+    property bool shortcutsBlocked: startPage.visible || preferencesDialog.visible || openDialog.visible || saveDialog.visible || importDialog.visible || exportDialog.visible || frameDialog.visible || audioFileDialog.visible || timelineFileDialog.visible || relinkDialog.visible || relinkFolderDialog.visible || srtOpen.visible || srtSave.visible || soundDialog.visible || folderDialog.visible || styleDialog.visible || layoutDialog.visible || rightsDialog.visible || templateDialog.visible || backupDialog.visible || discardDialog.visible || settings.visible || exportSettings.visible || about.visible || shortcutsDialog.visible || commandSearch.visible || timelinePanel.dialogOpen
     Shortcut {
         sequence: "Escape"
         enabled: (win.libraryGesture !== null && win.libraryGesture.dragging) || timelinePanel.draggingClip !== null
@@ -1392,6 +1392,51 @@ ApplicationWindow {
                                         }
                                     }
                                 }
+                                // Own layouts: the places of the selected pictures, kept for every project.
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    ComboBox {
+                                        id: layoutChoice
+                                        objectName: "layoutChoice"
+                                        Layout.fillWidth: true
+                                        readonly property var layouts: win.s.layouts || []
+                                        model: [layouts.length ? "My layouts…" : "No saved layouts"].concat(layouts.map(l => l.name + " (" + l.count + ")"))
+                                        enabled: layouts.length > 0 && (win.s.selectedIds || []).length > 0
+                                        onActivated: index => {
+                                            if (index > 0)
+                                                editor.applyLayout(layouts[index - 1].name);
+                                            currentIndex = 0;
+                                        }
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Puts the selected pictures in the places of a saved layout, lowest track first"
+                                    }
+                                    ToolButton {
+                                        objectName: "saveLayout"
+                                        text: "Save…"
+                                        enabled: (win.s.selectedIds || []).length > 0
+                                        onClicked: layoutDialog.open()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Keeps the places, sizes, crops and frames of the selected pictures as a layout for every project"
+                                    }
+                                    ToolButton {
+                                        text: "⋯"
+                                        visible: layoutChoice.layouts.length > 0
+                                        onClicked: layoutMenu.popup()
+                                        Menu {
+                                            id: layoutMenu
+                                            Instantiator {
+                                                model: layoutChoice.layouts
+                                                delegate: MenuItem {
+                                                    required property var modelData
+                                                    text: "Remove “" + modelData.name + "”"
+                                                    onTriggered: editor.removeLayout(modelData.name)
+                                                }
+                                                onObjectAdded: (index, object) => layoutMenu.insertItem(index, object)
+                                                onObjectRemoved: (index, object) => layoutMenu.removeItem(object)
+                                            }
+                                        }
+                                    }
+                                }
                                 // Icons for tutorials: a click goes on at the playhead, coloured and sized
                                 // like shapes.
                                 Caption {
@@ -1968,6 +2013,22 @@ ApplicationWindow {
                                     ToolTip.visible: hovered
                                     ToolTip.text: "How in-between frames are made when the clip plays slower than it was filmed. Optical flow is smoothest but renders slowly."
                                 }
+                            }
+                            // Speed ramps: the clip cut into parts that speed up and slow down.
+                            ComboBox {
+                                objectName: "speedRamp"
+                                Layout.fillWidth: true
+                                visible: win.selection.video === true || (!!win.selection.assetId && win.selection.picture !== true)
+                                enabled: win.selection.locked !== true
+                                readonly property var presets: ["montage", "hero", "bullet", "jumpCut", "flashIn", "flashOut"]
+                                model: ["Speed ramp…", "Montage (fast, slow, fast)", "Hero (slow moment)", "Bullet (long slow moment)", "Jump cut (slow, then fast)", "Flash in (fast, then normal)", "Flash out (speeds up)"]
+                                onActivated: index => {
+                                    if (index > 0)
+                                        editor.speedRamp(presets[index - 1]);
+                                    currentIndex = 0;
+                                }
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Cuts the clip (and its sound) into parts that play faster and slower; the parts stay editable"
                             }
                             ComboBox {
                                 Layout.fillWidth: true
@@ -4010,6 +4071,101 @@ ApplicationWindow {
                                         ToolTip.text: "Remove the LUT"
                                     }
                                 }
+                                // Colour wheels: drag the point towards a colour to push it into the
+                                // shadows, midtones or highlights; double-click resets.
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    Repeater {
+                                        model: [
+                                            { key: "lift", name: "Shadows" },
+                                            { key: "gamma", name: "Midtones" },
+                                            { key: "gain", name: "Highlights" }
+                                        ]
+                                        ColumnLayout {
+                                            id: wheel
+                                            required property var modelData
+                                            readonly property real wx: win.selection[modelData.key + "X"] || 0
+                                            readonly property real wy: win.selection[modelData.key + "Y"] || 0
+                                            Layout.fillWidth: true
+                                            spacing: 2
+                                            Item {
+                                                objectName: "wheel-" + wheel.modelData.key
+                                                Layout.alignment: Qt.AlignHCenter
+                                                implicitWidth: 64
+                                                implicitHeight: 64
+                                                // While dragging, the point follows the mouse; otherwise the clip's values.
+                                                property bool dragging: false
+                                                property real mouseX: 0
+                                                property real mouseY: 0
+                                                readonly property real dragX: dragging ? mouseX : wheel.wx
+                                                readonly property real dragY: dragging ? mouseY : wheel.wy
+                                                function set(x, y) {
+                                                    const r = Math.hypot(x, y);
+                                                    const k = r > 1 ? 1 / r : 1;
+                                                    const values = {};
+                                                    values[wheel.modelData.key + "X"] = Math.round(x * k * 1000) / 1000;
+                                                    values[wheel.modelData.key + "Y"] = Math.round(y * k * 1000) / 1000;
+                                                    editor.setClipValues(values);
+                                                }
+                                                Canvas {
+                                                    anchors.fill: parent
+                                                    onPaint: {
+                                                        const ctx = getContext("2d");
+                                                        ctx.reset();
+                                                        // Red at the right, green up-left, blue down-left.
+                                                        const g = ctx.createConicalGradient(width / 2, height / 2, 0);
+                                                        g.addColorStop(0, "#c04040");
+                                                        g.addColorStop(1 / 3, "#40c040");
+                                                        g.addColorStop(2 / 3, "#4040c0");
+                                                        g.addColorStop(1, "#c04040");
+                                                        ctx.fillStyle = g;
+                                                        ctx.beginPath();
+                                                        ctx.arc(width / 2, height / 2, width / 2 - 1, 0, 2 * Math.PI);
+                                                        ctx.fill();
+                                                        const r = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width / 2);
+                                                        r.addColorStop(0, "#ff808080");
+                                                        r.addColorStop(1, "#00808080");
+                                                        ctx.fillStyle = r;
+                                                        ctx.fill();
+                                                    }
+                                                }
+                                                Rectangle {
+                                                    width: 10
+                                                    height: 10
+                                                    radius: 5
+                                                    color: "transparent"
+                                                    border.color: "white"
+                                                    border.width: 2
+                                                    x: parent.width / 2 + parent.dragX * (parent.width / 2 - 2) - width / 2
+                                                    y: parent.height / 2 - parent.dragY * (parent.height / 2 - 2) - height / 2
+                                                }
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    enabled: win.selection.locked !== true
+                                                    function at(mouse) {
+                                                        parent.mouseX = Math.max(-1, Math.min(1, (mouse.x - width / 2) / (width / 2 - 2)));
+                                                        parent.mouseY = Math.max(-1, Math.min(1, (height / 2 - mouse.y) / (height / 2 - 2)));
+                                                        parent.dragging = true;
+                                                    }
+                                                    onPressed: mouse => at(mouse)
+                                                    onPositionChanged: mouse => at(mouse)
+                                                    onReleased: {
+                                                        parent.set(parent.mouseX, parent.mouseY);
+                                                        parent.dragging = false;
+                                                    }
+                                                    onDoubleClicked: parent.set(0, 0)
+                                                }
+                                            }
+                                            Label {
+                                                Layout.alignment: Qt.AlignHCenter
+                                                text: wheel.modelData.name
+                                                font.pixelSize: 10
+                                                color: wheel.wx !== 0 || wheel.wy !== 0 ? win.mint : win.muted
+                                            }
+                                        }
+                                    }
+                                }
                                 // LUT library: the LUTs kept in Cutlery's data folder, one pick away.
                                 RowLayout {
                                     Layout.fillWidth: true
@@ -4885,6 +5041,27 @@ ApplicationWindow {
             onAccepted: styleDialog.accept()
         }
         onAccepted: editor.saveTextStyle(styleName.text)
+    }
+    Dialog {
+        id: layoutDialog
+        objectName: "layoutDialog"
+        anchors.centerIn: parent
+        modal: true
+        title: "Save layout"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAboutToShow: {
+            layoutName.text = "";
+            layoutName.forceActiveFocus();
+        }
+        TextField {
+            id: layoutName
+            objectName: "layoutName"
+            width: 280
+            maximumLength: 60
+            placeholderText: "Layout name, e.g. Interview split"
+            onAccepted: layoutDialog.accept()
+        }
+        onAccepted: editor.saveLayout(layoutName.text)
     }
     // Names a new folder (optionally moving one medium into it) or renames one.
     Dialog {
