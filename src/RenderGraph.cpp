@@ -42,9 +42,8 @@ static bool animatedGeometry(const Clip &c) {
 // Corner pin maps for FFmpeg's remap: for each pixel of the w × h result, the source pixel it
 // shows (x in the first image, y in the second), or 65535 where the warped picture does not
 // reach (left transparent).
-static std::pair<QImage, QImage> cornerPinMaps(const Clip &c, int w, int h) {
+static std::pair<QImage, QImage> cornerPinMaps(const QVector<double> &k, int w, int h) {
     QImage xs(w, h, QImage::Format_Grayscale16), ys(w, h, QImage::Format_Grayscale16);
-    const auto &k = c.cornerPin;
     const QPolygonF to{QPointF(k[0] * w, k[1] * h), QPointF(k[2] * w, k[3] * h),
                        QPointF(k[6] * w, k[7] * h), QPointF(k[4] * w, k[5] * h)};
     const QPolygonF from{QPointF(0, 0), QPointF(w, 0), QPointF(w, h), QPointF(0, h)};
@@ -61,6 +60,37 @@ static std::pair<QImage, QImage> cornerPinMaps(const Clip &c, int w, int h) {
         }
     }
     return {xs, ys};
+}
+// Where the corners of a w × h picture go (as in Clip::cornerPin): its corner pin, then its 3D
+// tilt seen in perspective from a distance of twice the larger side, shrunk to fit its box.
+static QVector<double> pinCorners(const Clip &c, int w, int h) {
+    QVector<double> k = c.cornerPin.size() == 8 ? c.cornerPin : QVector<double>{0, 0, 1, 0, 0, 1, 1, 1};
+    if (c.tiltX == 0 && c.tiltY == 0)
+        return k;
+    const double ax = c.tiltX * std::numbers::pi / 180, ay = c.tiltY * std::numbers::pi / 180;
+    const double f = 2. * std::max(w, h);
+    double lo[2] = {1e9, 1e9}, hi[2] = {-1e9, -1e9};
+    for (int i = 0; i < 8; i += 2) {
+        const double x = (k[i] - 0.5) * w, y = (k[i + 1] - 0.5) * h;
+        // Turn about the vertical axis, then lean about the horizontal one; z points away.
+        const double x1 = x * std::cos(ay), z1 = x * std::sin(ay);
+        const double y2 = y * std::cos(ax) + z1 * std::sin(ax),
+                     z2 = -y * std::sin(ax) + z1 * std::cos(ax);
+        const double s = f / (f + z2);
+        k[i] = x1 * s / w;
+        k[i + 1] = y2 * s / h;
+        for (int d = 0; d < 2; ++d) {
+            lo[d] = std::min(lo[d], k[i + d]);
+            hi[d] = std::max(hi[d], k[i + d]);
+        }
+    }
+    // Centred, and no larger than the box.
+    const double fit = std::min({1., 1 / std::max(1e-9, hi[0] - lo[0]), 1 / std::max(1e-9, hi[1] - lo[1])});
+    for (int i = 0; i < 8; i += 2) {
+        k[i] = 0.5 + (k[i] - (lo[0] + hi[0]) / 2) * fit;
+        k[i + 1] = 0.5 + (k[i + 1] - (lo[1] + hi[1]) / 2) * fit;
+    }
+    return k;
 }
 // Alpha mask of a styled overlay: rounded rectangle or circle, antialiased.
 static QImage overlayMask(const Clip &c, int w, int h) {
@@ -1159,9 +1189,10 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                 .arg(p.fpsN)
                 .arg(l0 + base);
         };
-        if (!c.cornerPin.isEmpty()) {
-            // Corner pin: every pixel takes the source pixel its inverse perspective lands on.
-            const auto [xs, ys] = cornerPinMaps(c, w, h);
+        if (!c.cornerPin.isEmpty() || c.tiltX != 0 || c.tiltY != 0) {
+            // Corner pin and tilt: every pixel takes the source pixel its inverse perspective
+            // lands on.
+            const auto [xs, ys] = cornerPinMaps(pinCorners(c, w, h), w, h);
             const auto id = QString::number(serial++);
             nodes << f + QString("[pin%1]").arg(id);
             nodes << stillInput(xs, "pinx") + QString(",format=gray16[pinx%1]").arg(id);

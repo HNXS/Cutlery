@@ -1249,6 +1249,12 @@ class UiTest : public QObject {
         editor.undo();
         editor.undo();
         QVERIFY(clip().cornerPin.isEmpty());
+        auto *tilt = findItem(window->contentItem(), "tilt-tiltY");
+        QTRY_VERIFY(tilt && tilt->isVisible());
+        tilt->setProperty("value", 30);
+        QVERIFY(QMetaObject::invokeMethod(tilt, "moved"));
+        QCOMPARE(clip().tiltY, 30.);
+        editor.undo();
         // Canvas fill for pictures that do not cover the frame.
         auto *fill = findItem(window->contentItem(), "canvasFill");
         QTRY_VERIFY(fill && fill->isVisible());

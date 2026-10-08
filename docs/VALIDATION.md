@@ -1,5 +1,16 @@
 # Validation record
 
+## Windows portable build — 2026-10-08, undo across sessions, freeze frames of any length, 3D tilt (0.6 development)
+
+[GitHub Actions run 37776488667](https://github.com/HNXS/Cutlery/actions/runs/37776488667) on commit `596ece7516a5f4871181e0b1fb29455557305bd3` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `undoAcrossSessions`:** after saving and opening again, redo and undo continue through the earlier edits back to the empty project; a file changed elsewhere opens without history.
+- **Engine test `freezeFrame`:** a reversed clip freezes the frame it shows (source frame 49 at the 11th frame) for half a second, and the still is not reversed.
+- **Engine test `styleEffects`:** leaning a grey picture back narrows its top edge; turning it shortens its right side; tilt values are saved and validated.
+- **UI test `lookControls`:** the turn slider sets the tilt.
+
 ## Windows portable build — 2026-10-08, corner pin, library search by speech and metadata, usage rights (0.6 development)
 
 [GitHub Actions run 37766665238](https://github.com/HNXS/Cutlery/actions/runs/37766665238) on commit `a61771356b21efb59ecd9022cb5f70c0eff4c1fc` passed every step on its first attempt.
