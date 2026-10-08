@@ -1,5 +1,18 @@
 # Validation record
 
+## Windows portable build — 2026-10-08, ellipse and soft-edged blur areas, brand kit, LUT library (0.6 development)
+
+[GitHub Actions run 37751884809](https://github.com/HNXS/Cutlery/actions/runs/37751884809) on commit `c63d63bea412864dc3cedc848cad11d90ddb696e` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `blurAndMosaic`:** ellipse blur and mosaic areas leave the rectangle's corners sharp; a soft edge fades the effect; the shape is saved and validated.
+- **Engine test `brandKitAndLutLibrary`:**
+  - **Brand colours:** normalised, without duplicates, kept for the next start and removable.
+  - **Logo:** copied into the data folder; "+ Logo" puts it over the whole video on a new top track, about an eighth of the height, 3 % from the chosen corner, reusing its media; undo works.
+  - **LUT library:** files are copied into luts/, listed by name, numbered on a name clash and set on a clip from the list.
+- **UI test `presenterControls`:** the area shape and soft edge controls, and brand colour swatches added and removed in the Add tab.
+
 ## Windows portable build — 2026-10-07, motion presets, whites and blacks, convert or compress, lower thirds without slide (0.6 development)
 
 [GitHub Actions run 37678983296](https://github.com/HNXS/Cutlery/actions/runs/37678983296) on commit `f3cfddfa648ea09b57b493a4678729ad8f0b9fa1` passed every step on its first attempt.
