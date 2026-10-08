@@ -1049,9 +1049,14 @@ class UiTest : public QObject {
         auto *style = findItem(window->contentItem(), "titleStyle");
         QTRY_VERIFY(style && style->isVisible());
         QCOMPARE(style->property("currentIndex").toInt(), 1);
-        style->setProperty("currentIndex", 3);
-        QVERIFY(QMetaObject::invokeMethod(style, "activated", Q_ARG(int, 3)));
+        style->setProperty("currentIndex", 4);
+        QVERIFY(QMetaObject::invokeMethod(style, "activated", Q_ARG(int, 4)));
         QCOMPARE(editor.project().clip(lower.id)->titleStyle, QString("titleCard"));
+        style->setProperty("currentIndex", 6);
+        QVERIFY(QMetaObject::invokeMethod(style, "activated", Q_ARG(int, 6)));
+        QCOMPARE(editor.project().clip(lower.id)->titleStyle, QString("quote"));
+        press("addBanner");
+        QCOMPARE(editor.project().clips.last().titleStyle, QString("banner"));
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void slipSlideAndRollDrags() {

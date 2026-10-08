@@ -4896,6 +4896,37 @@ class EngineTest : public QObject {
             QVERIFY2(lit(letters, 4) < done / 2, kind);
             QVERIFY2(std::abs(lit(letters, 40) - plain) < plain / 20, kind);
         }
+        // Words between asterisks in the highlight colour; the asterisks are not drawn, so the
+        // text takes the same room as without them.
+        {
+            auto marked = t;
+            marked.textShadow = 0;
+            marked.text = "AB *CD*";
+            marked.highlightColor = "#ff0000";
+            const auto image = picture(marked, 10);
+            // At this size "AB" and "CD" stand on two lines.
+            int redTop = 0, redBottom = 0, whiteTop = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x) {
+                    const QColor c(image.pixel(x, y));
+                    const bool red = c.red() > 200 && c.green() < 80, white = qGray(c.rgb()) > 220;
+                    (y < 90 ? redTop : redBottom) += red;
+                    whiteTop += white && y < 90;
+                }
+            QVERIFY2(redBottom > 300 && redTop < 20 && whiteTop > 300,
+                     qPrintable(QString("%1 %2 %3").arg(redTop).arg(redBottom).arg(whiteTop)));
+            // In white, the marked text looks exactly like the unmarked one.
+            auto plainText = t, white = marked;
+            plainText.textShadow = 0;
+            white.highlightColor = "#ffffff";
+            QCOMPARE(lit(white, 10), lit(plainText, 10));
+            QCOMPARE(shownTitleText("A *big* day\n*so* good *"), QString("A big day\nso good"));
+            QCOMPARE(shownTitleText("2*3 stays"), QString("2*3 stays"));
+            // Building up counts the shown letters only.
+            white.textAnimation = "typewriter";
+            white.textAnimationTime = 1;
+            QCOMPARE(lit(white, 40), lit(plainText, 10));
+        }
         // A gradient from white at the top to red at the bottom of the text.
         auto gradient = t;
         gradient.textShadow = 0;
@@ -6879,7 +6910,7 @@ class EngineTest : public QObject {
             return image.convertToFormat(QImage::Format_RGB32);
         };
         for (const auto &kind : {"check", "cross", "star", "heart", "warning", "info", "cursor",
-                                 "click", "lightbulb"}) {
+                                 "click", "lightbulb", "play", "bell", "pin", "clock"}) {
             editor.newProject();
             editor.configure(320, 180, 25, 1);
             editor.seek(0);
@@ -6907,6 +6938,15 @@ class EngineTest : public QObject {
                 QVERIFY2(hole.red() < 60, qPrintable(hole.name()));
                 QVERIFY2(solid.red() > 200 && solid.green() > 120 && solid.blue() < 80, qPrintable(solid.name()));
             }
+            if (QString(kind) == "play") {
+                // The triangle is cut out of the disc (the icon spans 144 px around the centre).
+                QVERIFY2(qGray(image.pixel(165, 90)) < 40, qPrintable(image.pixelColor(165, 90).name()));
+                QVERIFY(image.pixelColor(110, 90).red() > 200);
+            }
+            if (QString(kind) == "pin") // the hole in the head
+                QVERIFY2(qGray(image.pixel(160, 66)) < 40, qPrintable(image.pixelColor(160, 66).name()));
+            if (QString(kind) == "clock") // a hand cut out, the face around it
+                QVERIFY(qGray(image.pixel(160, 50)) < 40 && image.pixelColor(120, 90).blue() > 200);
         }
         editor.addGraphic("unicorn");
         QVERIFY(editor.state()["error"].toString().contains("Unknown"));
@@ -7497,6 +7537,31 @@ class EngineTest : public QObject {
         auto plain = lower;
         plain.titleStyle.clear();
         QVERIFY(titlePlate(plain, 1920, 1080, 1080).image.isNull());
+        // The right lower third mirrors the left one; the banner spans the bottom; the quote is
+        // centred, taller than a title card of the same text for its quotation mark.
+        auto rightThird = lower;
+        rightThird.titleStyle = "lowerThirdRight";
+        const auto mirrored = titlePlate(rightThird, 1920, 1080, 1080);
+        QCOMPARE(mirrored.position.x() + mirrored.image.width(), 1805);
+        QCOMPARE(mirrored.position.y(), plate.position.y());
+        QCOMPARE(mirrored.image.pixelColor(mirrored.image.width() - 6, mirrored.image.height() / 2).name(),
+                 QString("#00ff00")); // the bar on the right edge
+        auto banner = lower;
+        banner.titleStyle = "banner";
+        const auto band = titlePlate(banner, 1920, 1080, 1080);
+        QCOMPARE(band.position.x(), 0);
+        QCOMPARE(band.image.width(), 1920);
+        QCOMPARE(band.position.y() + band.image.height(), 1015);
+        auto quote = lower;
+        quote.titleStyle = "quote";
+        const auto quoted = titlePlate(quote, 1920, 1080, 1080);
+        QVERIFY(std::abs(quoted.position.x() + quoted.image.width() / 2 - 960) <= 2);
+        int accentPixels = 0;
+        for (int y = 0; y < quoted.image.height() / 3; ++y)
+            for (int x = 0; x < quoted.image.width(); ++x)
+                accentPixels += quoted.image.pixelColor(x, y).green() > 200 &&
+                                quoted.image.pixelColor(x, y).red() < 80;
+        QVERIFY2(accentPixels > 100, qPrintable(QString::number(accentPixels))); // the mark
         // Text scales with the clip's scale.
         auto big = lower;
         big.scale = 2;
@@ -7568,7 +7633,7 @@ class EngineTest : public QObject {
         QCOMPARE(loaded.clips[1].accentColor, QString("#00ff00"));
         QVERIFY(p.json()["schemaVersion"].toInt() >= 10);
         auto invalid = p;
-        invalid.clips[1].titleStyle = "banner";
+        invalid.clips[1].titleStyle = "marquee";
         QVERIFY_EXCEPTION_THROWN(invalid.validate(), std::runtime_error);
         FrameProvider frames;
         Editor editor(&frames);
@@ -7580,7 +7645,10 @@ class EngineTest : public QObject {
         const auto expected = titlePlate(*editor.project().clip(id), 320, 180, 180);
         QVERIFY(std::abs(bounds["x"].toDouble() - expected.position.x() / 320.) < 1e-9);
         QVERIFY(std::abs(bounds["width"].toDouble() - expected.image.width() / 320.) < 1e-9);
-        editor.addTitleTemplate("banner");
+        editor.addTitleTemplate("quote");
+        QCOMPARE(editor.project().clips.back().titleStyle, QString("quote"));
+        QCOMPARE(editor.project().clips.back().name, QString("Quote"));
+        editor.addTitleTemplate("marquee");
         QVERIFY(editor.state()["error"].toString().contains("Unknown title template"));
     }
     void waveformPeaksAndCache() {

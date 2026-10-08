@@ -1898,16 +1898,22 @@ bool Editor::overwriteAsset(const QString &assetId, int track, qint64 frame) {
     return true;
 }
 void Editor::addTitleTemplate(const QString &style) {
-    if (!QStringList{"lowerThird", "lowerThirdLine", "titleCard"}.contains(style))
+    static const QHash<QString, QPair<QString, QString>> templates{
+        {"lowerThird", {"Lower third", "Your Name\nYour role or topic"}},
+        {"lowerThirdLine", {"Lower third", "Your Name\nYour role or topic"}},
+        {"lowerThirdRight", {"Lower third", "Your Name\nYour role or topic"}},
+        {"titleCard", {"Title card", "Chapter title\nWhat this part is about"}},
+        {"banner", {"Banner", "Subscribe for more\nNew videos every week"}},
+        {"quote", {"Quote", "Simplicity is the soul of efficiency.\nAustin Freeman"}}};
+    if (!templates.contains(style))
         return fail("Unknown title template");
     const auto id = newId();
     mutate([&](Project &p) {
         Clip c;
         c.id = id;
-        c.name = style == "titleCard" ? "Title card" : "Lower third";
+        c.name = templates[style].first;
         c.titleStyle = style;
-        c.text = style == "titleCard" ? "Chapter title\nWhat this part is about"
-                                      : "Your Name\nYour role or topic";
+        c.text = templates[style].second;
         c.fadeIn = 0.3;
         c.fadeOut = 0.3;
         c.track = p.tracks - 1;
@@ -2301,7 +2307,9 @@ void Editor::addGraphic(const QString &kind) {
             {"ellipse", "Circle"},       {"rectangle", "Box"}, {"check", "Check mark"},
             {"cross", "Cross"},          {"star", "Star"},     {"heart", "Heart"},
             {"warning", "Warning"},      {"info", "Info"},     {"cursor", "Mouse pointer"},
-            {"click", "Mouse click"},    {"lightbulb", "Light bulb"}, {"badge", "Step"}};
+            {"click", "Mouse click"},    {"lightbulb", "Light bulb"}, {"badge", "Step"},
+            {"play", "Play"},            {"bell", "Bell"},     {"pin", "Location"},
+            {"clock", "Clock"}};
         c.name = names.value(kind, "Shape");
         if (kind == "bubble") {
             c.text = "Hello!";
@@ -2314,13 +2322,15 @@ void Editor::addGraphic(const QString &kind) {
             c.graphicHeight = kind == "arrow" ? 0.12 : 0.012;
             c.fillColor = kind == "arrow" ? "#ff5a5f" : "#ffffff";
         } else if (QStringList{"check", "cross", "star", "heart", "warning", "info", "cursor",
-                               "click", "lightbulb"}
+                               "click", "lightbulb", "play", "bell", "pin", "clock"}
                        .contains(kind)) {
             // Icons: square, at about a ninth of the picture's height.
             static const QHash<QString, QString> colours{
                 {"check", "#3ecf6e"}, {"cross", "#ff5a5f"},   {"star", "#ffd23f"},
                 {"heart", "#ff5a7a"}, {"warning", "#ffb020"}, {"info", "#4aa3ff"},
-                {"cursor", "#ffffff"}, {"click", "#ffffff"},  {"lightbulb", "#ffd23f"}};
+                {"cursor", "#ffffff"}, {"click", "#ffffff"},  {"lightbulb", "#ffd23f"},
+                {"play", "#ff5a5f"},  {"bell", "#ffd23f"},    {"pin", "#ff5a5f"},
+                {"clock", "#4aa3ff"}};
             c.graphicHeight = 0.16;
             c.graphicWidth = 0.16 * p.height / p.width;
             c.fillColor = colours.value(kind);
@@ -6356,7 +6366,7 @@ static QString subtitleText(const Project &p, const QString &format, qint64 from
         if (c.assetId.isEmpty() && c.effect.isEmpty() && c.graphic.isEmpty() && !c.hidden &&
             !p.trackSettings[c.track].hidden && c.start < end && c.start + c.duration > from) {
             cues.push_back({seconds(std::max(c.start, from)),
-                            seconds(std::min(c.start + c.duration, end)), c.text});
+                            seconds(std::min(c.start + c.duration, end)), shownTitleText(c.text)});
             if (!first)
                 first = &c;
         }

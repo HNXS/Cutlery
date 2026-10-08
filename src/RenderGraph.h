@@ -61,6 +61,9 @@ struct TitlePlate {
     QPoint position;
 };
 TitlePlate titlePlate(const Clip &, int width, int height, int projectHeight);
+// A title's text as shown: words between asterisks (*like this*) are drawn in the highlight
+// colour, and the asterisks are left out.
+QString shownTitleText(const QString &text);
 struct Encoder;
 // The same compiler handles preview stills, live playback and final export.
 // FFmpeg is the first CPU reference backend; a D3D11 backend is not implemented.

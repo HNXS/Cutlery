@@ -4,6 +4,9 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Highlight words in titles:** put asterisks around words (*like this*) to show them in a highlight colour.
+- **More title templates:** a lower third on the right, a banner across the bottom and a quote.
+- **More icons:** play button, bell, location pin and clock.
 - **More letter animations:** letters can drop and bounce, spin in or just fade in.
 - **Favourite fonts:** star a font to keep it at the top of the font list.
 - **Numbered steps:** "+ Shape" → "Numbered step" adds 1, 2, 3 … discs for tutorials.

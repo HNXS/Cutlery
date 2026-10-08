@@ -290,31 +290,88 @@ static QFont textFont(const Clip &c, int pixelSize) {
 // for titles that build up; the layout stays that of the whole text. A `time` (clip-local
 // seconds) draws the letters of a "rise", "pop", "fly", "drop", "spin" or "fade" animation at
 // that moment.
+// Title words with their highlight: words between asterisks (*like this*) are marked; the
+// asterisks themselves are not shown.
+struct MarkedWord {
+    QString text;
+    bool marked = false;
+};
+static QVector<QVector<MarkedWord>> markedParagraphs(const QString &text) {
+    QVector<QVector<MarkedWord>> paragraphs;
+    for (const auto &paragraph : text.split('\n')) {
+        QVector<MarkedWord> words;
+        bool inside = false;
+        for (auto token : paragraph.split(' ', Qt::SkipEmptyParts)) {
+            const bool open = token.startsWith('*'), close = token.size() > 1 && token.endsWith('*');
+            while (token.startsWith('*'))
+                token.remove(0, 1);
+            while (token.endsWith('*'))
+                token.chop(1);
+            inside = inside || open;
+            if (!token.isEmpty())
+                words.push_back({token, inside});
+            if (close || (open && token.isEmpty()))
+                inside = false;
+        }
+        paragraphs.push_back(words);
+    }
+    return paragraphs;
+}
+// The title text as shown: the highlight asterisks removed.
+QString shownTitleText(const QString &text) {
+    QStringList paragraphs;
+    for (const auto &words : markedParagraphs(text)) {
+        QStringList plain;
+        for (const auto &w : words)
+            plain << w.text;
+        paragraphs << plain.join(' ');
+    }
+    return paragraphs.join('\n');
+}
 static void paintText(QPainter &paint, const Clip &c, const QFont &font, const QRect &area,
                       int visible = -1, double time = -1) {
     const QFontMetricsF m(font);
     QStringList lines;
-    for (const auto &paragraph : c.text.split('\n')) {
+    QVector<QVector<MarkedWord>> lineWords;
+    for (const auto &paragraph : markedParagraphs(c.text)) {
         QString line;
-        for (const auto &word : paragraph.split(' ', Qt::SkipEmptyParts)) {
-            const auto candidate = line.isEmpty() ? word : line + ' ' + word;
+        QVector<MarkedWord> words;
+        for (const auto &word : paragraph) {
+            const auto candidate = line.isEmpty() ? word.text : line + ' ' + word.text;
             if (!line.isEmpty() && m.horizontalAdvance(candidate) > area.width()) {
                 lines << line;
-                line = word;
-            } else
+                lineWords << words;
+                line = word.text;
+                words = {word};
+            } else {
                 line = candidate;
+                words << word;
+            }
         }
         lines << line;
+        lineWords << words;
     }
+    // Whether the character at `i` of line `l` is in a marked word.
+    auto markedAt = [&](int l, int i) {
+        int at = 0;
+        for (const auto &w : lineWords[l]) {
+            if (i < at + w.text.size())
+                return i >= at && w.marked;
+            at += int(w.text.size()) + 1;
+        }
+        return false;
+    };
     const double px = font.pixelSize(), step = m.height() * c.lineSpacing,
                  pad = 0.25 * px;
     const double top = area.top() + (area.height() - (step * (lines.size() - 1) + m.height())) / 2;
     double y = top;
-    QPainterPath path;
+    QPainterPath path, plain, marked;
     QVector<QRectF> boxes;
     // Letters one by one for the animations: the outline of each and its place in the text.
     QVector<QPainterPath> letters;
-    for (const auto &line : lines) {
+    QVector<bool> letterMarked;
+    for (int l = 0; l < lines.size(); ++l) {
+        const auto &line = lines[l];
         const double w = m.horizontalAdvance(line);
         const double x = c.align == "left"    ? area.left()
                          : c.align == "right" ? area.right() + 1 - w
@@ -330,6 +387,16 @@ static void paintText(QPainter &paint, const Clip &c, const QFont &font, const Q
         }
         if (!shown.isEmpty()) {
             path.addText(QPointF(x, y + m.ascent()), font, shown);
+            // The same text split into unmarked and marked runs, for their fills.
+            for (int i = 0; i < shown.size();) {
+                int e = i;
+                while (e < shown.size() && markedAt(l, e) == markedAt(l, i))
+                    ++e;
+                (markedAt(l, i) ? marked : plain)
+                    .addText(QPointF(x + m.horizontalAdvance(shown.left(i)), y + m.ascent()), font,
+                             shown.mid(i, e - i));
+                i = e;
+            }
             boxes << QRectF(x - pad, y - pad * 0.3, m.horizontalAdvance(shown) + 2 * pad,
                             m.height() + pad * 0.6);
             if (time >= 0)
@@ -339,6 +406,7 @@ static void paintText(QPainter &paint, const Clip &c, const QFont &font, const Q
                         letter.addText(QPointF(x + m.horizontalAdvance(shown.left(i)), y + m.ascent()),
                                        font, QString(shown[i]));
                         letters << letter;
+                        letterMarked << markedAt(l, i);
                     }
         }
         y += step;
@@ -368,8 +436,16 @@ static void paintText(QPainter &paint, const Clip &c, const QFont &font, const Q
             paint.drawRoundedRect(b, pad * 0.6, pad * 0.6);
         paint.setOpacity(1);
     }
+    const QBrush highlight{QColor(c.highlightColor)};
     if (time < 0 || letters.isEmpty()) {
-        paintStyledPath(paint, c, path, px, fill);
+        if (marked.isEmpty()) {
+            paintStyledPath(paint, c, path, px, fill);
+            return;
+        }
+        // Glow, shadow and outline for the whole text, then each run's own fill.
+        paintStyledPath(paint, c, path, px, Qt::NoBrush);
+        paint.fillPath(plain, fill);
+        paint.fillPath(marked, highlight);
         return;
     }
     for (int i = 0; i < letters.size(); ++i) {
@@ -408,7 +484,7 @@ static void paintText(QPainter &paint, const Clip &c, const QFont &font, const Q
             opacity = std::min(1., p * 3);
         }
         paint.setOpacity(opacity);
-        paintStyledPath(paint, c, t.map(letters[i]), px, fill);
+        paintStyledPath(paint, c, t.map(letters[i]), px, letterMarked[i] ? highlight : fill);
     }
     paint.setOpacity(1);
 }
@@ -525,6 +601,40 @@ static void paintGraphic(QPainter &paint, const Clip &c, const QRectF &box, int 
         QPainterPath base;
         base.addRoundedRect(QRectF(at(0.34, 0.78), at(0.66, 0.96)), 0.05 * side, 0.05 * side);
         path = bulb.united(neck).united(base);
+    } else if (c.graphic == "play") {
+        // A disc with a play triangle cut out of it.
+        QPainterPath disc, triangle;
+        disc.addEllipse(QRectF(at(0.04, 0.04), at(0.96, 0.96)));
+        triangle.moveTo(at(0.4, 0.28));
+        triangle.lineTo(at(0.74, 0.5));
+        triangle.lineTo(at(0.4, 0.72));
+        triangle.closeSubpath();
+        path = disc.subtracted(triangle);
+    } else if (c.graphic == "bell") {
+        QPainterPath dome, body, brim, clapper, knob;
+        dome.addEllipse(QRectF(at(0.24, 0.12), at(0.76, 0.6)));
+        body.addRect(QRectF(at(0.24, 0.36), at(0.76, 0.72)));
+        brim.addRoundedRect(QRectF(at(0.1, 0.68), at(0.9, 0.8)), 0.04 * side, 0.04 * side);
+        clapper.addEllipse(QRectF(at(0.41, 0.8), at(0.59, 0.95)));
+        knob.addEllipse(QRectF(at(0.44, 0.05), at(0.56, 0.17)));
+        path = dome.united(body).united(brim).united(clapper).united(knob);
+    } else if (c.graphic == "pin") {
+        // A map pin: a round head running to a point, with a hole.
+        QPainterPath head, point, hole;
+        head.addEllipse(QRectF(at(0.2, 0.04), at(0.8, 0.64)));
+        point.moveTo(at(0.25, 0.46));
+        point.lineTo(at(0.75, 0.46));
+        point.lineTo(at(0.5, 0.97));
+        point.closeSubpath();
+        hole.addEllipse(QRectF(at(0.38, 0.22), at(0.62, 0.46)));
+        path = head.united(point).subtracted(hole);
+    } else if (c.graphic == "clock") {
+        // A clock face with its hands cut out, at ten past twelve.
+        QPainterPath face, hands;
+        face.addEllipse(QRectF(at(0.04, 0.04), at(0.96, 0.96)));
+        hands.addRoundedRect(QRectF(at(0.455, 0.16), at(0.545, 0.545)), 0.03 * side, 0.03 * side);
+        hands.addRoundedRect(QRectF(at(0.455, 0.455), at(0.76, 0.545)), 0.03 * side, 0.03 * side);
+        path = face.subtracted(hands.simplified());
     }
     paint.setPen(Qt::NoPen);
     paint.fillPath(path, QColor(c.fillColor));
@@ -605,15 +715,20 @@ TitlePlate titlePlate(const Clip &c, int width, int height, int projectHeight) {
     for (int i = 1; i < lines.size(); ++i)
         if (!lines[i].trimmed().isEmpty())
             rest << lines[i].trimmed();
-    const bool card = c.titleStyle == "titleCard";
+    // Centred styles: the title card, the quote and the banner across the bottom; the others
+    // are lower thirds, on the left or (lowerThirdRight) on the right.
+    const bool quote = c.titleStyle == "quote", banner = c.titleStyle == "banner",
+               card = c.titleStyle == "titleCard" || quote || banner,
+               right = c.titleStyle == "lowerThirdRight";
     const double unit = double(height) / projectHeight * c.scale;
     QFont nameFont(c.fontFamily), restFont(c.fontFamily);
-    nameFont.setPixelSize(std::max(8, qRound(c.fontSize * (card ? 1.2 : 0.75) * unit)));
-    nameFont.setBold(true);
+    nameFont.setPixelSize(std::max(8, qRound(c.fontSize * (banner ? 0.75 : card ? (quote ? 0.9 : 1.2) : 0.75) * unit)));
+    nameFont.setBold(!quote);
+    nameFont.setItalic(quote);
     restFont.setPixelSize(std::max(8, qRound(c.fontSize * (card ? 0.6 : 0.45) * unit)));
     const QFontMetrics nm(nameFont), rm(restFont);
     const int pad = std::max(4, nm.height() / 3), accent = std::max(3, nm.height() / 9);
-    const int maxWidth = int(width * (card ? 0.8 : 0.6));
+    const int maxWidth = int(width * (banner ? 0.9 : card ? 0.8 : 0.6));
     auto elide = [&](const QFontMetrics &m, const QString &t) {
         return m.elidedText(t, Qt::ElideRight, maxWidth);
     };
@@ -621,9 +736,17 @@ TitlePlate titlePlate(const Clip &c, int width, int height, int projectHeight) {
     for (const auto &r : rest)
         textWidth = std::max(textWidth, rm.horizontalAdvance(elide(rm, r)));
     const int textHeight = nm.height() + int(rest.size()) * rm.height();
-    const bool plate = c.titleStyle != "lowerThirdLine";
-    const int left = card ? pad * 2 : accent + pad, w = left + textWidth + (card ? pad * 2 : pad * 2),
-              h = textHeight + pad * 2 + (card ? accent + pad / 2 : 0);
+    const bool plate = c.titleStyle != "lowerThirdLine" && !quote;
+    // A quote has a large opening quotation mark above its text.
+    QFont markFont(c.fontFamily);
+    markFont.setPixelSize(std::max(8, nm.height() * 2));
+    markFont.setBold(true);
+    const int markHeight = quote ? QFontMetrics(markFont).ascent() * 2 / 3 : 0;
+    const int left = card ? pad * 2 : (right ? pad : accent + pad);
+    int w = left + textWidth + (right ? accent + pad : pad * 2);
+    if (banner)
+        w = width - 4; // the band spans the picture
+    const int h = textHeight + pad * 2 + (card && !banner ? accent + pad / 2 : 0) + markHeight;
     TitlePlate t;
     t.image = QImage(w + 4, h + 4, QImage::Format_ARGB32_Premultiplied);
     t.image.fill(Qt::transparent);
@@ -632,18 +755,31 @@ TitlePlate titlePlate(const Clip &c, int width, int height, int projectHeight) {
     if (plate) {
         paint.setPen(Qt::NoPen);
         paint.setBrush(QColor(16, 20, 26, 215));
-        paint.drawRoundedRect(QRectF(0, 0, w, h), pad / 2.0, pad / 2.0);
+        const double round = banner ? 0 : pad / 2.0; // the band runs to the picture's edges
+        paint.drawRoundedRect(QRectF(0, 0, w, h), round, round);
     }
     paint.setPen(Qt::NoPen);
     paint.setBrush(QColor(c.accentColor));
-    if (card) // underline below the headline
+    if (banner) // a strip along the top of the band
+        paint.drawRect(QRectF(0, 0, w, accent));
+    else if (quote) { // the quotation mark
+        paint.setFont(markFont);
+        paint.setPen(QColor(c.accentColor));
+        paint.drawText(QRectF(0, 0, w, markHeight * 1.5), Qt::AlignHCenter | Qt::AlignTop,
+                       QString::fromUtf8("\u201C"));
+        paint.setPen(Qt::NoPen);
+    } else if (card) // underline below the headline
         paint.drawRect(QRectF((w - textWidth) / 2.0, pad + nm.height() + pad / 4.0, textWidth, accent));
+    else if (right) // bar along the right edge
+        paint.drawRect(QRectF(w - accent, plate ? 0 : pad / 2.0, accent, plate ? h : h - pad));
     else // bar along the left edge
         paint.drawRect(QRectF(0, plate ? 0 : pad / 2.0, accent, plate ? h : h - pad));
     auto text = [&](const QFont &font, const QFontMetrics &m, const QString &s, int top,
                     const QColor &color) {
         const auto shown = elide(m, s);
-        const int x = card ? (w - m.horizontalAdvance(shown)) / 2 : left;
+        const int x = card    ? (w - m.horizontalAdvance(shown)) / 2
+                      : right ? w - accent - pad - m.horizontalAdvance(shown)
+                              : left;
         paint.setFont(font);
         if (!plate) { // readable on any picture without a plate
             paint.setPen(QColor(0, 0, 0, 200));
@@ -652,9 +788,9 @@ TitlePlate titlePlate(const Clip &c, int width, int height, int projectHeight) {
         paint.setPen(color);
         paint.drawText(x, top + m.ascent(), shown);
     };
-    int top = pad;
+    int top = pad + markHeight + (banner ? accent : 0);
     text(nameFont, nm, name, top, QColor(c.textColor));
-    top += nm.height() + (card ? accent + pad / 2 : 0);
+    top += nm.height() + (card && !banner ? accent + pad / 2 : 0);
     for (const auto &r : rest) {
         QColor sub(c.textColor);
         sub.setAlpha(200);
@@ -664,8 +800,10 @@ TitlePlate titlePlate(const Clip &c, int width, int height, int projectHeight) {
     paint.end();
     // Lower thirds sit in the lower left, inside the title-safe area; cards in the centre.
     const int iw = t.image.width(), ih = t.image.height();
-    t.position = card ? QPoint((width - iw) / 2, (height - ih) / 2)
-                      : QPoint(qRound(width * 0.06), qRound(height * 0.86) - ih);
+    t.position = banner  ? QPoint(0, qRound(height * 0.94) - ih)
+                 : card  ? QPoint((width - iw) / 2, (height - ih) / 2)
+                 : right ? QPoint(qRound(width * 0.94) - iw, qRound(height * 0.86) - ih)
+                         : QPoint(qRound(width * 0.06), qRound(height * 0.86) - ih);
     return t;
 }
 RenderPlan compileRender(const Project &p, const QString &work, int width, int height,
@@ -1511,9 +1649,13 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                 const auto px = plate.position.x() + qRound(c.x * width),
                            py = plate.position.y() + qRound(c.y * height);
                 QString x = QString::number(px);
-                if (c.titleStyle != "titleCard" && c.titleSlide) {
+                // Lower thirds slide in from their side: the left, or the right for the right one.
+                if (QStringList{"lowerThird", "lowerThirdLine", "lowerThirdRight"}.contains(c.titleStyle) &&
+                    c.titleSlide) {
                     const auto local = QString("(t+%1)").arg(num(secs(from - c.start)));
-                    x = QString("'%1-(%1+w)*pow(max(0,1-%2/0.45),3)'").arg(px).arg(local);
+                    x = c.titleStyle == "lowerThirdRight"
+                            ? QString("'%1+(W-%1)*pow(max(0,1-%2/0.45),3)'").arg(px).arg(local)
+                            : QString("'%1-(%1+w)*pow(max(0,1-%2/0.45),3)'").arg(px).arg(local);
                 }
                 composite(f + ",setpts=PTS-STARTPTS", QString("x=%1:y=%2").arg(x).arg(py),
                           visibleStart - from, visibleEnd - visibleStart, c.blendMode);
@@ -1634,10 +1776,11 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                 QVector<int> counts;
                 if (c.textAnimation == "words") {
                     int total = 0;
-                    for (const auto &word : c.text.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts))
+                    for (const auto &word : shownTitleText(c.text).split(QRegularExpression("\\s+"), Qt::SkipEmptyParts))
                         counts << (total += int(word.size()));
                 } else {
-                    const int total = int(std::count_if(c.text.begin(), c.text.end(),
+                    const auto text = shownTitleText(c.text);
+                    const int total = int(std::count_if(text.begin(), text.end(),
                                                         [](QChar ch) { return !ch.isSpace(); }));
                     for (int i = 1; i <= total; ++i)
                         counts << i;

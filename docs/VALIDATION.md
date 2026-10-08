@@ -1,5 +1,16 @@
 # Validation record
 
+## Windows portable build — 2026-10-08, highlighted title words, right lower third, banner and quote, four icons (0.6 development)
+
+[GitHub Actions run 37798527810](https://github.com/HNXS/Cutlery/actions/runs/37798527810) on commit `57ec262f9a0ed1b2787a7cc061342c3eb3fbf226` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `titlesThatBuildUp`:** a word between asterisks is drawn red on its own line while the other stays white; in a white highlight the marked title looks exactly like the unmarked one; asterisks inside words stay; a typewriter build-up ends with the same text.
+- **Engine test `titleTemplates`:** the right lower third mirrors the left one with its bar on the right edge; the banner spans the full width at the bottom; the quote is centred with its accent quotation mark; the editor adds a quote and refuses unknown templates.
+- **Engine test `builtInIcons`:** play, bell, pin and clock render in their colours, with the play triangle, the pin's hole and the clock's hand cut out.
+- **UI test `presenterControls`:** title styles chosen from the inspector, including the quote, and a banner added from the Add tab.
+
 ## Windows portable build — 2026-10-08, drop/spin/fade letter animations, favourite fonts, numbered steps (0.6 development)
 
 [GitHub Actions run 37791770850](https://github.com/HNXS/Cutlery/actions/runs/37791770850) on commit `dab5de72a3bcadb8ce6a32001643b90ec4ecc594` passed every step on its first attempt.
