@@ -2863,10 +2863,25 @@ class EngineTest : public QObject {
             bright += g > 240;
         }
         QVERIFY2(dark > 3 && bright > 20, qPrintable(QString("%1 %2").arg(dark).arg(bright)));
+        // Numbered steps count up: 1, 2; each is a red disc with its white number.
+        editor.remove(false);
+        editor.addGraphic("badge");
+        editor.addGraphic("badge");
+        const auto *two = editor.project().clip(editor.state()["selectedId"].toString());
+        QCOMPARE(two->text, QString("2"));
+        QCOMPARE(two->name, QString("Step 2"));
+        image = still();
+        QVERIFY(red(image, 152, 90)); // inside the disc (radius 10.8 px), left of the digit
+        int white = 0;
+        for (int y = 80; y < 100; ++y)
+            for (int x = 150; x < 170; ++x)
+                white += qGray(image.pixel(x, y)) > 230;
+        QVERIFY2(white > 8, qPrintable(QString::number(white)));
+        editor.remove(false);
         // Shapes are not captions, and the project validates them.
         QVERIFY(!editor.exportSrt(QUrl::fromLocalFile(dir.filePath("none.srt"))));
         auto json = editor.project().json();
-        QCOMPARE(Project::fromJson(json, {}).clips.back().graphic, QString("bubble"));
+        QCOMPARE(Project::fromJson(json, {}).clips.back().graphic, QString("badge"));
         auto clips = json["clips"].toArray();
         auto o = clips.last().toObject();
         o["graphic"] = "hexagon";
@@ -4868,6 +4883,19 @@ class EngineTest : public QObject {
         const double flyX = std::get<1>(centre(fly, 4)), aX = std::get<1>(centre(a, 4));
         QVERIFY2(flyX > aX + 20, qPrintable(QString("%1 vs %2").arg(flyX).arg(aX)));
         QVERIFY(std::abs(lit(fly, 40) - plain) < plain / 20);
+        // Letters dropping from above: at first the "A" is above its place; all end in place.
+        auto drop = rise;
+        drop.textAnimation = "drop";
+        const auto [dropped, dropX, dropY] = centre(drop, 4);
+        QVERIFY2(dropped > 0 && dropY < doneY - 3, qPrintable(QString("%1 vs %2").arg(dropY).arg(doneY)));
+        QVERIFY(std::abs(lit(drop, 40) - plain) < plain / 20);
+        // Spinning and fading letters: fewer lit pixels early, the finished text at the end.
+        for (const auto &kind : {"spin", "fade"}) {
+            auto letters = rise;
+            letters.textAnimation = kind;
+            QVERIFY2(lit(letters, 4) < done / 2, kind);
+            QVERIFY2(std::abs(lit(letters, 40) - plain) < plain / 20, kind);
+        }
         // A gradient from white at the top to red at the bottom of the text.
         auto gradient = t;
         gradient.textShadow = 0;
@@ -6744,6 +6772,33 @@ class EngineTest : public QObject {
             QVERIFY(QFileInfo::exists(kept)); // projects may still show it
             QFile::remove(kept);
             QFile::remove(editor.state()["lutLibrary"].toList()[0].toMap()["path"].toString());
+        }
+    }
+    void fontFavorites() {
+        FrameProvider frames;
+        QString font;
+        {
+            Editor editor(&frames);
+            for (const auto &f : editor.state()["fontFavorites"].toStringList())
+                editor.toggleFontFavorite(f);
+            const auto families = editor.fontFamilies();
+            QVERIFY(families.size() > 1);
+            font = families.last();
+            editor.toggleFontFavorite(font);
+            QCOMPARE(editor.fontFamilies().first(), font);
+            QCOMPARE(editor.fontFamilies().size(), families.size());
+            QCOMPARE(editor.state()["fontFavorites"].toStringList(), QStringList{font});
+        }
+        {
+            // Kept for the next start; a star on a font no longer installed is left out.
+            Editor editor(&frames);
+            QCOMPARE(editor.fontFamilies().first(), font);
+            editor.toggleFontFavorite("No Such Font 123");
+            QCOMPARE(editor.fontFamilies().first(), font);
+            editor.toggleFontFavorite("No Such Font 123");
+            editor.toggleFontFavorite(font);
+            QVERIFY(editor.state()["fontFavorites"].toStringList().isEmpty());
+            QVERIFY(editor.fontFamilies().first() != font || editor.fontFamilies().size() == 1);
         }
     }
     void textStylesKit() {

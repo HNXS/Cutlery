@@ -1352,6 +1352,11 @@ ApplicationWindow {
                                                 text: "―  Line"
                                                 onTriggered: editor.addGraphic("line")
                                             }
+                                            MenuItem {
+                                                objectName: "addGraphic-badge"
+                                                text: "①  Numbered step (1, 2, 3 …)"
+                                                onTriggered: editor.addGraphic("badge")
+                                            }
                                         }
                                     }
                                 }
@@ -2245,8 +2250,8 @@ ApplicationWindow {
                                 ComboBox {
                                     objectName: "graphicKind"
                                     Layout.fillWidth: true
-                                    readonly property var kinds: ["arrow", "ellipse", "bubble", "rectangle", "line"]
-                                    model: ["Arrow", "Circle / ellipse", "Speech bubble", "Box", "Line"]
+                                    readonly property var kinds: ["arrow", "ellipse", "bubble", "rectangle", "line", "badge"]
+                                    model: ["Arrow", "Circle / ellipse", "Speech bubble", "Box", "Line", "Numbered step"]
                                     currentIndex: Math.max(0, kinds.indexOf(win.selection.graphic || "arrow"))
                                     onActivated: index => editor.setClip("graphic", kinds[index])
                                 }
@@ -2377,8 +2382,8 @@ ApplicationWindow {
                                     ComboBox {
                                         objectName: "textAnimation"
                                         Layout.fillWidth: true
-                                        readonly property var kinds: ["", "typewriter", "words", "rise", "pop", "fly"]
-                                        model: ["Appears at once", "Typewriter", "Word by word", "Letters rise", "Letters pop up", "Letters fly in"]
+                                        readonly property var kinds: ["", "typewriter", "words", "rise", "pop", "fly", "drop", "spin", "fade"]
+                                        model: ["Appears at once", "Typewriter", "Word by word", "Letters rise", "Letters pop up", "Letters fly in", "Letters drop and bounce", "Letters spin in", "Letters fade in"]
                                         currentIndex: Math.max(0, kinds.indexOf(win.selection.textAnimation || ""))
                                         onActivated: editor.setClip("textAnimation", kinds[currentIndex])
                                         ToolTip.visible: hovered
@@ -2594,7 +2599,8 @@ ApplicationWindow {
                                         objectName: "fontFamily"
                                         Layout.fillWidth: true
                                         editable: true
-                                        property var families: editor.fontFamilies()
+                                        // Read again when the favourites change, which reorders the list.
+                                        property var families: (win.s.fontFavorites || []).length >= 0 ? editor.fontFamilies() : []
                                         model: families
                                         currentIndex: families.indexOf(win.selection.fontFamily || "Arial")
                                         onActivated: index => editor.setClip("fontFamily", families[index])
@@ -2607,12 +2613,20 @@ ApplicationWindow {
                                             required property string modelData
                                             required property int index
                                             width: ListView.view ? ListView.view.width : 200
-                                            text: modelData
+                                            text: ((win.s.fontFavorites || []).indexOf(modelData) >= 0 ? "★ " : "") + modelData
                                             font.family: modelData
                                             highlighted: fontBox.highlightedIndex === index
                                         }
                                         ToolTip.visible: hovered
                                         ToolTip.text: "Type to find a font. Fonts you add are kept in Cutlery's data folder."
+                                    }
+                                    ToolButton {
+                                        objectName: "favoriteFont"
+                                        readonly property bool starred: (win.s.fontFavorites || []).indexOf(win.selection.fontFamily || "") >= 0
+                                        text: starred ? "★" : "☆"
+                                        onClicked: editor.toggleFontFavorite(win.selection.fontFamily || "")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: starred ? "Remove this font from the favourites" : "Keep this font at the top of the list (every project)"
                                     }
                                     Action {
                                         objectName: "addFont"

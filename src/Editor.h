@@ -222,8 +222,11 @@ class Editor final : public QObject {
     Q_INVOKABLE void clearInOut();
     Q_INVOKABLE void remove(bool ripple = false);
     Q_INVOKABLE void duplicate();
-    // Installed font families, including fonts added to Cutlery.
+    // Installed font families, including fonts added to Cutlery; favourites first, in the order
+    // they were starred.
     Q_INVOKABLE QStringList fontFamilies() const;
+    // Favourite fonts for every project (data folder, fonts.json; state "fontFavorites").
+    Q_INVOKABLE void toggleFontFavorite(const QString &family);
     // Copies a font file into the data folder's fonts/ and returns its family ("" on failure).
     Q_INVOKABLE QString addFont(const QUrl &file);
     // Copies the project with all its media, LUTs and the fonts added in Cutlery that it uses
@@ -480,6 +483,7 @@ class Editor final : public QObject {
     QString m_brandLogo;
     QVariantList m_lutLibrary;
     QJsonArray m_layouts;
+    QStringList m_fontFavorites;
     void saveLayouts();
     // Selected clips with a picture (media, titles, shapes, effect areas; not sound), lowest
     // track first, then by start.
