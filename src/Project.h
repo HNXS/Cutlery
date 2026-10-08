@@ -28,6 +28,11 @@ struct Asset {
     bool loops = false;
     // The media library folder it is in; empty for the top level.
     QString folder;
+    // Usage rights, as the user records them: "" (not recorded), "own" (made by the user),
+    // "free" (public domain, CC0 or free for commercial use), "attribution" (free with a
+    // credit), "licensed" (bought or licensed), "personal" (not for commercial use) or
+    // "unknown"; `credit` is the line to name in the credits, or a note on the source.
+    QString rights, credit;
     // A nested sequence: the project it holds (absolute media paths). Its picture and sound are
     // rendered by the editor into `path`, a cache file named after this content.
     QJsonObject nested;
@@ -204,6 +209,10 @@ struct Clip {
     double shadow = 0; // soft drop shadow strength, 0..1
     // Soft edge of the overlay's shape, as a fraction of the picture's shorter side (0..0.5).
     double feather = 0;
+    // Corner pin (perspective): where the picture's top-left, top-right, bottom-left and
+    // bottom-right corners go, as x, y fractions of its own box (0..1); 8 values, or empty for
+    // none. The picture is warped into that four-sided shape; outside it is transparent.
+    QVector<double> cornerPin;
     // Background removal by colour (green/blue screen).
     bool chromaKey = false;
     QString keyColor = "#00ff00";
@@ -221,7 +230,8 @@ struct Clip {
     // one when both are on.
     bool eyeContact = false;
     bool styled() const {
-        return shape != "rect" || border > 0 || shadow > 0 || aiCutout || feather > 0;
+        return shape != "rect" || border > 0 || shadow > 0 || aiCutout || feather > 0 ||
+               !cornerPin.isEmpty();
     }
     double staticValue(const QString &property) const;
     // Property value at a clip-local frame, interpolating keyframes when present.
@@ -261,6 +271,10 @@ struct Project {
     QStringList folders;
     QVector<Clip> clips;
     qint64 duration() const;
+    // Usage rights an asset can have (see Asset::rights), "" first.
+    static QStringList rightsKinds() {
+        return {"", "own", "free", "attribution", "licensed", "personal", "unknown"};
+    }
     double seconds() const {
         return frameTime(duration(), fpsN, fpsD).seconds();
     }

@@ -257,7 +257,7 @@ QVariantList Editor::assets() const {
             {"id", a.id},     {"name", a.name},        {"path", a.path},
             {"kind", a.kind}, {"seconds", a.duration},
             {"missing", !a.isNested() && !QFileInfo::exists(a.path)}, {"nested", a.isNested()},
-            {"folder", a.folder}, {"used", std::any_of(m_project.clips.begin(), m_project.clips.end(),
+            {"folder", a.folder}, {"rights", a.rights}, {"credit", a.credit}, {"used", std::any_of(m_project.clips.begin(), m_project.clips.end(),
                                                        [&](const Clip &c) { return c.assetId == a.id; })}};
     return result;
 }
@@ -580,6 +580,12 @@ QVariantMap Editor::state() const {
             PROP(radius);
             PROP(feather);
             PROP(effectShape);
+            {
+                QVariantList pin;
+                for (const auto v : c.cornerPin)
+                    pin << v;
+                selected["cornerPin"] = pin;
+            }
             PROP(border);
             PROP(borderColor);
             PROP(shadow);
@@ -2144,6 +2150,17 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             c->effect = v.toString();
         else if (key == "effectStrength")
             c->effectStrength = v.toDouble();
+        else if (key == "cornerPin") {
+            // 8 corner coordinates, or an empty list for none.
+            QVector<double> pin;
+            for (const auto &x : v.toList())
+                pin << x.toDouble();
+            if (!pin.isEmpty() && pin.size() != 8)
+                throw std::runtime_error("A corner pin has four corners");
+            for (auto &x : pin)
+                x = std::clamp(x, 0., 1.);
+            c->cornerPin = pin;
+        }
         else if (key == "blur")
             c->blur = v.toDouble();
         else if (key == "lut") {
@@ -2596,6 +2613,7 @@ bool Editor::placeSound(Project &p, const Sound &s, qint64 frame) {
         a.kind = "audio";
         a.duration = s.seconds;
         a.hasAudio = true;
+        a.rights = "free"; // Cutlery's own sounds
         p.assets.push_back(a);
         asset = &p.assets.back();
     }
@@ -3423,6 +3441,131 @@ void Editor::moveToFolder(const QStringList &assetIds, const QString &folder) {
                 a.folder = folder;
     });
 }
+void Editor::setAssetRights(const QStringList &assetIds, const QString &rights,
+                            const QString &credit) {
+    if (!Project::rightsKinds().contains(rights))
+        return fail("Unknown usage rights");
+    mutate([&](Project &p) {
+        for (auto &a : p.assets)
+            if (assetIds.contains(a.id)) {
+                a.rights = rights;
+                a.credit = credit.trimmed().left(500);
+            }
+    });
+}
+QVariantMap Editor::rightsCheck() const {
+    QStringList personal, unknown, unrecorded;
+    QVariantList credits;
+    for (const auto &a : m_project.assets) {
+        if (std::none_of(m_project.clips.begin(), m_project.clips.end(),
+                         [&](const Clip &c) { return c.assetId == a.id; }))
+            continue;
+        if (a.rights == "personal")
+            personal << a.name;
+        else if (a.rights == "unknown")
+            unknown << a.name;
+        else if (a.rights.isEmpty())
+            unrecorded << a.name;
+        if (!a.credit.isEmpty() || a.rights == "attribution")
+            credits << QVariantMap{{"name", a.name}, {"credit", a.credit}};
+    }
+    return {{"personal", personal}, {"unknown", unknown}, {"unrecorded", unrecorded},
+            {"credits", credits}};
+}
+bool Editor::exportCredits(const QUrl &file) {
+    const auto credits = rightsCheck()["credits"].toList();
+    if (credits.isEmpty()) {
+        fail("No media on the timeline has a credit line");
+        return false;
+    }
+    QString text;
+    for (const auto &v : credits) {
+        const auto m = v.toMap();
+        const auto credit = m["credit"].toString();
+        text += credit.isEmpty() ? m["name"].toString() + " (credit missing)\n"
+                                 : m["name"].toString() + ": " + credit + "\n";
+    }
+    QSaveFile f(file.isLocalFile() ? file.toLocalFile() : file.toString());
+    const auto data = text.toUtf8();
+    if (!f.open(QIODevice::WriteOnly) || f.write(data) != data.size() || !f.commit()) {
+        fail("Cannot write the credits file");
+        return false;
+    }
+    m_status = QString("Saved %1 credit line%2").arg(credits.size()).arg(credits.size() == 1 ? "" : "s");
+    emit changed();
+    return true;
+}
+QVariantMap Editor::searchMedia(const QString &query) const {
+    const auto words = query.toLower().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+    QVariantMap result;
+    if (words.isEmpty())
+        return result;
+    static const QStringList languages{"auto", "de", "en", "fr", "es", "it", "nl", "pl", "pt", "tr"};
+    for (const auto &a : m_project.assets) {
+        const auto about = QStringList{a.name, QFileInfo(a.path).fileName(), a.folder, a.kind,
+                                       a.width > 0 ? QString("%1x%2").arg(a.width).arg(a.height)
+                                                   : QString(),
+                                       a.rights, a.credit}
+                               .join('\n')
+                               .toLower();
+        // What is said in it, from any cached transcript.
+        QVector<Cue> said;
+        if ((a.kind == "video" || a.kind == "audio") && !a.isNested() && QFileInfo::exists(a.path))
+            for (const auto &language : languages) {
+                const auto r = m_ai->result("transcribe", a, language);
+                if (r.path.isEmpty())
+                    continue;
+                const auto modified = QFileInfo(r.path).lastModified().toMSecsSinceEpoch();
+                auto &entry = m_spoken[r.path];
+                if (entry.first != modified) {
+                    try {
+                        entry.second = parseSrt(readUtf8File(r.path));
+                        for (auto &cue : entry.second)
+                            cue.start += r.start;
+                    } catch (const std::exception &) {
+                        entry.second.clear();
+                    }
+                    entry.first = modified;
+                }
+                said += entry.second;
+            }
+        QString spoken;
+        for (const auto &cue : said)
+            spoken += cue.text.toLower() + ' ';
+        QString snippet;
+        bool all = true;
+        for (const auto &w : words) {
+            if (about.contains(w))
+                continue;
+            const auto at = spoken.indexOf(w);
+            if (at < 0) {
+                all = false;
+                break;
+            }
+            if (snippet.isEmpty()) {
+                // The cue the match starts in gives the time; a few words around it the text.
+                int offset = 0, index = 0;
+                for (; index < said.size(); ++index) {
+                    offset += int(said[index].text.size()) + 1;
+                    if (offset > at)
+                        break;
+                }
+                index = std::min(index, int(said.size()) - 1);
+                QStringList around;
+                for (int i = std::max(0, index - 3); i < std::min(int(said.size()), index + 5); ++i)
+                    around << said[i].text;
+                const int s = int(said[index].start);
+                snippet = QString("%1:%2 … %3 …")
+                              .arg(s / 60)
+                              .arg(s % 60, 2, 10, QChar('0'))
+                              .arg(around.join(' '));
+            }
+        }
+        if (all)
+            result[a.id] = snippet;
+    }
+    return result;
+}
 void Editor::removeAssets(const QStringList &assetIds) {
     // Only media no clip uses; the files on disk stay.
     mutate([&](Project &p) {
@@ -3926,6 +4069,7 @@ void Editor::pasteAttributes(const QString &group) {
         c->shape = from.shape;
         c->radius = from.radius;
         c->feather = from.feather;
+        c->cornerPin = from.cornerPin;
         c->border = from.border;
         c->borderColor = from.borderColor;
         c->shadow = from.shadow;

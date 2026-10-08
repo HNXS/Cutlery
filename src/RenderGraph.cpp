@@ -11,6 +11,7 @@
 #include <QPainter>
 #include <QHash>
 #include <QPainterPath>
+#include <QTransform>
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -37,6 +38,29 @@ static QString num(double v) {
 static bool animatedGeometry(const Clip &c) {
     return c.keyframes.contains("scale") || c.keyframes.contains("x") ||
            c.keyframes.contains("y") || c.keyframes.contains("rotation");
+}
+// Corner pin maps for FFmpeg's remap: for each pixel of the w × h result, the source pixel it
+// shows (x in the first image, y in the second), or 65535 where the warped picture does not
+// reach (left transparent).
+static std::pair<QImage, QImage> cornerPinMaps(const Clip &c, int w, int h) {
+    QImage xs(w, h, QImage::Format_Grayscale16), ys(w, h, QImage::Format_Grayscale16);
+    const auto &k = c.cornerPin;
+    const QPolygonF to{QPointF(k[0] * w, k[1] * h), QPointF(k[2] * w, k[3] * h),
+                       QPointF(k[6] * w, k[7] * h), QPointF(k[4] * w, k[5] * h)};
+    const QPolygonF from{QPointF(0, 0), QPointF(w, 0), QPointF(w, h), QPointF(0, h)};
+    QTransform back;
+    const bool ok = QTransform::quadToQuad(to, from, back);
+    for (int y = 0; y < h; ++y) {
+        auto *lx = reinterpret_cast<quint16 *>(xs.scanLine(y));
+        auto *ly = reinterpret_cast<quint16 *>(ys.scanLine(y));
+        for (int x = 0; x < w; ++x) {
+            const auto s = ok ? back.map(QPointF(x + 0.5, y + 0.5)) : QPointF(-1, -1);
+            const bool inside = s.x() >= 0 && s.y() >= 0 && s.x() < w && s.y() < h;
+            lx[x] = inside ? quint16(s.x()) : 65535;
+            ly[x] = inside ? quint16(s.y()) : 65535;
+        }
+    }
+    return {xs, ys};
 }
 // Alpha mask of a styled overlay: rounded rectangle or circle, antialiased.
 static QImage overlayMask(const Clip &c, int w, int h) {
@@ -1135,6 +1159,15 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                 .arg(p.fpsN)
                 .arg(l0 + base);
         };
+        if (!c.cornerPin.isEmpty()) {
+            // Corner pin: every pixel takes the source pixel its inverse perspective lands on.
+            const auto [xs, ys] = cornerPinMaps(c, w, h);
+            const auto id = QString::number(serial++);
+            nodes << f + QString("[pin%1]").arg(id);
+            nodes << stillInput(xs, "pinx") + QString(",format=gray16[pinx%1]").arg(id);
+            nodes << stillInput(ys, "piny") + QString(",format=gray16[piny%1]").arg(id);
+            f = QString("[pin%1][pinx%1][piny%1]remap=fill=black@0,format=rgba").arg(id);
+        }
         if (c.shape != "rect" || c.feather > 0) {
             // Multiply the picture's alpha by the shape: keeps chroma-key transparency.
             const auto id = QString::number(serial++);
