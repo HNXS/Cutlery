@@ -23,6 +23,7 @@
 #include <QSet>
 #include <QSvgRenderer>
 #include <QImageReader>
+#include <QMutex>
 #include <QColor>
 #include <QPainter>
 #include <QSaveFile>
@@ -56,12 +57,69 @@ QString Editor::executable(const QString &name) {
         return bundled;
     return QStandardPaths::findExecutable(name + suffix);
 }
+// The log: Qt warnings, errors and fatal messages with their time, appended to `path` (one
+// file for the process, from the first editor); over 1 MB it moves to a ".1" file and starts
+// again.
+static QString logFile;
+static QMutex logLock;
+static QtMessageHandler previousHandler = nullptr;
+static void appendLog(const QString &kind, const QString &message) {
+    const auto line = QString("%1 %2 %3\n")
+                          .arg(QDateTime::currentDateTime().toString(Qt::ISODateWithMs), kind, message)
+                          .toUtf8();
+    QMutexLocker locker(&logLock);
+    if (logFile.isEmpty())
+        return;
+    if (QFileInfo(logFile).size() > 1024 * 1024) {
+        const auto old = QString(logFile).replace(".log", ".1.log");
+        QFile::remove(old);
+        QFile::rename(logFile, old);
+    }
+    QFile f(logFile);
+    if (f.open(QIODevice::Append))
+        f.write(line);
+}
+static void writeLog(QtMsgType type, const QMessageLogContext &context, const QString &message) {
+    static const char *kinds[] = {"debug", "warning", "critical", "fatal", "info"};
+    if (type != QtDebugMsg && type != QtInfoMsg)
+        appendLog(kinds[std::clamp(int(type), 0, 4)], message);
+    // The message still goes where it went before (the console, or a test's checks).
+    if (previousHandler)
+        previousHandler(type, context, message);
+}
+static void startLog(const QString &path) {
+    QMutexLocker locker(&logLock);
+    if (!logFile.isEmpty())
+        return;
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    logFile = path;
+    previousHandler = qInstallMessageHandler(writeLog);
+}
 Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_frames(frames) {
     const auto app = QCoreApplication::applicationDirPath();
     m_data = QFileInfo::exists(app + "/portable.json")
                  ? app + "/data"
                  : QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     m_recovery = m_data + "/recovery.cutlery";
+    startLog(m_data + "/logs/cutlery.log");
+    {
+        // A lock left by another process means that session ended without closing Cutlery.
+        QDir().mkpath(m_data);
+        QFile lock(m_data + "/session.lock");
+        if (lock.open(QIODevice::ReadOnly)) {
+            const auto pid = lock.readAll().trimmed().toLongLong();
+            lock.close();
+            m_uncleanExit = pid != QCoreApplication::applicationPid();
+            if (m_uncleanExit)
+                appendLog("warning", QString("The previous session (process %1) did not end normally").arg(pid));
+        }
+        if (!m_uncleanExit || lock.remove() || !lock.exists()) {
+            if (lock.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                lock.write(QByteArray::number(QCoreApplication::applicationPid()));
+                m_ownsLock = true;
+            }
+        }
+    }
     {
         QFile recent(m_data + "/recent.json");
         if (recent.open(QIODevice::ReadOnly) && recent.size() < 1024 * 1024)
@@ -273,6 +331,8 @@ QString Editor::addFont(const QUrl &url) {
 Editor::~Editor() {
     if (m_dirty)
         autosave();
+    if (m_ownsLock)
+        QFile::remove(m_data + "/session.lock");
     for (auto *t : {m_collectThread, m_beatThread})
         if (t) {
             t->disconnect(this);
@@ -281,7 +341,7 @@ Editor::~Editor() {
             delete t;
         }
     for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess, m_sceneProcess,
-                    m_nestedProcess, m_autoColourProcess, m_frameProcess, m_pickProcess})
+                    m_nestedProcess, m_autoColourProcess, m_frameProcess, m_pickProcess, m_soundProcess})
         if (p) {
             p->disconnect(this);
             p->kill();
@@ -566,6 +626,7 @@ QVariantMap Editor::state() const {
             PROP(compressor);
             PROP(gate);
             PROP(denoise);
+            PROP(noiseFloor);
             PROP(deess);
             PROP(fx);
             PROP(voice);
@@ -715,6 +776,9 @@ QVariantMap Editor::state() const {
             {"follow", m_follow},
             {"transcript", transcriptState()},
             {"autoColour", m_autoColour},
+            {"soundMeasure", m_soundMeasure},
+            {"uncleanExit", m_uncleanExit},
+            {"logPath", QDir::toNativeSeparators(m_data + "/logs/cutlery.log")},
             {"textStyles", m_textStyles},
             {"brandColors", m_brandColors},
             {"brandLogo", m_brandLogo},
@@ -770,7 +834,12 @@ QVariantMap Editor::state() const {
             {"revision", m_revision}};
 }
 void Editor::fail(const QString &error) {
+    appendLog("error", error);
     m_error = error;
+    emit changed();
+}
+void Editor::dismissUncleanExit() {
+    m_uncleanExit = false;
     emit changed();
 }
 void Editor::clearError() {
@@ -2482,6 +2551,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             {"compressor", &Clip::compressor},
             {"gate", &Clip::gate},
             {"denoise", &Clip::denoise},
+            {"noiseFloor", &Clip::noiseFloor},
             {"deess", &Clip::deess},
             {"fxStrength", &Clip::fxStrength},
             {"motionBlur", &Clip::motionBlur},
@@ -4402,6 +4472,7 @@ void Editor::pasteAttributes(const QString &group) {
         c->compressor = from.compressor;
         c->gate = from.gate;
         c->denoise = from.denoise;
+        c->noiseFloor = from.noiseFloor;
         c->deess = from.deess;
         c->reverb = from.reverb;
         c->pitch = from.pitch;
@@ -5388,6 +5459,142 @@ void Editor::autoColour() {
     });
     p->start(executable("ffmpeg"), args);
     emit changed();
+}
+// Sound measurements ------------------------------------------------------------------------
+void Editor::measureSound(const Asset &a, double from, double length, const QString &filter,
+                          std::function<void(const QString &)> done) {
+    auto *p = new QProcess(this);
+    m_soundProcess = p;
+    p->setProcessChannelMode(QProcess::MergedChannels);
+    auto log = std::make_shared<QByteArray>();
+    connect(p, &QProcess::readyRead, this, [p, log] {
+        *log += p->readAll();
+        if (log->size() > 4 * 1024 * 1024)
+            *log = log->right(1024 * 1024);
+    });
+    auto finish = [this, p, log, done](bool success) {
+        *log += p->readAll();
+        p->deleteLater();
+        m_soundProcess = nullptr;
+        done(success ? QString::fromUtf8(*log) : QString());
+    };
+    connect(p, &QProcess::finished, this, [finish](int code, QProcess::ExitStatus status) {
+        finish(code == 0 && status == QProcess::NormalExit);
+    });
+    connect(p, &QProcess::errorOccurred, this, [finish](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart)
+            finish(false);
+    });
+    p->start(executable("ffmpeg"),
+             {"-hide_banner", "-nostdin", "-ss", QString::number(std::max(0., from), 'f', 3), "-t",
+              QString::number(std::max(0.05, length), 'f', 3), "-i", a.path, "-vn", "-af", filter,
+              "-f", "null", "-"});
+}
+void Editor::evenLoudness(double target) {
+    if (!std::isfinite(target) || target < -30 || target > -5)
+        return fail("Choose a loudness from −30 to −5 LUFS");
+    if (m_soundProcess)
+        return;
+    QStringList ids;
+    for (const auto &id : selection()) {
+        const auto *c = m_project.clip(id);
+        const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+        if (c && a && a->hasAudio && !a->isNested() && !c->keyframes.contains("volume"))
+            ids << id;
+    }
+    if (ids.isEmpty())
+        return fail("Select clips with sound (Ctrl+click several)");
+    m_soundMeasure = {{"status", "measuring"}, {"task", "loudness"}, {"count", int(ids.size())}};
+    emit changed();
+    // Measured one after the other; the volumes change together at the end.
+    auto gains = std::make_shared<QHash<QString, double>>();
+    // The step holds itself only weakly; each running measurement holds it until it calls on.
+    auto next = std::make_shared<std::function<void(int)>>();
+    *next = [this, ids, target, gains, weak = std::weak_ptr(next)](int i) {
+        const auto self = weak.lock();
+        if (i == ids.size()) {
+            if (gains->isEmpty()) {
+                m_soundMeasure = {{"status", "failed"}, {"task", "loudness"}};
+                return fail("Could not measure the sound");
+            }
+            mutate([&](Project &p) {
+                for (auto it = gains->begin(); it != gains->end(); ++it)
+                    if (auto *c = p.clip(it.key())) {
+                        p.requireEditable(c->track);
+                        c->volume = std::clamp(it.value(), 0., 4.);
+                    }
+            });
+            m_soundMeasure = {{"status", "done"}, {"task", "loudness"}};
+            m_status = QString("Loudness evened out on %1 clip%2")
+                           .arg(gains->size())
+                           .arg(gains->size() == 1 ? "" : "s");
+            emit changed();
+            return;
+        }
+        const auto *c = m_project.clip(ids[i]);
+        const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+        if (!a)
+            return (*self)(i + 1);
+        const double length = frameTime(c->duration, m_project.fpsN, m_project.fpsD).seconds() *
+                              c->speed.seconds();
+        const auto id = ids[i];
+        measureSound(*a, c->sourceIn.seconds(), length, "ebur128=framelog=quiet",
+                     [this, id, target, gains, self, i](const QString &log) {
+                         static const QRegularExpression integrated("I:\\s+(-?[0-9.]+) LUFS");
+                         QRegularExpressionMatch m;
+                         for (auto it = integrated.globalMatch(log); it.hasNext();)
+                             m = it.next();
+                         // Silence measures as about −70: nothing to even out.
+                         if (m.hasMatch() && m.captured(1).toDouble() > -69)
+                             (*gains)[id] = std::pow(10., (target - m.captured(1).toDouble()) / 20);
+                         (*self)(i + 1);
+                     });
+    };
+    (*next)(0);
+}
+void Editor::learnNoise() {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || !a->hasAudio || a->isNested())
+        return fail("Select a clip with sound");
+    if (m_playhead < c->start || m_playhead >= c->start + c->duration)
+        return fail("Move the playhead to a quiet moment in the clip");
+    if (m_soundProcess)
+        return;
+    const double fps = double(m_project.fpsN) / m_project.fpsD;
+    const double local = (m_playhead - c->start) / fps, length = c->duration / fps;
+    const double at = c->sourceIn.seconds() +
+                      (c->reverse ? std::max(0., length - local - 0.5) : local) * c->speed.seconds();
+    m_soundMeasure = {{"status", "measuring"}, {"task", "noise"}};
+    emit changed();
+    const auto id = c->id;
+    measureSound(*a, at, 0.5 * c->speed.seconds(), "astats=measure_perchannel=none",
+                 [this, id](const QString &log) {
+                     static const QRegularExpression rms("RMS level dB:\\s+(-?[0-9.]+|-inf)");
+                     QRegularExpressionMatch m;
+                     for (auto it = rms.globalMatch(log); it.hasNext();)
+                         m = it.next();
+                     if (!m.hasMatch() || !m_project.clip(id)) {
+                         m_soundMeasure = {{"status", "failed"}, {"task", "noise"}};
+                         return fail("Could not measure the noise");
+                     }
+                     // Digital silence has no noise to learn; the floor stays within its range.
+                     const double level = m.captured(1) == "-inf" ? -80 : m.captured(1).toDouble();
+                     const double floor = std::clamp(std::round(level), -80., -20.);
+                     const auto selected = m_selected;
+                     m_selected = id;
+                     mutate([&](Project &p) {
+                         auto *c = p.clip(id);
+                         p.requireEditable(c->track);
+                         c->noiseFloor = floor;
+                         if (c->denoise == 0)
+                             c->denoise = 0.4;
+                     });
+                     m_selected = selected;
+                     m_soundMeasure = {{"status", "done"}, {"task", "noise"}, {"floor", floor}};
+                     m_status = QString("Noise learned: %1 dB").arg(floor);
+                     emit changed();
+                 });
 }
 // Text styles -------------------------------------------------------------------------------
 static const QStringList &textStyleKeys() {

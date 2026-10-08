@@ -3770,6 +3770,89 @@ class EngineTest : public QObject {
             QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, {}), std::runtime_error);
         }
     }
+    void uncleanExitAndLog() {
+        FrameProvider frames;
+        QString data;
+        {
+            Editor editor(&frames);
+            data = editor.state()["dataPath"].toString();
+            QVERIFY(!editor.state()["uncleanExit"].toBool());
+        }
+        QVERIFY(!QFileInfo::exists(data + "/session.lock")); // removed on a normal end
+        {
+            // A lock left by another process: that session ended without closing Cutlery.
+            QFile lock(data + "/session.lock");
+            QVERIFY(lock.open(QIODevice::WriteOnly));
+            lock.write("999999999");
+        }
+        {
+            Editor editor(&frames);
+            QVERIFY(editor.state()["uncleanExit"].toBool());
+            editor.dismissUncleanExit();
+            QVERIFY(!editor.state()["uncleanExit"].toBool());
+            // Errors shown to the user are also written to the log.
+            editor.addGraphic("unicorn");
+            const auto log = editor.state()["logPath"].toString();
+            QVERIFY2(readUtf8File(log).contains(" error Unknown shape"), qPrintable(log));
+            QVERIFY(readUtf8File(log).contains("did not end normally"));
+            // A second editor in the same process is not a crash.
+            Editor second(&frames);
+            QVERIFY(!second.state()["uncleanExit"].toBool());
+        }
+        Editor again(&frames);
+        QVERIFY(!again.state()["uncleanExit"].toBool());
+    }
+    void evenLoudnessAndNoise() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // A loud and a quiet tone, 20 dB apart, and a recording with half a second of noise
+        // before a tone.
+        const auto loud = dir.filePath("loud.wav"), quiet = dir.filePath("quiet.wav"),
+                   noisy = dir.filePath("noisy.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "aevalsrc=0.5*sin(2*PI*440*t):d=2:s=48000", loud});
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "aevalsrc=0.05*sin(2*PI*440*t):d=2:s=48000", quiet});
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "anoisesrc=d=2:c=white:a=0.01:r=48000:seed=7",
+                     "-f", "lavfi", "-i", "aevalsrc=if(gte(t\\,1)\\,0.3*sin(2*PI*440*t)\\,0):d=2:s=48000",
+                     "-filter_complex", "[0][1]amix=inputs=2:normalize=0", noisy});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(loud), QUrl::fromLocalFile(quiet), QUrl::fromLocalFile(noisy)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 3, 15000);
+        QString loudId, quietId, noisyId;
+        for (const auto &a : editor.project().assets) {
+            editor.addAsset(a.id, int(editor.project().clips.size()));
+            const auto id = editor.project().clips.back().id;
+            (a.name.startsWith("loud") ? loudId : a.name.startsWith("quiet") ? quietId : noisyId) = id;
+        }
+        // Even loudness for the two tones, in one undo step.
+        editor.select(loudId);
+        editor.toggleSelect(quietId);
+        editor.evenLoudness(-20); // reachable for both within the volume range (up to 4×)
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["soundMeasure"].toMap()["status"].toString(),
+                                  QString("done"), 20000);
+        const double a = editor.project().clip(loudId)->volume, b = editor.project().clip(quietId)->volume;
+        QVERIFY2(std::abs(b / a - 10) < 0.5 && a < 1, qPrintable(QString("%1 %2").arg(a).arg(b)));
+        editor.undo();
+        QCOMPARE(editor.project().clip(quietId)->volume, 1.);
+        editor.evenLoudness(10);
+        QVERIFY(editor.state()["error"].toString().contains("LUFS"));
+        editor.clearError();
+        // Noise learned at a quiet moment becomes the noise floor, with noise reduction on.
+        editor.select(noisyId);
+        editor.seek(editor.project().clip(noisyId)->start + 5); // 0.2 s into the noise
+        editor.learnNoise();
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["soundMeasure"].toMap()["status"].toString(),
+                                  QString("done"), 20000);
+        const auto *c = editor.project().clip(noisyId);
+        QVERIFY2(c->noiseFloor < -35 && c->noiseFloor > -50, qPrintable(QString::number(c->noiseFloor)));
+        QCOMPARE(c->denoise, 0.4);
+        QCOMPARE(Project::fromJson(editor.project().json(), {}).clip(noisyId)->noiseFloor, c->noiseFloor);
+        editor.addTitle();
+        editor.learnNoise();
+        QVERIFY(editor.state()["error"].toString().contains("with sound"));
+    }
     void voiceChanger() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

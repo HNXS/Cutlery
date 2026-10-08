@@ -92,6 +92,7 @@ const QVector<QPair<QString, double Clip::*>> &lookFields() {
         {"eqMid", &Clip::eqMid},             {"eqHigh", &Clip::eqHigh},
         {"lowCut", &Clip::lowCut},           {"compressor", &Clip::compressor},
         {"gate", &Clip::gate},               {"denoise", &Clip::denoise},
+        {"noiseFloor", &Clip::noiseFloor},
         {"deess", &Clip::deess},             {"motionBlur", &Clip::motionBlur},
         {"reverb", &Clip::reverb},           {"echo", &Clip::echo},
         {"pan", &Clip::pan},                 {"hslHue", &Clip::hslHue},
@@ -898,6 +899,7 @@ void Project::validate() const {
                     bounded(c.eqHigh, -12, 12) && bounded(c.lowCut, 0, 300) &&
                     bounded(c.compressor, 0, 1) && bounded(c.gate, 0, 1) &&
                     bounded(c.denoise, 0, 1) && bounded(c.deess, 0, 1) &&
+                    (c.noiseFloor == 0 || bounded(c.noiseFloor, -80, -20)) &&
                     bounded(c.pitch, -12, 12),
                 "Invalid sound setting");
         require(bounded(c.exposure, -3, 3), "Invalid exposure");

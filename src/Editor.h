@@ -105,6 +105,10 @@ class Editor final : public QObject {
     Q_INVOKABLE QVariantList backups() const;
     Q_INVOKABLE bool restoreBackup(const QString &file);
     Q_INVOKABLE void recover();
+    // The last session did not end normally (its lock file in the data folder was left
+    // behind): state "uncleanExit", until dismissed. Warnings and errors go to the log in the
+    // data folder (logs/cutlery.log, the previous one kept as cutlery.1.log; state "logPath").
+    Q_INVOKABLE void dismissUncleanExit();
     // Files and folders: a folder adds the media files inside it and the folders below it,
     // into a library folder of its name.
     Q_INVOKABLE void importMedia(const QList<QUrl> &);
@@ -365,6 +369,16 @@ class Editor final : public QObject {
     // and tint so the picture spans the usual range with neutral greys. One undo step; state
     // "autoColour": status measuring|done|failed.
     Q_INVOKABLE void autoColour();
+    // Even loudness: measures the sound of each selected clip (FFmpeg's EBU R128 meter over its
+    // source range, in the background, one after the other) and sets each volume so it plays at
+    // `target` LUFS (−30..−5), within the volume range; one undo step for all. Clips with
+    // keyframed volume or no sound are left out.
+    Q_INVOKABLE void evenLoudness(double target = -16);
+    // Learns the background noise from half a second of the selected clip at the playhead (a
+    // quiet moment): its level becomes the clip's noise floor, and noise reduction is switched
+    // on (40 %) if it was off. One undo step. State "soundMeasure": {status measuring|done|failed,
+    // task loudness|noise}.
+    Q_INVOKABLE void learnNoise();
     // Text styles kept for every project (data folder, styles.json): font, size, colours,
     // outline, shadow, box, alignment, spacing and animation of a title. saveTextStyle takes
     // them from the selected title (replacing a style of the same name); applyTextStyle sets
@@ -478,6 +492,13 @@ class Editor final : public QObject {
     QString m_importFolder;
     QVariantMap m_reframe;
     QVariantMap m_autoColour;
+    QVariantMap m_soundMeasure;
+    bool m_uncleanExit = false, m_ownsLock = false;
+    QProcess *m_soundProcess = nullptr;
+    // Runs FFmpeg on source seconds [from, from + length) of an asset's sound with `filter` and
+    // calls `done` with its log, or with an empty one when it fails.
+    void measureSound(const Asset &, double from, double length, const QString &filter,
+                      std::function<void(const QString &)> done);
     QVariantList m_textStyles, m_templates;
     QStringList m_brandColors;
     QString m_brandLogo;

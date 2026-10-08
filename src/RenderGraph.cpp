@@ -2039,7 +2039,9 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         if (c.lowCut > 0)
             a += ",highpass=f=" + num(c.lowCut) + ":poles=2";
         if (c.denoise > 0)
-            a += QString(",afftdn=nr=%1:nf=-50").arg(num(6 + 24 * c.denoise));
+            a += QString(",afftdn=nr=%1:nf=%2")
+                     .arg(num(6 + 24 * c.denoise))
+                     .arg(num(c.noiseFloor != 0 ? c.noiseFloor : -50));
         if (c.gate > 0)
             // Opens above a threshold from −60 dB (gentle) to −30 dB (strong).
             a += QString(",agate=threshold=%1:ratio=4:attack=5:release=150:range=%2")

@@ -158,6 +158,9 @@ struct Clip {
     // reduction and de-essing.
     double eqLow = 0, eqMid = 0, eqHigh = 0, lowCut = 0;
     double compressor = 0, gate = 0, denoise = 0, deess = 0;
+    // The level of the background noise noise reduction works against, in dBFS (−80..−20), as
+    // measured in a quiet part of the clip; 0 for FFmpeg's default of −50.
+    double noiseFloor = 0;
     // Style effect: "", "shake", "glitch", "vhs", "film", "sketch" (edges), "poster" (fewer
     // colours), "fisheye" (bulge from the centre) or "mirror" (left half reflected), at
     // fxStrength (0..1). Motion blur

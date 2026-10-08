@@ -567,6 +567,11 @@ ApplicationWindow {
                 onTriggered: shortcutsDialog.open()
             }
             MenuItem {
+                objectName: "openLogFolder"
+                text: "Open the log folder"
+                onTriggered: Qt.openUrlExternally("file:///" + String(win.s.logPath || "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/[^\/]*$/, ""))
+            }
+            MenuItem {
                 text: "About this alpha"
                 onTriggered: about.open()
             }
@@ -3809,6 +3814,29 @@ ApplicationWindow {
                                         ToolTip.text: "Changes how the voice sounds; works with the pitch above"
                                     }
                                 }
+                                // Measured sound tools: even loudness across clips, noise learned here.
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    readonly property var measure: win.s.soundMeasure || ({})
+                                    Action {
+                                        objectName: "evenLoudness"
+                                        Layout.fillWidth: true
+                                        enabled: win.selection.locked !== true && parent.measure.status !== "measuring"
+                                        text: parent.measure.status === "measuring" && parent.measure.task === "loudness" ? "Measuring…" : "Even loudness"
+                                        onClicked: editor.evenLoudness(-16)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Measures each selected clip (Ctrl+click several) and sets its volume so all play equally loud (−16 LUFS, like podcasts and online video)"
+                                    }
+                                    Action {
+                                        objectName: "learnNoise"
+                                        Layout.fillWidth: true
+                                        enabled: win.selection.locked !== true && win.selection.playheadInside === true && parent.measure.status !== "measuring"
+                                        text: parent.measure.status === "measuring" && parent.measure.task === "noise" ? "Listening…" : "Learn noise here"
+                                        onClicked: editor.learnNoise()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Put the playhead where only background noise is heard: noise reduction then works against exactly that noise" + ((win.selection.noiseFloor || 0) !== 0 ? " (learned: " + win.selection.noiseFloor + " dB)" : "")
+                                    }
+                                }
                             }
                             // Colour and look of the clip's picture.
                             ColumnLayout {
@@ -4640,6 +4668,35 @@ ApplicationWindow {
                             cursorShape: Qt.PointingHandCursor
                             onClicked: formatTile.clicked()
                         }
+                    }
+                }
+            }
+            // After a session that did not end normally: what to do now, and where the log is.
+            Rectangle {
+                objectName: "uncleanExitNotice"
+                visible: win.s.uncleanExit === true
+                Layout.fillWidth: true
+                implicitHeight: noticeRow.implicitHeight + 16
+                radius: 6
+                color: "#3a2f1c"
+                border.color: "#e5c07b"
+                RowLayout {
+                    id: noticeRow
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: "Cutlery did not close normally last time." + (win.s.hasRecovery ? " Your unsaved work can be recovered with “Recover autosave”." : "") + " The log may tell why: " + (win.s.logPath || "")
+                    }
+                    Action {
+                        text: "Open log folder"
+                        onClicked: Qt.openUrlExternally("file:///" + String(win.s.logPath || "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/[^\/]*$/, ""))
+                    }
+                    ToolButton {
+                        objectName: "dismissUncleanExit"
+                        text: "✕"
+                        onClicked: editor.dismissUncleanExit()
                     }
                 }
             }
