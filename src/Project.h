@@ -213,6 +213,10 @@ struct Clip {
     // bottom-right corners go, as x, y fractions of its own box (0..1); 8 values, or empty for
     // none. The picture is warped into that four-sided shape; outside it is transparent.
     QVector<double> cornerPin;
+    // 3D tilt in degrees (−70..70): tiltX leans the top away (positive) or towards the viewer,
+    // tiltY turns the right side away (positive) or towards the viewer; seen in perspective,
+    // after the corner pin.
+    double tiltX = 0, tiltY = 0;
     // Background removal by colour (green/blue screen).
     bool chromaKey = false;
     QString keyColor = "#00ff00";
@@ -231,7 +235,7 @@ struct Clip {
     bool eyeContact = false;
     bool styled() const {
         return shape != "rect" || border > 0 || shadow > 0 || aiCutout || feather > 0 ||
-               !cornerPin.isEmpty();
+               !cornerPin.isEmpty() || tiltX != 0 || tiltY != 0;
     }
     double staticValue(const QString &property) const;
     // Property value at a clip-local frame, interpolating keyframes when present.

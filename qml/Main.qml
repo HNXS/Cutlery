@@ -2748,6 +2748,44 @@ ApplicationWindow {
                                         }
                                     }
                                 }
+                                // 3D tilt: lean or turn the picture, seen in perspective.
+                                Repeater {
+                                    model: [
+                                        { key: "tiltX", name: "Lean back", tip: "Leans the top away (or, below zero, towards you)" },
+                                        { key: "tiltY", name: "Turn", tip: "Turns the right side away (or, below zero, towards you)" }
+                                    ]
+                                    RowLayout {
+                                        id: tiltRow
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        visible: !!win.selection.assetId && win.selection.picture === true
+                                        Label {
+                                            text: tiltRow.modelData.name
+                                            color: (win.selection[tiltRow.modelData.key] || 0) !== 0 ? win.mint : win.muted
+                                            Layout.preferredWidth: 80
+                                        }
+                                        Slider {
+                                            objectName: "tilt-" + tiltRow.modelData.key
+                                            Layout.fillWidth: true
+                                            from: -70
+                                            to: 70
+                                            stepSize: 1
+                                            value: win.selection[tiltRow.modelData.key] || 0
+                                            enabled: win.selection.locked !== true
+                                            onPressedChanged: if (!pressed)
+                                                editor.setClip(tiltRow.modelData.key, value)
+                                            onMoved: if (!pressed)
+                                                editor.setClip(tiltRow.modelData.key, value)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: tiltRow.modelData.tip
+                                        }
+                                        Label {
+                                            text: Math.round(win.selection[tiltRow.modelData.key] || 0) + "°"
+                                            font.pixelSize: 10
+                                            Layout.preferredWidth: 30
+                                        }
+                                    }
+                                }
                                 // Canvas fill: what shows around a picture that does not fill the frame,
                                 // e.g. a portrait video in a landscape project.
                                 RowLayout {
@@ -3239,15 +3277,31 @@ ApplicationWindow {
                                     ToolTip.text: "Makes an editing copy (ProRes) with evenly spaced frames in Cutlery's data folder and switches the media to it. The original stays untouched."
                                 }
                             }
-                            Action {
-                                objectName: "freezeFrame"
+                            RowLayout {
                                 Layout.fillWidth: true
-                                visible: win.selection.video === true && win.selection.reverse !== true
-                                enabled: win.selection.locked !== true && win.selection.playheadInside === true
-                                text: "Freeze frame here (2 s)"
-                                onClicked: editor.freezeFrame(2)
-                                ToolTip.visible: hovered
-                                ToolTip.text: win.selection.playheadInside ? "Holds the picture at the playhead for 2 seconds; the rest of the clip continues afterwards" : "Move the playhead into the clip first"
+                                visible: win.selection.video === true
+                                Action {
+                                    objectName: "freezeFrame"
+                                    Layout.fillWidth: true
+                                    enabled: win.selection.locked !== true && win.selection.playheadInside === true
+                                    text: "Freeze frame here"
+                                    onClicked: editor.freezeFrame(freezeSeconds.value / 10)
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: win.selection.playheadInside ? "Holds the picture at the playhead for the time beside; the rest of the clip continues afterwards" : "Move the playhead into the clip first"
+                                }
+                                SpinBox {
+                                    id: freezeSeconds
+                                    objectName: "freezeSeconds"
+                                    from: 1
+                                    to: 600
+                                    value: 20
+                                    stepSize: 5
+                                    editable: true
+                                    textFromValue: v => (v / 10).toFixed(1) + " s"
+                                    valueFromText: t => Math.round(parseFloat(t) * 10)
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "How long the frozen picture lasts (0.1–60 s)"
+                                }
                             }
                             Action {
                                 objectName: "splitScenes"

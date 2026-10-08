@@ -581,6 +581,43 @@ class EngineTest : public QObject {
             QCOMPARE(e.project().width, 1920);
         }
     }
+    void undoAcrossSessions() {
+        QTemporaryDir dir;
+        const auto file = dir.filePath("story.cutlery");
+        FrameProvider frames;
+        {
+            Editor editor(&frames);
+            editor.configure(320, 180, 25, 1);
+            editor.addTitle();
+            editor.setClip("text", "First");
+            editor.setClip("text", "Second");
+            editor.undo(); // one step to redo
+            QVERIFY(editor.save(QUrl::fromLocalFile(file)));
+        }
+        {
+            // Opened again unchanged: undo and redo go on where they were.
+            Editor editor(&frames);
+            QVERIFY(editor.openProject(QUrl::fromLocalFile(file)));
+            QVERIFY(editor.state()["canUndo"].toBool());
+            QCOMPARE(editor.project().clips.first().text, QString("First"));
+            editor.redo();
+            QCOMPARE(editor.project().clips.first().text, QString("Second"));
+            editor.undo();
+            editor.undo();
+            QCOMPARE(editor.project().clips.first().text, QString("Your story starts here"));
+            editor.undo();
+            QVERIFY(editor.project().clips.empty());
+        }
+        {
+            // Changed outside Cutlery: the old history no longer applies.
+            auto p = loadProject(file);
+            p.clips.clear();
+            saveProject(p, file);
+            Editor editor(&frames);
+            QVERIFY(editor.openProject(QUrl::fromLocalFile(file)));
+            QVERIFY(!editor.state()["canUndo"].toBool());
+        }
+    }
     void recentProjectsAndBackups() {
         QTemporaryDir dir;
         const auto path = dir.filePath("talk.cutlery");
@@ -3331,6 +3368,58 @@ class EngineTest : public QObject {
         QVERIFY(qGray(pinned.pixel(3, 70)) > 30);  // the bottom keeps its full width
         // The top edge shows the whole top row of bars, squeezed between x 32 and 96.
         QVERIFY(QColor(pinned.pixel(36, 20)).name() != QColor(pinned.pixel(92, 20)).name());
+        // Tilt: leaning the top away makes the top edge narrower than the bottom; turning the
+        // right side away makes it shorter than the left. Measured on an even grey picture.
+        {
+            QImage grey(128, 72, QImage::Format_RGB32);
+            grey.fill(QColor(160, 160, 160));
+            QVERIFY(grey.save(dir.filePath("grey.png")));
+            Asset g;
+            g.id = "grey";
+            g.path = dir.filePath("grey.png");
+            g.kind = "image";
+            g.duration = 5;
+            g.width = 128;
+            g.height = 72;
+            p.assets << g;
+        }
+        const auto leaning = still(with([](Clip &c) {
+                                       c.assetId = "grey";
+                                       c.tiltX = 40;
+                                   }),
+                                   10);
+        auto rowWidth = [](const QImage &image, int y) {
+            int n = 0;
+            for (int x = 0; x < image.width(); ++x)
+                n += qGray(image.pixel(x, y)) > 20 || QColor(image.pixel(x, y)).saturation() > 40;
+            return n;
+        };
+        auto colHeight = [](const QImage &image, int x) {
+            int n = 0;
+            for (int y = 0; y < image.height(); ++y)
+                n += qGray(image.pixel(x, y)) > 20 || QColor(image.pixel(x, y)).saturation() > 40;
+            return n;
+        };
+        int top = 0, bottom = 0;
+        while (top < leaning.height() && rowWidth(leaning, top) == 0)
+            ++top;
+        bottom = leaning.height() - 1;
+        while (bottom > 0 && rowWidth(leaning, bottom) == 0)
+            --bottom;
+        QVERIFY2(rowWidth(leaning, top + 2) < rowWidth(leaning, bottom - 2) - 10,
+                 qPrintable(QString("%1 %2").arg(rowWidth(leaning, top + 2)).arg(rowWidth(leaning, bottom - 2))));
+        const auto turned = still(with([](Clip &c) {
+                                      c.assetId = "grey";
+                                      c.tiltY = 40;
+                                  }),
+                                  10);
+        int left = 0, right = turned.width() - 1;
+        while (left < turned.width() && colHeight(turned, left) == 0)
+            ++left;
+        while (right > 0 && colHeight(turned, right) == 0)
+            --right;
+        QVERIFY2(colHeight(turned, right - 2) < colHeight(turned, left + 2) - 6,
+                 qPrintable(QString("%1 %2").arg(colHeight(turned, right - 2)).arg(colHeight(turned, left + 2))));
         // Corners in place leave the picture as it was.
         QVERIFY(difference(still(with([](Clip &c) { c.cornerPin = {0, 0, 1, 0, 0, 1, 1, 1}; }), 10),
                            plain) < 2);
@@ -3416,6 +3505,7 @@ class EngineTest : public QObject {
                      q.clips[0].voice = "robot";
                      q.clips[0].fx = "mirror";
                      q.clips[0].cornerPin = {0.1, 0, 1, 0, 0, 1, 1, 0.9};
+                     q.clips[0].tiltY = -25;
                      return q.json();
                  }(), {}).clips[0].canvasFill,
                  QString("blur"));
@@ -3432,6 +3522,7 @@ class EngineTest : public QObject {
                                          std::pair{QString("fxStrength"), QJsonValue(2)},
                                          std::pair{QString("canvasFill"), QJsonValue("red")},
                                          std::pair{QString("cornerPin"), QJsonValue(QJsonArray{0, 0, 1})},
+                                         std::pair{QString("tiltX"), QJsonValue(80)},
                                          std::pair{QString("voice"), QJsonValue("dalek")},
                                          std::pair{QString("echo"), QJsonValue(-1)}}) {
             auto bad = json;
@@ -3733,6 +3824,24 @@ class EngineTest : public QObject {
         QCOMPARE(p.duration(), 90);
         editor.undo();
         QCOMPARE(editor.project().clips.size(), size_t(2));
+        // A reversed clip freezes the frame it shows (frame 49 at the 11th frame: luma 196, about
+        // 210 in full-range RGB), for any length; the still itself is not reversed.
+        editor.select(id);
+        editor.setClip("reverse", true);
+        editor.seek(10);
+        editor.freezeFrame(0.5);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().clips.size() == 5, 15000);
+        QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+        {
+            const auto *frozen = editor.project().clip(editor.state()["selectedId"].toString());
+            QVERIFY(frozen && frozen->duration == 15 && !frozen->reverse);
+            QImage picture(editor.project().asset(frozen->assetId)->path);
+            QVERIFY2(std::abs(qGray(picture.pixel(80, 45)) - 210) < 4,
+                     qPrintable(QString::number(qGray(picture.pixel(80, 45)))));
+        }
+        editor.undo();
+        editor.select(id);
+        editor.setClip("reverse", false);
         // Not outside the clip.
         editor.select(id);
         editor.setClip("start", 30);

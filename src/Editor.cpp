@@ -580,6 +580,8 @@ QVariantMap Editor::state() const {
             PROP(radius);
             PROP(feather);
             PROP(effectShape);
+            PROP(tiltX);
+            PROP(tiltY);
             {
                 QVariantList pin;
                 for (const auto v : c.cornerPin)
@@ -861,6 +863,7 @@ bool Editor::openProject(const QUrl &url) {
         m_path = path;
         m_undo.clear();
         m_redo.clear();
+        loadHistory(path);
         m_selected.clear();
         m_playhead = 0;
         m_dirty = false;
@@ -903,6 +906,8 @@ bool Editor::save(const QUrl &url) {
             m_nest.first().parent.name = p.name;
         m_path = path;
         m_dirty = false;
+        if (m_nest.isEmpty())
+            saveHistory(path);
         m_status = "Project saved";
         m_saveTimer.stop();
         QFile::remove(m_recovery);
@@ -1254,6 +1259,64 @@ void Editor::seek(qint64 frame) {
     m_playhead = std::clamp(frame, qint64(0), std::max(qint64(0), m_project.duration() - 1));
     m_previewTimer.start();
     emit changed();
+}
+QString Editor::historyFile(const QString &projectPath) const {
+    const auto key = QCryptographicHash::hash(
+        QDir::cleanPath(QFileInfo(projectPath).absoluteFilePath()).toUtf8(), QCryptographicHash::Sha1);
+    return m_data + "/history/" + QString::fromLatin1(key.toHex()) + ".json";
+}
+static QByteArray fileHash(const QString &path) {
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return {};
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData(&f);
+    return hash.result().toHex();
+}
+void Editor::saveHistory(const QString &projectPath) {
+    // Best effort: a project saves fine without its history.
+    const int keep = std::min(m_prefs.value("undoSteps", 60).toInt(), 100);
+    QJsonArray undo, redo;
+    for (qsizetype i = std::max<qsizetype>(0, m_undo.size() - keep); i < m_undo.size(); ++i)
+        undo.append(m_undo[i].json());
+    for (qsizetype i = std::max<qsizetype>(0, m_redo.size() - keep); i < m_redo.size(); ++i)
+        redo.append(m_redo[i].json());
+    const auto file = historyFile(projectPath);
+    QDir().mkpath(QFileInfo(file).absolutePath());
+    const auto data = QJsonDocument(QJsonObject{{"file", QFileInfo(projectPath).absoluteFilePath()},
+                                                {"saved", QString::fromLatin1(fileHash(projectPath))},
+                                                {"undo", undo},
+                                                {"redo", redo}})
+                          .toJson(QJsonDocument::Compact);
+    QSaveFile f(file);
+    if (data.size() > 64 * 1024 * 1024 || !f.open(QIODevice::WriteOnly) || f.write(data) != data.size() ||
+        !f.commit())
+        return;
+    // The 50 most recently saved projects keep their history.
+    auto old = QDir(QFileInfo(file).absolutePath()).entryInfoList({"*.json"}, QDir::Files, QDir::Time);
+    for (qsizetype i = 50; i < old.size(); ++i)
+        QFile::remove(old[i].absoluteFilePath());
+}
+void Editor::loadHistory(const QString &projectPath) {
+    QFile f(historyFile(projectPath));
+    if (!f.open(QIODevice::ReadOnly) || f.size() > 64 * 1024 * 1024)
+        return;
+    const auto o = QJsonDocument::fromJson(f.readAll()).object();
+    // Only for the file as it was saved: an edit elsewhere makes the history meaningless.
+    if (o["saved"].toString().toLatin1() != fileHash(projectPath) || o["saved"].toString().isEmpty())
+        return;
+    try {
+        QVector<Project> undo, redo;
+        for (const auto &v : o["undo"].toArray())
+            undo.push_back(Project::fromJson(v.toObject(), {}));
+        for (const auto &v : o["redo"].toArray())
+            redo.push_back(Project::fromJson(v.toObject(), {}));
+        m_undo = std::move(undo);
+        m_redo = std::move(redo);
+    } catch (const std::exception &) {
+        m_undo.clear();
+        m_redo.clear();
+    }
 }
 void Editor::undo() {
     if (m_undo.empty())
@@ -2295,6 +2358,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(radius, toDouble);
         FIELD(feather, toDouble);
         FIELD(effectShape, toString);
+        FIELD(tiltX, toDouble);
+        FIELD(tiltY, toDouble);
         FIELD(border, toDouble);
         FIELD(shadow, toDouble);
         FIELD(chromaKey, toBool);
@@ -4070,6 +4135,8 @@ void Editor::pasteAttributes(const QString &group) {
         c->radius = from.radius;
         c->feather = from.feather;
         c->cornerPin = from.cornerPin;
+        c->tiltX = from.tiltX;
+        c->tiltY = from.tiltY;
         c->border = from.border;
         c->borderColor = from.borderColor;
         c->shadow = from.shadow;
@@ -4677,14 +4744,15 @@ void Editor::freezeFrame(double seconds) {
     const auto *a = c ? m_project.asset(c->assetId) : nullptr;
     if (!a || a->kind != "video" || c->audioOnly)
         return fail("Select a video clip to freeze a frame of it");
-    if (c->reverse)
-        return fail("Reversed clips cannot be frozen; turn off Reverse first");
     if (m_playhead < c->start || m_playhead >= c->start + c->duration)
         return fail("Move the playhead into the clip to freeze that frame");
     seconds = std::clamp(seconds, 0.1, 60.);
     const double fps = double(m_project.fpsN) / m_project.fpsD;
+    // A reversed clip shows the source from its end backwards.
+    const double local = (m_playhead - c->start) / fps, length = c->duration / fps;
     const double source =
-        c->sourceIn.seconds() + (m_playhead - c->start) / fps * c->speed.seconds();
+        c->sourceIn.seconds() +
+        (c->reverse ? std::max(0., length - local - 1 / fps) : local) * c->speed.seconds();
     QDir().mkpath(m_data + "/freeze");
     const auto still = m_data + "/freeze/" + newId() + ".png";
     auto *p = new QProcess(this);
@@ -4738,6 +4806,7 @@ void Editor::freezeFrame(double seconds) {
             f.transition.clear();
             f.transitionFrames = 0;
             f.fadeIn = f.fadeOut = 0;
+            f.reverse = false;
             f.aiCutout = f.aiUpscale = f.eyeContact = false;
             f.slowMotion.clear();
             project.clips.push_back(f);

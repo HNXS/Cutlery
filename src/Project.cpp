@@ -453,6 +453,10 @@ QJsonObject Project::json(const QString &base) const {
         o["radius"] = c.radius;
         if (c.feather > 0)
             o["feather"] = c.feather;
+        if (c.tiltX != 0)
+            o["tiltX"] = c.tiltX;
+        if (c.tiltY != 0)
+            o["tiltY"] = c.tiltY;
         if (!c.cornerPin.isEmpty()) {
             QJsonArray pin;
             for (const auto v : c.cornerPin)
@@ -694,6 +698,8 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.shape = j["shape"].toString("rect");
         c.radius = j["radius"].toDouble(0.12);
         c.feather = j["feather"].toDouble(0);
+        c.tiltX = j["tiltX"].toDouble(0);
+        c.tiltY = j["tiltY"].toDouble(0);
         for (const auto &v : j["cornerPin"].toArray())
             c.cornerPin << v.toDouble(-1);
         c.border = j["border"].toDouble(0);
@@ -821,6 +827,7 @@ void Project::validate() const {
         require(QStringList{"rect", "rounded", "circle"}.contains(c.shape) &&
                     bounded(c.radius, 0, 0.5) && bounded(c.border, 0, 0.1) &&
                     bounded(c.feather, 0, 0.5) &&
+                    bounded(c.tiltX, -70, 70) && bounded(c.tiltY, -70, 70) &&
                     (c.cornerPin.isEmpty() ||
                      (c.cornerPin.size() == 8 &&
                       std::all_of(c.cornerPin.begin(), c.cornerPin.end(),

@@ -466,6 +466,11 @@ class Editor final : public QObject {
     // Spoken words of cached transcripts by result file: modified time and cues.
     mutable QHash<QString, QPair<qint64, QVector<Cue>>> m_spoken;
     void saveBrand();
+    // Undo history kept across sessions: written next to each save (data folder, history/),
+    // read back when the same file is opened unchanged.
+    QString historyFile(const QString &projectPath) const;
+    void saveHistory(const QString &projectPath);
+    void loadHistory(const QString &projectPath);
     void listLuts();
     void listTemplates();
     void saveTextStyles();
