@@ -8,6 +8,7 @@
 #include "Project.h"
 #include "Scopes.h"
 #include "SoundLibrary.h"
+#include <QJsonArray>
 #include <QObject>
 #include <QProcess>
 #include <QQuickImageProvider>
