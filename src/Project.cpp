@@ -199,7 +199,8 @@ double standardRate(double rate) {
 const QStringList &graphicKinds() {
     static const QStringList kinds{"rectangle", "ellipse", "arrow", "line",    "bubble",
                                    "check",     "cross",   "star",  "heart",   "warning",
-                                   "info",      "cursor",  "click", "lightbulb", "badge"};
+                                   "info",      "cursor",  "click", "lightbulb", "badge",
+                                   "play",      "bell",    "pin",   "clock"};
     return kinds;
 }
 QSizeF Project::pictureSize(const Clip &c, double boxWidth, double boxHeight) const {
@@ -924,7 +925,9 @@ void Project::validate() const {
                     bounded(c.reverb, 0, 1) && bounded(c.echo, 0, 1) && bounded(c.pan, -1, 1) &&
                     bounded(c.anchorX, 0, 1) && bounded(c.anchorY, 0, 1),
                 "Invalid effect setting");
-        require(QStringList{"", "lowerThird", "lowerThirdLine", "titleCard"}.contains(
+        require(QStringList{"", "lowerThird", "lowerThirdLine", "lowerThirdRight", "titleCard",
+                            "banner", "quote"}
+                    .contains(
                     c.titleStyle) &&
                     QColor(c.accentColor).isValid(),
                 "Invalid title style");

@@ -1302,6 +1302,33 @@ ApplicationWindow {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Action {
+                                        objectName: "addLowerThirdRight"
+                                        text: "+ Right third"
+                                        Layout.fillWidth: true
+                                        onClicked: editor.addTitleTemplate("lowerThirdRight")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Name and role in the lower right; slides in from the right"
+                                    }
+                                    Action {
+                                        objectName: "addBanner"
+                                        text: "+ Banner"
+                                        Layout.fillWidth: true
+                                        onClicked: editor.addTitleTemplate("banner")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "A band across the bottom with a headline and a line below, e.g. a call to action"
+                                    }
+                                    Action {
+                                        objectName: "addQuote"
+                                        text: "+ Quote"
+                                        Layout.fillWidth: true
+                                        onClicked: editor.addTitleTemplate("quote")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "A quotation in the centre with a large quotation mark; the second line names who said it"
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Action {
                                         objectName: "addBlurArea"
                                         text: "+ Blur area"
                                         Layout.fillWidth: true
@@ -1462,7 +1489,11 @@ ApplicationWindow {
                                             { kind: "heart", glyph: "♥", name: "Heart" },
                                             { kind: "lightbulb", glyph: "💡", name: "Light bulb (tip)" },
                                             { kind: "cursor", glyph: "↖", name: "Mouse pointer" },
-                                            { kind: "click", glyph: "✳", name: "Mouse click" }
+                                            { kind: "click", glyph: "✳", name: "Mouse click" },
+                                            { kind: "play", glyph: "▶", name: "Play button" },
+                                            { kind: "bell", glyph: "🔔", name: "Bell (e.g. notifications)" },
+                                            { kind: "pin", glyph: "📍", name: "Location pin" },
+                                            { kind: "clock", glyph: "🕒", name: "Clock" }
                                         ]
                                         ToolButton {
                                             required property var modelData
@@ -2370,8 +2401,8 @@ ApplicationWindow {
                                     objectName: "titleStyle"
                                     Layout.fillWidth: true
                                     visible: (win.selection.captionStyle || "") === ""
-                                    readonly property var styles: ["", "lowerThird", "lowerThirdLine", "titleCard"]
-                                    model: ["Plain title", "Lower third (plate)", "Lower third (line)", "Title card"]
+                                    readonly property var styles: ["", "lowerThird", "lowerThirdLine", "lowerThirdRight", "titleCard", "banner", "quote"]
+                                    model: ["Plain title", "Lower third (plate)", "Lower third (line)", "Lower third (right)", "Title card", "Banner across the bottom", "Quote"]
                                     currentIndex: Math.max(0, styles.indexOf(win.selection.titleStyle || ""))
                                     onActivated: editor.setClip("titleStyle", styles[currentIndex])
                                 }
@@ -2430,7 +2461,7 @@ ApplicationWindow {
                                 CheckBox {
                                     objectName: "titleSlide"
                                     visible: (win.selection.titleStyle || "").startsWith("lowerThird")
-                                    text: "Slide in from the left"
+                                    text: win.selection.titleStyle === "lowerThirdRight" ? "Slide in from the right" : "Slide in from the left"
                                     checked: win.selection.titleSlide !== false
                                     onToggled: editor.setClip("titleSlide", checked)
                                 }
@@ -2587,6 +2618,36 @@ ApplicationWindow {
                                             MouseArea {
                                                 anchors.fill: parent
                                                 onClicked: editor.setClip("textColor", parent.modelData)
+                                            }
+                                        }
+                                    }
+                                }
+                                // Words between asterisks (*like this*) take this colour in plain titles.
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    visible: (win.selection.captionStyle || "") === "" && (win.selection.titleStyle || "") === "" && win.selection.text !== undefined
+                                    Label {
+                                        text: "*Highlight*"
+                                        color: (win.selection.text || "").indexOf("*") >= 0 ? win.mint : win.muted
+                                        Layout.fillWidth: true
+                                        ToolTip.visible: highlightHover.hovered
+                                        ToolTip.text: "Put asterisks around words in the text, *like this*, to show them in this colour"
+                                        HoverHandler { id: highlightHover }
+                                    }
+                                    Repeater {
+                                        model: ["#ffd23f", "#64d8bc", "#ff6fae", "#5fa8ff", "#ff5a5f"].concat(win.s.brandColors || [])
+                                        Rectangle {
+                                            required property string modelData
+                                            objectName: "titleHighlight-" + modelData
+                                            width: 18
+                                            height: 18
+                                            radius: 9
+                                            color: modelData
+                                            border.width: win.selection.highlightColor === modelData ? 3 : 1
+                                            border.color: win.selection.highlightColor === modelData ? win.mint : "#6481a0"
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: editor.setClip("highlightColor", parent.modelData)
                                             }
                                         }
                                     }
