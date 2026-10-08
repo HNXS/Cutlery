@@ -4,6 +4,9 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Background for pictures that do not fill the frame:** a portrait video in a landscape project (or a picture in picture) can have its own picture blurred behind it, or a colour, instead of black bars.
+- **New effects:** sketch, poster, fisheye and mirror.
+- **Voice changer:** robot, telephone, megaphone, alien, chipmunk and monster voices in the sound tools.
 - **Round and soft blur areas:** blur and mosaic areas can be ellipses (e.g. over a face) and have a soft edge.
 - **Brand kit:** keep your brand colours and logo for every project (Add tab). The colours appear next to the text and shape colours; "+ Logo" puts the logo small in a corner for the whole video.
 - **LUT library:** add .cube/.3dl LUTs once and pick them from a list in the colour tools of any project.

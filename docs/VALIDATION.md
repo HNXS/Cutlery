@@ -1,5 +1,20 @@
 # Validation record
 
+## Windows portable build — 2026-10-08, canvas fill, sketch/poster/fisheye/mirror effects, voice changer (0.6 development)
+
+[GitHub Actions run 37761592181](https://github.com/HNXS/Cutlery/actions/runs/37761592181) on commit `8ec6ee07495b47ddd37d76f1962c6ca9617b1602` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `styleEffects`:**
+  - **Sketch:** dark outlines between the bars on white.
+  - **Poster:** at full strength only 0 or 255 per channel.
+  - **Fisheye:** the centre kept at the same picture size.
+  - **Mirror:** the right half reflects the left.
+  - **Canvas fill:** black by default, a colour, or the blurred picture around a half-size clip, also during a transition; saved and validated.
+- **Engine test `voiceChanger`:** the telephone voice drops a 100 Hz tone by more than 20 dB and keeps 1 kHz; every voice is audible; chipmunk and monster shift by seven semitones.
+- **UI test `lookControls`:** the mirror effect from the effect list and the background box (blurred picture, a custom colour).
+
 ## Windows portable build — 2026-10-08, ellipse and soft-edged blur areas, brand kit, LUT library (0.6 development)
 
 [GitHub Actions run 37751884809](https://github.com/HNXS/Cutlery/actions/runs/37751884809) on commit `c63d63bea412864dc3cedc848cad11d90ddb696e` passed every step on its first attempt.

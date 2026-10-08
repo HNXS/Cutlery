@@ -2665,6 +2665,41 @@ ApplicationWindow {
                                         }
                                     }
                                 }
+                                // Canvas fill: what shows around a picture that does not fill the frame,
+                                // e.g. a portrait video in a landscape project.
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    visible: !!win.selection.assetId && win.selection.picture === true
+                                    Label {
+                                        text: "Background"
+                                        color: win.selection.canvasFill ? win.mint : win.muted
+                                        Layout.preferredWidth: 80
+                                    }
+                                    ComboBox {
+                                        id: canvasFill
+                                        objectName: "canvasFill"
+                                        Layout.fillWidth: true
+                                        enabled: win.selection.locked !== true
+                                        readonly property var fills: ["", "blur", "#000000", "#ffffff"].concat((win.s.brandColors || []).filter(c => c !== "#000000" && c !== "#ffffff"))
+                                        readonly property string current: win.selection.canvasFill || ""
+                                        model: ["None (tracks below)", "Blurred picture", "Black", "White"].concat(fills.slice(4)).concat(fills.indexOf(current) < 0 ? [current] : [])
+                                        currentIndex: fills.indexOf(current) >= 0 ? fills.indexOf(current) : fills.length
+                                        onActivated: index => {
+                                            if (index < fills.length)
+                                                editor.setClip("canvasFill", fills[index]);
+                                        }
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Fills the frame around the picture: the picture itself blurred, or a colour (brand colours are listed too)"
+                                    }
+                                    TextField {
+                                        objectName: "canvasFillColor"
+                                        Layout.preferredWidth: 80
+                                        placeholderText: "#rrggbb"
+                                        text: win.selection.canvasFill && win.selection.canvasFill !== "blur" ? win.selection.canvasFill : ""
+                                        onEditingFinished: if (text.trim() !== (win.selection.canvasFill || ""))
+                                            editor.setClip("canvasFill", text.trim())
+                                    }
+                                }
                                 // Anchor: the point that zoom and rotation keep in place, e.g. a corner for
                                 // a zoom into that corner.
                                 RowLayout {
@@ -3482,6 +3517,25 @@ ApplicationWindow {
                                         }
                                     }
                                 }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label {
+                                        text: "Voice"
+                                        color: win.selection.voice ? win.mint : win.muted
+                                        Layout.preferredWidth: 105
+                                    }
+                                    ComboBox {
+                                        objectName: "voice"
+                                        Layout.fillWidth: true
+                                        enabled: win.selection.locked !== true
+                                        readonly property var voices: ["", "robot", "telephone", "megaphone", "alien", "chipmunk", "monster"]
+                                        model: ["Normal", "Robot", "Telephone", "Megaphone", "Alien", "Chipmunk", "Monster"]
+                                        currentIndex: Math.max(0, voices.indexOf(win.selection.voice || ""))
+                                        onActivated: index => editor.setClip("voice", voices[index])
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Changes how the voice sounds; works with the pitch above"
+                                    }
+                                }
                             }
                             // Colour and look of the clip's picture.
                             ColumnLayout {
@@ -3876,8 +3930,8 @@ ApplicationWindow {
                                         objectName: "fxChoice"
                                         Layout.fillWidth: true
                                         enabled: win.selection.locked !== true
-                                        readonly property var keys: ["", "shake", "glitch", "vhs", "film"]
-                                        model: ["No effect", "Camera shake", "Glitch", "VHS", "Old film"]
+                                        readonly property var keys: ["", "shake", "glitch", "vhs", "film", "sketch", "poster", "fisheye", "mirror"]
+                                        model: ["No effect", "Camera shake", "Glitch", "VHS", "Old film", "Sketch", "Poster", "Fisheye", "Mirror"]
                                         currentIndex: Math.max(0, keys.indexOf(win.selection.fx || ""))
                                         onActivated: index => editor.setClip("fx", keys[index])
                                         ToolTip.visible: hovered

@@ -3276,6 +3276,84 @@ class EngineTest : public QObject {
                                  }),
                                  10),
                            plain) < 1);
+        // Sketch: dark outlines on white; inside a bar the picture is near white.
+        const auto sketch = still(with([](Clip &c) {
+                                      c.fx = "sketch";
+                                      c.fxStrength = 1;
+                                  }),
+                                  10);
+        QVERIFY2(qGray(sketch.pixel(9, 20)) > 200 && qGray(sketch.pixel(27, 20)) > 200,
+                 qPrintable(QColor(sketch.pixel(27, 20)).name()));
+        int dark = 0;
+        for (int x = 0; x < 128; ++x)
+            dark += qGray(sketch.pixel(x, 20)) < 120;
+        QVERIFY2(dark >= 3 && dark < 40, qPrintable(QString::number(dark)));
+        // Poster at full strength: every channel is 0 or 255.
+        const auto poster = still(with([](Clip &c) {
+                                      c.fx = "poster";
+                                      c.fxStrength = 1;
+                                  }),
+                                  10);
+        for (int x = 2; x < 128; x += 9) {
+            const QColor v(poster.pixel(x, 20));
+            for (int channel : {v.red(), v.green(), v.blue()})
+                QVERIFY2(channel < 8 || channel > 247, qPrintable(v.name()));
+        }
+        QVERIFY(difference(poster, plain) > 5);
+        // Fisheye: the centre stays, the bars near the edges bend and move outward.
+        const auto bulge = still(with([](Clip &c) {
+                                     c.fx = "fisheye";
+                                     c.fxStrength = 1;
+                                 }),
+                                 10);
+        QVERIFY(difference(bulge, plain) > 5);
+        const QColor centre(bulge.pixel(64, 30)), was(plain.pixel(64, 30));
+        QVERIFY(std::abs(centre.red() - was.red()) + std::abs(centre.blue() - was.blue()) < 40);
+        QCOMPARE(bulge.size(), plain.size());
+        // Mirror: the right half is the left half reflected.
+        const auto mirrored = still(with([](Clip &c) {
+                                        c.fx = "mirror";
+                                        c.fxStrength = 1;
+                                    }),
+                                    10);
+        for (int x = 0; x < 64; x += 7)
+            QVERIFY(std::abs(qGray(mirrored.pixel(x, 20)) - qGray(mirrored.pixel(127 - x, 20))) < 6);
+        QVERIFY(difference(mirrored, plain) > 5);
+        // Canvas fill: around a half-size picture, black by default, a colour, or the picture
+        // blurred.
+        auto small = with([](Clip &c) { c.scale = 0.5; });
+        QCOMPARE(qGray(still(small, 10).pixel(3, 3)), 0);
+        small.canvasFill = "#ff0000";
+        auto filled = still(small, 10);
+        const QColor red(filled.pixel(3, 3));
+        QVERIFY2(red.red() > 245 && red.green() < 10 && red.blue() < 10, qPrintable(red.name()));
+        QVERIFY(difference(filled.copy(32, 18, 64, 36), still(with([](Clip &c) { c.scale = 0.5; }), 10).copy(32, 18, 64, 36)) < 1);
+        small.canvasFill = "blur";
+        filled = still(small, 10);
+        QVERIFY2(qGray(filled.pixel(3, 3)) > 40, qPrintable(QColor(filled.pixel(3, 3)).name()));
+        QVERIFY(difference(filled.copy(32, 18, 64, 36), still(with([](Clip &c) { c.scale = 0.5; }), 10).copy(32, 18, 64, 36)) < 1);
+        // Also under a transition: the fill shows behind both pictures.
+        {
+            auto project = p;
+            auto first = small, second = small;
+            second.id = "d";
+            second.start = 60;
+            second.transition = "fade";
+            second.transitionFrames = 10;
+            project.clips = {first, second};
+            RenderOptions options;
+            options.audio = false;
+            options.from = 58;
+            options.to = 59;
+            const auto plan = compileRender(project, dir.filePath("work"), 128, 72, options);
+            QFile g(graph);
+            QVERIFY(g.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage out;
+            out.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            QVERIFY2(qGray(out.pixel(3, 3)) > 40, qPrintable(QColor(out.pixel(3, 3)).name()));
+        }
         // Stabilize renders and leaves a still picture about where it was.
         const auto steady = still(with([](Clip &c) { c.stabilize = true; }), 10);
         QVERIFY2(difference(steady, plain) < 8, qPrintable(QString::number(difference(steady, plain))));
@@ -3312,6 +3390,14 @@ class EngineTest : public QObject {
         const auto json = saved.json();
         const auto loaded = Project::fromJson(json, {}).clips[0];
         QCOMPARE(loaded.fx, QString("vhs"));
+        QCOMPARE(Project::fromJson([&] {
+                     auto q = saved;
+                     q.clips[0].canvasFill = "blur";
+                     q.clips[0].voice = "robot";
+                     q.clips[0].fx = "mirror";
+                     return q.json();
+                 }(), {}).clips[0].canvasFill,
+                 QString("blur"));
         QCOMPARE(loaded.fxStrength, 0.7);
         QCOMPARE(loaded.motionBlur, 0.4);
         QVERIFY(loaded.stabilize);
@@ -3323,6 +3409,8 @@ class EngineTest : public QObject {
                 !bare.contains("reverb"));
         for (const auto &[key, value] : {std::pair{QString("fx"), QJsonValue("wobble")},
                                          std::pair{QString("fxStrength"), QJsonValue(2)},
+                                         std::pair{QString("canvasFill"), QJsonValue("red")},
+                                         std::pair{QString("voice"), QJsonValue("dalek")},
                                          std::pair{QString("echo"), QJsonValue(-1)}}) {
             auto bad = json;
             auto clips = bad["clips"].toArray();
@@ -3332,6 +3420,72 @@ class EngineTest : public QObject {
             bad["clips"] = clips;
             QVERIFY_EXCEPTION_THROWN(Project::fromJson(bad, {}), std::runtime_error);
         }
+    }
+    void voiceChanger() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto low = dir.filePath("low.wav"), mid = dir.filePath("mid.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "sine=f=100:d=1", "-ar", "48000", "-ac", "2", low});
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "sine=f=1000:d=1", "-ar", "48000", "-ac", "2", mid});
+        Project p;
+        for (const auto &[id, path] : {std::pair{QString("low"), low}, std::pair{QString("mid"), mid}}) {
+            Asset a;
+            a.id = id;
+            a.path = path;
+            a.kind = "audio";
+            a.duration = 1;
+            a.hasAudio = true;
+            p.assets << a;
+        }
+        const auto graph = dir.filePath("graph.txt");
+        auto render = [&](const QString &asset, const QString &voice, QString *script = nullptr) {
+            auto project = p;
+            Clip c;
+            c.id = "c";
+            c.assetId = asset;
+            c.duration = 30;
+            c.voice = voice;
+            project.clips = {c};
+            RenderOptions options;
+            options.video = false;
+            const auto plan = compileRender(project, dir.filePath("work"), 128, 72, options);
+            if (script)
+                *script = plan.graph;
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            const auto out = dir.filePath("out-" + asset + voice + ".wav");
+            QStringList args{"-v", "error", "-y"};
+            args += plan.inputs;
+            args << "-filter_complex_script" << graph << "-map" << "[aout]" << out;
+            run(ffmpeg, args);
+            QProcess m;
+            m.start(ffmpeg, {"-hide_banner", "-nostats", "-ss", "0.2", "-t", "0.6", "-i", out,
+                             "-af", "volumedetect", "-f", "null", "-"});
+            m.waitForFinished(30000);
+            const auto v = QRegularExpression("mean_volume: (-?[0-9.]+|-inf) dB")
+                               .match(QString::fromUtf8(m.readAllStandardError()));
+            return !v.hasMatch() || v.captured(1) == "-inf" ? -999. : v.captured(1).toDouble();
+        };
+        // The telephone keeps the middle of the voice range and drops low tones.
+        const double plainLow = render("low", ""), phoneLow = render("low", "telephone");
+        QVERIFY2(phoneLow < plainLow - 20, qPrintable(QString("%1 %2").arg(phoneLow).arg(plainLow)));
+        QVERIFY(std::abs(render("mid", "telephone") - render("mid", "")) < 3);
+        // The others render audibly.
+        for (const auto &voice : {"robot", "megaphone", "alien", "chipmunk", "monster"})
+            QVERIFY2(render("mid", voice) > -30, voice);
+        // Chipmunk and monster: seven semitones up or down, on top of the clip's own pitch.
+        QString script;
+        render("mid", "chipmunk", &script);
+        QVERIFY2(script.contains(QString("asetrate=%1").arg(qRound(48000 * std::pow(2., 7. / 12)))),
+                 qPrintable(script));
+        render("mid", "monster", &script);
+        QVERIFY(script.contains(QString("asetrate=%1").arg(qRound(48000 * std::pow(2., -7. / 12)))));
+        render("mid", "", &script);
+        QVERIFY(!script.contains("asetrate"));
     }
     void reverbAndEcho() {
         const auto ffmpeg = Editor::executable("ffmpeg");

@@ -38,7 +38,8 @@ void noteLosses(const Clip &c, QMap<QString, int> &what) {
         what["transitions (as straight cuts)"]++;
     if (!c.fx.isEmpty() || c.blur > 0 || c.sharpen > 0 || c.glow > 0 || c.vignette > 0 ||
         c.grain > 0 || c.stabilize || c.chromaKey || c.aiCutout ||
-        !c.lumaKey.isEmpty() || !c.blendMode.isEmpty() || c.pitch != 0)
+        !c.lumaKey.isEmpty() || !c.blendMode.isEmpty() || c.pitch != 0 || !c.voice.isEmpty() ||
+        !c.canvasFill.isEmpty())
         what["effects"]++;
     if (c.reverse)
         what["reversed clips (exported forwards)"]++;

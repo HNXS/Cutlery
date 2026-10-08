@@ -149,7 +149,9 @@ struct Clip {
     // reduction and de-essing.
     double eqLow = 0, eqMid = 0, eqHigh = 0, lowCut = 0;
     double compressor = 0, gate = 0, denoise = 0, deess = 0;
-    // Style effect: "", "shake", "glitch", "vhs" or "film", at fxStrength (0..1). Motion blur
+    // Style effect: "", "shake", "glitch", "vhs", "film", "sketch" (edges), "poster" (fewer
+    // colours), "fisheye" (bulge from the centre) or "mirror" (left half reflected), at
+    // fxStrength (0..1). Motion blur
     // blends successive frames (0..1); stabilize smooths camera shake.
     QString fx;
     double fxStrength = 0.5, motionBlur = 0;
@@ -162,6 +164,11 @@ struct Clip {
     double reverb = 0, echo = 0;
     // Pitch in semitones (−12..12) without changing the tempo.
     double pitch = 0;
+    // Voice changer: "", "robot", "telephone", "megaphone", "alien", "chipmunk" or "monster".
+    QString voice;
+    // What fills the canvas around a picture that does not cover it: "" (lower tracks or
+    // black), "blur" (the picture itself, enlarged to cover and blurred) or a colour #rrggbb.
+    QString canvasFill;
     double pan = 0; // -1 left .. 1 right
     // Look: 0..1, 0 off.
     double sharpen = 0, glow = 0, vignette = 0, grain = 0;

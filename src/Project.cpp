@@ -375,6 +375,10 @@ QJsonObject Project::json(const QString &base) const {
             o["lumaTolerance"] = c.lumaTolerance;
             o["lumaSoftness"] = c.lumaSoftness;
         }
+        if (!c.voice.isEmpty())
+            o["voice"] = c.voice;
+        if (!c.canvasFill.isEmpty())
+            o["canvasFill"] = c.canvasFill;
         if (!c.fx.isEmpty()) {
             o["fx"] = c.fx;
             o["fxStrength"] = c.fxStrength;
@@ -619,6 +623,8 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.lumaTolerance = j["lumaTolerance"].toDouble(0.1);
         c.lumaSoftness = j["lumaSoftness"].toDouble(0.05);
         c.fx = j["fx"].toString();
+        c.voice = j["voice"].toString();
+        c.canvasFill = j["canvasFill"].toString();
         c.fxStrength = j["fxStrength"].toDouble(0.5);
         c.stabilize = j["stabilize"].toBool(false);
         c.stabilizeStrength = j["stabilizeStrength"].toDouble(0.33);
@@ -866,7 +872,17 @@ void Project::validate() const {
                                 [](QChar ch) { return QString("rygcbm ").contains(ch); }) &&
                     c.hslColors.size() <= 16,
                 "Invalid selective colour");
-        require(QStringList{"", "shake", "glitch", "vhs", "film"}.contains(c.fx) &&
+        require(QStringList{"", "robot", "telephone", "megaphone", "alien", "chipmunk", "monster"}
+                        .contains(c.voice),
+                "Invalid voice effect");
+        require(c.canvasFill.isEmpty() ||
+                    (!c.assetId.isEmpty() &&
+                     (c.canvasFill == "blur" ||
+                      QRegularExpression("^#[0-9a-fA-F]{6}$").match(c.canvasFill).hasMatch())),
+                "Invalid background fill");
+        require(QStringList{"", "shake", "glitch", "vhs", "film", "sketch", "poster", "fisheye",
+                            "mirror"}
+                        .contains(c.fx) &&
                     bounded(c.fxStrength, 0, 1) && bounded(c.motionBlur, 0, 1) &&
                     bounded(c.stabilizeStrength, 0, 1) &&
                     bounded(c.reverb, 0, 1) && bounded(c.echo, 0, 1) && bounded(c.pan, -1, 1) &&

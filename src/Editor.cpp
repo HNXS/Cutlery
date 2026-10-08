@@ -528,6 +528,8 @@ QVariantMap Editor::state() const {
             PROP(denoise);
             PROP(deess);
             PROP(fx);
+            PROP(voice);
+            PROP(canvasFill);
             PROP(fxStrength);
             PROP(motionBlur);
             PROP(stabilize);
@@ -2223,6 +2225,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(denoise, toDouble);
         FIELD(deess, toDouble);
         FIELD(fx, toString);
+        FIELD(voice, toString);
+        FIELD(canvasFill, toString);
         FIELD(fxStrength, toDouble);
         FIELD(motionBlur, toDouble);
         FIELD(stabilize, toBool);
@@ -3881,6 +3885,7 @@ void Editor::pasteAttributes(const QString &group) {
         c->hslLightness = from.hslLightness;
         c->fx = from.fx;
         c->fxStrength = from.fxStrength;
+        c->canvasFill = from.canvasFill;
         c->motionBlur = from.motionBlur;
         if (group == "look")
             return;
@@ -3910,6 +3915,7 @@ void Editor::pasteAttributes(const QString &group) {
         c->deess = from.deess;
         c->reverb = from.reverb;
         c->pitch = from.pitch;
+        c->voice = from.voice;
         c->echo = from.echo;
         c->pan = from.pan;
         c->fadeIn = from.fadeIn;

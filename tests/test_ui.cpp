@@ -1217,6 +1217,20 @@ class UiTest : public QObject {
         editor.clearError();
         editor.undo();
         QVERIFY(clip().fx.isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(fx, "activated", Q_ARG(int, 8)));
+        QCOMPARE(clip().fx, QString("mirror"));
+        editor.undo();
+        // Canvas fill for pictures that do not cover the frame.
+        auto *fill = findItem(window->contentItem(), "canvasFill");
+        QTRY_VERIFY(fill && fill->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(fill, "activated", Q_ARG(int, 1)));
+        QCOMPARE(clip().canvasFill, QString("blur"));
+        QTRY_COMPARE(fill->property("currentIndex").toInt(), 1);
+        editor.setClip("canvasFill", "#12ab34");
+        QTRY_COMPARE(fill->property("currentText").toString(), QString("#12ab34"));
+        editor.undo();
+        editor.undo();
+        QVERIFY(clip().canvasFill.isEmpty());
         // Copy the look and paste it onto a title.
         editor.setClip("temperature", 0.5);
         QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "copyClip"), "clicked"));
