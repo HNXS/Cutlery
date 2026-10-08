@@ -1284,10 +1284,34 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                              .arg(rw)
                              .arg(rh)
                              .arg(x, y, effect);
-                nodes << QString("[base%1][fx%1]overlay=x='%2':y='%3':eof_action=pass:"
+                QString area = "fx" + id;
+                if (c.effectShape == "ellipse" || c.feather > 0) {
+                    // Ellipse or soft edge: the effect's alpha is multiplied by a still mask,
+                    // so the untouched picture shows through outside the shape.
+                    Clip shape;
+                    shape.shape = c.effectShape == "ellipse" ? "circle" : "rect";
+                    shape.feather = c.feather;
+                    const auto file =
+                        QDir(work).filePath(QString("area-%1.png").arg(serial++));
+                    if (!overlayMask(shape, rw, rh).save(file))
+                        throw std::runtime_error("Cannot write effect area mask");
+                    r.inputs << "-loop" << "1" << "-framerate" << fps << "-i" << file;
+                    nodes << QString("[%1:v:0]settb=%2/%3,setpts=N,format=gbrap[amask%4]")
+                                 .arg(input++)
+                                 .arg(p.fpsD)
+                                 .arg(p.fpsN)
+                                 .arg(id);
+                    nodes << QString("[fx%1]format=gbrap[fxp%1]").arg(id);
+                    nodes << QString("[fxp%1][amask%1]blend=c0_mode=normal:c1_mode=normal:"
+                                     "c2_mode=normal:c3_mode=multiply:shortest=1,format=rgba[fxm%1]")
+                                 .arg(id);
+                    area = "fxm" + id;
+                }
+                nodes << QString("[base%1][%6]overlay=x='%2':y='%3':eof_action=pass:"
                                  "repeatlast=0:format=auto:enable='gte(t,%4)*lt(t,%5)'[area%1]")
                              .arg(id, x, y, num(secs(visibleStart - from) - half),
-                                  num(secs(visibleEnd - from) - half));
+                                  num(secs(visibleEnd - from) - half))
+                             .arg(area);
                 visual = "area" + id;
                 continue;
             }

@@ -1409,6 +1409,119 @@ ApplicationWindow {
                                         }
                                     }
                                 }
+                                // Brand kit (every project): colours offered next to the colour settings,
+                                // and a logo put in a corner for the whole video.
+                                Caption {
+                                    text: "BRAND KIT"
+                                }
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 4
+                                    Repeater {
+                                        model: win.s.brandColors || []
+                                        Rectangle {
+                                            required property string modelData
+                                            objectName: "brandColor-" + modelData
+                                            width: 22
+                                            height: 22
+                                            radius: 11
+                                            color: modelData
+                                            border.width: 1
+                                            border.color: "#6481a0"
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                                hoverEnabled: true
+                                                onClicked: mouse => {
+                                                    if (mouse.button === Qt.RightButton)
+                                                        editor.removeBrandColor(parent.modelData);
+                                                }
+                                                ToolTip.visible: containsMouse
+                                                ToolTip.text: parent.modelData + " (right-click to remove)"
+                                            }
+                                        }
+                                    }
+                                    Label {
+                                        visible: (win.s.brandColors || []).length === 0
+                                        text: "No brand colours yet"
+                                        color: win.muted
+                                        font.pixelSize: 11
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    TextField {
+                                        id: brandColorField
+                                        objectName: "brandColorField"
+                                        Layout.fillWidth: true
+                                        placeholderText: "#rrggbb"
+                                        onAccepted: {
+                                            editor.addBrandColor(text);
+                                            text = "";
+                                        }
+                                    }
+                                    Action {
+                                        objectName: "addBrandColor"
+                                        text: "+ Colour"
+                                        padding: 6
+                                        onClicked: {
+                                            editor.addBrandColor(brandColorField.text || win.selection.textColor || win.selection.fillColor || "");
+                                            brandColorField.text = "";
+                                        }
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Keeps the colour typed here (or the selected title's or shape's colour) for every project"
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Image {
+                                        visible: !!win.s.brandLogo
+                                        source: win.s.brandLogo ? "file:///" + win.s.brandLogo.replace(/^\/+/, "") : ""
+                                        sourceSize.height: 28
+                                        Layout.preferredHeight: 28
+                                        Layout.preferredWidth: 56
+                                        fillMode: Image.PreserveAspectFit
+                                    }
+                                    Action {
+                                        objectName: "chooseBrandLogo"
+                                        text: win.s.brandLogo ? "Change logo…" : "Choose logo…"
+                                        Layout.fillWidth: true
+                                        padding: 6
+                                        onClicked: logoDialog.open()
+                                    }
+                                    Action {
+                                        objectName: "addBrandLogo"
+                                        text: "+ Logo ▾"
+                                        padding: 6
+                                        enabled: !!win.s.brandLogo
+                                        onClicked: logoMenu.popup()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Puts the logo small in a corner for the whole video, on its own track"
+                                        Menu {
+                                            id: logoMenu
+                                            MenuItem {
+                                                objectName: "addBrandLogo-topLeft"
+                                                text: "◸  Top left"
+                                                onTriggered: editor.addBrandLogo("topLeft")
+                                            }
+                                            MenuItem {
+                                                objectName: "addBrandLogo-topRight"
+                                                text: "◹  Top right"
+                                                onTriggered: editor.addBrandLogo("topRight")
+                                            }
+                                            MenuItem {
+                                                objectName: "addBrandLogo-bottomLeft"
+                                                text: "◺  Bottom left"
+                                                onTriggered: editor.addBrandLogo("bottomLeft")
+                                            }
+                                            MenuItem {
+                                                objectName: "addBrandLogo-bottomRight"
+                                                text: "◿  Bottom right"
+                                                onTriggered: editor.addBrandLogo("bottomRight")
+                                            }
+                                        }
+                                    }
+                                }
                                 Action {
                                     objectName: "addAdjustment"
                                     text: "+ Adjustment layer"
@@ -1984,6 +2097,37 @@ ApplicationWindow {
                                     onMoved: if (!pressed)
                                         editor.setClip("effectStrength", value)
                                 }
+                                ComboBox {
+                                    objectName: "effectShape"
+                                    Layout.fillWidth: true
+                                    readonly property var shapes: ["rect", "ellipse"]
+                                    model: ["Rectangle", "Ellipse"]
+                                    currentIndex: Math.max(0, shapes.indexOf(win.selection.effectShape || "rect"))
+                                    onActivated: editor.setClip("effectShape", shapes[currentIndex])
+                                }
+                                RowLayout {
+                                    Label {
+                                        text: "Soft edge"
+                                        color: win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    Label {
+                                        text: Math.round((win.selection.feather || 0) * 200) + "%"
+                                        font.pixelSize: 10
+                                    }
+                                }
+                                Slider {
+                                    objectName: "effectFeather"
+                                    Layout.fillWidth: true
+                                    from: 0
+                                    to: .5
+                                    stepSize: .01
+                                    value: win.selection.feather ?? 0
+                                    onPressedChanged: if (!pressed)
+                                        editor.setClip("feather", value)
+                                    onMoved: if (!pressed)
+                                        editor.setClip("feather", value)
+                                }
                                 Label {
                                     Layout.fillWidth: true
                                     wrapMode: Text.Wrap
@@ -2042,7 +2186,7 @@ ApplicationWindow {
                                             Layout.preferredWidth: 60
                                         }
                                         Repeater {
-                                            model: graphicColours.modelData.colors
+                                            model: (win.s.brandColors || []).concat(graphicColours.modelData.colors)
                                             Rectangle {
                                                 required property string modelData
                                                 width: 18
@@ -2340,6 +2484,28 @@ ApplicationWindow {
                                         onEditingFinished: editor.setClip("gradientColor", text.trim())
                                         ToolTip.visible: hovered
                                         ToolTip.text: "The letters fade from the text colour at the top to this colour at the bottom. Leave empty for one colour."
+                                    }
+                                }
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 4
+                                    visible: (win.s.brandColors || []).length > 0
+                                    Repeater {
+                                        model: win.s.brandColors || []
+                                        Rectangle {
+                                            required property string modelData
+                                            objectName: "brandTextColor-" + modelData
+                                            width: 18
+                                            height: 18
+                                            radius: 9
+                                            color: modelData
+                                            border.width: win.selection.textColor === modelData ? 3 : 1
+                                            border.color: win.selection.textColor === modelData ? win.mint : "#6481a0"
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: editor.setClip("textColor", parent.modelData)
+                                            }
+                                        }
                                     }
                                 }
                                 // Typography: font, weight, alignment, spacing, outline, shadow, box.
@@ -3653,6 +3819,30 @@ ApplicationWindow {
                                         ToolTip.text: "Remove the LUT"
                                     }
                                 }
+                                // LUT library: the LUTs kept in Cutlery's data folder, one pick away.
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    ComboBox {
+                                        objectName: "lutLibrary"
+                                        Layout.fillWidth: true
+                                        readonly property var luts: win.s.lutLibrary || []
+                                        model: [luts.length ? "LUT library…" : "LUT library is empty"].concat(luts.map(l => l.name))
+                                        enabled: luts.length > 0 && win.selection.locked !== true
+                                        onActivated: index => {
+                                            if (index > 0)
+                                                editor.setClip("lut", luts[index - 1].path);
+                                            currentIndex = 0;
+                                        }
+                                    }
+                                    Action {
+                                        objectName: "addLutToLibrary"
+                                        text: "+ Library"
+                                        padding: 6
+                                        onClicked: lutLibraryDialog.open()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Copy .cube or .3dl files into the library, for every project"
+                                    }
+                                }
                                 RowLayout {
                                     visible: !!win.selection.lut
                                     Layout.fillWidth: true
@@ -4233,6 +4423,22 @@ ApplicationWindow {
                 editor.setClip("fontFamily", family);
             }
         }
+    }
+    FileDialog {
+        id: lutLibraryDialog
+        title: "Add LUTs to the library"
+        fileMode: FileDialog.OpenFiles
+        nameFilters: ["3D LUTs (*.cube *.3dl)", "All files (*)"]
+        onAccepted: {
+            for (const f of selectedFiles)
+                editor.addLutToLibrary(f);
+        }
+    }
+    FileDialog {
+        id: logoDialog
+        title: "Choose the brand logo"
+        nameFilters: ["Pictures (*.png *.jpg *.jpeg *.webp *.bmp)", "All files (*)"]
+        onAccepted: editor.setBrandLogo(selectedFile)
     }
     FileDialog {
         id: lutDialog

@@ -979,6 +979,25 @@ class UiTest : public QObject {
         QVERIFY(QMetaObject::invokeMethod(type, "activated", Q_ARG(int, 0)));
         QCOMPARE(editor.project().clip(area.id)->effect, QString("blur"));
         QVERIFY(!findItem(window->contentItem(), "overlayShape")->isVisible());
+        auto *areaShape = findItem(window->contentItem(), "effectShape");
+        QVERIFY(areaShape && areaShape->isVisible());
+        areaShape->setProperty("currentIndex", 1);
+        QVERIFY(QMetaObject::invokeMethod(areaShape, "activated", Q_ARG(int, 1)));
+        QCOMPARE(editor.project().clip(area.id)->effectShape, QString("ellipse"));
+        QVERIFY(findItem(window->contentItem(), "effectFeather")->isVisible());
+        // Brand kit in the Add tab: colours appear as swatches; the logo needs choosing first.
+        for (const auto &c : editor.state()["brandColors"].toStringList())
+            editor.removeBrandColor(c);
+        editor.setBrandLogo({});
+        auto *brandField = findItem(window->contentItem(), "brandColorField");
+        QVERIFY(brandField && brandField->isVisible());
+        brandField->setProperty("text", "#123456");
+        press("addBrandColor");
+        QCOMPARE(editor.state()["brandColors"].toStringList(), QStringList{"#123456"});
+        QTRY_VERIFY(findItem(window->contentItem(), "brandColor-#123456"));
+        QVERIFY(!findItem(window->contentItem(), "addBrandLogo")->property("enabled").toBool());
+        editor.removeBrandColor("#123456");
+        QTRY_VERIFY(!findItem(window->contentItem(), "brandColor-#123456"));
         // A lower third from the library panel; its style can be changed in the inspector.
         press("addLowerThird");
         const auto lower = editor.project().clips.last();

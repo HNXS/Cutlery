@@ -340,6 +340,18 @@ class Editor final : public QObject {
     Q_INVOKABLE void saveTextStyle(const QString &name);
     Q_INVOKABLE void applyTextStyle(const QString &name);
     Q_INVOKABLE void removeTextStyle(const QString &name);
+    // Brand kit for every project (data folder, brand.json and brand/): up to 24 colours
+    // (#rrggbb, state "brandColors") offered next to the colour settings, and one logo picture
+    // (state "brandLogo", copied into the data folder). addBrandLogo puts the logo on a free
+    // top track over the whole project, small, in a corner (topLeft, topRight, bottomLeft,
+    // bottomRight), in one undo step.
+    Q_INVOKABLE void addBrandColor(const QString &color);
+    Q_INVOKABLE void removeBrandColor(const QString &color);
+    Q_INVOKABLE void setBrandLogo(const QUrl &file);
+    Q_INVOKABLE void addBrandLogo(const QString &corner);
+    // LUT library: the .cube and .3dl files in the data folder's luts/ (state "lutLibrary",
+    // {name, path}, sorted by name). addLutToLibrary copies a file there and returns its path.
+    Q_INVOKABLE QString addLutToLibrary(const QUrl &file);
     // Finds the shot changes in the selected video clip and splits it there, with any detached
     // audio, in one undo step. Sensitivity 0..1: higher finds subtler cuts.
     Q_INVOKABLE void splitAtScenes(double sensitivity = 0.5);
@@ -434,6 +446,11 @@ class Editor final : public QObject {
     QVariantMap m_reframe;
     QVariantMap m_autoColour;
     QVariantList m_textStyles, m_templates;
+    QStringList m_brandColors;
+    QString m_brandLogo;
+    QVariantList m_lutLibrary;
+    void saveBrand();
+    void listLuts();
     void listTemplates();
     void saveTextStyles();
     QProcess *m_autoColourProcess = nullptr, *m_frameProcess = nullptr, *m_pickProcess = nullptr;

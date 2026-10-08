@@ -4,6 +4,9 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Round and soft blur areas:** blur and mosaic areas can be ellipses (e.g. over a face) and have a soft edge.
+- **Brand kit:** keep your brand colours and logo for every project (Add tab). The colours appear next to the text and shape colours; "+ Logo" puts the logo small in a corner for the whole video.
+- **LUT library:** add .cube/.3dl LUTs once and pick them from a list in the colour tools of any project.
 - **Motions:** "Add a motion…" in the inspector makes a picture, title or icon pop in, pop out, slide in, pulse or wiggle, as keyframes you can still change.
 - **Whites and blacks** sliders in the colour tools.
 - **Convert or compress:** right-click a video or sound in the library to save it in another format, size or quality without putting it on the timeline.

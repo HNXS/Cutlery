@@ -356,6 +356,8 @@ QJsonObject Project::json(const QString &base) const {
             o["effectStrength"] = c.effectStrength;
             o["effectWidth"] = c.effectWidth;
             o["effectHeight"] = c.effectHeight;
+            if (c.effectShape != "rect")
+                o["effectShape"] = c.effectShape;
         }
         if (c.blur > 0)
             o["blur"] = c.blur;
@@ -606,6 +608,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.effectStrength = j["effectStrength"].toDouble(0.6);
         c.effectWidth = j["effectWidth"].toDouble(0.3);
         c.effectHeight = j["effectHeight"].toDouble(0.2);
+        c.effectShape = j["effectShape"].toString("rect");
         c.blur = j["blur"].toDouble(0);
         for (const auto &[k, field] : lookFields())
             c.*field = j[k].toDouble(0);
@@ -837,7 +840,8 @@ void Project::validate() const {
                  ((c.effect == "blur" || c.effect == "pixelate" || c.effect == "adjust") &&
                   c.assetId.isEmpty())) &&
                     bounded(c.effectStrength, 0, 1) && bounded(c.effectWidth, 0.02, 1) &&
-                    bounded(c.effectHeight, 0.02, 1) && bounded(c.blur, 0, 1),
+                    bounded(c.effectHeight, 0.02, 1) && bounded(c.blur, 0, 1) &&
+                    (c.effectShape == "rect" || c.effectShape == "ellipse"),
                 "Invalid blur or mosaic setting");
         require(bounded(c.temperature, -1, 1) && bounded(c.tint, -1, 1) &&
                     bounded(c.vibrance, -1, 1) && bounded(c.shadows, -1, 1) &&

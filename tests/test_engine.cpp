@@ -6076,6 +6076,93 @@ class EngineTest : public QObject {
         editor.addEffect("sparkle");
         QVERIFY(editor.state()["error"].toString().contains("Unknown"));
     }
+    void brandKitAndLutLibrary() {
+        QTemporaryDir dir;
+        QImage logoImage(200, 100, QImage::Format_ARGB32);
+        logoImage.fill(Qt::red);
+        const auto logo = dir.filePath("logo.png");
+        QVERIFY(logoImage.save(logo));
+        QFile cube(dir.filePath("Warm Film.cube"));
+        QVERIFY(cube.open(QIODevice::WriteOnly));
+        cube.write("LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n");
+        cube.close();
+        FrameProvider frames;
+        QString kept;
+        {
+            Editor editor(&frames);
+            for (const auto &c : editor.state()["brandColors"].toStringList())
+                editor.removeBrandColor(c);
+            editor.setBrandLogo({});
+            editor.addBrandColor("#FFD23F");
+            editor.addBrandColor("#ffd23f");
+            editor.addBrandColor(" #14181d ");
+            QCOMPARE(editor.state()["brandColors"].toStringList(), QStringList({"#ffd23f", "#14181d"}));
+            editor.addBrandColor("brandish");
+            QVERIFY(editor.state()["error"].toString().contains("#rrggbb"));
+            editor.addBrandLogo("topRight");
+            QVERIFY(editor.state()["error"].toString().contains("logo"));
+            editor.setBrandLogo(QUrl::fromLocalFile(dir.filePath("Warm Film.cube")));
+            QVERIFY(editor.state()["error"].toString().contains("picture"));
+            editor.setBrandLogo(QUrl::fromLocalFile(logo));
+            kept = editor.state()["brandLogo"].toString();
+            QVERIFY(QFileInfo(kept).isFile() && kept != logo);
+            // The logo goes over the whole video on a new top track, small, in the corner.
+            editor.configure(320, 180, 30, 1);
+            editor.addTitle();
+            const int tracks = editor.project().tracks;
+            editor.addBrandLogo("topRight");
+            const auto &p = editor.project();
+            QCOMPARE(p.tracks, tracks + 1);
+            const auto *c = p.clip(editor.state()["selectedId"].toString());
+            QVERIFY(c && c->track == tracks && c->start == 0 && c->duration == 150);
+            const auto logoClip = c->id;
+            QCOMPARE(p.asset(c->assetId)->path, kept);
+            const auto size = p.pictureSize(*c, 320 * c->scale, 180 * c->scale);
+            QVERIFY2(std::abs(size.height() - 22.5) < 0.5, qPrintable(QString::number(size.height())));
+            QVERIFY(std::abs(c->x * 320 - (160 - 22.5 - 5.4)) < 0.5);
+            QVERIFY(std::abs(c->y * 180 + (90 - 11.25 - 5.4)) < 0.5);
+            editor.addBrandLogo("bottomLeft");
+            QCOMPARE(editor.project().assets.size(), size_t(1));
+            QVERIFY(editor.project().clips.last().x < 0 && editor.project().clips.last().y > 0);
+            editor.undo();
+            editor.undo();
+            QCOMPARE(editor.project().tracks, tracks);
+            editor.addBrandLogo("middle");
+            QVERIFY(editor.state()["error"].toString().contains("corner"));
+            // LUT library: copied into the data folder and listed by name.
+            for (const auto &l : editor.state()["lutLibrary"].toList())
+                QFile::remove(l.toMap()["path"].toString());
+            const auto first = editor.addLutToLibrary(QUrl::fromLocalFile(dir.filePath("Warm Film.cube")));
+            QVERIFY(QFileInfo(first).isFile() && first.endsWith("/luts/Warm Film.cube"));
+            QCOMPARE(editor.addLutToLibrary(QUrl::fromLocalFile(first)), first);
+            const auto second = editor.addLutToLibrary(QUrl::fromLocalFile(dir.filePath("Warm Film.cube")));
+            QVERIFY(second.endsWith("/luts/Warm Film (2).cube"));
+            const auto library = editor.state()["lutLibrary"].toList();
+            QCOMPARE(library.size(), 2);
+            QCOMPARE(library[0].toMap()["name"].toString(), QString("Warm Film"));
+            QVERIFY(editor.addLutToLibrary(QUrl::fromLocalFile(logo)).isEmpty());
+            editor.addBrandLogo("topLeft");
+            const auto withLut = editor.state()["selectedId"].toString();
+            QVERIFY(withLut != logoClip);
+            editor.setClip("lut", library[0].toMap()["path"]);
+            QCOMPARE(editor.project().clip(withLut)->lut, first);
+            QFile::remove(second);
+        }
+        {
+            // Kept for the next start.
+            Editor editor(&frames);
+            QCOMPARE(editor.state()["brandColors"].toStringList(), QStringList({"#ffd23f", "#14181d"}));
+            QCOMPARE(editor.state()["brandLogo"].toString(), kept);
+            QCOMPARE(editor.state()["lutLibrary"].toList().size(), 1);
+            editor.removeBrandColor("#FFD23F");
+            QCOMPARE(editor.state()["brandColors"].toStringList(), QStringList({"#14181d"}));
+            editor.setBrandLogo({});
+            QVERIFY(editor.state()["brandLogo"].toString().isEmpty());
+            QVERIFY(QFileInfo::exists(kept)); // projects may still show it
+            QFile::remove(kept);
+            QFile::remove(editor.state()["lutLibrary"].toList()[0].toMap()["path"].toString());
+        }
+    }
     void textStylesKit() {
         FrameProvider frames;
         {
@@ -6705,6 +6792,25 @@ class EngineTest : public QObject {
         later.clips[1].duration = 30;
         QVERIFY(spread(still(later, 10), 160, 90) > 200);
         QVERIFY(spread(still(later, 40), 160, 90) < 40);
+        // An ellipse leaves the rectangle's corners sharp; a soft edge fades the effect out.
+        auto oval = p;
+        oval.clips[1].effectShape = "ellipse";
+        image = still(oval, 10);
+        QVERIFY(spread(image, 160, 90) < 40);
+        QVERIFY2(spread(image, 90, 54) > 200, qPrintable(QString::number(spread(image, 90, 54))));
+        oval.clips[1].effect = "pixelate";
+        image = still(oval, 10);
+        QVERIFY(spread(image, 90, 54) > 200 && spread(image, 230, 126) > 200);
+        auto feathered = p;
+        feathered.clips[1].feather = 0.5;
+        image = still(feathered, 10);
+        QVERIFY(spread(image, 160, 90) < 60);
+        QVERIFY(spread(image, 90, 54) > 150);
+        QCOMPARE(Project::fromJson(oval.json(), {}).clips[1].effectShape, QString("ellipse"));
+        QVERIFY(!p.json()["clips"].toArray()[1].toObject().contains("effectShape"));
+        auto badShape = p;
+        badShape.clips[1].effectShape = "star";
+        QVERIFY_EXCEPTION_THROWN(badShape.validate(), std::runtime_error);
         // Clip-wide blur of the picture itself.
         auto soft = p;
         soft.clips.removeLast();

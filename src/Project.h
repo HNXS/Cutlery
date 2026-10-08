@@ -125,6 +125,8 @@ struct Clip {
     // the clip's colour and look apply to everything below it, by its opacity)
     QString effect;
     double effectStrength = 0.6, effectWidth = 0.3, effectHeight = 0.2;
+    // Shape of a blur or pixelate area: "rect" or "ellipse"; `feather` softens its edge.
+    QString effectShape = "rect";
     // Graphic clips (no media): a shape of graphicWidth × graphicHeight canvas fractions at
     // scale 1, centred at x/y, filled with fillColor and outlined with strokeColor at `stroke`
     // (fraction of the canvas height). Arrows and lines point right; rotate them. Speech bubbles

@@ -22,6 +22,8 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QSvgRenderer>
+#include <QImageReader>
+#include <QColor>
 #include <QPainter>
 #include <QSaveFile>
 #include <QStandardPaths>
@@ -78,6 +80,20 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
                 if (v.isObject() && !v.toObject()["name"].toString().isEmpty() && m_textStyles.size() < 200)
                     m_textStyles << v.toObject().toVariantMap();
     }
+    {
+        QFile brand(m_data + "/brand.json");
+        if (brand.open(QIODevice::ReadOnly) && brand.size() < 1024 * 1024) {
+            const auto o = QJsonDocument::fromJson(brand.readAll()).object();
+            for (const auto &v : o["colors"].toArray())
+                if (const QColor c(v.toString()); c.isValid() && m_brandColors.size() < 24 &&
+                                                  !m_brandColors.contains(c.name()))
+                    m_brandColors << c.name();
+            const auto logo = o["logo"].toString();
+            if (!logo.isEmpty() && !logo.contains("..") && QFileInfo(m_data + "/" + logo).isFile())
+                m_brandLogo = QDir::cleanPath(m_data + "/" + logo);
+        }
+    }
+    listLuts();
     m_analysis = new MediaAnalysis(m_data + "/cache/waveforms", executable("ffmpeg"), this);
     m_thumbnails = new Thumbnails(m_data + "/cache/thumbnails", executable("ffmpeg"), this);
     m_encoders = new EncoderResolver(executable("ffmpeg"), this);
@@ -561,6 +577,7 @@ QVariantMap Editor::state() const {
             PROP(shape);
             PROP(radius);
             PROP(feather);
+            PROP(effectShape);
             PROP(border);
             PROP(borderColor);
             PROP(shadow);
@@ -643,6 +660,9 @@ QVariantMap Editor::state() const {
             {"transcript", transcriptState()},
             {"autoColour", m_autoColour},
             {"textStyles", m_textStyles},
+            {"brandColors", m_brandColors},
+            {"brandLogo", m_brandLogo},
+            {"lutLibrary", m_lutLibrary},
             {"templates", m_templates},
             {"reframe", m_reframe},
             {"conform", m_conform},
@@ -2253,6 +2273,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(hidden, toBool);
         FIELD(radius, toDouble);
         FIELD(feather, toDouble);
+        FIELD(effectShape, toString);
         FIELD(border, toDouble);
         FIELD(shadow, toDouble);
         FIELD(chromaKey, toBool);
@@ -4951,6 +4972,162 @@ void Editor::removeTextStyle(const QString &name) {
             emit changed();
             return;
         }
+}
+void Editor::saveBrand() {
+    QDir().mkpath(m_data);
+    QSaveFile f(m_data + "/brand.json");
+    QJsonObject o{{"colors", QJsonArray::fromStringList(m_brandColors)}};
+    if (!m_brandLogo.isEmpty())
+        o["logo"] = QDir(m_data).relativeFilePath(m_brandLogo);
+    const auto data = QJsonDocument(o).toJson();
+    if (!f.open(QIODevice::WriteOnly) || f.write(data) != data.size() || !f.commit())
+        fail("Cannot save the brand kit in " + m_data);
+}
+void Editor::addBrandColor(const QString &color) {
+    const QColor c(color.trimmed());
+    if (!c.isValid())
+        return fail("Enter a colour as #rrggbb");
+    if (m_brandColors.contains(c.name()))
+        return;
+    if (m_brandColors.size() >= 24)
+        return fail("Remove a brand colour first (24 at most)");
+    m_brandColors << c.name();
+    saveBrand();
+    emit changed();
+}
+void Editor::removeBrandColor(const QString &color) {
+    if (m_brandColors.removeAll(QColor(color).name()) == 0)
+        return;
+    saveBrand();
+    emit changed();
+}
+void Editor::setBrandLogo(const QUrl &file) {
+    // Earlier logo files stay in the data folder: saved projects may still show them.
+    if (file.isEmpty()) {
+        m_brandLogo.clear();
+    } else {
+        const auto path = file.isLocalFile() ? file.toLocalFile() : file.toString();
+        const QFileInfo info(path);
+        QImageReader reader(path);
+        if (!QStringList{"png", "jpg", "jpeg", "webp", "bmp"}.contains(info.suffix().toLower()) ||
+            !reader.canRead())
+            return fail("Choose a picture for the logo (PNG with transparency works best)");
+        // A new name each time, so projects that use an earlier logo keep it.
+        QDir().mkpath(m_data + "/brand");
+        const auto target = QString("%1/brand/logo-%2.%3")
+                                .arg(m_data)
+                                .arg(QDateTime::currentMSecsSinceEpoch())
+                                .arg(info.suffix().toLower());
+        if (!QFile::copy(path, target))
+            return fail("Cannot copy the logo into " + m_data);
+        m_brandLogo = QDir::cleanPath(target);
+    }
+    saveBrand();
+    m_status = m_brandLogo.isEmpty() ? "Logo removed from the brand kit" : "Logo saved in the brand kit";
+    emit changed();
+}
+void Editor::addBrandLogo(const QString &corner) {
+    if (!QStringList{"topLeft", "topRight", "bottomLeft", "bottomRight"}.contains(corner))
+        return fail("Unknown corner");
+    if (m_brandLogo.isEmpty() || !QFileInfo(m_brandLogo).isFile())
+        return fail("Choose a logo for the brand kit first");
+    QImageReader reader(m_brandLogo);
+    const auto size = reader.size();
+    if (!size.isValid())
+        return fail("The logo cannot be read");
+    const auto id = newId();
+    mutate([&](Project &p) {
+        QString assetId;
+        for (const auto &a : p.assets)
+            if (QDir::cleanPath(a.path) == m_brandLogo)
+                assetId = a.id;
+        if (assetId.isEmpty()) {
+            Asset a;
+            a.id = newId();
+            a.path = m_brandLogo;
+            a.name = "Logo";
+            a.kind = "image";
+            a.width = size.width();
+            a.height = size.height();
+            a.duration = 5;
+            p.assets.push_back(a);
+            assetId = a.id;
+        }
+        const qint64 length = std::max(p.duration(), qRound64(5. * p.fpsN / p.fpsD));
+        // The top track when nothing is on it, otherwise a new one above.
+        int track = p.tracks - 1;
+        const bool used = std::any_of(p.clips.begin(), p.clips.end(),
+                                      [&](const Clip &c) { return c.track == track; });
+        if (used || p.trackSettings[track].locked || p.trackSettings[track].name == captionTrackName) {
+            p.addTrack();
+            track = p.tracks - 1;
+        }
+        Clip c;
+        c.id = id;
+        c.assetId = assetId;
+        c.name = "Logo";
+        c.track = track;
+        c.start = 0;
+        c.duration = length;
+        // About an eighth of the picture's height (or a fifth of its width for wide logos),
+        // 3 % of the height from the edges.
+        const double fit = std::min(0.125 * p.height / size.height(), 0.2 * p.width / size.width());
+        const double contain = std::min(double(p.width) / size.width(), double(p.height) / size.height());
+        c.scale = std::clamp(fit / contain, 0.02, 1.);
+        const double w = size.width() * contain * c.scale, h = size.height() * contain * c.scale;
+        const double margin = 0.03 * p.height;
+        const double dx = 0.5 - (w / 2 + margin) / p.width, dy = 0.5 - (h / 2 + margin) / p.height;
+        c.x = corner.endsWith("Left") ? -dx : dx;
+        c.y = corner.startsWith("top") ? -dy : dy;
+        p.clips.push_back(c);
+    });
+    if (m_project.clip(id)) {
+        select(id);
+        m_status = "Logo added for the whole video";
+        emit changed();
+    }
+}
+void Editor::listLuts() {
+    m_lutLibrary.clear();
+    QList<QFileInfo> files = QDir(m_data + "/luts")
+                                 .entryInfoList({"*.cube", "*.3dl", "*.CUBE", "*.3DL"},
+                                                QDir::Files);
+    std::sort(files.begin(), files.end(), [](const QFileInfo &a, const QFileInfo &b) {
+        return a.completeBaseName().compare(b.completeBaseName(), Qt::CaseInsensitive) < 0;
+    });
+    for (const auto &f : files)
+        m_lutLibrary << QVariantMap{{"name", f.completeBaseName()},
+                                    {"path", QDir::cleanPath(f.absoluteFilePath())}};
+}
+QString Editor::addLutToLibrary(const QUrl &file) {
+    const auto path = file.isLocalFile() ? file.toLocalFile() : file.toString();
+    const QFileInfo info(path);
+    if (!info.isFile() || !QStringList{"cube", "3dl"}.contains(info.suffix().toLower())) {
+        fail("Choose a .cube or .3dl LUT file");
+        return {};
+    }
+    if (info.size() > 64 * 1024 * 1024) {
+        fail("The LUT file is too large");
+        return {};
+    }
+    QDir().mkpath(m_data + "/luts");
+    auto target = QDir::cleanPath(m_data + "/luts/" + info.fileName());
+    if (QDir::cleanPath(info.absoluteFilePath()) != target) {
+        // Another LUT of the same name gets a number.
+        for (int n = 2; QFileInfo::exists(target); ++n)
+            target = QString("%1/luts/%2 (%3).%4")
+                         .arg(m_data, info.completeBaseName())
+                         .arg(n)
+                         .arg(info.suffix());
+        if (!QFile::copy(path, target)) {
+            fail("Cannot copy the LUT into " + m_data);
+            return {};
+        }
+    }
+    listLuts();
+    m_status = "LUT added to the library: " + QFileInfo(target).completeBaseName();
+    emit changed();
+    return target;
 }
 void Editor::removePauses() {
     if (m_pauses.status != "ready" || m_pauses.revision != m_revision || m_pauses.ranges.isEmpty())
