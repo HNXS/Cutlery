@@ -2393,7 +2393,83 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
                 list.insert(it, {frame, v.toDouble(), true});
             return;
         }
-        if (key == "duration")
+        // Plain numbers, looked up rather than chained (compilers limit else-if depth).
+        static const QHash<QString, double Clip::*> numbers{
+            {"scale", &Clip::scale},
+            {"x", &Clip::x},
+            {"y", &Clip::y},
+            {"rotation", &Clip::rotation},
+            {"opacity", &Clip::opacity},
+            {"volume", &Clip::volume},
+            {"brightness", &Clip::brightness},
+            {"contrast", &Clip::contrast},
+            {"saturation", &Clip::saturation},
+            {"crop", &Clip::crop},
+            {"temperature", &Clip::temperature},
+            {"tint", &Clip::tint},
+            {"vibrance", &Clip::vibrance},
+            {"shadows", &Clip::shadows},
+            {"highlights", &Clip::highlights},
+            {"sharpen", &Clip::sharpen},
+            {"glow", &Clip::glow},
+            {"vignette", &Clip::vignette},
+            {"grain", &Clip::grain},
+            {"lutStrength", &Clip::lutStrength},
+            {"hslHue", &Clip::hslHue},
+            {"hslSaturation", &Clip::hslSaturation},
+            {"hslLightness", &Clip::hslLightness},
+            {"eqLow", &Clip::eqLow},
+            {"eqMid", &Clip::eqMid},
+            {"eqHigh", &Clip::eqHigh},
+            {"lowCut", &Clip::lowCut},
+            {"compressor", &Clip::compressor},
+            {"gate", &Clip::gate},
+            {"denoise", &Clip::denoise},
+            {"deess", &Clip::deess},
+            {"fxStrength", &Clip::fxStrength},
+            {"motionBlur", &Clip::motionBlur},
+            {"reverb", &Clip::reverb},
+            {"pitch", &Clip::pitch},
+            {"whites", &Clip::whites},
+            {"blacks", &Clip::blacks},
+            {"liftX", &Clip::liftX},
+            {"liftY", &Clip::liftY},
+            {"gammaX", &Clip::gammaX},
+            {"gammaY", &Clip::gammaY},
+            {"gainX", &Clip::gainX},
+            {"gainY", &Clip::gainY},
+            {"stabilizeStrength", &Clip::stabilizeStrength},
+            {"exposure", &Clip::exposure},
+            {"echo", &Clip::echo},
+            {"pan", &Clip::pan},
+            {"textAnimationTime", &Clip::textAnimationTime},
+            {"anchorX", &Clip::anchorX},
+            {"anchorY", &Clip::anchorY},
+            {"letterSpacing", &Clip::letterSpacing},
+            {"lineSpacing", &Clip::lineSpacing},
+            {"outline", &Clip::outline},
+            {"textShadow", &Clip::textShadow},
+            {"textGlow", &Clip::textGlow},
+            {"background", &Clip::background},
+            {"stroke", &Clip::stroke},
+            {"graphicWidth", &Clip::graphicWidth},
+            {"graphicHeight", &Clip::graphicHeight},
+            {"fadeIn", &Clip::fadeIn},
+            {"fadeOut", &Clip::fadeOut},
+            {"lumaTolerance", &Clip::lumaTolerance},
+            {"lumaSoftness", &Clip::lumaSoftness},
+            {"radius", &Clip::radius},
+            {"feather", &Clip::feather},
+            {"tiltX", &Clip::tiltX},
+            {"tiltY", &Clip::tiltY},
+            {"border", &Clip::border},
+            {"shadow", &Clip::shadow},
+            {"keySimilarity", &Clip::keySimilarity},
+            {"keyBlend", &Clip::keyBlend},
+        };
+        if (const auto number = numbers.constFind(key); number != numbers.constEnd())
+            c->*number.value() = v.toDouble();
+        else if (key == "duration")
             c->duration = v.toLongLong();
         else if (key == "sourceIn") {
             const auto t = v.toDouble();
@@ -2476,112 +2552,41 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         } else if (key == "transitionFrames")
             c->transitionFrames = v.toLongLong();
 #define FIELD(k, type) else if (key == #k) c->k = v.type()
-        FIELD(scale, toDouble);
-        FIELD(x, toDouble);
-        FIELD(y, toDouble);
-        FIELD(rotation, toDouble);
-        FIELD(opacity, toDouble);
-        FIELD(volume, toDouble);
-        FIELD(brightness, toDouble);
-        FIELD(contrast, toDouble);
-        FIELD(saturation, toDouble);
-        FIELD(crop, toDouble);
-        FIELD(temperature, toDouble);
-        FIELD(tint, toDouble);
-        FIELD(vibrance, toDouble);
-        FIELD(shadows, toDouble);
-        FIELD(highlights, toDouble);
-        FIELD(sharpen, toDouble);
-        FIELD(glow, toDouble);
-        FIELD(vignette, toDouble);
-        FIELD(grain, toDouble);
-        FIELD(lutStrength, toDouble);
         FIELD(curveMaster, toString);
         FIELD(curveRed, toString);
         FIELD(curveGreen, toString);
         FIELD(curveBlue, toString);
         FIELD(hslColors, toString);
-        FIELD(hslHue, toDouble);
-        FIELD(hslSaturation, toDouble);
-        FIELD(hslLightness, toDouble);
-        FIELD(eqLow, toDouble);
-        FIELD(eqMid, toDouble);
-        FIELD(eqHigh, toDouble);
-        FIELD(lowCut, toDouble);
-        FIELD(compressor, toDouble);
-        FIELD(gate, toDouble);
-        FIELD(denoise, toDouble);
-        FIELD(deess, toDouble);
         FIELD(fx, toString);
         FIELD(voice, toString);
         FIELD(canvasFill, toString);
-        FIELD(fxStrength, toDouble);
-        FIELD(motionBlur, toDouble);
         FIELD(stabilize, toBool);
-        FIELD(reverb, toDouble);
-        FIELD(pitch, toDouble);
-        FIELD(whites, toDouble);
-        FIELD(blacks, toDouble);
-        FIELD(liftX, toDouble);
-        FIELD(liftY, toDouble);
-        FIELD(gammaX, toDouble);
-        FIELD(gammaY, toDouble);
-        FIELD(gainX, toDouble);
-        FIELD(gainY, toDouble);
         FIELD(titleSlide, toBool);
-        FIELD(stabilizeStrength, toDouble);
         FIELD(stabilizeZoom, toBool);
-        FIELD(exposure, toDouble);
-        FIELD(echo, toDouble);
-        FIELD(pan, toDouble);
         FIELD(textAnimation, toString);
-        FIELD(textAnimationTime, toDouble);
-        FIELD(anchorX, toDouble);
-        FIELD(anchorY, toDouble);
         FIELD(slowMotion, toString);
         FIELD(bold, toBool);
         FIELD(italic, toBool);
         FIELD(align, toString);
-        FIELD(letterSpacing, toDouble);
-        FIELD(lineSpacing, toDouble);
-        FIELD(outline, toDouble);
         FIELD(outlineColor, toString);
-        FIELD(textShadow, toDouble);
-        FIELD(textGlow, toDouble);
         FIELD(textGlowColor, toString);
-        FIELD(background, toDouble);
         FIELD(backgroundColor, toString);
         FIELD(fontFamily, toString);
         FIELD(graphic, toString);
         FIELD(fillColor, toString);
         FIELD(strokeColor, toString);
-        FIELD(stroke, toDouble);
-        FIELD(graphicWidth, toDouble);
-        FIELD(graphicHeight, toDouble);
-        FIELD(fadeIn, toDouble);
-        FIELD(fadeOut, toDouble);
         FIELD(reverse, toBool);
         FIELD(flip, toBool);
         FIELD(flipVertical, toBool);
         FIELD(blendMode, toString);
         FIELD(lumaKey, toString);
-        FIELD(lumaTolerance, toDouble);
-        FIELD(lumaSoftness, toDouble);
         FIELD(muted, toBool);
         FIELD(hidden, toBool);
-        FIELD(radius, toDouble);
-        FIELD(feather, toDouble);
         FIELD(effectShape, toString);
-        FIELD(tiltX, toDouble);
-        FIELD(tiltY, toDouble);
-        FIELD(border, toDouble);
-        FIELD(shadow, toDouble);
         FIELD(chromaKey, toBool);
         FIELD(aiCutout, toBool);
         FIELD(aiUpscale, toBool);
         FIELD(eyeContact, toBool);
-        FIELD(keySimilarity, toDouble);
-        FIELD(keyBlend, toDouble);
         FIELD(shape, toString);
         FIELD(borderColor, toString);
         FIELD(keyColor, toString);
