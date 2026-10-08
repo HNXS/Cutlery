@@ -1,5 +1,19 @@
 # Validation record
 
+## Windows portable build — 2026-10-08, drop/spin/fade letter animations, favourite fonts, numbered steps (0.6 development)
+
+[GitHub Actions run 37791770850](https://github.com/HNXS/Cutlery/actions/runs/37791770850) on commit `dab5de72a3bcadb8ce6a32001643b90ec4ecc594` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `titlesThatBuildUp`:**
+  - **Drop:** the first dropping letter is above its place.
+  - **Spin and fade:** both show few letters early.
+  - All three animations end with the finished text.
+- **Engine test `fontFavorites`:** a starred font comes first in the font list and stays starred at the next start; a star on a font that is not installed changes nothing; stars are removed again.
+- **Engine test `shapes`:** two numbered steps are numbered 1 and 2 and named after their number; a step is a red disc with its white number.
+- **UI test `textStylesAndAdjustment`:** the star beside the font list stars the selected title's font and turns filled.
+
 ## Windows portable build — 2026-10-08, colour wheels, speed ramps, own layouts (0.6 development)
 
 [GitHub Actions run 37784160751](https://github.com/HNXS/Cutlery/actions/runs/37784160751) on commit `3e5c0e808413ad6216aabd29c827d15c7d8913dc` passed every step on its first attempt. Three earlier commits of this change did not compile with MSVC; each was fixed in the next commit:
