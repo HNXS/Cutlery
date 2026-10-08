@@ -1,5 +1,19 @@
 # Validation record
 
+## Windows portable build — 2026-10-08, even loudness, noise learned at the playhead, session log and unclean-exit notice (0.6 development)
+
+[GitHub Actions run 37830678750](https://github.com/HNXS/Cutlery/actions/runs/37830678750) on commit `348d89e52d5525cba0fd02accedba2d738aefa0c` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `evenLoudnessAndNoise`:**
+  - **Even loudness:** a loud and a quiet tone are brought to the same loudness, so the quiet one gets about ten times the volume of the loud one. One undo restores both, and an impossible target is refused.
+  - **Learn noise:** sets a noise floor between −50 and −35 dB and switches denoising on at 0.4. A title is refused.
+- **Engine test `uncleanExitAndLog`:**
+  - A lock left by another process is reported as an unclean exit, and the notice can be dismissed.
+  - Errors and the unclean exit are written to `logs/cutlery.log`.
+  - A second editor in the same process does not report an unclean exit.
+
 ## Windows portable build — 2026-10-08, highlighted title words, right lower third, banner and quote, four icons (0.6 development)
 
 [GitHub Actions run 37798527810](https://github.com/HNXS/Cutlery/actions/runs/37798527810) on commit `57ec262f9a0ed1b2787a7cc061342c3eb3fbf226` passed every step on its first attempt.

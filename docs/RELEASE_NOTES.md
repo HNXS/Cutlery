@@ -4,6 +4,9 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Even loudness:** select several clips and make them play equally loud in one step.
+- **Learn noise:** put the playhead on a quiet moment and press "Learn noise here" for better noise reduction.
+- **After a crash:** the start page says when Cutlery did not close normally; errors are written to a log file (Help → "Open the log folder").
 - **Highlight words in titles:** put asterisks around words (*like this*) to show them in a highlight colour.
 - **More title templates:** a lower third on the right, a banner across the bottom and a quote.
 - **More icons:** play button, bell, location pin and clock.
