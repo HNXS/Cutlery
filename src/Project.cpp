@@ -199,7 +199,7 @@ double standardRate(double rate) {
 const QStringList &graphicKinds() {
     static const QStringList kinds{"rectangle", "ellipse", "arrow", "line",    "bubble",
                                    "check",     "cross",   "star",  "heart",   "warning",
-                                   "info",      "cursor",  "click", "lightbulb"};
+                                   "info",      "cursor",  "click", "lightbulb", "badge"};
     return kinds;
 }
 QSizeF Project::pictureSize(const Clip &c, double boxWidth, double boxHeight) const {
@@ -928,7 +928,7 @@ void Project::validate() const {
                     c.titleStyle) &&
                     QColor(c.accentColor).isValid(),
                 "Invalid title style");
-        require(QStringList{"", "typewriter", "words", "rise", "pop", "fly"}.contains(
+        require(QStringList{"", "typewriter", "words", "rise", "pop", "fly", "drop", "spin", "fade"}.contains(
                     c.textAnimation) &&
                     bounded(c.textAnimationTime, 0.1, 60) &&
                     (c.gradientColor.isEmpty() || QColor(c.gradientColor).isValid()),

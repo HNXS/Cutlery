@@ -288,7 +288,8 @@ static QFont textFont(const Clip &c, int pixelSize) {
 // vertically, with line spacing, a rounded box behind each line, a shadow, an outline and a
 // colour gradient. `visible` limits the drawing to that many characters (spaces not counted),
 // for titles that build up; the layout stays that of the whole text. A `time` (clip-local
-// seconds) draws the letters of a "rise", "pop" or "fly" animation at that moment.
+// seconds) draws the letters of a "rise", "pop", "fly", "drop", "spin" or "fade" animation at
+// that moment.
 static void paintText(QPainter &paint, const Clip &c, const QFont &font, const QRect &area,
                       int visible = -1, double time = -1) {
     const QFontMetricsF m(font);
@@ -383,6 +384,22 @@ static void paintText(QPainter &paint, const Clip &c, const QFont &font, const Q
             t.translate(0, (1 - ease) * 0.8 * px);
         } else if (c.textAnimation == "fly") {
             t.translate((1 - ease) * area.width() * 0.5, 0);
+        } else if (c.textAnimation == "drop") {
+            // Falls from above and bounces twice before it rests.
+            const double b = p < 1 / 2.75     ? 7.5625 * p * p
+                             : p < 2 / 2.75   ? 7.5625 * (p - 1.5 / 2.75) * (p - 1.5 / 2.75) + 0.75
+                             : p < 2.5 / 2.75 ? 7.5625 * (p - 2.25 / 2.75) * (p - 2.25 / 2.75) + 0.9375
+                                              : 7.5625 * (p - 2.625 / 2.75) * (p - 2.625 / 2.75) + 0.984375;
+            t.translate(0, -(1 - b) * 1.5 * px);
+            opacity = std::min(1., p * 4);
+        } else if (c.textAnimation == "spin") {
+            // Turns half a round about its centre while it grows to size.
+            t.translate(centre.x(), centre.y());
+            t.rotate(-180 * (1 - ease));
+            t.scale(std::max(0.01, ease), std::max(0.01, ease));
+            t.translate(-centre.x(), -centre.y());
+        } else if (c.textAnimation == "fade") {
+            // Only fades in, in place.
         } else { // pop: grows from nothing, overshoots a little and settles
             const double k = 1.7, q = p - 1, grow = 1 + (k + 1) * q * q * q + k * q * q;
             t.translate(centre.x(), centre.y());
@@ -399,7 +416,7 @@ static void paintText(QPainter &paint, const Clip &c, const QFont &font, const Q
 static void paintGraphic(QPainter &paint, const Clip &c, const QRectF &box, int height) {
     QPainterPath path;
     const double w = box.width(), h = box.height();
-    if (c.graphic == "ellipse")
+    if (c.graphic == "ellipse" || c.graphic == "badge")
         path.addEllipse(box);
     else if (c.graphic == "rectangle")
         path.addRoundedRect(box, std::min(w, h) * 0.08, std::min(w, h) * 0.08);
@@ -1502,7 +1519,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                           visibleStart - from, visibleEnd - visibleStart, c.blendMode);
                 continue;
             }
-            if (n.title && QStringList{"rise", "pop", "fly"}.contains(c.textAnimation) &&
+            if (n.title && QStringList{"rise", "pop", "fly", "drop", "spin", "fade"}.contains(c.textAnimation) &&
                 c.graphic.isEmpty() && c.titleStyle.isEmpty() && c.captionStyle.isEmpty() &&
                 !c.text.isEmpty() && !animatedGeometry(c) && c.rotation == 0 && c.scale == 1 &&
                 n.vPre == 0) {

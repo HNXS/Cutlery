@@ -704,6 +704,20 @@ class UiTest : public QObject {
         QVERIFY(findItem(window->contentItem(), "arrange-full")->isEnabled());
         editor.toggleSelect(second);
         QTRY_VERIFY(findItem(window->contentItem(), "arrange-side")->isEnabled());
+        // The star keeps the selected title's font at the top of the font list.
+        const auto adjustment = editor.project().clips.back().id;
+        editor.select(second);
+        for (const auto &f : editor.state()["fontFavorites"].toStringList())
+            editor.toggleFontFavorite(f);
+        auto *star = findItem(window->contentItem(), "favoriteFont");
+        QTRY_VERIFY(star && star->isVisible());
+        const auto family = editor.state()["selected"].toMap()["fontFamily"].toString();
+        QVERIFY(QMetaObject::invokeMethod(star, "clicked"));
+        QCOMPARE(editor.state()["fontFavorites"].toStringList(), QStringList{family});
+        QTRY_COMPARE(star->property("text").toString(), QString("★"));
+        editor.toggleFontFavorite(family);
+        editor.select(adjustment);
+        editor.toggleSelect(second);
         // Saving a layout through its dialog; it is offered in the layout list.
         for (const auto &l : editor.state()["layouts"].toList())
             editor.removeLayout(l.toMap()["name"].toString());

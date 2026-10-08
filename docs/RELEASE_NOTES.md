@@ -4,6 +4,9 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **More letter animations:** letters can drop and bounce, spin in or just fade in.
+- **Favourite fonts:** star a font to keep it at the top of the font list.
+- **Numbered steps:** "+ Shape" → "Numbered step" adds 1, 2, 3 … discs for tutorials.
 - **Colour wheels:** push a colour into the shadows, midtones or highlights.
 - **Speed ramps:** montage, hero, bullet, jump cut, flash in and flash out make a clip speed up and slow down in one step.
 - **Own layouts:** save where the selected clips sit (e.g. an interview split) and use it again in any project.

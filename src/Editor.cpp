@@ -93,6 +93,14 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
                 m_brandLogo = QDir::cleanPath(m_data + "/" + logo);
         }
     }
+    {
+        QFile fonts(m_data + "/fonts.json");
+        if (fonts.open(QIODevice::ReadOnly) && fonts.size() < 1024 * 1024)
+            for (const auto &v : QJsonDocument::fromJson(fonts.readAll()).object()["favorites"].toArray())
+                if (v.isString() && !v.toString().isEmpty() && m_fontFavorites.size() < 100 &&
+                    !m_fontFavorites.contains(v.toString()))
+                    m_fontFavorites << v.toString();
+    }
     listLuts();
     {
         QFile layouts(m_data + "/layouts.json");
@@ -208,7 +216,31 @@ void Editor::loadFonts(const QString &folder) {
     }
 }
 QStringList Editor::fontFamilies() const {
-    return QFontDatabase::families();
+    auto all = QFontDatabase::families();
+    QStringList favorites;
+    for (const auto &f : m_fontFavorites)
+        if (all.contains(f))
+            favorites << f;
+    for (const auto &f : favorites)
+        all.removeAll(f);
+    return favorites + all;
+}
+void Editor::toggleFontFavorite(const QString &family) {
+    if (family.isEmpty())
+        return;
+    if (m_fontFavorites.contains(family))
+        m_fontFavorites.removeAll(family);
+    else if (m_fontFavorites.size() < 100)
+        m_fontFavorites << family;
+    else
+        return fail("Unstar a font first (100 at most)");
+    QDir().mkpath(m_data);
+    QSaveFile f(m_data + "/fonts.json");
+    const auto data =
+        QJsonDocument(QJsonObject{{"favorites", QJsonArray::fromStringList(m_fontFavorites)}}).toJson();
+    if (!f.open(QIODevice::WriteOnly) || f.write(data) != data.size() || !f.commit())
+        return fail("Cannot save the favourite fonts in " + m_data);
+    emit changed();
 }
 QString Editor::addFont(const QUrl &url) {
     const auto source = url.isLocalFile() ? url.toLocalFile() : url.toString();
@@ -687,6 +719,7 @@ QVariantMap Editor::state() const {
             {"brandColors", m_brandColors},
             {"brandLogo", m_brandLogo},
             {"lutLibrary", m_lutLibrary},
+            {"fontFavorites", m_fontFavorites},
             {"layouts", [this] {
                  QVariantList list;
                  for (const auto &v : m_layouts)
@@ -2268,7 +2301,7 @@ void Editor::addGraphic(const QString &kind) {
             {"ellipse", "Circle"},       {"rectangle", "Box"}, {"check", "Check mark"},
             {"cross", "Cross"},          {"star", "Star"},     {"heart", "Heart"},
             {"warning", "Warning"},      {"info", "Info"},     {"cursor", "Mouse pointer"},
-            {"click", "Mouse click"},    {"lightbulb", "Light bulb"}};
+            {"click", "Mouse click"},    {"lightbulb", "Light bulb"}, {"badge", "Step"}};
         c.name = names.value(kind, "Shape");
         if (kind == "bubble") {
             c.text = "Hello!";
@@ -2295,6 +2328,20 @@ void Editor::addGraphic(const QString &kind) {
                 c.strokeColor = "#000000";
                 c.stroke = 0.004;
             }
+        } else if (kind == "badge") {
+            // A numbered step for tutorials: a filled circle with the next number in it.
+            const auto steps = std::count_if(p.clips.begin(), p.clips.end(),
+                                             [](const Clip &x) { return x.graphic == "badge"; });
+            c.text = QString::number(steps + 1);
+            c.name = "Step " + c.text;
+            c.graphicHeight = 0.12;
+            c.graphicWidth = 0.12 * p.height / p.width;
+            c.fillColor = "#ff5a5f";
+            c.strokeColor = "#ffffff";
+            c.stroke = 0.004;
+            c.textColor = "#ffffff";
+            c.textShadow = 0;
+            c.fontSize = std::max(8, int(std::lround(0.06 * p.height)));
         } else if (kind == "ellipse") {
             // An outline circle, like a highlight around something on screen.
             c.graphicWidth = 0.2;
