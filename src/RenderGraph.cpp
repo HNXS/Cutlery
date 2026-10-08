@@ -831,7 +831,9 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             // Luma grain that changes every frame, on a format that keeps alpha.
             f += QString(",format=yuva444p,noise=c0s=%1:c0f=t,format=rgba").arg(num(4 + 26 * c.grain));
     };
-    auto videoChain = [&](Info &n, qint64 l0, qint64 l1) {
+    // `fill`, when given, receives a canvas-sized stream to put under the picture for its
+    // canvas fill (blurred copy or colour), or stays empty.
+    auto videoChain = [&](Info &n, qint64 l0, qint64 l1, QString *fill) {
         const auto &c = *n.clip;
         const double s = c.speed.seconds(), d = secs(c.duration);
         const auto [lo, hi] = available(n);
@@ -957,6 +959,34 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         if (c.flipVertical)
             f += ",vflip";
         appendLook(f, c, w);
+        if (fill && !c.canvasFill.isEmpty()) {
+            // Canvas fill: the picture enlarged to cover the canvas and blurred, or a colour,
+            // fading in and out with the clip.
+            const auto id = QString::number(serial++);
+            nodes << f + QString(",split[cfp%1][cfb%1]").arg(id);
+            QString b = QString("[cfb%1]scale=%2:%3:force_original_aspect_ratio=increase,"
+                                "crop=%2:%3,setsar=1")
+                            .arg(id)
+                            .arg(width)
+                            .arg(height);
+            if (c.canvasFill == "blur")
+                b += QString(",gblur=sigma=%1:steps=2").arg(num(height / 25.));
+            else
+                b += QString(",drawbox=c=%1:t=fill").arg(c.canvasFill);
+            b += ",format=rgb24,format=rgba";
+            if (c.opacity != 1 && !c.keyframes.contains("opacity"))
+                b += ",colorchannelmixer=aa=" + num(c.opacity);
+            const double k = secs(base);
+            if (c.fadeIn > 0)
+                b += QString(",fade=t=in:st=%1:d=%2:alpha=1").arg(num(k), num(std::min(c.fadeIn, d)));
+            if (c.fadeOut > 0) {
+                const auto fd = std::min(c.fadeOut, d);
+                b += QString(",fade=t=out:st=%1:d=%2:alpha=1").arg(num(k + d - fd), num(fd));
+            }
+            nodes << b + QString(",setpts=PTS-STARTPTS[cfo%1]").arg(id);
+            *fill = QString("[cfo%1]null").arg(id);
+            f = QString("[cfp%1]null").arg(id);
+        }
         // Style effects. Times in the chain are clip-local frames plus the handle.
         const double fxk = c.fxStrength;
         if (c.fx == "shake" && fxk > 0) {
@@ -1006,6 +1036,43 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                           mix(.168, 0), mix(.272, 0), mix(.534, 0), mix(.131, 1));
             f += QString(",hue=b='%1*sin(t*41)',format=yuva444p,noise=c0s=%2:c0f=t,format=rgba")
                      .arg(num(0.06 * fxk), num(6 + 16 * fxk));
+        } else if (c.fx == "sketch" && fxk > 0) {
+            // Dark outlines on white, like a pencil drawing, mixed over the picture by strength.
+            // The edge filters have no alpha, so the picture's alpha is put back afterwards.
+            const auto id = QString::number(serial++);
+            nodes << f + QString(",split[sa%1][sb%1]").arg(id);
+            nodes << QString("[sa%1]alphaextract[sm%1]").arg(id);
+            nodes << QString("[sb%1]format=gbrp,split[so%1][se%1]").arg(id);
+            nodes << QString("[se%1]format=gray,gblur=sigma=1,sobel=scale=3,negate,format=gbrp[sn%1]")
+                         .arg(id);
+            nodes << QString("[sn%1][so%1]blend=all_mode=normal:all_opacity=%2[sc%1]")
+                         .arg(id, num(fxk));
+            f = QString("[sc%1][sm%1]alphamerge,format=rgba").arg(id);
+        } else if (c.fx == "poster" && fxk > 0) {
+            // Each colour channel rounded to a few levels: 8 at the lowest strength, 2 at full.
+            const int levels = std::max(2, int(std::lround(8 - 6 * fxk)));
+            const auto q = QString("floor(val*%1/256)*255/%2").arg(levels).arg(levels - 1);
+            f += QString(",lutrgb=r='%1':g='%1':b='%1'").arg(q);
+        } else if (c.fx == "fisheye" && fxk > 0) {
+            // Barrel distortion, then zoomed in so the bent edges are cut away.
+            const double k1 = 0.5 * fxk, zoom = 1 + 0.7 * k1;
+            const auto id = QString::number(serial++);
+            nodes << f + QString(",split[la%1][lb%1]").arg(id);
+            nodes << QString("[la%1]alphaextract,lenscorrection=k1=%2:k2=0:i=bilinear[lm%1]")
+                         .arg(id, num(k1));
+            nodes << QString("[lb%1]format=gbrp,lenscorrection=k1=%2:k2=0:i=bilinear[lc%1]")
+                         .arg(id, num(k1));
+            const auto size = c.styled() ? QString("%1:%2").arg(w).arg(h)
+                                         : QString("trunc(iw*%1/2)*2:trunc(ih*%1/2)*2").arg(num(zoom));
+            f = QString("[lc%1][lm%1]alphamerge,format=rgba,crop=trunc(iw/%2/2)*2:trunc(ih/%2/2)*2,"
+                        "scale=%3")
+                    .arg(id, num(zoom), size);
+        } else if (c.fx == "mirror" && fxk > 0) {
+            // The left half, flipped, replaces the right half.
+            const auto id = QString::number(serial++);
+            nodes << f + QString(",split[ma%1][mb%1]").arg(id);
+            nodes << QString("[mb%1]crop=trunc(iw/2):ih:0:0,hflip[mh%1]").arg(id);
+            f = QString("[ma%1][mh%1]overlay=x=W-w:y=0:format=auto").arg(id);
         }
         const auto matte = c.aiCutout && !n.image && n.asset ? o.mattes.value(n.asset->id)
                                                              : MatteSource{};
@@ -1565,8 +1632,11 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                     continue;
                 }
             }
-            composite(videoChain(n, visibleStart - c.start, visibleEnd - c.start),
-                      overlayPosition(c, from - c.start), visibleStart - from,
+            QString fill;
+            const auto chain = videoChain(n, visibleStart - c.start, visibleEnd - c.start, &fill);
+            if (!fill.isEmpty())
+                composite(fill, "x=0:y=0", visibleStart - from, visibleEnd - visibleStart);
+            composite(chain, overlayPosition(c, from - c.start), visibleStart - from,
                       visibleEnd - visibleStart, c.blendMode);
             continue;
         }
@@ -1584,12 +1654,18 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                          .arg(fps)
                          .arg(r1 - r0)
                          .arg(id);
-            nodes << videoChain(n, r0 - c.start, r1 - c.start) + QString("[m%1]").arg(id);
-            nodes << QString("[cv%1][m%1]overlay=%2:eof_action=pass:format=auto,settb=%3/%4,"
+            QString fill;
+            nodes << videoChain(n, r0 - c.start, r1 - c.start, &fill) + QString("[m%1]").arg(id);
+            if (!fill.isEmpty()) {
+                nodes << fill + QString("[cf%1]").arg(id);
+                nodes << QString("[cv%1][cf%1]overlay=0:0:eof_action=pass:format=auto[cvf%1]").arg(id);
+            }
+            nodes << QString("[%5][m%1]overlay=%2:eof_action=pass:format=auto,settb=%3/%4,"
                              "setpts=PTS-STARTPTS[mc%1]")
                          .arg(id, overlayPosition(c, r0 - c.start))
                          .arg(p.fpsD)
-                         .arg(p.fpsN);
+                         .arg(p.fpsN)
+                         .arg((fill.isEmpty() ? "cv" : "cvf") + id);
             if (g == 0) {
                 accumulated = "mc" + id;
                 continue;
@@ -1673,12 +1749,29 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         }
         a += ",atempo=" + num(tempo);
         a += ",aresample=48000";
-        if (c.pitch != 0) {
+        // The chipmunk and monster voices are a pitch shift on top of the clip's own.
+        const double pitch = c.pitch + (c.voice == "chipmunk" ? 7 : c.voice == "monster" ? -7 : 0);
+        if (pitch != 0) {
             // Played faster or slower at the same sample rate, which moves the pitch, then
             // brought back to the original tempo.
-            const int rate = qRound(48000 * std::pow(2., c.pitch / 12));
+            const int rate = qRound(48000 * std::pow(2., pitch / 12));
             a += QString(",asetrate=%1,aresample=48000,atempo=%2").arg(rate).arg(num(48000. / rate));
         }
+        if (c.voice == "robot")
+            // Every frequency keeps its strength but loses its phase: a flat, buzzing voice,
+            // brought back to about its former loudness.
+            a += ",afftfilt=real='hypot(re,im)':imag='0':win_size=512:overlap=0.75,volume=6,"
+                 "asoftclip=type=atan";
+        else if (c.voice == "telephone")
+            a += ",highpass=f=300:poles=2,highpass=f=300:poles=2,lowpass=f=3400:poles=2,"
+                 "lowpass=f=3400:poles=2";
+        else if (c.voice == "megaphone")
+            a += ",highpass=f=500:poles=2,lowpass=f=4000:poles=2,volume=4,asoftclip=type=atan,"
+                 "volume=0.5";
+        else if (c.voice == "alien")
+            a += ",vibrato=f=7:d=0.6,aphaser=type=t:speed=1.5:in_gain=0.9:out_gain=0.9";
+        else if (c.voice == "monster")
+            a += ",bass=g=6:f=120";
         a += ",aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS+" + num(t0 + k) + "/TB";
         if (c.keyframes.contains("volume"))
             // Audio timestamps here are clip-local seconds plus the handle.
