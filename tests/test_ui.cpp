@@ -704,6 +704,21 @@ class UiTest : public QObject {
         QVERIFY(findItem(window->contentItem(), "arrange-full")->isEnabled());
         editor.toggleSelect(second);
         QTRY_VERIFY(findItem(window->contentItem(), "arrange-side")->isEnabled());
+        // Saving a layout through its dialog; it is offered in the layout list.
+        for (const auto &l : editor.state()["layouts"].toList())
+            editor.removeLayout(l.toMap()["name"].toString());
+        auto *saveLayout = findItem(window->contentItem(), "saveLayout");
+        QTRY_VERIFY(saveLayout && saveLayout->isEnabled());
+        auto *layoutDialog = window->findChild<QObject *>("layoutDialog");
+        QVERIFY(QMetaObject::invokeMethod(layoutDialog, "open"));
+        findItem(window->contentItem(), "layoutName")->setProperty("text", "Pair");
+        QVERIFY(QMetaObject::invokeMethod(layoutDialog, "accept"));
+        QCOMPARE(editor.state()["layouts"].toList().size(), 1);
+        auto *layoutChoice = findItem(window->contentItem(), "layoutChoice");
+        QTRY_VERIFY(layoutChoice->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(layoutChoice, "activated", Q_ARG(int, 1)));
+        QVERIFY(editor.state()["error"].toString().isEmpty());
+        editor.removeLayout("Pair");
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void commandSearch() {
@@ -1249,6 +1264,14 @@ class UiTest : public QObject {
         editor.undo();
         editor.undo();
         QVERIFY(clip().cornerPin.isEmpty());
+        // Colour wheels: set from the wheel, reset by double-click.
+        auto *wheel = findItem(window->contentItem(), "wheel-gain");
+        QTRY_VERIFY(wheel && wheel->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(wheel, "set", Q_ARG(QVariant, 2.0), Q_ARG(QVariant, 0.0)));
+        QCOMPARE(clip().gainX, 1.); // kept inside the wheel
+        QCOMPARE(clip().gainY, 0.);
+        editor.undo();
+        QCOMPARE(clip().gainX, 0.);
         auto *tilt = findItem(window->contentItem(), "tilt-tiltY");
         QTRY_VERIFY(tilt && tilt->isVisible());
         tilt->setProperty("value", 30);

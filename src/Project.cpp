@@ -99,7 +99,10 @@ const QVector<QPair<QString, double Clip::*>> &lookFields() {
         {"cropLeft", &Clip::cropLeft},       {"cropRight", &Clip::cropRight},
         {"cropTop", &Clip::cropTop},         {"cropBottom", &Clip::cropBottom},
         {"pitch", &Clip::pitch},             {"exposure", &Clip::exposure},
-        {"whites", &Clip::whites},           {"blacks", &Clip::blacks}};
+        {"whites", &Clip::whites},           {"blacks", &Clip::blacks},
+        {"liftX", &Clip::liftX},             {"liftY", &Clip::liftY},
+        {"gammaX", &Clip::gammaX},           {"gammaY", &Clip::gammaY},
+        {"gainX", &Clip::gainX},             {"gainY", &Clip::gainY}};
     return fields;
 }
 } // namespace
@@ -109,7 +112,8 @@ const QStringList &Clip::lookProperties() {
                                    "highlights", "whites", "blacks", "sharpen",    "glow",       "vignette",
                                    "grain",      "lut",        "lutStrength", "curveMaster",
                                    "curveRed",   "curveGreen", "curveBlue",   "hslColors",
-                                   "hslHue",     "hslSaturation", "hslLightness"};
+                                   "hslHue",     "hslSaturation", "hslLightness",
+                                   "liftX", "liftY", "gammaX", "gammaY", "gainX", "gainY"};
     return names;
 }
 double Clip::staticValue(const QString &p) const {
@@ -883,6 +887,8 @@ void Project::validate() const {
                     bounded(c.vibrance, -1, 1) && bounded(c.shadows, -1, 1) &&
                     bounded(c.highlights, -1, 1) && bounded(c.sharpen, 0, 1) &&
                     bounded(c.whites, -1, 1) && bounded(c.blacks, -1, 1) &&
+                    std::hypot(c.liftX, c.liftY) <= 1.0001 && std::hypot(c.gammaX, c.gammaY) <= 1.0001 &&
+                    std::hypot(c.gainX, c.gainY) <= 1.0001 &&
                     bounded(c.glow, 0, 1) && bounded(c.vignette, 0, 1) && bounded(c.grain, 0, 1) &&
                     bounded(c.lutStrength, 0, 1) && c.lut.size() <= 4096 &&
                     QStringList{"", "blend", "flow"}.contains(c.slowMotion),

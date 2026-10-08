@@ -1,5 +1,20 @@
 # Validation record
 
+## Windows portable build — 2026-10-08, colour wheels, speed ramps, own layouts (0.6 development)
+
+[GitHub Actions run 37784160751](https://github.com/HNXS/Cutlery/actions/runs/37784160751) on commit `3e5c0e808413ad6216aabd29c827d15c7d8913dc` passed every step on its first attempt. Three earlier commits of this change did not compile with MSVC; each was fixed in the next commit:
+
+- `QJsonArray` was not included in `Editor.h`.
+- The clip value setter's else-if chain had grown past MSVC's nesting limit; its plain number fields now come from a lookup table.
+- `<numbers>` was not included in the engine tests.
+
+New coverage:
+
+- **Engine test `colourWheels`:** red into the shadows tints the dark grey and leaves the light one; blue into the highlights tints the light grey only; midtones change mid-grey; values are saved and validated.
+- **Engine test `speedRamps`:** flash in cuts the clip and its linked sound into eight back-to-back parts with falling speeds, the source running on; the title after the clip follows; hero makes the clip longer; unknown presets and titles are refused.
+- **Engine test `savedLayouts`:** a layout is saved from two arranged pictures and applied to two others in order, border included; undo, too many clips and unknown names; kept for the next start and removed.
+- **UI tests:** the highlights wheel keeps its point inside the circle; a layout is saved through its dialog and applied from the list.
+
 ## Windows portable build — 2026-10-08, undo across sessions, freeze frames of any length, 3D tilt (0.6 development)
 
 [GitHub Actions run 37776488667](https://github.com/HNXS/Cutlery/actions/runs/37776488667) on commit `596ece7516a5f4871181e0b1fb29455557305bd3` passed every step on its first attempt.

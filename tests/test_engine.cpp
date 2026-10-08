@@ -16,8 +16,10 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <array>
 #include <functional>
 #include <limits>
+#include <numbers>
 #include <tuple>
 using namespace cutlery;
 class EngineTest : public QObject {
@@ -580,6 +582,225 @@ class EngineTest : public QObject {
             reset(e);
             QCOMPARE(e.project().width, 1920);
         }
+    }
+    void speedRamps() {
+        Project p;
+        p.width = 320;
+        p.height = 180;
+        Asset a;
+        a.id = "v";
+        a.path = "/media/v.mp4";
+        a.kind = "video";
+        a.duration = 20;
+        a.width = 320;
+        a.height = 180;
+        a.hasAudio = true;
+        p.assets = {a};
+        Clip v;
+        v.id = "v1";
+        v.assetId = "v";
+        v.duration = 240; // 8 s at 30 fps
+        v.link = "L";
+        Clip s = v;
+        s.id = "a1";
+        s.track = 1;
+        s.audioOnly = true;
+        Clip after;
+        after.id = "t";
+        after.text = "After";
+        after.start = 240;
+        after.duration = 30;
+        p.clips = {v, s, after};
+        QTemporaryDir dir;
+        saveProject(p, dir.filePath("ramp.cutlery"));
+        FrameProvider frames;
+        Editor editor(&frames);
+        QVERIFY(editor.openProject(QUrl::fromLocalFile(dir.filePath("ramp.cutlery"))));
+        editor.select("v1");
+        editor.speedRamp("flashIn");
+        QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+        const auto &q = editor.project();
+        QVector<const Clip *> pieces, sound;
+        for (const auto &c : q.clips)
+            (c.track == 0 && c.assetId == "v" ? pieces : c.track == 1 ? sound : pieces) << &c;
+        pieces.erase(std::remove_if(pieces.begin(), pieces.end(), [](const Clip *c) { return c->assetId.isEmpty(); }),
+                     pieces.end());
+        QCOMPARE(pieces.size(), 8);
+        QCOMPARE(sound.size(), 8);
+        std::sort(pieces.begin(), pieces.end(), [](auto *l, auto *r) { return l->start < r->start; });
+        // Fast at first, settling towards normal speed; back to back; the source runs on.
+        QVERIFY(pieces.first()->speed.seconds() > 3 && pieces.last()->speed.seconds() < 1.3);
+        QCOMPARE(pieces.first()->id, QString("v1"));
+        for (int i = 1; i < pieces.size(); ++i) {
+            QCOMPARE(pieces[i]->start, pieces[i - 1]->start + pieces[i - 1]->duration);
+            QVERIFY(pieces[i]->speed.seconds() <= pieces[i - 1]->speed.seconds());
+            QVERIFY(std::abs(pieces[i]->sourceIn.seconds() - i * 1.0) < 0.05);
+            QCOMPARE(q.linkedClips(pieces[i]->id).size(), 1);
+        }
+        const qint64 end = pieces.last()->start + pieces.last()->duration;
+        QVERIFY(end < 150);
+        QCOMPARE(q.clip("t")->start, end); // the title after it follows on its track
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), size_t(3));
+        // Hero: the middle plays slowly, making the clip longer.
+        editor.select("v1");
+        editor.speedRamp("hero");
+        qint64 longest = 0;
+        double slowest = 10;
+        for (const auto &c : editor.project().clips)
+            if (c.track == 0 && !c.assetId.isEmpty()) {
+                longest = std::max(longest, c.start + c.duration);
+                slowest = std::min(slowest, c.speed.seconds());
+            }
+        QVERIFY(longest > 240 && slowest < 0.6);
+        editor.undo();
+        editor.speedRamp("warp");
+        QVERIFY(editor.state()["error"].toString().contains("Unknown"));
+        editor.clearError();
+        editor.select("t");
+        editor.speedRamp("hero");
+        QVERIFY(editor.state()["error"].toString().contains("video or sound"));
+    }
+    void savedLayouts() {
+        Project p;
+        p.width = 320;
+        p.height = 180;
+        for (const auto &id : {"a", "b", "c"}) {
+            Asset a;
+            a.id = id;
+            a.path = QString("/media/%1.png").arg(id);
+            a.kind = "image";
+            a.duration = 5;
+            a.width = 320;
+            a.height = 180;
+            p.assets << a;
+            Clip c;
+            c.id = QString("clip-") + id;
+            c.assetId = id;
+            c.duration = 60;
+            c.track = int(p.clips.size());
+            p.clips.push_back(c);
+        }
+        p.tracks = 3;
+        p.trackSettings.resize(3);
+        QTemporaryDir dir;
+        saveProject(p, dir.filePath("layout.cutlery"));
+        FrameProvider frames;
+        {
+            Editor editor(&frames);
+            for (const auto &l : editor.state()["layouts"].toList())
+                editor.removeLayout(l.toMap()["name"].toString());
+            QVERIFY(editor.openProject(QUrl::fromLocalFile(dir.filePath("layout.cutlery"))));
+            editor.select("clip-a");
+            editor.toggleSelect("clip-b");
+            editor.arrange("side");
+            editor.select("clip-a");
+            editor.setClipValues({{"border", 0.01}});
+            editor.toggleSelect("clip-b");
+            const auto left = *editor.project().clip("clip-a"), right = *editor.project().clip("clip-b");
+            editor.saveLayout("  ");
+            QVERIFY(editor.state()["error"].toString().contains("Name"));
+            editor.clearError();
+            editor.saveLayout("Duo");
+            QCOMPARE(editor.state()["layouts"].toList().size(), 1);
+            QCOMPARE(editor.state()["layouts"].toList()[0].toMap()["count"].toInt(), 2);
+            // Other pictures take those places, lowest track first, in one undo step.
+            editor.select("clip-b");
+            editor.toggleSelect("clip-c");
+            editor.applyLayout("Duo");
+            QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+            QCOMPARE(editor.project().clip("clip-b")->x, left.x);
+            QCOMPARE(editor.project().clip("clip-b")->scale, left.scale);
+            QCOMPARE(editor.project().clip("clip-b")->border, 0.01);
+            QCOMPARE(editor.project().clip("clip-c")->x, right.x);
+            editor.undo();
+            QCOMPARE(editor.project().clip("clip-c")->x, 0.);
+            // Too many pictures for the layout, or an unknown one.
+            editor.select("clip-a");
+            editor.toggleSelect("clip-b");
+            editor.toggleSelect("clip-c");
+            editor.applyLayout("Duo");
+            QVERIFY(editor.state()["error"].toString().contains("2 pictures"));
+            editor.clearError();
+            editor.applyLayout("Trio");
+            QVERIFY(editor.state()["error"].toString().contains("No such"));
+        }
+        {
+            // Kept for every project; removed again.
+            Editor editor(&frames);
+            QCOMPARE(editor.state()["layouts"].toList().size(), 1);
+            editor.removeLayout("Duo");
+            QVERIFY(editor.state()["layouts"].toList().isEmpty());
+        }
+    }
+    void colourWheels() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Dark, middle and light grey thirds.
+        QImage tones(150, 90, QImage::Format_RGB32);
+        QPainter paint(&tones);
+        paint.fillRect(0, 0, 50, 90, QColor(40, 40, 40));
+        paint.fillRect(50, 0, 50, 90, QColor(128, 128, 128));
+        paint.fillRect(100, 0, 50, 90, QColor(215, 215, 215));
+        paint.end();
+        QVERIFY(tones.save(dir.filePath("tones.png")));
+        Project p;
+        p.width = 150;
+        p.height = 90;
+        Asset a;
+        a.id = "tones";
+        a.path = dir.filePath("tones.png");
+        a.kind = "image";
+        a.duration = 5;
+        a.width = 150;
+        a.height = 90;
+        p.assets = {a};
+        Clip t;
+        t.id = "t";
+        t.assetId = "tones";
+        t.duration = 10;
+        p.clips = {t};
+        auto colours = [&](const Project &project) {
+            RenderOptions options;
+            options.audio = false;
+            options.to = 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 150, 90, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            return std::array<QColor, 3>{image.pixelColor(25, 45), image.pixelColor(75, 45),
+                                        image.pixelColor(125, 45)};
+        };
+        auto warmth = [](const QColor &c) { return c.red() - c.blue(); };
+        const auto plain = colours(p);
+        for (const auto &c : plain)
+            QVERIFY(std::abs(warmth(c)) < 4);
+        // Red into the shadows: the dark third turns red, the light third hardly changes.
+        p.clips[0].liftX = 1;
+        auto graded = colours(p);
+        QVERIFY2(warmth(graded[0]) > 12, qPrintable(graded[0].name()));
+        QVERIFY(std::abs(warmth(graded[2])) < std::max(6, warmth(graded[0]) / 3));
+        // Blue (240°) into the highlights: the light third turns blue.
+        p.clips[0].liftX = 0;
+        p.clips[0].gainX = std::cos(4 * std::numbers::pi / 3);
+        p.clips[0].gainY = std::sin(4 * std::numbers::pi / 3);
+        graded = colours(p);
+        QVERIFY2(warmth(graded[2]) < -12, qPrintable(graded[2].name()));
+        QVERIFY(std::abs(warmth(graded[0])) < std::max(6, -warmth(graded[2]) / 3));
+        // Midtones; saved, validated, and among the look properties.
+        p.clips[0].gainX = p.clips[0].gainY = 0;
+        p.clips[0].gammaY = 0.8;
+        graded = colours(p);
+        QVERIFY(graded[1] != plain[1]);
+        QCOMPARE(Project::fromJson(p.json(), {}).clips[0].gammaY, 0.8);
+        QVERIFY(Clip::lookProperties().contains("gainX"));
+        p.clips[0].gammaX = 0.9;
+        QVERIFY_EXCEPTION_THROWN(p.validate(), std::runtime_error);
     }
     void undoAcrossSessions() {
         QTemporaryDir dir;

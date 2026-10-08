@@ -94,6 +94,14 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
         }
     }
     listLuts();
+    {
+        QFile layouts(m_data + "/layouts.json");
+        if (layouts.open(QIODevice::ReadOnly) && layouts.size() < 4 * 1024 * 1024)
+            for (const auto &v : QJsonDocument::fromJson(layouts.readAll()).array())
+                if (v.isObject() && !v.toObject()["name"].toString().isEmpty() &&
+                    !v.toObject()["slots"].toArray().isEmpty() && m_layouts.size() < 100)
+                    m_layouts.append(v);
+    }
     m_analysis = new MediaAnalysis(m_data + "/cache/waveforms", executable("ffmpeg"), this);
     m_thumbnails = new Thumbnails(m_data + "/cache/thumbnails", executable("ffmpeg"), this);
     m_encoders = new EncoderResolver(executable("ffmpeg"), this);
@@ -537,6 +545,12 @@ QVariantMap Editor::state() const {
             PROP(pitch);
             PROP(whites);
             PROP(blacks);
+            PROP(liftX);
+            PROP(liftY);
+            PROP(gammaX);
+            PROP(gammaY);
+            PROP(gainX);
+            PROP(gainY);
             PROP(titleSlide);
             PROP(stabilizeStrength);
             PROP(stabilizeZoom);
@@ -673,6 +687,13 @@ QVariantMap Editor::state() const {
             {"brandColors", m_brandColors},
             {"brandLogo", m_brandLogo},
             {"lutLibrary", m_lutLibrary},
+            {"layouts", [this] {
+                 QVariantList list;
+                 for (const auto &v : m_layouts)
+                     list << QVariantMap{{"name", v.toObject()["name"].toString()},
+                                         {"count", int(v.toObject()["slots"].toArray().size())}};
+                 return list;
+             }()},
             {"templates", m_templates},
             {"reframe", m_reframe},
             {"conform", m_conform},
@@ -1972,6 +1993,193 @@ void Editor::arrange(const QString &layout, bool fill) {
     m_status = "Arranged " + QString::number(clips.size()) + " pictures";
     emit changed();
 }
+QVector<const Clip *> Editor::selectedPictures() const {
+    QVector<const Clip *> clips;
+    for (const auto &id : selection()) {
+        const auto *c = m_project.clip(id);
+        const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+        if (c && !c->audioOnly && (!a || a->kind != "audio"))
+            clips << c;
+    }
+    std::sort(clips.begin(), clips.end(), [](const Clip *a, const Clip *b) {
+        return a->track != b->track ? a->track < b->track : a->start < b->start;
+    });
+    return clips;
+}
+void Editor::saveLayouts() {
+    QDir().mkpath(m_data);
+    QSaveFile f(m_data + "/layouts.json");
+    const auto data = QJsonDocument(m_layouts).toJson();
+    if (!f.open(QIODevice::WriteOnly) || f.write(data) != data.size() || !f.commit())
+        fail("Cannot save the layouts in " + m_data);
+}
+// The numbers of a picture's placement a saved layout keeps (besides shape and border colour).
+static const QVector<QPair<QString, double Clip::*>> &layoutFields() {
+    static const QVector<QPair<QString, double Clip::*>> fields{
+        {"crop", &Clip::crop},         {"cropLeft", &Clip::cropLeft},
+        {"cropRight", &Clip::cropRight}, {"cropTop", &Clip::cropTop},
+        {"cropBottom", &Clip::cropBottom}, {"radius", &Clip::radius},
+        {"feather", &Clip::feather},   {"border", &Clip::border},
+        {"shadow", &Clip::shadow}};
+    return fields;
+}
+void Editor::saveLayout(const QString &name) {
+    const auto label = name.trimmed().left(60);
+    if (label.isEmpty())
+        return fail("Name the layout");
+    const auto clips = selectedPictures();
+    if (clips.isEmpty())
+        return fail("Select the clips whose places to keep (Ctrl+click several)");
+    QJsonArray places;
+    for (const auto *c : clips) {
+        // Position, size and rotation as shown at the playhead, also when animated.
+        const double local = std::clamp<qint64>(m_playhead - c->start, 0, c->duration - 1);
+        QJsonObject slot{{"scale", c->valueAt("scale", local)},
+                         {"x", c->valueAt("x", local)},
+                         {"y", c->valueAt("y", local)},
+                         {"rotation", c->valueAt("rotation", local)},
+                         {"shape", c->shape},
+                         {"borderColor", c->borderColor}};
+        for (const auto &[k, field] : layoutFields())
+            slot[k] = c->*field;
+        places.append(slot);
+    }
+    const QJsonObject layout{{"name", label}, {"slots", places}};
+    for (qsizetype i = 0; i < m_layouts.size(); ++i)
+        if (m_layouts[i].toObject()["name"].toString().compare(label, Qt::CaseInsensitive) == 0) {
+            m_layouts[i] = layout;
+            saveLayouts();
+            m_status = "Layout updated: " + label;
+            emit changed();
+            return;
+        }
+    if (m_layouts.size() >= 100)
+        return fail("Remove a layout first (100 at most)");
+    m_layouts.append(layout);
+    saveLayouts();
+    m_status = QString("Layout saved: %1 (%2 picture%3)")
+                   .arg(label)
+                   .arg(places.size())
+                   .arg(places.size() == 1 ? "" : "s");
+    emit changed();
+}
+void Editor::applyLayout(const QString &name) {
+    QJsonArray places;
+    for (const auto &v : m_layouts)
+        if (v.toObject()["name"].toString() == name)
+            places = v.toObject()["slots"].toArray();
+    if (places.isEmpty())
+        return fail("No such layout");
+    QStringList ids;
+    for (const auto *c : selectedPictures())
+        ids << c->id;
+    if (ids.isEmpty())
+        return fail("Select the clips to place (Ctrl+click several)");
+    if (ids.size() > places.size())
+        return fail(QString("This layout has places for %1 picture%2")
+                        .arg(places.size())
+                        .arg(places.size() == 1 ? "" : "s"));
+    // The project's checks reject values a hand-edited file might hold.
+    mutate([&](Project &p) {
+        for (int i = 0; i < ids.size(); ++i) {
+            auto *c = p.clip(ids[i]);
+            p.requireEditable(c->track);
+            const auto slot = places[i].toObject();
+            c->scale = slot["scale"].toDouble(1);
+            c->x = slot["x"].toDouble(0);
+            c->y = slot["y"].toDouble(0);
+            c->rotation = slot["rotation"].toDouble(0);
+            c->shape = slot["shape"].toString("rect");
+            c->borderColor = slot["borderColor"].toString("#ffffff");
+            for (const auto &[k, field] : layoutFields())
+                c->*field = slot[k].toDouble(0);
+            for (const auto &k : {"scale", "x", "y", "rotation"})
+                c->keyframes.remove(k);
+        }
+    });
+}
+void Editor::removeLayout(const QString &name) {
+    for (qsizetype i = 0; i < m_layouts.size(); ++i)
+        if (m_layouts[i].toObject()["name"].toString() == name) {
+            m_layouts.removeAt(i);
+            saveLayouts();
+            emit changed();
+            return;
+        }
+}
+void Editor::speedRamp(const QString &preset) {
+    // Speed factors along the clip (0..1), joined by straight lines.
+    static const QHash<QString, QVector<QPointF>> curves{
+        {"montage", {{0, 2.5}, {0.25, 0.6}, {0.5, 2.5}, {0.75, 0.6}, {1, 2.5}}},
+        {"hero", {{0, 1}, {0.35, 1}, {0.5, 0.25}, {0.65, 1}, {1, 1}}},
+        {"bullet", {{0, 2.5}, {0.4, 0.2}, {0.6, 0.2}, {1, 2.5}}},
+        {"jumpCut", {{0, 0.6}, {0.45, 0.6}, {0.55, 4}, {1, 4}}},
+        {"flashIn", {{0, 4}, {1, 1}}},
+        {"flashOut", {{0, 1}, {1, 4}}}};
+    if (!curves.contains(preset))
+        return fail("Unknown speed ramp");
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a || a->kind == "image")
+        return fail("Select a video or sound clip for a speed ramp");
+    const int parts = int(std::min<qint64>(8, c->duration / 3));
+    if (parts < 2)
+        return fail("The clip is too short for a speed ramp");
+    const auto &curve = curves[preset];
+    auto factor = [&](double t) {
+        for (int i = 1; i < curve.size(); ++i)
+            if (t <= curve[i].x())
+                return curve[i - 1].y() + (curve[i].y() - curve[i - 1].y()) *
+                                              (t - curve[i - 1].x()) / (curve[i].x() - curve[i - 1].x());
+        return curve.last().y();
+    };
+    const auto id = c->id;
+    const bool done = mutate([&](Project &p) {
+        const auto *first = p.clip(id);
+        const qint64 start = first->start, end = first->start + first->duration;
+        const auto group = QStringList{id} + p.linkedClips(id);
+        QSet<int> tracks;
+        for (const auto &clipId : group) {
+            p.requireEditable(p.clip(clipId)->track);
+            tracks.insert(p.clip(clipId)->track);
+        }
+        // Equal parts of the source, cut from the end so the clip keeps its id as the first.
+        for (int k = parts - 1; k >= 1; --k)
+            for (const auto &clipId : group)
+                p.split(clipId, start + qRound64(double(k) * (end - start) / parts));
+        qint64 newEnd = end;
+        for (const auto track : tracks) {
+            QVector<Clip *> pieces;
+            for (auto &x : p.clips)
+                if (x.track == track && x.start >= start && x.start < end)
+                    pieces << &x;
+            std::sort(pieces.begin(), pieces.end(),
+                      [](const Clip *l, const Clip *r) { return l->start < r->start; });
+            qint64 cursor = start;
+            for (int k = 0; k < pieces.size(); ++k) {
+                auto *piece = pieces[k];
+                const auto old = piece->speed;
+                const double speed =
+                    std::clamp(old.seconds() * factor((k + 0.5) / pieces.size()), 0.1, 100.);
+                piece->speed = Time(qRound64(speed * 1000), 1000);
+                piece->scaleKeyframes(old.seconds() / piece->speed.seconds());
+                piece->duration = std::max<qint64>(
+                    1, qint64(std::floor(piece->duration * old.seconds() / piece->speed.seconds())));
+                piece->start = cursor;
+                cursor += piece->duration;
+            }
+            newEnd = cursor;
+        }
+        // Later clips on those tracks follow the new length.
+        for (auto &x : p.clips)
+            if (tracks.contains(x.track) && x.start >= end)
+                x.start += newEnd - end;
+    });
+    if (!done)
+        return;
+    m_status = "Speed ramp applied";
+    emit changed();
+}
 void Editor::applyMotion(const QString &preset) {
     static const QStringList presets{"popIn", "popOut", "slideLeft", "slideUp", "pulse", "wiggle", "none"};
     if (!presets.contains(preset))
@@ -2185,7 +2393,83 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
                 list.insert(it, {frame, v.toDouble(), true});
             return;
         }
-        if (key == "duration")
+        // Plain numbers, looked up rather than chained (compilers limit else-if depth).
+        static const QHash<QString, double Clip::*> numbers{
+            {"scale", &Clip::scale},
+            {"x", &Clip::x},
+            {"y", &Clip::y},
+            {"rotation", &Clip::rotation},
+            {"opacity", &Clip::opacity},
+            {"volume", &Clip::volume},
+            {"brightness", &Clip::brightness},
+            {"contrast", &Clip::contrast},
+            {"saturation", &Clip::saturation},
+            {"crop", &Clip::crop},
+            {"temperature", &Clip::temperature},
+            {"tint", &Clip::tint},
+            {"vibrance", &Clip::vibrance},
+            {"shadows", &Clip::shadows},
+            {"highlights", &Clip::highlights},
+            {"sharpen", &Clip::sharpen},
+            {"glow", &Clip::glow},
+            {"vignette", &Clip::vignette},
+            {"grain", &Clip::grain},
+            {"lutStrength", &Clip::lutStrength},
+            {"hslHue", &Clip::hslHue},
+            {"hslSaturation", &Clip::hslSaturation},
+            {"hslLightness", &Clip::hslLightness},
+            {"eqLow", &Clip::eqLow},
+            {"eqMid", &Clip::eqMid},
+            {"eqHigh", &Clip::eqHigh},
+            {"lowCut", &Clip::lowCut},
+            {"compressor", &Clip::compressor},
+            {"gate", &Clip::gate},
+            {"denoise", &Clip::denoise},
+            {"deess", &Clip::deess},
+            {"fxStrength", &Clip::fxStrength},
+            {"motionBlur", &Clip::motionBlur},
+            {"reverb", &Clip::reverb},
+            {"pitch", &Clip::pitch},
+            {"whites", &Clip::whites},
+            {"blacks", &Clip::blacks},
+            {"liftX", &Clip::liftX},
+            {"liftY", &Clip::liftY},
+            {"gammaX", &Clip::gammaX},
+            {"gammaY", &Clip::gammaY},
+            {"gainX", &Clip::gainX},
+            {"gainY", &Clip::gainY},
+            {"stabilizeStrength", &Clip::stabilizeStrength},
+            {"exposure", &Clip::exposure},
+            {"echo", &Clip::echo},
+            {"pan", &Clip::pan},
+            {"textAnimationTime", &Clip::textAnimationTime},
+            {"anchorX", &Clip::anchorX},
+            {"anchorY", &Clip::anchorY},
+            {"letterSpacing", &Clip::letterSpacing},
+            {"lineSpacing", &Clip::lineSpacing},
+            {"outline", &Clip::outline},
+            {"textShadow", &Clip::textShadow},
+            {"textGlow", &Clip::textGlow},
+            {"background", &Clip::background},
+            {"stroke", &Clip::stroke},
+            {"graphicWidth", &Clip::graphicWidth},
+            {"graphicHeight", &Clip::graphicHeight},
+            {"fadeIn", &Clip::fadeIn},
+            {"fadeOut", &Clip::fadeOut},
+            {"lumaTolerance", &Clip::lumaTolerance},
+            {"lumaSoftness", &Clip::lumaSoftness},
+            {"radius", &Clip::radius},
+            {"feather", &Clip::feather},
+            {"tiltX", &Clip::tiltX},
+            {"tiltY", &Clip::tiltY},
+            {"border", &Clip::border},
+            {"shadow", &Clip::shadow},
+            {"keySimilarity", &Clip::keySimilarity},
+            {"keyBlend", &Clip::keyBlend},
+        };
+        if (const auto number = numbers.constFind(key); number != numbers.constEnd())
+            c->*number.value() = v.toDouble();
+        else if (key == "duration")
             c->duration = v.toLongLong();
         else if (key == "sourceIn") {
             const auto t = v.toDouble();
@@ -2268,106 +2552,41 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         } else if (key == "transitionFrames")
             c->transitionFrames = v.toLongLong();
 #define FIELD(k, type) else if (key == #k) c->k = v.type()
-        FIELD(scale, toDouble);
-        FIELD(x, toDouble);
-        FIELD(y, toDouble);
-        FIELD(rotation, toDouble);
-        FIELD(opacity, toDouble);
-        FIELD(volume, toDouble);
-        FIELD(brightness, toDouble);
-        FIELD(contrast, toDouble);
-        FIELD(saturation, toDouble);
-        FIELD(crop, toDouble);
-        FIELD(temperature, toDouble);
-        FIELD(tint, toDouble);
-        FIELD(vibrance, toDouble);
-        FIELD(shadows, toDouble);
-        FIELD(highlights, toDouble);
-        FIELD(sharpen, toDouble);
-        FIELD(glow, toDouble);
-        FIELD(vignette, toDouble);
-        FIELD(grain, toDouble);
-        FIELD(lutStrength, toDouble);
         FIELD(curveMaster, toString);
         FIELD(curveRed, toString);
         FIELD(curveGreen, toString);
         FIELD(curveBlue, toString);
         FIELD(hslColors, toString);
-        FIELD(hslHue, toDouble);
-        FIELD(hslSaturation, toDouble);
-        FIELD(hslLightness, toDouble);
-        FIELD(eqLow, toDouble);
-        FIELD(eqMid, toDouble);
-        FIELD(eqHigh, toDouble);
-        FIELD(lowCut, toDouble);
-        FIELD(compressor, toDouble);
-        FIELD(gate, toDouble);
-        FIELD(denoise, toDouble);
-        FIELD(deess, toDouble);
         FIELD(fx, toString);
         FIELD(voice, toString);
         FIELD(canvasFill, toString);
-        FIELD(fxStrength, toDouble);
-        FIELD(motionBlur, toDouble);
         FIELD(stabilize, toBool);
-        FIELD(reverb, toDouble);
-        FIELD(pitch, toDouble);
-        FIELD(whites, toDouble);
-        FIELD(blacks, toDouble);
         FIELD(titleSlide, toBool);
-        FIELD(stabilizeStrength, toDouble);
         FIELD(stabilizeZoom, toBool);
-        FIELD(exposure, toDouble);
-        FIELD(echo, toDouble);
-        FIELD(pan, toDouble);
         FIELD(textAnimation, toString);
-        FIELD(textAnimationTime, toDouble);
-        FIELD(anchorX, toDouble);
-        FIELD(anchorY, toDouble);
         FIELD(slowMotion, toString);
         FIELD(bold, toBool);
         FIELD(italic, toBool);
         FIELD(align, toString);
-        FIELD(letterSpacing, toDouble);
-        FIELD(lineSpacing, toDouble);
-        FIELD(outline, toDouble);
         FIELD(outlineColor, toString);
-        FIELD(textShadow, toDouble);
-        FIELD(textGlow, toDouble);
         FIELD(textGlowColor, toString);
-        FIELD(background, toDouble);
         FIELD(backgroundColor, toString);
         FIELD(fontFamily, toString);
         FIELD(graphic, toString);
         FIELD(fillColor, toString);
         FIELD(strokeColor, toString);
-        FIELD(stroke, toDouble);
-        FIELD(graphicWidth, toDouble);
-        FIELD(graphicHeight, toDouble);
-        FIELD(fadeIn, toDouble);
-        FIELD(fadeOut, toDouble);
         FIELD(reverse, toBool);
         FIELD(flip, toBool);
         FIELD(flipVertical, toBool);
         FIELD(blendMode, toString);
         FIELD(lumaKey, toString);
-        FIELD(lumaTolerance, toDouble);
-        FIELD(lumaSoftness, toDouble);
         FIELD(muted, toBool);
         FIELD(hidden, toBool);
-        FIELD(radius, toDouble);
-        FIELD(feather, toDouble);
         FIELD(effectShape, toString);
-        FIELD(tiltX, toDouble);
-        FIELD(tiltY, toDouble);
-        FIELD(border, toDouble);
-        FIELD(shadow, toDouble);
         FIELD(chromaKey, toBool);
         FIELD(aiCutout, toBool);
         FIELD(aiUpscale, toBool);
         FIELD(eyeContact, toBool);
-        FIELD(keySimilarity, toDouble);
-        FIELD(keyBlend, toDouble);
         FIELD(shape, toString);
         FIELD(borderColor, toString);
         FIELD(keyColor, toString);
@@ -4076,6 +4295,12 @@ void Editor::pasteAttributes(const QString &group) {
         c->shadows = from.shadows;
         c->whites = from.whites;
         c->blacks = from.blacks;
+        c->liftX = from.liftX;
+        c->liftY = from.liftY;
+        c->gammaX = from.gammaX;
+        c->gammaY = from.gammaY;
+        c->gainX = from.gainX;
+        c->gainY = from.gainY;
         c->highlights = from.highlights;
         c->sharpen = from.sharpen;
         c->glow = from.glow;

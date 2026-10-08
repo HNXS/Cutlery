@@ -4,6 +4,9 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Colour wheels:** push a colour into the shadows, midtones or highlights.
+- **Speed ramps:** montage, hero, bullet, jump cut, flash in and flash out make a clip speed up and slow down in one step.
+- **Own layouts:** save where the selected clips sit (e.g. an interview split) and use it again in any project.
 - **Undo after reopening:** saved projects keep their undo steps; open the project again and Undo goes on where you left off.
 - **Freeze frames** of any length, also in reversed clips.
 - **3D tilt:** lean a picture back or turn it sideways, in perspective.

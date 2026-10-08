@@ -8,6 +8,7 @@
 #include "Project.h"
 #include "Scopes.h"
 #include "SoundLibrary.h"
+#include <QJsonArray>
 #include <QObject>
 #include <QProcess>
 #include <QQuickImageProvider>
@@ -149,6 +150,21 @@ class Editor final : public QObject {
     // properties it moves: "popIn", "popOut", "slideLeft", "slideUp", "pulse", "wiggle", or
     // "none" to remove scale, position and rotation keyframes.
     Q_INVOKABLE void applyMotion(const QString &preset);
+    // Speed ramp: the selected video or sound clip (with its linked clips) is cut into up to 8
+    // equal parts of its source, each played at the clip's speed times the preset's curve
+    // there: "montage" (fast, slow, fast, slow, fast), "hero" (a slow moment in the middle),
+    // "bullet" (fast into a long slow moment and out), "jumpCut" (slow, then suddenly fast),
+    // "flashIn" (fast settling to normal), "flashOut" (normal speeding up). Later clips on
+    // those tracks move with the new length. One undo step.
+    Q_INVOKABLE void speedRamp(const QString &preset);
+    // Own layouts for every project (data folder, layouts.json, up to 100): saveLayout keeps
+    // the position, size, rotation, crop and frame of each selected clip with a picture
+    // (lowest track first); applyLayout puts the selected clips in those places, in the same order, in one
+    // undo step (their position, size and rotation keyframes are replaced). State "layouts":
+    // [{name, count}].
+    Q_INVOKABLE void saveLayout(const QString &name);
+    Q_INVOKABLE void applyLayout(const QString &name);
+    Q_INVOKABLE void removeLayout(const QString &name);
     // Arranges the selected pictures (lowest track first) on the canvas, in one undo step:
     // "side" (side by side), "stack" (one above the other), "grid" (2 × 2), "pip-tl", "pip-tr",
     // "pip-bl", "pip-br" (the lowest full, the others small in that corner), "presenter" (the
@@ -463,6 +479,11 @@ class Editor final : public QObject {
     QStringList m_brandColors;
     QString m_brandLogo;
     QVariantList m_lutLibrary;
+    QJsonArray m_layouts;
+    void saveLayouts();
+    // Selected clips with a picture (media, titles, shapes, effect areas; not sound), lowest
+    // track first, then by start.
+    QVector<const Clip *> selectedPictures() const;
     // Spoken words of cached transcripts by result file: modified time and cues.
     mutable QHash<QString, QPair<qint64, QVector<Cue>>> m_spoken;
     void saveBrand();
