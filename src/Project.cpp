@@ -285,6 +285,10 @@ QJsonObject Project::json(const QString &base) const {
             o["loops"] = true;
         if (!a.folder.isEmpty())
             o["folder"] = a.folder;
+        if (!a.rights.isEmpty())
+            o["rights"] = a.rights;
+        if (!a.credit.isEmpty())
+            o["credit"] = a.credit;
         // Media paths inside a nested sequence are stored relative to the project file too.
         if (a.isNested())
             o["nested"] = Project::fromJson(a.nested, {}).json(base);
@@ -449,6 +453,12 @@ QJsonObject Project::json(const QString &base) const {
         o["radius"] = c.radius;
         if (c.feather > 0)
             o["feather"] = c.feather;
+        if (!c.cornerPin.isEmpty()) {
+            QJsonArray pin;
+            for (const auto v : c.cornerPin)
+                pin.append(v);
+            o["cornerPin"] = pin;
+        }
         o["border"] = c.border;
         o["borderColor"] = c.borderColor;
         o["shadow"] = c.shadow;
@@ -556,6 +566,8 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         a.variableRate = j["variableRate"].toBool(false);
         a.loops = j["loops"].toBool(false) && a.kind == "video";
         a.folder = j["folder"].toString();
+        a.rights = j["rights"].toString();
+        a.credit = j["credit"].toString();
         if (j["nested"].isObject()) {
             a.nested = Project::fromJson(j["nested"].toObject(), base).json();
             a.kind = "video";
@@ -682,6 +694,8 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.shape = j["shape"].toString("rect");
         c.radius = j["radius"].toDouble(0.12);
         c.feather = j["feather"].toDouble(0);
+        for (const auto &v : j["cornerPin"].toArray())
+            c.cornerPin << v.toDouble(-1);
         c.border = j["border"].toDouble(0);
         c.borderColor = j["borderColor"].toString("#ffffff");
         c.shadow = j["shadow"].toDouble(0);
@@ -741,6 +755,11 @@ void Project::validate() const {
                                 return a.folder.isEmpty() || folders.contains(a.folder);
                             }),
             "Invalid media folder");
+    require(std::all_of(assets.begin(), assets.end(),
+                        [](const Asset &a) {
+                            return Project::rightsKinds().contains(a.rights) && a.credit.size() <= 500;
+                        }),
+            "Invalid usage rights");
     require(inPoint >= -1 && outPoint >= -1 && inPoint <= 100000000 && outPoint <= 100000000 &&
                 (inPoint < 0 || outPoint < 0 || inPoint < outPoint),
             "Invalid in/out range");
@@ -802,6 +821,10 @@ void Project::validate() const {
         require(QStringList{"rect", "rounded", "circle"}.contains(c.shape) &&
                     bounded(c.radius, 0, 0.5) && bounded(c.border, 0, 0.1) &&
                     bounded(c.feather, 0, 0.5) &&
+                    (c.cornerPin.isEmpty() ||
+                     (c.cornerPin.size() == 8 &&
+                      std::all_of(c.cornerPin.begin(), c.cornerPin.end(),
+                                  [](double v) { return v >= 0 && v <= 1; }))) &&
                     QColor(c.borderColor).isValid() && bounded(c.shadow, 0, 1) &&
                     QColor(c.keyColor).isValid() && bounded(c.keySimilarity, 0.01, 1) &&
                     bounded(c.keyBlend, 0, 1),

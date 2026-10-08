@@ -979,7 +979,7 @@ ApplicationWindow {
                                 id: librarySearch
                                 objectName: "librarySearch"
                                 Layout.fillWidth: true
-                                placeholderText: "Search media by name"
+                                placeholderText: "Search media, also by what is said"
                                 selectByMouse: true
                             }
                             RowLayout {
@@ -1007,8 +1007,10 @@ ApplicationWindow {
                                 model: {
                                     const kind = libraryView.currentIndex >= 0 && libraryView.currentIndex < libraryView.kinds.length ? libraryView.kinds[libraryView.currentIndex].key : "";
                                     const folder = libraryView.folder;
-                                    const words = librarySearch.text.toLowerCase().split(/\s+/).filter(w => w.length > 0);
-                                    return editor.assets.filter(a => (folder === "" || a.folder === folder) && (kind === "" || a.kind === kind) && words.every(w => a.name.toLowerCase().indexOf(w) >= 0));
+                                    // Names, files, folders, sizes, rights and what is said (cached transcripts).
+                                    const found = librarySearch.text.trim().length > 0 ? editor.searchMedia(librarySearch.text) : null;
+                                    return editor.assets.filter(a => (folder === "" || a.folder === folder) && (kind === "" || a.kind === kind) && (!found || found[a.id] !== undefined))
+                                        .map(a => Object.assign({ said: found ? found[a.id] : "" }, a));
                                 }
                                 delegate: Rectangle {
                                     id: mediaTile
@@ -1074,7 +1076,17 @@ ApplicationWindow {
                                                 font.bold: true
                                             }
                                             Label {
-                                                text: modelData.missing ? "Missing • relink in inspector" : modelData.kind.toUpperCase() + "  ·  " + modelData.seconds.toFixed(1) + "s" + (modelData.folder && libraryView.folder === "" ? "  ·  ▸ " + modelData.folder : "")
+                                                objectName: "said-" + modelData.id
+                                                visible: !!modelData.said
+                                                text: "“" + modelData.said + "”"
+                                                font.pixelSize: 10
+                                                font.italic: true
+                                                color: win.mint
+                                                elide: Text.ElideRight
+                                                Layout.fillWidth: true
+                                            }
+                                            Label {
+                                                text: (modelData.missing ? "Missing • relink in inspector" : modelData.kind.toUpperCase() + "  ·  " + modelData.seconds.toFixed(1) + "s" + (modelData.folder && libraryView.folder === "" ? "  ·  ▸ " + modelData.folder : "")) + (modelData.rights === "personal" ? "  ·  ⚠ personal use" : modelData.rights === "unknown" ? "  ·  ⚠ rights unknown" : modelData.rights === "attribution" ? "  ·  credit needed" : "")
                                                 font.pixelSize: 10
                                                 color: win.muted
                                                 elide: Text.ElideRight
@@ -1199,6 +1211,11 @@ ApplicationWindow {
                                                 win.relinkAsset = mediaTile.modelData.id;
                                                 relinkDialog.open();
                                             }
+                                        }
+                                        MenuItem {
+                                            objectName: "assetRights"
+                                            text: "Usage rights…"
+                                            onTriggered: rightsDialog.ask(mediaTile.modelData)
                                         }
                                         MenuItem {
                                             text: "New folder with this media…"
@@ -2662,6 +2679,72 @@ ApplicationWindow {
                                             onClicked: editor.placeClip(modelData.id)
                                             ToolTip.visible: hovered
                                             ToolTip.text: modelData.id === "full" ? "Full frame" : "Picture-in-picture in this corner"
+                                        }
+                                    }
+                                }
+                                // Corner pin: move the picture's corners, e.g. into a screen in a photo.
+                                CheckBox {
+                                    id: pinToggle
+                                    objectName: "cornerPin"
+                                    visible: !!win.selection.assetId && win.selection.picture === true
+                                    text: "Perspective (move the corners)"
+                                    checked: (win.selection.cornerPin || []).length === 8
+                                    enabled: win.selection.locked !== true
+                                    onToggled: editor.setClip("cornerPin", checked ? [0, 0, 1, 0, 0, 1, 1, 1] : [])
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Places the picture into a four-sided shape, e.g. onto a screen or a sign in another picture"
+                                }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    visible: pinToggle.visible && pinToggle.checked
+                                    spacing: 0
+                                    Repeater {
+                                        model: [
+                                            { label: "Top left", i: 0 },
+                                            { label: "Top right", i: 2 },
+                                            { label: "Bottom left", i: 4 },
+                                            { label: "Bottom right", i: 6 }
+                                        ]
+                                        delegate: Item {
+                                            id: pinCorner
+                                            required property var modelData
+                                            Layout.fillWidth: true
+                                            implicitHeight: pinRow.implicitHeight
+                                            RowLayout {
+                                                id: pinRow
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                Label {
+                                                    text: pinCorner.modelData.label
+                                                    color: win.muted
+                                                    font.pixelSize: 11
+                                                    Layout.preferredWidth: 72
+                                                }
+                                                Repeater {
+                                                    model: 2
+                                                    Slider {
+                                                        required property int index
+                                                        objectName: "cornerPin-" + (pinCorner.modelData.i + index)
+                                                        Layout.fillWidth: true
+                                                        from: 0
+                                                        to: 1
+                                                        stepSize: .005
+                                                        value: (win.selection.cornerPin || [0, 0, 1, 0, 0, 1, 1, 1])[pinCorner.modelData.i + index] ?? 0
+                                                        enabled: win.selection.locked !== true
+                                                        function commit() {
+                                                            const pin = (win.selection.cornerPin || [0, 0, 1, 0, 0, 1, 1, 1]).slice();
+                                                            pin[pinCorner.modelData.i + index] = value;
+                                                            editor.setClip("cornerPin", pin);
+                                                        }
+                                                        onPressedChanged: if (!pressed)
+                                                            commit()
+                                                        onMoved: if (!pressed)
+                                                            commit()
+                                                        ToolTip.visible: hovered
+                                                        ToolTip.text: (index === 0 ? "Across" : "Down") + " (fraction of the picture)"
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -4479,6 +4562,14 @@ ApplicationWindow {
         }
     }
     FileDialog {
+        id: creditsDialog
+        title: "Save credits"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "txt"
+        nameFilters: ["Text (*.txt)"]
+        onAccepted: editor.exportCredits(selectedFile)
+    }
+    FileDialog {
         id: lutLibraryDialog
         title: "Add LUTs to the library"
         fileMode: FileDialog.OpenFiles
@@ -4776,6 +4867,56 @@ ApplicationWindow {
             if (assetId && (win.s.folders || []).indexOf(name) >= 0)
                 editor.moveToFolder([assetId], name);
         }
+    }
+    // Usage rights of a medium and the credit line it needs (kept with the project).
+    Dialog {
+        id: rightsDialog
+        objectName: "rightsDialog"
+        property string assetId: ""
+        readonly property var kinds: [
+            { id: "", label: "Not recorded" },
+            { id: "own", label: "My own" },
+            { id: "free", label: "Free for any use (public domain, CC0)" },
+            { id: "attribution", label: "Free with a credit (e.g. CC BY)" },
+            { id: "licensed", label: "Bought or licensed" },
+            { id: "personal", label: "Personal use only (not commercial)" },
+            { id: "unknown", label: "Unknown" }
+        ]
+        function ask(asset) {
+            assetId = asset.id;
+            title = "Usage rights: " + asset.name;
+            rightsKind.currentIndex = Math.max(0, kinds.findIndex(k => k.id === (asset.rights || "")));
+            rightsCredit.text = asset.credit || "";
+            open();
+        }
+        anchors.centerIn: parent
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        ColumnLayout {
+            width: 340
+            ComboBox {
+                id: rightsKind
+                objectName: "rightsKind"
+                Layout.fillWidth: true
+                model: rightsDialog.kinds.map(k => k.label)
+            }
+            TextField {
+                id: rightsCredit
+                objectName: "rightsCredit"
+                Layout.fillWidth: true
+                maximumLength: 500
+                placeholderText: "Credit line or source, e.g. Music: Jane Doe (CC BY 4.0)"
+                onAccepted: rightsDialog.accept()
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                font.pixelSize: 11
+                color: win.muted
+                text: "Kept with the project. The export points out media for personal use only or of unknown rights, and can save the credit lines as a text file."
+            }
+        }
+        onAccepted: editor.setAssetRights([assetId], kinds[rightsKind.currentIndex].id, rightsCredit.text)
     }
     // The sound effects library: listen, add at the playhead, or a swoosh on every transition.
     Dialog {
@@ -5408,6 +5549,32 @@ ApplicationWindow {
                 color: win.muted
                 font.pixelSize: 11
                 text: exportSettings.current.format === "png" ? "Output: numbered PNG pictures (name_00001.png, …) in a new folder named like the file you choose, " + (exportSettings.preview.width || 0) + " × " + (exportSettings.preview.height || 0) + ", transparent where the timeline is empty." : exportSettings.preview.audio ? "Output: the timeline's sound only, 48 kHz stereo · ." + exportSettings.preview.extension + (exportSettings.preview.extension === "wav" ? " (24-bit at Maximum quality, otherwise 16-bit)" : "") + "." : "Output " + (exportSettings.preview.width || 0) + " × " + (exportSettings.preview.height || 0) + " · ." + (exportSettings.preview.extension || "mp4") + ". Cutlery uses your graphics card's encoder (NVIDIA, AMD or Intel) when available, otherwise Windows' encoder; AV1, VP9 and ProRes also work in software. Higher resolutions re-render each source at that size with sharp Lanczos scaling, so 4K sources stay 4K."
+            }
+            // Usage rights of the media on the timeline: a note before publishing, and the credits.
+            Label {
+                id: rightsNote
+                objectName: "rightsNote"
+                Layout.columnSpan: 2
+                Layout.fillWidth: true
+                visible: win.convertAsset.length === 0 && exportSettings.visible && text.length > 0
+                wrapMode: Text.Wrap
+                font.pixelSize: 11
+                color: "#e5c07b"
+                readonly property var r: exportSettings.visible ? editor.rightsCheck() : ({})
+                text: [
+                    (r.personal || []).length ? "⚠ For personal use only: " + r.personal.join(", ") + "." : "",
+                    (r.unknown || []).length ? "⚠ Rights unknown: " + r.unknown.join(", ") + "." : "",
+                    (r.credits || []).length ? (r.credits.length + " medi" + (r.credits.length === 1 ? "um needs" : "a need") + " a credit.") : ""
+                ].filter(t => t.length).join(" ")
+            }
+            Action {
+                objectName: "saveCredits"
+                Layout.columnSpan: 2
+                visible: rightsNote.visible && (rightsNote.r.credits || []).length > 0
+                text: "Save credits…"
+                onClicked: creditsDialog.open()
+                ToolTip.visible: hovered
+                ToolTip.text: "Saves the credit lines of the media on the timeline as a text file, e.g. for the video description"
             }
             // The export queue: each job renders the timeline as it was when it was added, one
             // after the other, so you can queue several formats and keep editing.

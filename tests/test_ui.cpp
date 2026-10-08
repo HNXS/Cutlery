@@ -377,6 +377,21 @@ class UiTest : public QObject {
         QTRY_COMPARE(list->property("count").toInt(), 2);
         search->setProperty("text", "WALK beach");
         QTRY_COMPARE(list->property("count").toInt(), 1);
+        // Usage rights from the dialog; the rights are searchable too.
+        QVariant walkAsset;
+        for (const auto &a : editor.assets())
+            if (a.toMap()["name"].toString().contains("walk", Qt::CaseInsensitive))
+                walkAsset = a;
+        const auto walk = walkAsset.toMap()["id"].toString();
+        auto *rights = window->findChild<QObject *>("rightsDialog");
+        QVERIFY(QMetaObject::invokeMethod(rights, "ask", Q_ARG(QVariant, walkAsset)));
+        findItem(window->contentItem(), "rightsKind")->setProperty("currentIndex", 3);
+        findItem(window->contentItem(), "rightsCredit")->setProperty("text", "Footage: Sam");
+        QVERIFY(QMetaObject::invokeMethod(rights, "accept"));
+        QCOMPARE(editor.project().asset(walk)->rights, QString("attribution"));
+        QCOMPARE(editor.project().asset(walk)->credit, QString("Footage: Sam"));
+        search->setProperty("text", "sam");
+        QTRY_COMPARE(list->property("count").toInt(), 1);
         search->setProperty("text", "");
         // A new folder is shown at once and empty; media moved into it appears there.
         auto *dialog = window->findChild<QObject *>("folderDialog");
@@ -1220,6 +1235,20 @@ class UiTest : public QObject {
         QVERIFY(QMetaObject::invokeMethod(fx, "activated", Q_ARG(int, 8)));
         QCOMPARE(clip().fx, QString("mirror"));
         editor.undo();
+        // Perspective: switching it on pins the corners where they are; sliders move them.
+        auto *pin = findItem(window->contentItem(), "cornerPin");
+        QTRY_VERIFY(pin && pin->isVisible());
+        pin->setProperty("checked", true);
+        QVERIFY(QMetaObject::invokeMethod(pin, "toggled"));
+        QCOMPARE(clip().cornerPin, (QVector<double>{0, 0, 1, 0, 0, 1, 1, 1}));
+        auto *corner = findItem(window->contentItem(), "cornerPin-2");
+        QTRY_VERIFY(corner && corner->isVisible());
+        corner->setProperty("value", 0.8);
+        QVERIFY(QMetaObject::invokeMethod(corner, "commit"));
+        QCOMPARE(clip().cornerPin[2], 0.8);
+        editor.undo();
+        editor.undo();
+        QVERIFY(clip().cornerPin.isEmpty());
         // Canvas fill for pictures that do not cover the frame.
         auto *fill = findItem(window->contentItem(), "canvasFill");
         QTRY_VERIFY(fill && fill->isVisible());

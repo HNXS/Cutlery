@@ -4,6 +4,7 @@
 #include "Playback.h"
 #include "Thumbnails.h"
 #include "AiJobs.h"
+#include "Captions.h"
 #include "Project.h"
 #include "Scopes.h"
 #include "SoundLibrary.h"
@@ -113,6 +114,19 @@ class Editor final : public QObject {
     Q_INVOKABLE void renameFolder(const QString &from, const QString &to);
     Q_INVOKABLE void removeFolder(const QString &name);
     Q_INVOKABLE void moveToFolder(const QStringList &assetIds, const QString &folder);
+    // Usage rights of media (see Asset::rights) with a credit line or source note, in one undo
+    // step. rightsCheck lists the media on the timeline by their rights: {personal, unknown,
+    // unrecorded: [names], credits: [{name, credit}]}. exportCredits writes the credit lines
+    // of the media on the timeline to a text file.
+    Q_INVOKABLE void setAssetRights(const QStringList &assetIds, const QString &rights,
+                                    const QString &credit);
+    Q_INVOKABLE QVariantMap rightsCheck() const;
+    Q_INVOKABLE bool exportCredits(const QUrl &file);
+    // Library search: every word of `query` must appear in a medium's name, file name, folder,
+    // kind, size (e.g. 1920x1080), rights or credit, or in what is said in it (cached
+    // transcripts in any language). Returns {assetId: snippet}, the snippet being the spoken
+    // words around the first match with its time ("0:12 … words …"), or "" for other matches.
+    Q_INVOKABLE QVariantMap searchMedia(const QString &query) const;
     Q_INVOKABLE void setImportFolder(const QString &folder);
     // Takes media no clip uses out of the library (the files stay on disk).
     Q_INVOKABLE void removeAssets(const QStringList &assetIds);
@@ -449,6 +463,8 @@ class Editor final : public QObject {
     QStringList m_brandColors;
     QString m_brandLogo;
     QVariantList m_lutLibrary;
+    // Spoken words of cached transcripts by result file: modified time and cues.
+    mutable QHash<QString, QPair<qint64, QVector<Cue>>> m_spoken;
     void saveBrand();
     void listLuts();
     void listTemplates();

@@ -1,5 +1,19 @@
 # Validation record
 
+## Windows portable build — 2026-10-08, corner pin, library search by speech and metadata, usage rights (0.6 development)
+
+[GitHub Actions run 37766665238](https://github.com/HNXS/Cutlery/actions/runs/37766665238) on commit `a61771356b21efb59ecd9022cb5f70c0eff4c1fc` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `styleEffects`:** a corner pin narrows the top of the picture to a trapezoid with black canvas outside, keeps the bottom at full width and squeezes the top row of bars; corners left in place change nothing; corners are saved and validated.
+- **Engine test `rightsAndMediaSearch`:**
+  - **Usage rights:** recorded with a trimmed credit line; the check names media for personal use on the timeline and counts the credits; the credits file is written; saving, undo and redo work.
+  - **Search:** media are found by name, picture size, credit and kind, and by a word said in a cached transcript, with the time of that word; every search word must match.
+- **UI tests:**
+  - `lookControls`: the corner pin is switched on and one corner moved with its slider.
+  - Library test: rights set in the rights dialog are then found by the library search.
+
 ## Windows portable build — 2026-10-08, canvas fill, sketch/poster/fisheye/mirror effects, voice changer (0.6 development)
 
 [GitHub Actions run 37761592181](https://github.com/HNXS/Cutlery/actions/runs/37761592181) on commit `8ec6ee07495b47ddd37d76f1962c6ca9617b1602` passed every step on its first attempt.

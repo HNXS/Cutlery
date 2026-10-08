@@ -3319,6 +3319,21 @@ class EngineTest : public QObject {
         for (int x = 0; x < 64; x += 7)
             QVERIFY(std::abs(qGray(mirrored.pixel(x, 20)) - qGray(mirrored.pixel(127 - x, 20))) < 6);
         QVERIFY(difference(mirrored, plain) > 5);
+        // Corner pin: the picture becomes a trapezoid, narrow at the top; outside shows the black
+        // canvas.
+        const auto pinned = still(with([](Clip &c) {
+                                      c.cornerPin = {0.25, 0.25, 0.75, 0.25, 0, 1, 1, 1};
+                                  }),
+                                  10);
+        QCOMPARE(qGray(pinned.pixel(64, 8)), 0);   // above the top edge
+        QCOMPARE(qGray(pinned.pixel(10, 24)), 0);  // left of the slanted side
+        QVERIFY(qGray(pinned.pixel(64, 40)) > 30); // inside
+        QVERIFY(qGray(pinned.pixel(3, 70)) > 30);  // the bottom keeps its full width
+        // The top edge shows the whole top row of bars, squeezed between x 32 and 96.
+        QVERIFY(QColor(pinned.pixel(36, 20)).name() != QColor(pinned.pixel(92, 20)).name());
+        // Corners in place leave the picture as it was.
+        QVERIFY(difference(still(with([](Clip &c) { c.cornerPin = {0, 0, 1, 0, 0, 1, 1, 1}; }), 10),
+                           plain) < 2);
         // Canvas fill: around a half-size picture, black by default, a colour, or the picture
         // blurred.
         auto small = with([](Clip &c) { c.scale = 0.5; });
@@ -3390,11 +3405,17 @@ class EngineTest : public QObject {
         const auto json = saved.json();
         const auto loaded = Project::fromJson(json, {}).clips[0];
         QCOMPARE(loaded.fx, QString("vhs"));
+        {
+            auto q = saved;
+            q.clips[0].cornerPin = {0.1, 0, 1, 0, 0, 1, 1, 0.9};
+            QVERIFY(Project::fromJson(q.json(), {}).clips[0].cornerPin == q.clips[0].cornerPin);
+        }
         QCOMPARE(Project::fromJson([&] {
                      auto q = saved;
                      q.clips[0].canvasFill = "blur";
                      q.clips[0].voice = "robot";
                      q.clips[0].fx = "mirror";
+                     q.clips[0].cornerPin = {0.1, 0, 1, 0, 0, 1, 1, 0.9};
                      return q.json();
                  }(), {}).clips[0].canvasFill,
                  QString("blur"));
@@ -3410,6 +3431,7 @@ class EngineTest : public QObject {
         for (const auto &[key, value] : {std::pair{QString("fx"), QJsonValue("wobble")},
                                          std::pair{QString("fxStrength"), QJsonValue(2)},
                                          std::pair{QString("canvasFill"), QJsonValue("red")},
+                                         std::pair{QString("cornerPin"), QJsonValue(QJsonArray{0, 0, 1})},
                                          std::pair{QString("voice"), QJsonValue("dalek")},
                                          std::pair{QString("echo"), QJsonValue(-1)}}) {
             auto bad = json;
@@ -6229,6 +6251,83 @@ class EngineTest : public QObject {
         QCOMPARE(Project::fromJson(editor.project().json(), {}).clip(id)->effect, QString("adjust"));
         editor.addEffect("sparkle");
         QVERIFY(editor.state()["error"].toString().contains("Unknown"));
+    }
+    void rightsAndMediaSearch() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto interview = dir.filePath("interview.mkv"), song = dir.filePath("song.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=320x180:r=25:d=20", "-f",
+                     "lavfi", "-i", "sine=d=20", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-shortest",
+                     interview});
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "sine=f=330:d=3", song});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(interview), QUrl::fromLocalFile(song)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        const auto &assets = editor.project().assets;
+        const auto video = assets[0].kind == "video" ? assets[0] : assets[1];
+        const auto music = assets[0].kind == "video" ? assets[1] : assets[0];
+        // Rights: recorded per medium, saved, and checked for what is on the timeline.
+        editor.setAssetRights({music.id}, "attribution", "  Music: Jane Doe (CC BY 4.0) ");
+        editor.setAssetRights({video.id}, "personal", "");
+        QCOMPARE(editor.project().asset(music.id)->credit, QString("Music: Jane Doe (CC BY 4.0)"));
+        editor.setAssetRights({video.id}, "stolen", "");
+        QVERIFY(editor.state()["error"].toString().contains("rights"));
+        editor.clearError();
+        auto check = editor.rightsCheck();
+        QVERIFY(check["personal"].toStringList().isEmpty()); // nothing on the timeline yet
+        QVERIFY(!editor.exportCredits(QUrl::fromLocalFile(dir.filePath("none.txt"))));
+        editor.addAsset(video.id);
+        editor.addAsset(music.id, 1);
+        check = editor.rightsCheck();
+        QCOMPARE(check["personal"].toStringList(), QStringList{video.name});
+        QCOMPARE(check["credits"].toList().size(), 1);
+        const auto credits = dir.filePath("credits.txt");
+        QVERIFY(editor.exportCredits(QUrl::fromLocalFile(credits)));
+        QCOMPARE(readUtf8File(credits), music.name + ": Music: Jane Doe (CC BY 4.0)\n");
+        const auto reloaded = Project::fromJson(editor.project().json(), {});
+        QCOMPARE(reloaded.asset(video.id)->rights, QString("personal"));
+        QCOMPARE(reloaded.asset(music.id)->credit, QString("Music: Jane Doe (CC BY 4.0)"));
+        editor.undo();
+        editor.undo();
+        editor.undo();
+        QCOMPARE(editor.project().asset(video.id)->rights, QString());
+        editor.redo();
+        editor.redo();
+        editor.redo();
+        // Search: name, size, rights and credit, and what is said in a cached transcript.
+        QCOMPARE(editor.searchMedia("interview").keys(), QStringList{video.id});
+        QCOMPARE(editor.searchMedia("320x180").keys(), QStringList{video.id});
+        QCOMPARE(editor.searchMedia("jane").keys(), QStringList{music.id});
+        QVERIFY(editor.searchMedia("audio").contains(music.id));
+        QVERIFY(editor.searchMedia("nothing-like-this").isEmpty());
+        QVERIFY(editor.searchMedia("  ").isEmpty());
+        const auto key = QDir(editor.state()["dataPath"].toString() + "/ai")
+                             .filePath(MediaAnalysis::fingerprint(video) + "-transcribe-v2-en");
+        QVERIFY(QDir().mkpath(QFileInfo(key).absolutePath()));
+        {
+            QFile srt(key + ".srt");
+            QVERIFY(srt.open(QIODevice::WriteOnly));
+            srt.write("1\n00:00:01,000 --> 00:00:01,500\nWelcome\n\n"
+                      "2\n00:00:01,500 --> 00:00:02,000\nto\n\n"
+                      "3\n00:00:02,000 --> 00:00:02,500\nthe\n\n"
+                      "4\n00:00:12,000 --> 00:00:12,500\nquarterly\n\n"
+                      "5\n00:00:12,500 --> 00:00:13,000\nreport.\n");
+            QFile meta(key + ".json");
+            QVERIFY(meta.open(QIODevice::WriteOnly));
+            meta.write(R"({"start": 0, "end": 20, "rate": 8})");
+        }
+        const auto found = editor.searchMedia("Quarterly");
+        QCOMPARE(found.keys(), QStringList{video.id});
+        const auto snippet = found[video.id].toString();
+        QVERIFY2(snippet.startsWith("0:12") && snippet.contains("quarterly report."), qPrintable(snippet));
+        // Every word must match, in the name or in what is said.
+        QCOMPARE(editor.searchMedia("interview welcome").keys(), QStringList{video.id});
+        QVERIFY(editor.searchMedia("welcome jane").isEmpty());
+        QFile::remove(key + ".srt");
+        QFile::remove(key + ".json");
     }
     void brandKitAndLutLibrary() {
         QTemporaryDir dir;

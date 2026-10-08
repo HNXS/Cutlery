@@ -4,6 +4,9 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Perspective:** move a picture's corners to place it into a screen, a sign or a frame in another picture.
+- **Find media by what is said:** the library search also finds words spoken in media that were transcribed (for captions or text editing), with the moment they are said; it also searches sizes, folders and rights.
+- **Usage rights:** record for each medium whether it is your own, free, needs a credit, licensed or for personal use only; the export warns about media you may not publish commercially and saves the credits as a text file.
 - **Background for pictures that do not fill the frame:** a portrait video in a landscape project (or a picture in picture) can have its own picture blurred behind it, or a colour, instead of black bars.
 - **New effects:** sketch, poster, fisheye and mirror.
 - **Voice changer:** robot, telephone, megaphone, alien, chipmunk and monster voices in the sound tools.
