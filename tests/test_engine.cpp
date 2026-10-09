@@ -3124,6 +3124,69 @@ class EngineTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
         QCOMPARE(editor.project().assets.last().frameRate, 0.);
     }
+    void proxies() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto source = dir.filePath("wide.mov");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=red:s=1280x720:r=30:d=2", "-f",
+                     "lavfi", "-i", "sine=d=2", "-c:v", "mpeg4", "-c:a", "aac", "-shortest", source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        const auto id = editor.project().assets.first().id;
+        editor.addAsset(id);
+        auto proxy = [&] { return editor.assets().first().toMap()["proxy"].toString(); };
+        QCOMPARE(proxy(), QString());
+        // Without a choice only videos taller than 1080 lines are queued.
+        editor.makeProxies();
+        QVERIFY(editor.state()["error"].toString().contains("1080"));
+        editor.clearError();
+        editor.makeProxies({id});
+        QVERIFY(proxy() == "making" || proxy() == "ready");
+        QTRY_COMPARE_WITH_TIMEOUT(proxy(), QString("ready"), 60000);
+        QCOMPARE(editor.state()["proxies"].toMap()["queued"].toInt(), 0);
+        // Asking again changes nothing.
+        editor.makeProxies({id});
+        QVERIFY(editor.state()["error"].toString().contains("proxy already"));
+        editor.clearError();
+        // The proxy in the data folder: 540 lines, with the sound.
+        const auto folder = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/proxies";
+        const auto files = QDir(folder).entryInfoList({"*-540.mov"}, QDir::Files, QDir::Time);
+        QVERIFY(!files.isEmpty());
+        const auto made = files.first().absoluteFilePath();
+        const auto streams = QString::fromUtf8(
+            run(Editor::executable("ffprobe"), {"-v", "error", "-show_entries", "stream=codec_type,height",
+                                                "-of", "compact", made}));
+        QVERIFY2(streams.contains("codec_type=video|height=540") && streams.contains("codec_type=audio"),
+                 qPrintable(streams));
+        // The preview reads the proxy: a blue file in its place shows blue, and red again
+        // once proxies are off.
+        run(ffmpeg, {"-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=960x540:r=30:d=2",
+                     "-c:v", "prores_ks", "-profile:v", "0", made});
+        auto centre = [&](qint64 frame) {
+            frames.frame = QImage();
+            editor.seek(frame);
+            if (!QTest::qWaitFor([&] { return !frames.frame.isNull(); }, 20000))
+                return QColor();
+            return frames.frame.pixelColor(frames.frame.width() / 2, frames.frame.height() / 2);
+        };
+        auto colour = centre(15);
+        QVERIFY2(colour.blue() > 200 && colour.red() < 50, qPrintable(colour.name()));
+        editor.setUseProxies(false);
+        QVERIFY(!editor.state()["proxies"].toMap()["useProxies"].toBool());
+        colour = centre(20);
+        QVERIFY2(colour.red() > 200 && colour.blue() < 50, qPrintable(colour.name()));
+        QVERIFY(editor.state()["error"].toString().isEmpty());
+        editor.setUseProxies(true);
+        // The project does not carry proxies.
+        QVERIFY(!QString::fromUtf8(QJsonDocument(editor.project().json()).toJson()).contains("proxies"));
+        editor.deleteProxies();
+        QCOMPARE(proxy(), QString());
+        QCOMPARE(editor.state()["status"].toString(), QString("Removed 1 proxy"));
+    }
     void imageSequences() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

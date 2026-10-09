@@ -825,6 +825,33 @@ ApplicationWindow {
                 enabled: (win.s.collect || {}).status !== "copying"
                 onTriggered: collectDialog.open()
             }
+            // Editing proxies: small copies the preview plays instead of large videos.
+            Menu {
+                title: "Editing proxies"
+                MenuItem {
+                    objectName: "makeProxies"
+                    text: "Make proxies for videos over 1080p"
+                    onTriggered: editor.makeProxies([])
+                }
+                MenuItem {
+                    objectName: "useProxies"
+                    text: "Play the proxies in the preview"
+                    checkable: true
+                    checked: win.s.proxies.useProxies === true
+                    onTriggered: editor.setUseProxies(checked)
+                }
+                MenuItem {
+                    objectName: "cancelProxies"
+                    text: "Stop making proxies"
+                    enabled: !!win.s.proxies.making || win.s.proxies.queued > 0
+                    onTriggered: editor.cancelProxies()
+                }
+                MenuItem {
+                    objectName: "deleteProxies"
+                    text: "Delete this project's proxies"
+                    onTriggered: editor.deleteProxies()
+                }
+            }
             MenuSeparator {}
             MenuItem {
                 text: "Project settings…"
@@ -1579,7 +1606,7 @@ ApplicationWindow {
                                                 Layout.fillWidth: true
                                             }
                                             Label {
-                                                text: (modelData.missing ? "Missing • relink in inspector" : modelData.kind.toUpperCase() + "  ·  " + modelData.seconds.toFixed(1) + "s" + (modelData.folder && libraryView.folder === "" ? "  ·  ▸ " + modelData.folder : "")) + (modelData.rights === "personal" ? "  ·  ⚠ personal use" : modelData.rights === "unknown" ? "  ·  ⚠ rights unknown" : modelData.rights === "attribution" ? "  ·  credit needed" : "")
+                                                text: (modelData.missing ? "Missing • relink in inspector" : modelData.kind.toUpperCase() + "  ·  " + modelData.seconds.toFixed(1) + "s" + (modelData.folder && libraryView.folder === "" ? "  ·  ▸ " + modelData.folder : "")) + (modelData.proxy === "ready" ? "  ·  proxy" : modelData.proxy === "making" ? "  ·  proxy " + Math.round(100 * modelData.proxyProgress) + "%" : modelData.proxy === "queued" ? "  ·  proxy waiting" : "") + (modelData.rights === "personal" ? "  ·  ⚠ personal use" : modelData.rights === "unknown" ? "  ·  ⚠ rights unknown" : modelData.rights === "attribution" ? "  ·  credit needed" : "")
                                                 font.pixelSize: 10
                                                 color: win.muted
                                                 elide: Text.ElideRight
@@ -1692,6 +1719,16 @@ ApplicationWindow {
                                                 win.convertAsset = mediaTile.modelData.id;
                                                 exportSettings.open();
                                             }
+                                        }
+                                        MenuItem {
+                                            objectName: "makeProxy"
+                                            visible: mediaTile.modelData.kind === "video" && !mediaTile.modelData.nested
+                                            height: visible ? implicitHeight : 0
+                                            text: mediaTile.modelData.proxy === "ready" ? "Editing proxy made" : mediaTile.modelData.proxy !== "" ? "Making the editing proxy…" : "Make an editing proxy"
+                                            enabled: mediaTile.modelData.proxy === "" && !mediaTile.modelData.missing
+                                            onTriggered: editor.makeProxies([mediaTile.modelData.id])
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "A small copy (540 lines) that the preview plays instead, for smooth editing of large videos. Exports always use the original."
                                         }
                                         MenuItem {
                                             objectName: "overwriteAtPlayhead"
@@ -2760,6 +2797,16 @@ ApplicationWindow {
                                 onClicked: voice.recording ? editor.stopVoiceOver() : editor.startVoiceOver()
                                 ToolTip.visible: hovered
                                 ToolTip.text: voice.available === true ? "Record narration from the microphone while the timeline plays from the playhead. Use headphones so the recording does not pick up the timeline." : "No microphone found"
+                            }
+                            Action {
+                                objectName: "toggleProxies"
+                                visible: editor.assets.some(a => a.proxy === "ready" || a.proxy === "making")
+                                text: win.s.proxies.making ? "Proxy " + Math.round(100 * (win.s.proxies.progress || 0)) + "%" : "Proxy"
+                                highlighted: win.s.proxies.useProxies === true
+                                padding: 4
+                                onClicked: editor.setUseProxies(!win.s.proxies.useProxies)
+                                ToolTip.visible: hovered
+                                ToolTip.text: (win.s.proxies.useProxies ? "The preview plays the small editing copies. Click to see the originals." : "The preview plays the originals. Click to use the small editing copies.") + " Exports always use the originals."
                             }
                             Action {
                                 objectName: "toggleScopes"
