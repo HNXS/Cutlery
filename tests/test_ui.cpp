@@ -710,7 +710,7 @@ class UiTest : public QObject {
         QCOMPARE(choice->property("currentIndex").toInt(), 0);
         editor.removeTextStyle("Red heading");
         // An adjustment layer from the Add tab shows its own inspector section.
-        findItem(window->contentItem(), "leftTabs")->setProperty("currentIndex", 1);
+        window->setProperty("leftTab", "effects");
         auto *adjust = findItem(window->contentItem(), "addAdjustment");
         QTRY_VERIFY(adjust && adjust->isVisible());
         QVERIFY(QMetaObject::invokeMethod(adjust, "clicked"));
@@ -1041,7 +1041,7 @@ class UiTest : public QObject {
         QCOMPARE(clip().scale, 1.);
         QCOMPARE(clip().x, 0.);
         // A mosaic area: added from the library panel, configured in its own section.
-        findItem(window->contentItem(), "leftTabs")->setProperty("currentIndex", 1); // the Add tab
+        window->setProperty("leftTab", "effects");
         press("addMosaicArea");
         const auto area = editor.project().clips.last();
         QCOMPARE(area.effect, QString("pixelate"));
@@ -1063,6 +1063,7 @@ class UiTest : public QObject {
         for (const auto &c : editor.state()["brandColors"].toStringList())
             editor.removeBrandColor(c);
         editor.setBrandLogo({});
+        window->setProperty("leftTab", "stickers");
         auto *brandField = findItem(window->contentItem(), "brandColorField");
         QVERIFY(brandField && brandField->isVisible());
         brandField->setProperty("text", "#123456");
@@ -1073,6 +1074,7 @@ class UiTest : public QObject {
         editor.removeBrandColor("#123456");
         QTRY_VERIFY(!findItem(window->contentItem(), "brandColor-#123456"));
         // A lower third from the library panel; its style can be changed in the inspector.
+        window->setProperty("leftTab", "text");
         press("addLowerThird");
         const auto lower = editor.project().clips.last();
         QCOMPARE(lower.titleStyle, QString("lowerThird"));
@@ -1470,6 +1472,36 @@ class UiTest : public QObject {
         QTRY_VERIFY(findItem(window->contentItem(), "stabilizeStrength")->isEnabled());
         editor.undo();
         QVERIFY(!editor.project().clips.first().stabilize);
+        // The asset panel's tabs: a style effect and a look as tiles for the selected clip; a
+        // transition only when the clip follows another.
+        auto *effectsTab = findItem(window->contentItem(), "leftTab-effects");
+        QVERIFY(effectsTab);
+        QVERIFY(QMetaObject::invokeMethod(effectsTab, "clicked"));
+        QCOMPARE(window->property("leftTab").toString(), QString("effects"));
+        auto *glitch = findItem(window->contentItem(), "fxTile-glitch");
+        QTRY_VERIFY(glitch && glitch->isVisible() && glitch->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(glitch, "clicked"));
+        QCOMPARE(editor.project().clips.first().fx, QString("glitch"));
+        QTRY_VERIFY(glitch->property("checked").toBool());
+        editor.undo();
+        window->setProperty("leftTab", "filters");
+        auto *warm = findItem(window->contentItem(), "lookTile-1");
+        QTRY_VERIFY(warm && warm->isVisible() && warm->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(warm, "clicked"));
+        QCOMPARE(editor.project().clips.first().temperature, .35);
+        editor.undo();
+        QCOMPARE(editor.project().clips.first().temperature, 0.);
+        window->setProperty("leftTab", "transitions");
+        auto *none = findItem(window->contentItem(), "transitionTile-none");
+        QTRY_VERIFY(none && none->isVisible());
+        QVERIFY(!none->isEnabled());
+        if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS"))
+            for (const auto &tab : {"media", "audio", "text", "stickers", "effects", "transitions", "filters", "layouts"}) {
+                window->setProperty("leftTab", tab);
+                QTest::qWait(50);
+                window->grabWindow().save(qEnvironmentVariable("CUTLERY_UI_SHOTS") + "/left-" + tab + ".png");
+            }
+        window->setProperty("leftTab", "media");
         // Pictures of every inspector page, for looking at the layout.
         if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS")) {
             for (const auto &[tab, sub] : std::initializer_list<std::pair<const char *, const char *>>{

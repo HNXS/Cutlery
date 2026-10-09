@@ -38,6 +38,48 @@ ApplicationWindow {
     property bool drawingMask: false
     readonly property string maskClip: s ? s.selectedId : ""
     onMaskClipChanged: drawingMask = false
+    // The asset panel's tabs (left): media, sound, text, stickers, effects, transitions, filters
+    // and layouts.
+    property string leftTab: "media"
+    readonly property var leftTabList: [
+        { id: "media", label: "Media", glyph: "▣" },
+        { id: "audio", label: "Audio", glyph: "♪" },
+        { id: "text", label: "Text", glyph: "T" },
+        { id: "stickers", label: "Stickers", glyph: "★" },
+        { id: "effects", label: "Effects", glyph: "✦" },
+        { id: "transitions", label: "Transitions", glyph: "⋈" },
+        { id: "filters", label: "Filters", glyph: "◐" },
+        { id: "layouts", label: "Layouts", glyph: "▦" }
+    ]
+    // Looks: the colour and look settings at once (the first entry is the menu's prompt).
+    readonly property var looks: [
+        { label: "Apply a look…", values: null },
+        { label: "Natural (reset)", values: {} },
+        { label: "Warm", values: { temperature: .35, vibrance: .2 } },
+        { label: "Cool", values: { temperature: -.35, vibrance: .1 } },
+        { label: "Cinematic", values: { temperature: .1, contrast: 1.15, highlights: -.25, vibrance: .15, vignette: .35 } },
+        { label: "Vintage", values: { temperature: .3, saturation: .75, shadows: .35, highlights: -.15, grain: .4, vignette: .4 } },
+        { label: "Black & white", values: { saturation: 0, contrast: 1.2, grain: .2 } },
+        { label: "Punchy", values: { contrast: 1.15, vibrance: .5, sharpen: .3 } },
+        { label: "Dreamy", values: { glow: .5, highlights: .15, contrast: .9, temperature: .1 } }
+    ]
+    function applyLook(index) {
+        const look = looks[index].values;
+        if (!look)
+            return;
+        // Every look setting at once, in one undo step; the LUT stays.
+        const values = { brightness: 0, contrast: 1, saturation: 1, temperature: 0, tint: 0, vibrance: 0, shadows: 0, highlights: 0, sharpen: 0, glow: 0, vignette: 0, grain: 0, curveMaster: "", curveRed: "", curveGreen: "", curveBlue: "", hslColors: "", hslHue: 0, hslSaturation: 0, hslLightness: 0 };
+        for (const k in look)
+            values[k] = look[k];
+        editor.setClipValues(values);
+    }
+    readonly property var styleEffects: [
+        { id: "", label: "No effect" }, { id: "shake", label: "Camera shake" }, { id: "glitch", label: "Glitch" },
+        { id: "vhs", label: "VHS" }, { id: "film", label: "Old film" }, { id: "sketch", label: "Sketch" },
+        { id: "poster", label: "Poster" }, { id: "fisheye", label: "Fisheye" }, { id: "mirror", label: "Mirror" }
+    ]
+    // The selected clip takes a look, style effect or transition from the asset panel.
+    readonly property bool pictureSelected: selectionKind === "media"
     // Inspector pages: tabs across the top and sub-tabs below them, chosen by what is selected.
     // The choice is kept per kind of selection, so switching between clips keeps the page.
     readonly property string selectionKind: !s || !s.selectedId ? ""
@@ -627,6 +669,60 @@ ApplicationWindow {
             }
         }
     }
+    // A tile in the asset panel: a large glyph or colour over a label; checked shows a mint
+    // frame (e.g. the selected clip's current look).
+    component Tile: AbstractButton {
+        id: tile
+        property string glyph: ""
+        property color swatch: "#202831"
+        implicitWidth: 78
+        implicitHeight: 72
+        hoverEnabled: true
+        contentItem: ColumnLayout {
+            spacing: 4
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 44
+                radius: 6
+                color: tile.swatch
+                border.width: tile.checked ? 2 : 1
+                border.color: tile.checked ? win.mint : tile.hovered && tile.enabled ? "#6c8796" : "#35404b"
+                Label {
+                    anchors.centerIn: parent
+                    text: tile.glyph
+                    font.pixelSize: 20
+                    color: tile.enabled ? "#e7edf2" : "#65707a"
+                }
+                Rectangle {
+                    visible: tile.hovered && tile.enabled
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.margins: 3
+                    width: 16
+                    height: 16
+                    radius: 8
+                    color: win.mint
+                    Label {
+                        anchors.centerIn: parent
+                        text: "+"
+                        color: "#10241f"
+                        font.pixelSize: 12
+                        font.bold: true
+                    }
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: tile.text
+                font.pixelSize: 10
+                elide: Text.ElideRight
+                horizontalAlignment: Text.AlignHCenter
+                color: tile.enabled ? (tile.checked ? win.mint : "#c7d0d8") : "#65707a"
+            }
+        }
+        background: Item {}
+        opacity: enabled ? 1 : .55
+    }
     component Caption: Label {
         color: win.muted
         font.pixelSize: 10
@@ -1149,29 +1245,58 @@ ApplicationWindow {
                 color: "#303945"
             }
             Rectangle {
-                SplitView.preferredWidth: 240
-                SplitView.minimumWidth: 190
+                SplitView.preferredWidth: 400
+                SplitView.minimumWidth: 330
                 color: "#171d24"
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 16
                     spacing: 14
-                    TabBar {
+                    // Icon tabs: what can be added to the timeline, by kind.
+                    RowLayout {
                         id: leftTabs
                         objectName: "leftTabs"
                         Layout.fillWidth: true
-                        TabButton {
-                            text: "Media  " + editor.assets.length
-                        }
-                        TabButton {
-                            objectName: "addTab"
-                            text: "Add"
+                        Layout.leftMargin: -8
+                        Layout.rightMargin: -8
+                        spacing: 0
+                        Repeater {
+                            model: win.leftTabList
+                            AbstractButton {
+                                required property var modelData
+                                objectName: "leftTab-" + modelData.id
+                                Layout.fillWidth: true
+                                implicitHeight: 44
+                                readonly property bool active: win.leftTab === modelData.id
+                                onClicked: win.leftTab = modelData.id
+                                hoverEnabled: true
+                                contentItem: ColumnLayout {
+                                    spacing: 1
+                                    Label {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        text: parent.parent.modelData.glyph
+                                        font.pixelSize: 16
+                                        color: parent.parent.active ? win.mint : parent.parent.hovered ? "#e7edf2" : win.muted
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        horizontalAlignment: Text.AlignHCenter
+                                        text: parent.parent.modelData.label
+                                        font.pixelSize: 9
+                                        elide: Text.ElideRight
+                                        color: parent.parent.active ? win.mint : parent.parent.hovered ? "#e7edf2" : win.muted
+                                    }
+                                }
+                                background: Item {}
+                                ToolTip.visible: hovered
+                                ToolTip.text: modelData.label + (modelData.id === "media" ? " (" + editor.assets.length + ")" : "")
+                            }
                         }
                     }
                     StackLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        currentIndex: leftTabs.currentIndex
+                        currentIndex: win.leftTab === "media" ? 0 : 1
                         ColumnLayout {
                             spacing: 12
                             RowLayout {
@@ -1564,13 +1689,17 @@ ApplicationWindow {
                                 width: parent.width
                                 spacing: 12
                                 RowLayout {
+                                    visible: win.leftTab === "text" || win.leftTab === "audio"
                                     Layout.fillWidth: true
                                     Action {
+                                        objectName: "addTitle"
+                                        visible: win.leftTab === "text"
                                         text: "+ Add title"
                                         Layout.fillWidth: true
                                         onClicked: editor.addTitle()
                                     }
                                     Action {
+                                        visible: win.leftTab === "text"
                                         objectName: "addCaption"
                                         text: "+ Caption"
                                         Layout.fillWidth: true
@@ -1580,6 +1709,7 @@ ApplicationWindow {
                                     }
                                     // Sound effects: clicks, typing and swooshes for tutorials and screen videos.
                                     Action {
+                                        visible: win.leftTab === "audio"
                                         objectName: "openSounds"
                                         text: "♪ Sounds…"
                                         Layout.fillWidth: true
@@ -1589,6 +1719,7 @@ ApplicationWindow {
                                     }
                                 }
                                 RowLayout {
+                                    visible: win.leftTab === "text"
                                     Layout.fillWidth: true
                                     Action {
                                         objectName: "addLowerThird"
@@ -1608,6 +1739,7 @@ ApplicationWindow {
                                     }
                                 }
                                 RowLayout {
+                                    visible: win.leftTab === "text"
                                     Layout.fillWidth: true
                                     Action {
                                         objectName: "addLowerThirdRight"
@@ -1635,8 +1767,10 @@ ApplicationWindow {
                                     }
                                 }
                                 RowLayout {
+                                    visible: win.leftTab === "effects" || win.leftTab === "stickers"
                                     Layout.fillWidth: true
                                     Action {
+                                        visible: win.leftTab === "effects"
                                         objectName: "addBlurArea"
                                         text: "+ Blur area"
                                         Layout.fillWidth: true
@@ -1645,6 +1779,7 @@ ApplicationWindow {
                                         ToolTip.text: "Blurs whatever lower tracks show inside a rectangle, e.g. private data in a screen recording"
                                     }
                                     Action {
+                                        visible: win.leftTab === "effects"
                                         objectName: "addMosaicArea"
                                         text: "+ Mosaic area"
                                         Layout.fillWidth: true
@@ -1654,6 +1789,7 @@ ApplicationWindow {
                                     }
                                     // Shapes for tutorials and explainers.
                                     Action {
+                                        visible: win.leftTab === "stickers"
                                         objectName: "addShape"
                                         text: "+ Shape ▾"
                                         Layout.fillWidth: true
@@ -1697,9 +1833,11 @@ ApplicationWindow {
                                 }
                                 // Layouts: arrange the selected pictures (Ctrl+click several) at once.
                                 Caption {
+                                    visible: win.leftTab === "layouts"
                                     text: "ARRANGE SELECTED"
                                 }
                                 CheckBox {
+                                    visible: win.leftTab === "layouts"
                                     id: arrangeFill
                                     objectName: "arrangeFill"
                                     text: "Fill each area (crop)"
@@ -1707,6 +1845,7 @@ ApplicationWindow {
                                     ToolTip.text: "Crops each picture to the shape of its area so there are no empty edges; off fits the whole picture inside"
                                 }
                                 GridLayout {
+                                    visible: win.leftTab === "layouts"
                                     Layout.fillWidth: true
                                     columns: 2
                                     columnSpacing: 4
@@ -1734,6 +1873,7 @@ ApplicationWindow {
                                 }
                                 // Own layouts: the places of the selected pictures, kept for every project.
                                 RowLayout {
+                                    visible: win.leftTab === "layouts"
                                     Layout.fillWidth: true
                                     ComboBox {
                                         id: layoutChoice
@@ -1780,9 +1920,11 @@ ApplicationWindow {
                                 // Icons for tutorials: a click goes on at the playhead, coloured and sized
                                 // like shapes.
                                 Caption {
+                                    visible: win.leftTab === "stickers"
                                     text: "ICONS"
                                 }
                                 GridLayout {
+                                    visible: win.leftTab === "stickers"
                                     Layout.fillWidth: true
                                     columns: 5
                                     columnSpacing: 4
@@ -1818,9 +1960,11 @@ ApplicationWindow {
                                 // Brand kit (every project): colours offered next to the colour settings,
                                 // and a logo put in a corner for the whole video.
                                 Caption {
+                                    visible: win.leftTab === "stickers"
                                     text: "BRAND KIT"
                                 }
                                 Flow {
+                                    visible: win.leftTab === "stickers"
                                     Layout.fillWidth: true
                                     spacing: 4
                                     Repeater {
@@ -1855,6 +1999,7 @@ ApplicationWindow {
                                     }
                                 }
                                 RowLayout {
+                                    visible: win.leftTab === "stickers"
                                     Layout.fillWidth: true
                                     TextField {
                                         id: brandColorField
@@ -1879,6 +2024,7 @@ ApplicationWindow {
                                     }
                                 }
                                 RowLayout {
+                                    visible: win.leftTab === "stickers"
                                     Layout.fillWidth: true
                                     Image {
                                         visible: !!win.s.brandLogo
@@ -1929,12 +2075,141 @@ ApplicationWindow {
                                     }
                                 }
                                 Action {
+                                    visible: win.leftTab === "effects"
                                     objectName: "addAdjustment"
                                     text: "+ Adjustment layer"
                                     Layout.fillWidth: true
                                     onClicked: editor.addEffect("adjust")
                                     ToolTip.visible: hovered
                                     ToolTip.text: "Its colour and look change everything on the tracks below while it runs, e.g. one grade for a whole scene"
+                                }
+                                // Text: automatic captions from what is said.
+                                Action {
+                                    objectName: "openAutoCaptions"
+                                    visible: win.leftTab === "text"
+                                    text: "Auto captions…"
+                                    Layout.fillWidth: true
+                                    onClicked: captionDialog.open()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Captions from what is said in the timeline, made on this computer (AI pack)"
+                                }
+                                // Audio: the library's sound files, and recording.
+                                Action {
+                                    objectName: "showAudioMedia"
+                                    visible: win.leftTab === "audio"
+                                    text: "Sound files in the library"
+                                    Layout.fillWidth: true
+                                    onClicked: {
+                                        libraryView.currentIndex = 2;
+                                        win.leftTab = "media";
+                                    }
+                                }
+                                Label {
+                                    visible: win.leftTab === "audio"
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    color: win.muted
+                                    font.pixelSize: 11
+                                    text: "Record a voice-over with ● Voice-over under the player; it lands at the playhead."
+                                }
+                                // Effects, transitions and looks for the selected clip, as tiles.
+                                Caption {
+                                    visible: win.leftTab === "effects"
+                                    text: "STYLE EFFECT · SELECTED CLIP"
+                                }
+                                Flow {
+                                    visible: win.leftTab === "effects"
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    Repeater {
+                                        model: win.styleEffects
+                                        Tile {
+                                            required property var modelData
+                                            objectName: "fxTile-" + (modelData.id || "none")
+                                            text: modelData.label
+                                            glyph: modelData.id ? "✦" : "⊘"
+                                            checked: win.pictureSelected && (win.selection.fx || "") === modelData.id
+                                            enabled: win.pictureSelected && win.selection.locked !== true
+                                            onClicked: editor.setClip("fx", modelData.id)
+                                        }
+                                    }
+                                }
+                                Caption {
+                                    visible: win.leftTab === "transitions"
+                                    text: "TRANSITION INTO THE SELECTED CLIP"
+                                }
+                                Flow {
+                                    visible: win.leftTab === "transitions"
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    Repeater {
+                                        model: [{ id: "", label: "None (cut)" }].concat(editor.transitionTypes())
+                                        Tile {
+                                            required property var modelData
+                                            objectName: "transitionTile-" + (modelData.id || "none")
+                                            text: modelData.label
+                                            glyph: modelData.id ? "⋈" : "|"
+                                            checked: win.selection.canTransition === true && (win.selection.transition || "") === modelData.id
+                                            enabled: win.selection.canTransition === true && win.selection.locked !== true
+                                            onClicked: editor.setClip("transition", modelData.id)
+                                        }
+                                    }
+                                }
+                                Caption {
+                                    visible: win.leftTab === "filters"
+                                    text: "LOOK · SELECTED CLIP"
+                                }
+                                Flow {
+                                    visible: win.leftTab === "filters"
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    Repeater {
+                                        model: win.looks.slice(1)
+                                        Tile {
+                                            required property var modelData
+                                            required property int index
+                                            objectName: "lookTile-" + index
+                                            text: modelData.label
+                                            swatch: ["#2a3038", "#6b4a2a", "#2a4a6b", "#3a3346", "#5e4b33", "#3c3c3c", "#5a2f3a", "#4a3f5e"][index] || "#202831"
+                                            glyph: "◐"
+                                            enabled: (win.pictureSelected || win.selectionKind === "adjust") && win.selection.locked !== true
+                                            onClicked: win.applyLook(index + 1)
+                                        }
+                                    }
+                                }
+                                Caption {
+                                    visible: win.leftTab === "filters"
+                                    text: "LUT LIBRARY"
+                                }
+                                Flow {
+                                    visible: win.leftTab === "filters" && (win.s.lutLibrary || []).length > 0
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    Repeater {
+                                        model: win.s.lutLibrary || []
+                                        Tile {
+                                            required property var modelData
+                                            text: modelData.name
+                                            glyph: "▤"
+                                            checked: (win.pictureSelected || win.selectionKind === "adjust") && win.selection.lutName === modelData.name
+                                            enabled: (win.pictureSelected || win.selectionKind === "adjust") && win.selection.locked !== true
+                                            onClicked: editor.setClip("lut", modelData.path)
+                                        }
+                                    }
+                                }
+                                Action {
+                                    visible: win.leftTab === "filters"
+                                    text: "+ Add a LUT file to the library"
+                                    Layout.fillWidth: true
+                                    onClicked: lutLibraryDialog.open()
+                                }
+                                Label {
+                                    visible: ["effects", "transitions", "filters"].indexOf(win.leftTab) >= 0
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    color: win.muted
+                                    font.pixelSize: 11
+                                    text: win.leftTab === "transitions" ? (win.selection.canTransition === true ? "Fine-tune the length in the inspector under Animation." : "Select a clip that directly follows another on its track.") : (win.pictureSelected || (win.leftTab === "filters" && win.selectionKind === "adjust") ? "Applies to " + (win.selection.name || "the selected clip") + "; fine-tune it in the inspector." : "Select a video or picture on the timeline first.")
                                 }
                             }
                         }
@@ -4234,27 +4509,9 @@ ApplicationWindow {
                                     objectName: "lookPreset"
                                     Layout.fillWidth: true
                                     enabled: win.selection.locked !== true
-                                    readonly property var looks: [
-                                        { label: "Apply a look…", values: null },
-                                        { label: "Natural (reset)", values: {} },
-                                        { label: "Warm", values: { temperature: .35, vibrance: .2 } },
-                                        { label: "Cool", values: { temperature: -.35, vibrance: .1 } },
-                                        { label: "Cinematic", values: { temperature: .1, contrast: 1.15, highlights: -.25, vibrance: .15, vignette: .35 } },
-                                        { label: "Vintage", values: { temperature: .3, saturation: .75, shadows: .35, highlights: -.15, grain: .4, vignette: .4 } },
-                                        { label: "Black & white", values: { saturation: 0, contrast: 1.2, grain: .2 } },
-                                        { label: "Punchy", values: { contrast: 1.15, vibrance: .5, sharpen: .3 } },
-                                        { label: "Dreamy", values: { glow: .5, highlights: .15, contrast: .9, temperature: .1 } }
-                                    ]
-                                    model: looks.map(l => l.label)
+                                    model: win.looks.map(l => l.label)
                                     onActivated: index => {
-                                        const look = looks[index].values;
-                                        if (look) {
-                                            // Every look setting at once, in one undo step; the LUT stays.
-                                            const values = { brightness: 0, contrast: 1, saturation: 1, temperature: 0, tint: 0, vibrance: 0, shadows: 0, highlights: 0, sharpen: 0, glow: 0, vignette: 0, grain: 0, curveMaster: "", curveRed: "", curveGreen: "", curveBlue: "", hslColors: "", hslHue: 0, hslSaturation: 0, hslLightness: 0 };
-                                            for (const k in look)
-                                                values[k] = look[k];
-                                            editor.setClipValues(values);
-                                        }
+                                        win.applyLook(index);
                                         currentIndex = 0;
                                     }
                                 }
