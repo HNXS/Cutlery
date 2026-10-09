@@ -4,6 +4,7 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Timeline tools:** a row of tools above the timeline (split, cut away before or after the playhead, delete, marker, freeze, reverse, mirror, turn, snap and zoom), track headers with lock, eye, speaker, solo, magnet and snap icons, clips coloured by kind, and a slimmer top bar with a prominent Export button.
 - **Asset panel in tabs:** Media, Audio, Text, Stickers, Effects, Transitions, Filters and Layouts, each with its own tools; style effects, transitions, looks and LUTs are tiles that apply to the selected clip with one click.
 - **Clearer settings:** values have number boxes with units and arrows, a keyframe diamond and a slider; sections can be folded and reset in one step, and switches like Stabilize sit in the section title.
 - **Inspector in tabs:** the settings of the selected clip are sorted into tabs and sub-tabs (e.g. Video › Basic, Cutout, Mask, Canvas, Enhance; Audio; Speed; Animation; Adjust › HSL, Curves, Wheels, LUT; Effects; More) instead of one long list; with nothing selected it shows the project's details.
