@@ -331,6 +331,24 @@ class UiTest : public QObject {
             QVERIFY(item && item->isVisible() && item->isEnabled());
             QVERIFY(QMetaObject::invokeMethod(item, "clicked"));
         };
+        // Project settings open on the current canvas and rate; a new rate keeps clip times.
+        {
+            auto *dialog = window->findChild<QObject *>("projectSettings");
+            QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+            auto *canvas = window->findChild<QQuickItem *>("projectCanvas");
+            auto *rate = window->findChild<QQuickItem *>("projectFrameRate");
+            QTRY_VERIFY(canvas && rate && rate->isVisible());
+            QCOMPARE(canvas->property("currentText").toString(), QString("160 × 90 · landscape"));
+            QCOMPARE(rate->property("currentText").toString(), QString("30"));
+            const auto before = editor.project().clips.first().duration;
+            rate->setProperty("currentIndex", 7); // 60
+            QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
+            QTRY_COMPARE(editor.project().fpsN, 60);
+            QCOMPARE(editor.project().clips.first().duration, before * 2);
+            QCOMPARE(editor.project().width, 160);
+            editor.undo();
+            QCOMPARE(editor.project().fpsN, 30);
+        }
         editor.seek(0);
         page(window, "video", "basic");
         auto *diamond = findItem(window->contentItem(), "keyframe-scale");

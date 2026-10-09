@@ -344,6 +344,11 @@ struct Project {
     void addTrack(const QString &name = {});
     void removeTrack(int track);
     void trim(const QString &id, qint64 start, qint64 end);
+    // Changes the frame rate, keeping every clip, keyframe, marker, caption word, transition and
+    // the export range at the same time (to the nearest frame). Clip edges are converted
+    // separately, so clips that touched still touch; a clip is shortened by a frame where
+    // rounding would run it past the end of its media. Nested sequences keep their own rate.
+    void changeFrameRate(int fpsN, int fpsD);
     // Edits that keep the clips around them in place (the caller validates the result):
     // Slip shows a later (positive) or earlier part of the source in the same place and length;
     // detached audio of the clip slips with it.

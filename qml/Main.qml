@@ -6664,11 +6664,26 @@ ApplicationWindow {
     }
     Dialog {
         id: settings
+        objectName: "projectSettings"
         anchors.centerIn: parent
         title: "Project settings"
         modal: true
         standardButtons: Dialog.Ok | Dialog.Cancel
-        width: 360
+        width: 380
+        readonly property var sizes: [[1920, 1080], [1080, 1920], [1080, 1080], [1280, 720], [3840, 2160], [1080, 1350]]
+        readonly property var rates: [[24000, 1001], [24, 1], [25, 1], [30000, 1001], [30, 1], [50, 1], [60000, 1001], [60, 1]]
+        // The current canvas and rate are chosen when the dialog opens; a size or rate not in the
+        // lists is offered as it is.
+        property var currentSize: [win.s.width, win.s.height]
+        property var currentRate: [win.s.fpsN, win.s.fpsD]
+        readonly property var sizeChoices: sizes.some(z => z[0] === currentSize[0] && z[1] === currentSize[1]) ? sizes : [currentSize].concat(sizes)
+        readonly property var rateChoices: rates.some(r => r[0] * currentRate[1] === currentRate[0] * r[1]) ? rates : [currentRate].concat(rates)
+        onAboutToShow: {
+            currentSize = [win.s.width, win.s.height];
+            currentRate = [win.s.fpsN, win.s.fpsD];
+            canvas.currentIndex = Math.max(0, sizeChoices.findIndex(z => z[0] === currentSize[0] && z[1] === currentSize[1]));
+            frameRate.currentIndex = Math.max(0, rateChoices.findIndex(r => r[0] * currentRate[1] === currentRate[0] * r[1]));
+        }
         ColumnLayout {
             anchors.fill: parent
             Label {
@@ -6676,25 +6691,31 @@ ApplicationWindow {
             }
             ComboBox {
                 id: canvas
+                objectName: "projectCanvas"
                 Layout.fillWidth: true
-                model: ["1920 × 1080 · landscape", "1080 × 1920 · portrait", "1080 × 1080 · square", "1280 × 720 · landscape"]
+                model: settings.sizeChoices.map(z => z[0] + " × " + z[1] + " · " + (z[0] > z[1] ? "landscape" : z[0] < z[1] ? "portrait" : "square"))
             }
             Label {
-                text: "Frame rate (set before adding clips)"
-                color: win.muted
+                text: "Frame rate"
             }
             ComboBox {
                 id: frameRate
-                enabled: win.s.duration === 0
+                objectName: "projectFrameRate"
                 Layout.fillWidth: true
-                model: ["24", "25", "30", "50", "60", "29.97 (30000/1001)"]
-                currentIndex: 2
+                model: settings.rateChoices.map(r => r[1] === 1 ? String(r[0]) : (r[0] / r[1]).toFixed(3).replace(/0+$/, "") + " (" + r[0] + "/" + r[1] + ")")
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: win.s.duration > 0
+                wrapMode: Text.Wrap
+                color: win.muted
+                font.pixelSize: 11
+                text: "Clips, keyframes, markers and captions keep their times at a new frame rate (to the nearest frame). Undo puts it back."
             }
         }
         onAccepted: {
-            const dims = [[1920, 1080], [1080, 1920], [1080, 1080], [1280, 720]][canvas.currentIndex];
-            const rate = [24, 25, 30, 50, 60, 30000][frameRate.currentIndex];
-            editor.configure(dims[0], dims[1], win.s.duration > 0 ? win.s.fpsN : rate, win.s.duration > 0 ? win.s.fpsD : (frameRate.currentIndex === 5 ? 1001 : 1));
+            const size = sizeChoices[canvas.currentIndex], rate = rateChoices[frameRate.currentIndex];
+            editor.configure(size[0], size[1], rate[0], rate[1]);
         }
     }
     Dialog {
