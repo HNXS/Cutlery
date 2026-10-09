@@ -1,5 +1,14 @@
 # Validation record
 
+## Windows portable build — 2026-10-09, category column, shape sections, transition length (0.6 development)
+
+[GitHub Actions run 37929386650](https://github.com/HNXS/Cutlery/actions/runs/37929386650) on commit `241692784c187b8719ba33d9785eef4d35aef77f` passed every step on its first attempt.
+
+New coverage:
+
+- **UI test `aiCutoutControls`:** the category column scrolls the Audio tab down to Transitions and back to the top. The Text tab has no column.
+- **UI test `transitionMarkers`:** typing 1 s into the transition length box stores 30 frames.
+
 ## Windows portable build — 2026-10-09, sound tiles, Added mark, sections for keys, tilt, mask and titles (0.6 development)
 
 [GitHub Actions run 37924472403](https://github.com/HNXS/Cutlery/actions/runs/37924472403) on commit `07a784530eb3b1d4c196b3303a3156a104278199` passed every step on its first attempt.
