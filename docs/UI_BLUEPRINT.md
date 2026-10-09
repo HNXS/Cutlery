@@ -122,7 +122,12 @@ click is one undo step.
 - **Video › Mask:** the sections Shape (reset to a rectangle), Free mask, and Edge and frame with the border colour.
 - **Text:** the sections Style (templates, letter animation, accent, caption highlight), Font (font, size with number box, bold, italic, alignment), Colour, Saved styles, Spacing, and Outline, shadow and glow.
 
+## Category column and last sections — package 6, done
+
+- **Category column:** the Audio, Stickers, Effects and Filters tabs show a narrow column of their categories on the left (e.g. Sounds, Clicks, Keyboard, Transitions). A click scrolls the tab to that category; the first entry goes back to the top. Tabs with a single group have no column.
+- **Shape page:** the sections Colour (fill and outline) and Size and outline (width, height and outline width as value rows).
+- **Animation › Transition:** the length is a value row in seconds (typed seconds are stored in frames).
+
 ## Still to do
 
-- **Asset panel:** a narrow category column per tab, once the tabs hold more than a screenful.
-- A section look for the rest of the shape page (arrows and lines) and the transition settings.
+Nothing from the study is open. New ideas go into docs/FEATURE_STATUS.md.
