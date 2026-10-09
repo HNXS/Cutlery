@@ -41,6 +41,33 @@ ApplicationWindow {
     // The asset panel's tabs (left): media, sound, text, stickers, effects, transitions, filters
     // and layouts.
     property string leftTab: "media"
+    // The categories of the left tab, for its category column; "top" scrolls to the start.
+    readonly property var leftCategories: {
+        switch (leftTab) {
+        case "audio":
+            return [{ name: "Sounds", target: "top" }].concat([...new Set(editor.sounds().map(x => x.category))].map(c => ({ name: c, target: "cat-sound-" + c })));
+        case "stickers":
+            return [{ name: "Shapes", target: "top" }, { name: "Icons", target: "catIcons" }, { name: "Brand kit", target: "catBrand" }];
+        case "effects":
+            return [{ name: "Areas", target: "top" }, { name: "Style effects", target: "catStyle" }];
+        case "filters":
+            return (s.lutLibrary || []).length > 0 ? [{ name: "Looks", target: "top" }, { name: "LUTs", target: "catLuts" }] : [];
+        }
+        return [];
+    }
+    // The first item under `root` with this objectName.
+    function findByName(root, name) {
+        if (!root)
+            return null;
+        if (root.objectName === name)
+            return root;
+        for (let i = 0; i < root.children.length; ++i) {
+            const found = findByName(root.children[i], name);
+            if (found)
+                return found;
+        }
+        return null;
+    }
     readonly property var leftTabList: [
         { id: "media", label: "Media", glyph: "▣" },
         { id: "audio", label: "Audio", glyph: "♪" },
@@ -1712,581 +1739,644 @@ ApplicationWindow {
                                 }
                             }
                         }
-                        // Titles, graphics, effect areas and sounds.
-                        // Scrolls when the window is too low for all of it.
-                        ScrollView {
-                            objectName: "addTabScroll"
-                            clip: true
-                            contentWidth: availableWidth
+                        // A narrow column of the tab's categories; a click scrolls to one.
+                        RowLayout {
+                            spacing: 6
                             ColumnLayout {
-                                width: parent.width
-                                spacing: 12
-                                RowLayout {
-                                    visible: win.leftTab === "text" || win.leftTab === "audio"
-                                    Layout.fillWidth: true
-                                    Action {
-                                        objectName: "addTitle"
-                                        visible: win.leftTab === "text"
-                                        text: "+ Add title"
-                                        Layout.fillWidth: true
-                                        onClicked: editor.addTitle()
-                                    }
-                                    Action {
-                                        visible: win.leftTab === "text"
-                                        objectName: "addCaption"
-                                        text: "+ Caption"
-                                        Layout.fillWidth: true
-                                        onClicked: editor.addCaption()
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "A caption at the playhead on the caption track, 2 seconds or up to the next one"
-                                    }
-                                    // Sound effects: clicks, typing and swooshes for tutorials and screen videos.
-                                    Action {
-                                        visible: win.leftTab === "audio"
-                                        objectName: "openSounds"
-                                        text: "♪ Listen and more…"
-                                        Layout.fillWidth: true
-                                        onClicked: soundDialog.open()
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Listen to the sound effects, or put a whoosh on every transition"
+                                id: categoryColumn
+                                objectName: "categoryColumn"
+                                property string current: ""
+                                Layout.preferredWidth: 78
+                                Layout.maximumWidth: 78
+                                Layout.fillWidth: false
+                                Layout.alignment: Qt.AlignTop
+                                visible: win.leftCategories.length > 1
+                                spacing: 2
+                                Connections {
+                                    target: win
+                                    function onLeftTabChanged() {
+                                        categoryColumn.current = "";
                                     }
                                 }
-                                RowLayout {
-                                    visible: win.leftTab === "text"
-                                    Layout.fillWidth: true
-                                    Action {
-                                        objectName: "addLowerThird"
-                                        text: "+ Lower third"
+                                Repeater {
+                                    model: win.leftCategories
+                                    AbstractButton {
+                                        id: categoryButton
+                                        required property var modelData
+                                        required property int index
+                                        readonly property bool active: categoryColumn.current === modelData.target || (categoryColumn.current === "" && index === 0)
+                                        objectName: "category-" + modelData.target
                                         Layout.fillWidth: true
-                                        onClicked: editor.addTitleTemplate("lowerThird")
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Name and role in the lower left; slides in, fades out"
-                                    }
-                                    Action {
-                                        objectName: "addTitleCard"
-                                        text: "+ Title card"
-                                        Layout.fillWidth: true
-                                        onClicked: editor.addTitleTemplate("titleCard")
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "A large centred heading with a subtitle, e.g. for chapters"
-                                    }
-                                }
-                                RowLayout {
-                                    visible: win.leftTab === "text"
-                                    Layout.fillWidth: true
-                                    Action {
-                                        objectName: "addLowerThirdRight"
-                                        text: "+ Right third"
-                                        Layout.fillWidth: true
-                                        onClicked: editor.addTitleTemplate("lowerThirdRight")
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Name and role in the lower right; slides in from the right"
-                                    }
-                                    Action {
-                                        objectName: "addBanner"
-                                        text: "+ Banner"
-                                        Layout.fillWidth: true
-                                        onClicked: editor.addTitleTemplate("banner")
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "A band across the bottom with a headline and a line below, e.g. a call to action"
-                                    }
-                                    Action {
-                                        objectName: "addQuote"
-                                        text: "+ Quote"
-                                        Layout.fillWidth: true
-                                        onClicked: editor.addTitleTemplate("quote")
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "A quotation in the centre with a large quotation mark; the second line names who said it"
-                                    }
-                                }
-                                RowLayout {
-                                    visible: win.leftTab === "effects" || win.leftTab === "stickers"
-                                    Layout.fillWidth: true
-                                    Action {
-                                        visible: win.leftTab === "effects"
-                                        objectName: "addBlurArea"
-                                        text: "+ Blur area"
-                                        Layout.fillWidth: true
-                                        onClicked: editor.addEffect("blur")
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Blurs whatever lower tracks show inside a rectangle, e.g. private data in a screen recording"
-                                    }
-                                    Action {
-                                        visible: win.leftTab === "effects"
-                                        objectName: "addMosaicArea"
-                                        text: "+ Mosaic area"
-                                        Layout.fillWidth: true
-                                        onClicked: editor.addEffect("pixelate")
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Pixelates whatever lower tracks show inside a rectangle, e.g. a face"
-                                    }
-                                    // Shapes for tutorials and explainers.
-                                    Action {
-                                        visible: win.leftTab === "stickers"
-                                        objectName: "addShape"
-                                        text: "+ Shape ▾"
-                                        Layout.fillWidth: true
-                                        onClicked: shapeMenu.popup()
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Arrow, circle, speech bubble, box or line"
-                                        Menu {
-                                            id: shapeMenu
-                                            MenuItem {
-                                                objectName: "addGraphic-arrow"
-                                                text: "➜  Arrow"
-                                                onTriggered: editor.addGraphic("arrow")
-                                            }
-                                            MenuItem {
-                                                objectName: "addGraphic-ellipse"
-                                                text: "◯  Circle"
-                                                onTriggered: editor.addGraphic("ellipse")
-                                            }
-                                            MenuItem {
-                                                objectName: "addGraphic-bubble"
-                                                text: "🗨  Speech bubble"
-                                                onTriggered: editor.addGraphic("bubble")
-                                            }
-                                            MenuItem {
-                                                objectName: "addGraphic-rectangle"
-                                                text: "▭  Box"
-                                                onTriggered: editor.addGraphic("rectangle")
-                                            }
-                                            MenuItem {
-                                                objectName: "addGraphic-line"
-                                                text: "―  Line"
-                                                onTriggered: editor.addGraphic("line")
-                                            }
-                                            MenuItem {
-                                                objectName: "addGraphic-badge"
-                                                text: "①  Numbered step (1, 2, 3 …)"
-                                                onTriggered: editor.addGraphic("badge")
-                                            }
+                                        implicitHeight: 28
+                                        hoverEnabled: true
+                                        onClicked: {
+                                            categoryColumn.current = modelData.target;
+                                            const flick = addTabScroll.contentItem;
+                                            const item = modelData.target === "top" ? null : win.findByName(addTabScroll.contentChildren[0], modelData.target);
+                                            const y = item ? item.mapToItem(flick.contentItem, 0, 0).y - 4 : 0;
+                                            flick.contentY = Math.max(0, Math.min(y, addTabScroll.contentChildren[0].height - flick.height));
+                                        }
+                                        contentItem: Label {
+                                            text: categoryButton.modelData.name
+                                            font.pixelSize: 11
+                                            elide: Text.ElideRight
+                                            leftPadding: 8
+                                            verticalAlignment: Text.AlignVCenter
+                                            color: categoryButton.active ? "#e7edf2" : categoryButton.hovered ? "#c7d0d8" : win.muted
+                                        }
+                                        background: Rectangle {
+                                            radius: 5
+                                            color: categoryButton.active ? "#26313b" : "transparent"
                                         }
                                     }
                                 }
-                                // Layouts: arrange the selected pictures (Ctrl+click several) at once.
-                                Caption {
-                                    visible: win.leftTab === "layouts"
-                                    text: "ARRANGE SELECTED"
-                                }
-                                CheckBox {
-                                    visible: win.leftTab === "layouts"
-                                    id: arrangeFill
-                                    objectName: "arrangeFill"
-                                    text: "Fill each area (crop)"
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Crops each picture to the shape of its area so there are no empty edges; off fits the whole picture inside"
-                                }
-                                GridLayout {
-                                    visible: win.leftTab === "layouts"
-                                    Layout.fillWidth: true
-                                    columns: 2
-                                    columnSpacing: 4
-                                    rowSpacing: 4
-                                    Repeater {
-                                        model: [
-                                            { id: "side", label: "▯▯ Side by side", tip: "Two pictures next to each other" },
-                                            { id: "stack", label: "▭ Stacked", tip: "One above the other, e.g. for 9:16" },
-                                            { id: "grid", label: "⊞ 2 × 2", tip: "Up to four pictures in a grid" },
-                                            { id: "presenter", label: "◐ Presenter", tip: "Screen large on the left, the presenter round in the lower right" },
-                                            { id: "pip-br", label: "▣ Picture in picture", tip: "The lower track full, the other small in the lower right corner" },
-                                            { id: "full", label: "□ Full size", tip: "Back to full size" }
-                                        ]
+                            }
+                            // Titles, graphics, effect areas and sounds.
+                            // Scrolls when the window is too low for all of it.
+                            ScrollView {
+                                id: addTabScroll
+                                objectName: "addTabScroll"
+                                Layout.fillWidth: true
+                                // Not its content's width: that follows the scroll view's own width.
+                                Layout.preferredWidth: 1
+                                Layout.fillHeight: true
+                                clip: true
+                                contentWidth: availableWidth
+                                ColumnLayout {
+                                    width: parent.width
+                                    spacing: 12
+                                    RowLayout {
+                                        visible: win.leftTab === "text" || win.leftTab === "audio"
+                                        Layout.fillWidth: true
                                         Action {
-                                            required property var modelData
-                                            objectName: "arrange-" + modelData.id
+                                            objectName: "addTitle"
+                                            visible: win.leftTab === "text"
+                                            text: "+ Add title"
                                             Layout.fillWidth: true
-                                            text: modelData.label
-                                            enabled: (win.s.selectedIds || []).length > (modelData.id === "full" ? 0 : 1)
-                                            onClicked: editor.arrange(modelData.id, arrangeFill.checked)
+                                            onClicked: editor.addTitle()
+                                        }
+                                        Action {
+                                            visible: win.leftTab === "text"
+                                            objectName: "addCaption"
+                                            text: "+ Caption"
+                                            Layout.fillWidth: true
+                                            onClicked: editor.addCaption()
                                             ToolTip.visible: hovered
-                                            ToolTip.text: modelData.tip + ". Select the clips first (Ctrl+click)."
+                                            ToolTip.text: "A caption at the playhead on the caption track, 2 seconds or up to the next one"
+                                        }
+                                        // Sound effects: clicks, typing and swooshes for tutorials and screen videos.
+                                        Action {
+                                            visible: win.leftTab === "audio"
+                                            objectName: "openSounds"
+                                            text: "♪ Listen and more…"
+                                            Layout.fillWidth: true
+                                            onClicked: soundDialog.open()
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Listen to the sound effects, or put a whoosh on every transition"
                                         }
                                     }
-                                }
-                                // Own layouts: the places of the selected pictures, kept for every project.
-                                RowLayout {
-                                    visible: win.leftTab === "layouts"
-                                    Layout.fillWidth: true
-                                    ComboBox {
-                                        id: layoutChoice
-                                        objectName: "layoutChoice"
+                                    RowLayout {
+                                        visible: win.leftTab === "text"
                                         Layout.fillWidth: true
-                                        readonly property var layouts: win.s.layouts || []
-                                        model: [layouts.length ? "My layouts…" : "No saved layouts"].concat(layouts.map(l => l.name + " (" + l.count + ")"))
-                                        enabled: layouts.length > 0 && (win.s.selectedIds || []).length > 0
-                                        onActivated: index => {
-                                            if (index > 0)
-                                                editor.applyLayout(layouts[index - 1].name);
-                                            currentIndex = 0;
-                                        }
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Puts the selected pictures in the places of a saved layout, lowest track first"
-                                    }
-                                    ToolButton {
-                                        objectName: "saveLayout"
-                                        text: "Save…"
-                                        enabled: (win.s.selectedIds || []).length > 0
-                                        onClicked: layoutDialog.open()
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Keeps the places, sizes, crops and frames of the selected pictures as a layout for every project"
-                                    }
-                                    ToolButton {
-                                        text: "⋯"
-                                        visible: layoutChoice.layouts.length > 0
-                                        onClicked: layoutMenu.popup()
-                                        Menu {
-                                            id: layoutMenu
-                                            Instantiator {
-                                                model: layoutChoice.layouts
-                                                delegate: MenuItem {
-                                                    required property var modelData
-                                                    text: "Remove “" + modelData.name + "”"
-                                                    onTriggered: editor.removeLayout(modelData.name)
-                                                }
-                                                onObjectAdded: (index, object) => layoutMenu.insertItem(index, object)
-                                                onObjectRemoved: (index, object) => layoutMenu.removeItem(object)
-                                            }
-                                        }
-                                    }
-                                }
-                                // Icons for tutorials: a click goes on at the playhead, coloured and sized
-                                // like shapes.
-                                Caption {
-                                    visible: win.leftTab === "stickers"
-                                    text: "ICONS"
-                                }
-                                GridLayout {
-                                    visible: win.leftTab === "stickers"
-                                    Layout.fillWidth: true
-                                    columns: 5
-                                    columnSpacing: 4
-                                    rowSpacing: 4
-                                    Repeater {
-                                        model: [
-                                            { kind: "check", glyph: "✔", name: "Check mark" },
-                                            { kind: "cross", glyph: "✖", name: "Cross" },
-                                            { kind: "warning", glyph: "⚠", name: "Warning" },
-                                            { kind: "info", glyph: "ℹ", name: "Info" },
-                                            { kind: "star", glyph: "★", name: "Star" },
-                                            { kind: "heart", glyph: "♥", name: "Heart" },
-                                            { kind: "lightbulb", glyph: "💡", name: "Light bulb (tip)" },
-                                            { kind: "cursor", glyph: "↖", name: "Mouse pointer" },
-                                            { kind: "click", glyph: "✳", name: "Mouse click" },
-                                            { kind: "play", glyph: "▶", name: "Play button" },
-                                            { kind: "bell", glyph: "🔔", name: "Bell (e.g. notifications)" },
-                                            { kind: "pin", glyph: "📍", name: "Location pin" },
-                                            { kind: "clock", glyph: "🕒", name: "Clock" }
-                                        ]
-                                        ToolButton {
-                                            required property var modelData
-                                            objectName: "addIcon-" + modelData.kind
+                                        Action {
+                                            objectName: "addLowerThird"
+                                            text: "+ Lower third"
                                             Layout.fillWidth: true
-                                            text: modelData.glyph
-                                            font.pixelSize: 18
-                                            onClicked: editor.addGraphic(modelData.kind)
+                                            onClicked: editor.addTitleTemplate("lowerThird")
                                             ToolTip.visible: hovered
-                                            ToolTip.text: modelData.name
+                                            ToolTip.text: "Name and role in the lower left; slides in, fades out"
+                                        }
+                                        Action {
+                                            objectName: "addTitleCard"
+                                            text: "+ Title card"
+                                            Layout.fillWidth: true
+                                            onClicked: editor.addTitleTemplate("titleCard")
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "A large centred heading with a subtitle, e.g. for chapters"
                                         }
                                     }
-                                }
-                                // Brand kit (every project): colours offered next to the colour settings,
-                                // and a logo put in a corner for the whole video.
-                                Caption {
-                                    visible: win.leftTab === "stickers"
-                                    text: "BRAND KIT"
-                                }
-                                Flow {
-                                    visible: win.leftTab === "stickers"
-                                    Layout.fillWidth: true
-                                    spacing: 4
-                                    Repeater {
-                                        model: win.s.brandColors || []
-                                        Rectangle {
-                                            required property string modelData
-                                            objectName: "brandColor-" + modelData
-                                            width: 22
-                                            height: 22
-                                            radius: 11
-                                            color: modelData
-                                            border.width: 1
-                                            border.color: "#6481a0"
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                                hoverEnabled: true
-                                                onClicked: mouse => {
-                                                    if (mouse.button === Qt.RightButton)
-                                                        editor.removeBrandColor(parent.modelData);
+                                    RowLayout {
+                                        visible: win.leftTab === "text"
+                                        Layout.fillWidth: true
+                                        Action {
+                                            objectName: "addLowerThirdRight"
+                                            text: "+ Right third"
+                                            Layout.fillWidth: true
+                                            onClicked: editor.addTitleTemplate("lowerThirdRight")
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Name and role in the lower right; slides in from the right"
+                                        }
+                                        Action {
+                                            objectName: "addBanner"
+                                            text: "+ Banner"
+                                            Layout.fillWidth: true
+                                            onClicked: editor.addTitleTemplate("banner")
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "A band across the bottom with a headline and a line below, e.g. a call to action"
+                                        }
+                                        Action {
+                                            objectName: "addQuote"
+                                            text: "+ Quote"
+                                            Layout.fillWidth: true
+                                            onClicked: editor.addTitleTemplate("quote")
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "A quotation in the centre with a large quotation mark; the second line names who said it"
+                                        }
+                                    }
+                                    RowLayout {
+                                        visible: win.leftTab === "effects" || win.leftTab === "stickers"
+                                        Layout.fillWidth: true
+                                        Action {
+                                            visible: win.leftTab === "effects"
+                                            objectName: "addBlurArea"
+                                            text: "+ Blur area"
+                                            Layout.fillWidth: true
+                                            onClicked: editor.addEffect("blur")
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Blurs whatever lower tracks show inside a rectangle, e.g. private data in a screen recording"
+                                        }
+                                        Action {
+                                            visible: win.leftTab === "effects"
+                                            objectName: "addMosaicArea"
+                                            text: "+ Mosaic area"
+                                            Layout.fillWidth: true
+                                            onClicked: editor.addEffect("pixelate")
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Pixelates whatever lower tracks show inside a rectangle, e.g. a face"
+                                        }
+                                        // Shapes for tutorials and explainers.
+                                        Action {
+                                            visible: win.leftTab === "stickers"
+                                            objectName: "addShape"
+                                            text: "+ Shape ▾"
+                                            Layout.fillWidth: true
+                                            onClicked: shapeMenu.popup()
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Arrow, circle, speech bubble, box or line"
+                                            Menu {
+                                                id: shapeMenu
+                                                MenuItem {
+                                                    objectName: "addGraphic-arrow"
+                                                    text: "➜  Arrow"
+                                                    onTriggered: editor.addGraphic("arrow")
                                                 }
-                                                ToolTip.visible: containsMouse
-                                                ToolTip.text: parent.modelData + " (right-click to remove)"
+                                                MenuItem {
+                                                    objectName: "addGraphic-ellipse"
+                                                    text: "◯  Circle"
+                                                    onTriggered: editor.addGraphic("ellipse")
+                                                }
+                                                MenuItem {
+                                                    objectName: "addGraphic-bubble"
+                                                    text: "🗨  Speech bubble"
+                                                    onTriggered: editor.addGraphic("bubble")
+                                                }
+                                                MenuItem {
+                                                    objectName: "addGraphic-rectangle"
+                                                    text: "▭  Box"
+                                                    onTriggered: editor.addGraphic("rectangle")
+                                                }
+                                                MenuItem {
+                                                    objectName: "addGraphic-line"
+                                                    text: "―  Line"
+                                                    onTriggered: editor.addGraphic("line")
+                                                }
+                                                MenuItem {
+                                                    objectName: "addGraphic-badge"
+                                                    text: "①  Numbered step (1, 2, 3 …)"
+                                                    onTriggered: editor.addGraphic("badge")
+                                                }
                                             }
+                                        }
+                                    }
+                                    // Layouts: arrange the selected pictures (Ctrl+click several) at once.
+                                    Caption {
+                                        visible: win.leftTab === "layouts"
+                                        text: "ARRANGE SELECTED"
+                                    }
+                                    CheckBox {
+                                        visible: win.leftTab === "layouts"
+                                        id: arrangeFill
+                                        objectName: "arrangeFill"
+                                        text: "Fill each area (crop)"
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Crops each picture to the shape of its area so there are no empty edges; off fits the whole picture inside"
+                                    }
+                                    GridLayout {
+                                        visible: win.leftTab === "layouts"
+                                        Layout.fillWidth: true
+                                        columns: 2
+                                        columnSpacing: 4
+                                        rowSpacing: 4
+                                        Repeater {
+                                            model: [
+                                                { id: "side", label: "▯▯ Side by side", tip: "Two pictures next to each other" },
+                                                { id: "stack", label: "▭ Stacked", tip: "One above the other, e.g. for 9:16" },
+                                                { id: "grid", label: "⊞ 2 × 2", tip: "Up to four pictures in a grid" },
+                                                { id: "presenter", label: "◐ Presenter", tip: "Screen large on the left, the presenter round in the lower right" },
+                                                { id: "pip-br", label: "▣ Picture in picture", tip: "The lower track full, the other small in the lower right corner" },
+                                                { id: "full", label: "□ Full size", tip: "Back to full size" }
+                                            ]
+                                            Action {
+                                                required property var modelData
+                                                objectName: "arrange-" + modelData.id
+                                                Layout.fillWidth: true
+                                                text: modelData.label
+                                                enabled: (win.s.selectedIds || []).length > (modelData.id === "full" ? 0 : 1)
+                                                onClicked: editor.arrange(modelData.id, arrangeFill.checked)
+                                                ToolTip.visible: hovered
+                                                ToolTip.text: modelData.tip + ". Select the clips first (Ctrl+click)."
+                                            }
+                                        }
+                                    }
+                                    // Own layouts: the places of the selected pictures, kept for every project.
+                                    RowLayout {
+                                        visible: win.leftTab === "layouts"
+                                        Layout.fillWidth: true
+                                        ComboBox {
+                                            id: layoutChoice
+                                            objectName: "layoutChoice"
+                                            Layout.fillWidth: true
+                                            readonly property var layouts: win.s.layouts || []
+                                            model: [layouts.length ? "My layouts…" : "No saved layouts"].concat(layouts.map(l => l.name + " (" + l.count + ")"))
+                                            enabled: layouts.length > 0 && (win.s.selectedIds || []).length > 0
+                                            onActivated: index => {
+                                                if (index > 0)
+                                                    editor.applyLayout(layouts[index - 1].name);
+                                                currentIndex = 0;
+                                            }
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Puts the selected pictures in the places of a saved layout, lowest track first"
+                                        }
+                                        ToolButton {
+                                            objectName: "saveLayout"
+                                            text: "Save…"
+                                            enabled: (win.s.selectedIds || []).length > 0
+                                            onClicked: layoutDialog.open()
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Keeps the places, sizes, crops and frames of the selected pictures as a layout for every project"
+                                        }
+                                        ToolButton {
+                                            text: "⋯"
+                                            visible: layoutChoice.layouts.length > 0
+                                            onClicked: layoutMenu.popup()
+                                            Menu {
+                                                id: layoutMenu
+                                                Instantiator {
+                                                    model: layoutChoice.layouts
+                                                    delegate: MenuItem {
+                                                        required property var modelData
+                                                        text: "Remove “" + modelData.name + "”"
+                                                        onTriggered: editor.removeLayout(modelData.name)
+                                                    }
+                                                    onObjectAdded: (index, object) => layoutMenu.insertItem(index, object)
+                                                    onObjectRemoved: (index, object) => layoutMenu.removeItem(object)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Icons for tutorials: a click goes on at the playhead, coloured and sized
+                                    // like shapes.
+                                    Caption {
+                                        objectName: "catIcons"
+                                        visible: win.leftTab === "stickers"
+                                        text: "ICONS"
+                                    }
+                                    GridLayout {
+                                        visible: win.leftTab === "stickers"
+                                        Layout.fillWidth: true
+                                        columns: 5
+                                        columnSpacing: 4
+                                        rowSpacing: 4
+                                        Repeater {
+                                            model: [
+                                                { kind: "check", glyph: "✔", name: "Check mark" },
+                                                { kind: "cross", glyph: "✖", name: "Cross" },
+                                                { kind: "warning", glyph: "⚠", name: "Warning" },
+                                                { kind: "info", glyph: "ℹ", name: "Info" },
+                                                { kind: "star", glyph: "★", name: "Star" },
+                                                { kind: "heart", glyph: "♥", name: "Heart" },
+                                                { kind: "lightbulb", glyph: "💡", name: "Light bulb (tip)" },
+                                                { kind: "cursor", glyph: "↖", name: "Mouse pointer" },
+                                                { kind: "click", glyph: "✳", name: "Mouse click" },
+                                                { kind: "play", glyph: "▶", name: "Play button" },
+                                                { kind: "bell", glyph: "🔔", name: "Bell (e.g. notifications)" },
+                                                { kind: "pin", glyph: "📍", name: "Location pin" },
+                                                { kind: "clock", glyph: "🕒", name: "Clock" }
+                                            ]
+                                            ToolButton {
+                                                required property var modelData
+                                                objectName: "addIcon-" + modelData.kind
+                                                Layout.fillWidth: true
+                                                text: modelData.glyph
+                                                font.pixelSize: 18
+                                                onClicked: editor.addGraphic(modelData.kind)
+                                                ToolTip.visible: hovered
+                                                ToolTip.text: modelData.name
+                                            }
+                                        }
+                                    }
+                                    // Brand kit (every project): colours offered next to the colour settings,
+                                    // and a logo put in a corner for the whole video.
+                                    Caption {
+                                        objectName: "catBrand"
+                                        visible: win.leftTab === "stickers"
+                                        text: "BRAND KIT"
+                                    }
+                                    Flow {
+                                        visible: win.leftTab === "stickers"
+                                        Layout.fillWidth: true
+                                        spacing: 4
+                                        Repeater {
+                                            model: win.s.brandColors || []
+                                            Rectangle {
+                                                required property string modelData
+                                                objectName: "brandColor-" + modelData
+                                                width: 22
+                                                height: 22
+                                                radius: 11
+                                                color: modelData
+                                                border.width: 1
+                                                border.color: "#6481a0"
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                                    hoverEnabled: true
+                                                    onClicked: mouse => {
+                                                        if (mouse.button === Qt.RightButton)
+                                                            editor.removeBrandColor(parent.modelData);
+                                                    }
+                                                    ToolTip.visible: containsMouse
+                                                    ToolTip.text: parent.modelData + " (right-click to remove)"
+                                                }
+                                            }
+                                        }
+                                        Label {
+                                            visible: (win.s.brandColors || []).length === 0
+                                            text: "No brand colours yet"
+                                            color: win.muted
+                                            font.pixelSize: 11
+                                        }
+                                    }
+                                    RowLayout {
+                                        visible: win.leftTab === "stickers"
+                                        Layout.fillWidth: true
+                                        TextField {
+                                            id: brandColorField
+                                            objectName: "brandColorField"
+                                            Layout.fillWidth: true
+                                            placeholderText: "#rrggbb"
+                                            onAccepted: {
+                                                editor.addBrandColor(text);
+                                                text = "";
+                                            }
+                                        }
+                                        Action {
+                                            objectName: "addBrandColor"
+                                            text: "+ Colour"
+                                            padding: 6
+                                            onClicked: {
+                                                editor.addBrandColor(brandColorField.text || win.selection.textColor || win.selection.fillColor || "");
+                                                brandColorField.text = "";
+                                            }
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Keeps the colour typed here (or the selected title's or shape's colour) for every project"
+                                        }
+                                    }
+                                    RowLayout {
+                                        visible: win.leftTab === "stickers"
+                                        Layout.fillWidth: true
+                                        Image {
+                                            visible: !!win.s.brandLogo
+                                            source: win.s.brandLogo ? "file:///" + win.s.brandLogo.replace(/^\/+/, "") : ""
+                                            sourceSize.height: 28
+                                            Layout.preferredHeight: 28
+                                            Layout.preferredWidth: 56
+                                            fillMode: Image.PreserveAspectFit
+                                        }
+                                        Action {
+                                            objectName: "chooseBrandLogo"
+                                            text: win.s.brandLogo ? "Change logo…" : "Choose logo…"
+                                            Layout.fillWidth: true
+                                            padding: 6
+                                            onClicked: logoDialog.open()
+                                        }
+                                        Action {
+                                            objectName: "addBrandLogo"
+                                            text: "+ Logo ▾"
+                                            padding: 6
+                                            enabled: !!win.s.brandLogo
+                                            onClicked: logoMenu.popup()
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Puts the logo small in a corner for the whole video, on its own track"
+                                            Menu {
+                                                id: logoMenu
+                                                MenuItem {
+                                                    objectName: "addBrandLogo-topLeft"
+                                                    text: "◸  Top left"
+                                                    onTriggered: editor.addBrandLogo("topLeft")
+                                                }
+                                                MenuItem {
+                                                    objectName: "addBrandLogo-topRight"
+                                                    text: "◹  Top right"
+                                                    onTriggered: editor.addBrandLogo("topRight")
+                                                }
+                                                MenuItem {
+                                                    objectName: "addBrandLogo-bottomLeft"
+                                                    text: "◺  Bottom left"
+                                                    onTriggered: editor.addBrandLogo("bottomLeft")
+                                                }
+                                                MenuItem {
+                                                    objectName: "addBrandLogo-bottomRight"
+                                                    text: "◿  Bottom right"
+                                                    onTriggered: editor.addBrandLogo("bottomRight")
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Action {
+                                        visible: win.leftTab === "effects"
+                                        objectName: "addAdjustment"
+                                        text: "+ Adjustment layer"
+                                        Layout.fillWidth: true
+                                        onClicked: editor.addEffect("adjust")
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Its colour and look change everything on the tracks below while it runs, e.g. one grade for a whole scene"
+                                    }
+                                    // Text: automatic captions from what is said.
+                                    Action {
+                                        objectName: "openAutoCaptions"
+                                        visible: win.leftTab === "text"
+                                        text: "Auto captions…"
+                                        Layout.fillWidth: true
+                                        onClicked: captionDialog.open()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Captions from what is said in the timeline, made on this computer (AI pack)"
+                                    }
+                                    // Audio: the library's sound files, and recording.
+                                    Action {
+                                        objectName: "showAudioMedia"
+                                        visible: win.leftTab === "audio"
+                                        text: "Sound files in the library"
+                                        Layout.fillWidth: true
+                                        onClicked: {
+                                            libraryView.currentIndex = 2;
+                                            win.leftTab = "media";
                                         }
                                     }
                                     Label {
-                                        visible: (win.s.brandColors || []).length === 0
-                                        text: "No brand colours yet"
+                                        visible: win.leftTab === "audio"
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.Wrap
                                         color: win.muted
                                         font.pixelSize: 11
+                                        text: "Record a voice-over with ● Voice-over under the player; it lands at the playhead."
                                     }
-                                }
-                                RowLayout {
-                                    visible: win.leftTab === "stickers"
-                                    Layout.fillWidth: true
-                                    TextField {
-                                        id: brandColorField
-                                        objectName: "brandColorField"
-                                        Layout.fillWidth: true
-                                        placeholderText: "#rrggbb"
-                                        onAccepted: {
-                                            editor.addBrandColor(text);
-                                            text = "";
-                                        }
-                                    }
-                                    Action {
-                                        objectName: "addBrandColor"
-                                        text: "+ Colour"
-                                        padding: 6
-                                        onClicked: {
-                                            editor.addBrandColor(brandColorField.text || win.selection.textColor || win.selection.fillColor || "");
-                                            brandColorField.text = "";
-                                        }
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Keeps the colour typed here (or the selected title's or shape's colour) for every project"
-                                    }
-                                }
-                                RowLayout {
-                                    visible: win.leftTab === "stickers"
-                                    Layout.fillWidth: true
-                                    Image {
-                                        visible: !!win.s.brandLogo
-                                        source: win.s.brandLogo ? "file:///" + win.s.brandLogo.replace(/^\/+/, "") : ""
-                                        sourceSize.height: 28
-                                        Layout.preferredHeight: 28
-                                        Layout.preferredWidth: 56
-                                        fillMode: Image.PreserveAspectFit
-                                    }
-                                    Action {
-                                        objectName: "chooseBrandLogo"
-                                        text: win.s.brandLogo ? "Change logo…" : "Choose logo…"
-                                        Layout.fillWidth: true
-                                        padding: 6
-                                        onClicked: logoDialog.open()
-                                    }
-                                    Action {
-                                        objectName: "addBrandLogo"
-                                        text: "+ Logo ▾"
-                                        padding: 6
-                                        enabled: !!win.s.brandLogo
-                                        onClicked: logoMenu.popup()
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Puts the logo small in a corner for the whole video, on its own track"
-                                        Menu {
-                                            id: logoMenu
-                                            MenuItem {
-                                                objectName: "addBrandLogo-topLeft"
-                                                text: "◸  Top left"
-                                                onTriggered: editor.addBrandLogo("topLeft")
+                                    // Sound effects by category: a click adds one at the playhead.
+                                    Repeater {
+                                        model: {
+                                            if (win.leftTab !== "audio")
+                                                return [];
+                                            const groups = [];
+                                            for (const sound of editor.sounds()) {
+                                                let g = groups.find(x => x.category === sound.category);
+                                                if (!g) {
+                                                    g = { category: sound.category, sounds: [] };
+                                                    groups.push(g);
+                                                }
+                                                g.sounds.push(sound);
                                             }
-                                            MenuItem {
-                                                objectName: "addBrandLogo-topRight"
-                                                text: "◹  Top right"
-                                                onTriggered: editor.addBrandLogo("topRight")
-                                            }
-                                            MenuItem {
-                                                objectName: "addBrandLogo-bottomLeft"
-                                                text: "◺  Bottom left"
-                                                onTriggered: editor.addBrandLogo("bottomLeft")
-                                            }
-                                            MenuItem {
-                                                objectName: "addBrandLogo-bottomRight"
-                                                text: "◿  Bottom right"
-                                                onTriggered: editor.addBrandLogo("bottomRight")
-                                            }
+                                            return groups;
                                         }
-                                    }
-                                }
-                                Action {
-                                    visible: win.leftTab === "effects"
-                                    objectName: "addAdjustment"
-                                    text: "+ Adjustment layer"
-                                    Layout.fillWidth: true
-                                    onClicked: editor.addEffect("adjust")
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Its colour and look change everything on the tracks below while it runs, e.g. one grade for a whole scene"
-                                }
-                                // Text: automatic captions from what is said.
-                                Action {
-                                    objectName: "openAutoCaptions"
-                                    visible: win.leftTab === "text"
-                                    text: "Auto captions…"
-                                    Layout.fillWidth: true
-                                    onClicked: captionDialog.open()
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Captions from what is said in the timeline, made on this computer (AI pack)"
-                                }
-                                // Audio: the library's sound files, and recording.
-                                Action {
-                                    objectName: "showAudioMedia"
-                                    visible: win.leftTab === "audio"
-                                    text: "Sound files in the library"
-                                    Layout.fillWidth: true
-                                    onClicked: {
-                                        libraryView.currentIndex = 2;
-                                        win.leftTab = "media";
-                                    }
-                                }
-                                Label {
-                                    visible: win.leftTab === "audio"
-                                    Layout.fillWidth: true
-                                    wrapMode: Text.Wrap
-                                    color: win.muted
-                                    font.pixelSize: 11
-                                    text: "Record a voice-over with ● Voice-over under the player; it lands at the playhead."
-                                }
-                                // Sound effects by category: a click adds one at the playhead.
-                                Repeater {
-                                    model: {
-                                        if (win.leftTab !== "audio")
-                                            return [];
-                                        const groups = [];
-                                        for (const sound of editor.sounds()) {
-                                            let g = groups.find(x => x.category === sound.category);
-                                            if (!g) {
-                                                g = { category: sound.category, sounds: [] };
-                                                groups.push(g);
-                                            }
-                                            g.sounds.push(sound);
-                                        }
-                                        return groups;
-                                    }
-                                    ColumnLayout {
-                                        id: soundGroup
-                                        required property var modelData
-                                        Layout.fillWidth: true
-                                        spacing: 6
-                                        Caption {
-                                            text: soundGroup.modelData.category.toUpperCase()
-                                        }
-                                        Flow {
+                                        ColumnLayout {
+                                            id: soundGroup
+                                            required property var modelData
                                             Layout.fillWidth: true
                                             spacing: 6
-                                            Repeater {
-                                                model: soundGroup.modelData.sounds
-                                                Tile {
-                                                    required property var modelData
-                                                    objectName: "soundTile-" + modelData.id
-                                                    text: modelData.name
-                                                    glyph: /click|mouse/i.test(modelData.category + modelData.name) ? "⌖" : /typ|key/i.test(modelData.category + modelData.name) ? "⌨" : /whoosh|swoosh|swish/i.test(modelData.category + modelData.name) ? "≋" : "♪"
-                                                    swatch: "#1f3340"
-                                                    implicitWidth: 112
-                                                    onClicked: editor.addSound(modelData.id)
-                                                    ToolTip.visible: hovered
-                                                    ToolTip.text: modelData.name + " · " + Number(modelData.seconds).toFixed(1) + " s · " + modelData.licence + "\nAdds it at the playhead."
+                                            Caption {
+                                                objectName: "cat-sound-" + soundGroup.modelData.category
+                                                text: soundGroup.modelData.category.toUpperCase()
+                                            }
+                                            Flow {
+                                                Layout.fillWidth: true
+                                                spacing: 6
+                                                Repeater {
+                                                    model: soundGroup.modelData.sounds
+                                                    Tile {
+                                                        required property var modelData
+                                                        objectName: "soundTile-" + modelData.id
+                                                        text: modelData.name
+                                                        glyph: /click|mouse/i.test(modelData.category + modelData.name) ? "⌖" : /typ|key/i.test(modelData.category + modelData.name) ? "⌨" : /whoosh|swoosh|swish/i.test(modelData.category + modelData.name) ? "≋" : "♪"
+                                                        swatch: "#1f3340"
+                                                        implicitWidth: 112
+                                                        onClicked: editor.addSound(modelData.id)
+                                                        ToolTip.visible: hovered
+                                                        ToolTip.text: modelData.name + " · " + Number(modelData.seconds).toFixed(1) + " s · " + modelData.licence + "\nAdds it at the playhead."
+                                                    }
                                                 }
                                             }
                                         }
                                     }
-                                }
-                                // Effects, transitions and looks for the selected clip, as tiles.
-                                Caption {
-                                    visible: win.leftTab === "effects"
-                                    text: "STYLE EFFECT · SELECTED CLIP"
-                                }
-                                Flow {
-                                    visible: win.leftTab === "effects"
-                                    Layout.fillWidth: true
-                                    spacing: 6
-                                    Repeater {
-                                        model: win.styleEffects
-                                        Tile {
-                                            required property var modelData
-                                            objectName: "fxTile-" + (modelData.id || "none")
-                                            text: modelData.label
-                                            glyph: modelData.id ? "✦" : "⊘"
-                                            checked: win.pictureSelected && (win.selection.fx || "") === modelData.id
-                                            enabled: win.pictureSelected && win.selection.locked !== true
-                                            onClicked: editor.setClip("fx", modelData.id)
+                                    // Effects, transitions and looks for the selected clip, as tiles.
+                                    Caption {
+                                        objectName: "catStyle"
+                                        visible: win.leftTab === "effects"
+                                        text: "STYLE EFFECT · SELECTED CLIP"
+                                    }
+                                    Flow {
+                                        visible: win.leftTab === "effects"
+                                        Layout.fillWidth: true
+                                        spacing: 6
+                                        Repeater {
+                                            model: win.styleEffects
+                                            Tile {
+                                                required property var modelData
+                                                objectName: "fxTile-" + (modelData.id || "none")
+                                                text: modelData.label
+                                                glyph: modelData.id ? "✦" : "⊘"
+                                                checked: win.pictureSelected && (win.selection.fx || "") === modelData.id
+                                                enabled: win.pictureSelected && win.selection.locked !== true
+                                                onClicked: editor.setClip("fx", modelData.id)
+                                            }
                                         }
                                     }
-                                }
-                                Caption {
-                                    visible: win.leftTab === "transitions"
-                                    text: "TRANSITION INTO THE SELECTED CLIP"
-                                }
-                                Flow {
-                                    visible: win.leftTab === "transitions"
-                                    Layout.fillWidth: true
-                                    spacing: 6
-                                    Repeater {
-                                        model: [{ id: "", label: "None (cut)" }].concat(editor.transitionTypes())
-                                        Tile {
-                                            required property var modelData
-                                            objectName: "transitionTile-" + (modelData.id || "none")
-                                            text: modelData.label
-                                            glyph: modelData.id ? "⋈" : "|"
-                                            checked: win.selection.canTransition === true && (win.selection.transition || "") === modelData.id
-                                            enabled: win.selection.canTransition === true && win.selection.locked !== true
-                                            onClicked: editor.setClip("transition", modelData.id)
+                                    Caption {
+                                        visible: win.leftTab === "transitions"
+                                        text: "TRANSITION INTO THE SELECTED CLIP"
+                                    }
+                                    Flow {
+                                        visible: win.leftTab === "transitions"
+                                        Layout.fillWidth: true
+                                        spacing: 6
+                                        Repeater {
+                                            model: [{ id: "", label: "None (cut)" }].concat(editor.transitionTypes())
+                                            Tile {
+                                                required property var modelData
+                                                objectName: "transitionTile-" + (modelData.id || "none")
+                                                text: modelData.label
+                                                glyph: modelData.id ? "⋈" : "|"
+                                                checked: win.selection.canTransition === true && (win.selection.transition || "") === modelData.id
+                                                enabled: win.selection.canTransition === true && win.selection.locked !== true
+                                                onClicked: editor.setClip("transition", modelData.id)
+                                            }
                                         }
                                     }
-                                }
-                                Caption {
-                                    visible: win.leftTab === "filters"
-                                    text: "LOOK · SELECTED CLIP"
-                                }
-                                Flow {
-                                    visible: win.leftTab === "filters"
-                                    Layout.fillWidth: true
-                                    spacing: 6
-                                    Repeater {
-                                        model: win.looks.slice(1)
-                                        Tile {
-                                            required property var modelData
-                                            required property int index
-                                            objectName: "lookTile-" + index
-                                            text: modelData.label
-                                            swatch: ["#2a3038", "#6b4a2a", "#2a4a6b", "#3a3346", "#5e4b33", "#3c3c3c", "#5a2f3a", "#4a3f5e"][index] || "#202831"
-                                            glyph: "◐"
-                                            enabled: (win.pictureSelected || win.selectionKind === "adjust") && win.selection.locked !== true
-                                            onClicked: win.applyLook(index + 1)
+                                    Caption {
+                                        visible: win.leftTab === "filters"
+                                        text: "LOOK · SELECTED CLIP"
+                                    }
+                                    Flow {
+                                        visible: win.leftTab === "filters"
+                                        Layout.fillWidth: true
+                                        spacing: 6
+                                        Repeater {
+                                            model: win.looks.slice(1)
+                                            Tile {
+                                                required property var modelData
+                                                required property int index
+                                                objectName: "lookTile-" + index
+                                                text: modelData.label
+                                                swatch: ["#2a3038", "#6b4a2a", "#2a4a6b", "#3a3346", "#5e4b33", "#3c3c3c", "#5a2f3a", "#4a3f5e"][index] || "#202831"
+                                                glyph: "◐"
+                                                enabled: (win.pictureSelected || win.selectionKind === "adjust") && win.selection.locked !== true
+                                                onClicked: win.applyLook(index + 1)
+                                            }
                                         }
                                     }
-                                }
-                                Caption {
-                                    visible: win.leftTab === "filters"
-                                    text: "LUT LIBRARY"
-                                }
-                                Flow {
-                                    visible: win.leftTab === "filters" && (win.s.lutLibrary || []).length > 0
-                                    Layout.fillWidth: true
-                                    spacing: 6
-                                    Repeater {
-                                        model: win.s.lutLibrary || []
-                                        Tile {
-                                            required property var modelData
-                                            text: modelData.name
-                                            glyph: "▤"
-                                            checked: (win.pictureSelected || win.selectionKind === "adjust") && win.selection.lutName === modelData.name
-                                            enabled: (win.pictureSelected || win.selectionKind === "adjust") && win.selection.locked !== true
-                                            onClicked: editor.setClip("lut", modelData.path)
+                                    Caption {
+                                        visible: win.leftTab === "filters"
+                                        objectName: "catLuts"
+                                        text: "LUT LIBRARY"
+                                    }
+                                    Flow {
+                                        visible: win.leftTab === "filters" && (win.s.lutLibrary || []).length > 0
+                                        Layout.fillWidth: true
+                                        spacing: 6
+                                        Repeater {
+                                            model: win.s.lutLibrary || []
+                                            Tile {
+                                                required property var modelData
+                                                text: modelData.name
+                                                glyph: "▤"
+                                                checked: (win.pictureSelected || win.selectionKind === "adjust") && win.selection.lutName === modelData.name
+                                                enabled: (win.pictureSelected || win.selectionKind === "adjust") && win.selection.locked !== true
+                                                onClicked: editor.setClip("lut", modelData.path)
+                                            }
                                         }
                                     }
-                                }
-                                Action {
-                                    visible: win.leftTab === "filters"
-                                    text: "+ Add a LUT file to the library"
-                                    Layout.fillWidth: true
-                                    onClicked: lutLibraryDialog.open()
-                                }
-                                Label {
-                                    visible: ["effects", "transitions", "filters"].indexOf(win.leftTab) >= 0
-                                    Layout.fillWidth: true
-                                    wrapMode: Text.Wrap
-                                    color: win.muted
-                                    font.pixelSize: 11
-                                    text: win.leftTab === "transitions" ? (win.selection.canTransition === true ? "Fine-tune the length in the inspector under Animation." : "Select a clip that directly follows another on its track.") : (win.pictureSelected || (win.leftTab === "filters" && win.selectionKind === "adjust") ? "Applies to " + (win.selection.name || "the selected clip") + "; fine-tune it in the inspector." : "Select a video or picture on the timeline first.")
+                                    Action {
+                                        visible: win.leftTab === "filters"
+                                        text: "+ Add a LUT file to the library"
+                                        Layout.fillWidth: true
+                                        onClicked: lutLibraryDialog.open()
+                                    }
+                                    Label {
+                                        visible: ["effects", "transitions", "filters"].indexOf(win.leftTab) >= 0
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.Wrap
+                                        color: win.muted
+                                        font.pixelSize: 11
+                                        text: win.leftTab === "transitions" ? (win.selection.canTransition === true ? "Fine-tune the length in the inspector under Animation." : "Select a clip that directly follows another on its track.") : (win.pictureSelected || (win.leftTab === "filters" && win.selectionKind === "adjust") ? "Applies to " + (win.selection.name || "the selected clip") + "; fine-tune it in the inspector." : "Select a video or picture on the timeline first.")
+                                    }
                                 }
                             }
                         }
@@ -3086,33 +3176,21 @@ ApplicationWindow {
                                     currentIndex: Math.max(0, entries.findIndex(e => e.id === (win.selection.transition || "")))
                                     onActivated: editor.setClip("transition", entries[currentIndex].id)
                                 }
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 0
+                                ValueRow {
                                     visible: win.selection.canTransition === true && (win.selection.transition || "") !== ""
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        Label {
-                                            text: "Duration"
-                                            color: win.muted
-                                            Layout.fillWidth: true
-                                        }
-                                        Label {
-                                            text: ((win.selection.transitionLength || 0) / win.s.fps).toFixed(2) + " s" + ((win.selection.transitionLength || 0) < (win.selection.transitionFrames || 0) ? " (clip limit)" : "")
-                                            font.pixelSize: 10
-                                        }
-                                    }
-                                    Slider {
-                                        objectName: "transitionDuration"
-                                        Layout.fillWidth: true
-                                        from: .1
-                                        to: 3
-                                        stepSize: .05
-                                        value: (win.selection.transitionFrames || 0) / win.s.fps
-                                        onPressedChanged: if (!pressed)
-                                            editor.setClip("transitionFrames", Math.max(2, Math.round(value * win.s.fps)))
-                                        onMoved: if (!pressed)
-                                            editor.setClip("transitionFrames", Math.max(2, Math.round(value * win.s.fps)))
+                                    key: "transitionFrames"
+                                    label: "Duration" + ((win.selection.transitionLength || 0) < (win.selection.transitionFrames || 0) ? " (clip limit " + ((win.selection.transitionLength || 0) / win.s.fps).toFixed(2) + " s)" : "")
+                                    from: 2
+                                    to: Math.round(3 * win.s.fps)
+                                    stepSize: 1
+                                    defaultValue: Math.round(.5 * win.s.fps)
+                                    shown: 1 / win.s.fps
+                                    decimals: 2
+                                    unit: " s"
+                                    sliderName: "transitionDuration"
+                                    tip: "How long the transition takes"
+                                    function commit(v) {
+                                        editor.setClip("transitionFrames", Math.max(2, Math.min(to, Math.round(v))));
                                     }
                                 }
                                 Rule {}
@@ -3266,70 +3344,56 @@ ApplicationWindow {
                                     currentIndex: Math.max(0, kinds.indexOf(win.selection.graphic || "arrow"))
                                     onActivated: index => editor.setClip("graphic", kinds[index])
                                 }
-                                Repeater {
-                                    model: [
-                                        { key: "fillColor", name: "Fill", colors: ["#ffd23f", "#ff5a5f", "#64d8bc", "#5fa8ff", "#ffffff", "#14181d", "#00000000"] },
-                                        { key: "strokeColor", name: "Outline", colors: ["#000000", "#ffffff", "#ff5a5f", "#ffd23f"] }
-                                    ]
-                                    RowLayout {
-                                        id: graphicColours
-                                        required property var modelData
-                                        Label {
-                                            text: graphicColours.modelData.name
-                                            color: win.muted
-                                            Layout.preferredWidth: 60
-                                        }
-                                        Repeater {
-                                            model: (win.s.brandColors || []).concat(graphicColours.modelData.colors)
-                                            Rectangle {
-                                                required property string modelData
-                                                width: 18
-                                                height: 18
-                                                radius: 9
-                                                color: modelData
-                                                border.width: win.selection[graphicColours.modelData.key] === modelData ? 3 : 1
-                                                border.color: win.selection[graphicColours.modelData.key] === modelData ? win.mint : "#6481a0"
-                                                Label {
-                                                    anchors.centerIn: parent
-                                                    visible: parent.modelData === "#00000000"
-                                                    text: "∅"
-                                                    font.pixelSize: 11
-                                                }
-                                                MouseArea {
-                                                    anchors.fill: parent
-                                                    onClicked: editor.setClip(graphicColours.modelData.key, parent.modelData)
+                                Section {
+                                    objectName: "graphicColours"
+                                    title: "Colour"
+                                    spacing: 6
+                                    Repeater {
+                                        model: [
+                                            { key: "fillColor", name: "Fill", colors: ["#ffd23f", "#ff5a5f", "#64d8bc", "#5fa8ff", "#ffffff", "#14181d", "#00000000"] },
+                                            { key: "strokeColor", name: "Outline", colors: ["#000000", "#ffffff", "#ff5a5f", "#ffd23f"] }
+                                        ]
+                                        RowLayout {
+                                            id: graphicColours
+                                            required property var modelData
+                                            Label {
+                                                text: graphicColours.modelData.name
+                                                color: win.muted
+                                                Layout.preferredWidth: 60
+                                            }
+                                            Repeater {
+                                                model: (win.s.brandColors || []).concat(graphicColours.modelData.colors)
+                                                Rectangle {
+                                                    required property string modelData
+                                                    width: 18
+                                                    height: 18
+                                                    radius: 9
+                                                    color: modelData
+                                                    border.width: win.selection[graphicColours.modelData.key] === modelData ? 3 : 1
+                                                    border.color: win.selection[graphicColours.modelData.key] === modelData ? win.mint : "#6481a0"
+                                                    Label {
+                                                        anchors.centerIn: parent
+                                                        visible: parent.modelData === "#00000000"
+                                                        text: "∅"
+                                                        font.pixelSize: 11
+                                                    }
+                                                    MouseArea {
+                                                        anchors.fill: parent
+                                                        onClicked: editor.setClip(graphicColours.modelData.key, parent.modelData)
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
-                                Repeater {
-                                    model: [
-                                        { key: "stroke", name: "Outline width", lo: 0, hi: 0.05 },
-                                        { key: "graphicWidth", name: "Width", lo: 0.01, hi: 1 },
-                                        { key: "graphicHeight", name: "Height", lo: 0.005, hi: 1 }
+                                ValueGroup {
+                                    objectName: "graphicSize"
+                                    title: "Size and outline"
+                                    rows: [
+                                        { key: "graphicWidth", name: "Width", lo: 0.01, hi: 1, def: 0.3, shown: 100, dec: 0, unit: "%", obj: "graphic-graphicWidth" },
+                                        { key: "graphicHeight", name: "Height", lo: 0.005, hi: 1, def: 0.2, shown: 100, dec: 0, unit: "%", obj: "graphic-graphicHeight" },
+                                        { key: "stroke", name: "Outline width", lo: 0, hi: 0.05, step: .001, def: 0, shown: 100, dec: 1, unit: "%", obj: "graphic-stroke" }
                                     ]
-                                    RowLayout {
-                                        id: graphicRow
-                                        required property var modelData
-                                        Layout.fillWidth: true
-                                        Label {
-                                            text: graphicRow.modelData.name
-                                            color: win.muted
-                                            Layout.preferredWidth: 95
-                                        }
-                                        Slider {
-                                            objectName: "graphic-" + graphicRow.modelData.key
-                                            Layout.fillWidth: true
-                                            from: graphicRow.modelData.lo
-                                            to: graphicRow.modelData.hi
-                                            value: win.selection[graphicRow.modelData.key] ?? 0
-                                            onPressedChanged: if (!pressed)
-                                                editor.setClip(graphicRow.modelData.key, value)
-                                            onMoved: if (!pressed)
-                                                editor.setClip(graphicRow.modelData.key, value)
-                                        }
-                                    }
                                 }
                                 Rule {}
                             }

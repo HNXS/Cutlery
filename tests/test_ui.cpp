@@ -284,6 +284,14 @@ class UiTest : public QObject {
         QTRY_COMPARE(type->property("currentText").toString(), QString("Dissolve"));
         editor.setClip("transition", "wipeleft");
         QTRY_COMPARE(type->property("currentText").toString(), QString("Wipe left"));
+        // The length in seconds, typed into the value row's box, is stored in frames.
+        auto *length = findItem(window->contentItem(), "transitionDuration-box");
+        QTRY_VERIFY(length && length->isVisible());
+        QCOMPARE(length->property("text").toString(), QString("0.50 s"));
+        length->setProperty("text", "1");
+        QVERIFY(QMetaObject::invokeMethod(length, "editingFinished"));
+        QCOMPARE(editor.project().clips.last().transitionFrames, qint64(30));
+        editor.undo();
         editor.undo();
         editor.undo();
         QVERIFY(editor.project().clips.last().transition.isEmpty());
@@ -1517,6 +1525,22 @@ class UiTest : public QObject {
         QCOMPARE(editor.project().clips.back().name, QString("Mouse click"));
         editor.undo();
         editor.select(editor.project().clips.first().id);
+        // The category column scrolls the tab to a category, and back to the top.
+        window->setProperty("leftTab", "audio");
+        auto *column = findItem(window->contentItem(), "categoryColumn");
+        QTRY_VERIFY(column && column->isVisible());
+        auto *scroll = findItem(window->contentItem(), "addTabScroll");
+        auto *flick = qvariant_cast<QQuickItem *>(scroll->property("contentItem"));
+        QVERIFY(flick);
+        auto *typing = findItem(window->contentItem(), "cat-sound-Transitions");
+        QVERIFY(typing);
+        QTRY_VERIFY(typing->mapToItem(flick, QPointF()).y() > flick->height());
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "category-cat-sound-Transitions"), "clicked"));
+        QTRY_VERIFY(flick->property("contentY").toDouble() > 0);
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "category-top"), "clicked"));
+        QTRY_COMPARE(flick->property("contentY").toDouble(), 0.);
+        window->setProperty("leftTab", "text");
+        QTRY_VERIFY(!column->isVisible());
         // Media used on the timeline is marked "Added".
         window->setProperty("leftTab", "media");
         auto *added = findItem(window->contentItem(), "added-" + editor.project().clips.first().assetId);
