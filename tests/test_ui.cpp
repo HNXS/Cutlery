@@ -1444,6 +1444,43 @@ class UiTest : public QObject {
         QCOMPARE(window->property("inspectorTabs").toList().size(), 0);
         editor.select(id);
         QTRY_VERIFY(!findItem(window->contentItem(), "projectDetails")->isVisible());
+        // Values: typed into the number box (in percent), stepped, and reset with the section.
+        page(window, "video", "basic");
+        auto *scaleBox = findItem(window->contentItem(), "prop-scale-box");
+        QVERIFY(scaleBox && scaleBox->isVisible());
+        scaleBox->setProperty("text", "150");
+        QVERIFY(QMetaObject::invokeMethod(scaleBox, "editingFinished"));
+        QCOMPARE(editor.project().clips.first().scale, 1.5);
+        QTRY_COMPARE(scaleBox->property("text").toString(), QString("150%"));
+        auto *reset = findItem(window->contentItem(), "transformSection-reset");
+        QVERIFY(reset && reset->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(reset, "clicked"));
+        QCOMPARE(editor.project().clips.first().scale, 1.);
+        editor.undo();
+        QCOMPARE(editor.project().clips.first().scale, 1.5);
+        editor.undo();
+        QCOMPARE(editor.project().clips.first().scale, 1.);
+        // A section with an on/off box: stabilizing.
+        page(window, "video", "enhance");
+        auto *stabilizeOn = findItem(window->contentItem(), "stabilize-on");
+        QVERIFY(stabilizeOn && stabilizeOn->isVisible());
+        stabilizeOn->setProperty("checked", true);
+        QVERIFY(QMetaObject::invokeMethod(stabilizeOn, "toggled"));
+        QVERIFY(editor.project().clips.first().stabilize);
+        QTRY_VERIFY(findItem(window->contentItem(), "stabilizeStrength")->isEnabled());
+        editor.undo();
+        QVERIFY(!editor.project().clips.first().stabilize);
+        // Pictures of every inspector page, for looking at the layout.
+        if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS")) {
+            for (const auto &[tab, sub] : std::initializer_list<std::pair<const char *, const char *>>{
+                     {"video", "basic"}, {"video", "cutout"}, {"video", "mask"}, {"video", "canvas"},
+                     {"video", "enhance"}, {"speed", ""}, {"animation", ""}, {"adjust", "basic"},
+                     {"adjust", "wheels"}, {"effects", ""}, {"more", ""}}) {
+                page(window, tab, sub);
+                QTest::qWait(50);
+                window->grabWindow().save(qEnvironmentVariable("CUTLERY_UI_SHOTS") + "/" + tab + "-" + sub + ".png");
+            }
+        }
         // Video noise, flicker and source colours for a video; the HDR choice only for HDR.
         page(window, "video", "enhance");
         for (const char *name : {"videoDenoise", "deflicker", "colorRange", "colorMatrix"})
@@ -1490,6 +1527,7 @@ class UiTest : public QObject {
         QTRY_COMPARE(status->property("text").toString(), QString("Speaker found ✓"));
         QVERIFY(!findItem(window->contentItem(), "cutoutAnalyze")->isVisible());
         // AI upscale of the 90p clip, to 360p: the same flow.
+        page(window, "video", "enhance");
         auto *sharpen = findItem(window->contentItem(), "aiUpscale");
         QVERIFY(sharpen && sharpen->isVisible() && sharpen->isEnabled());
         sharpen->setProperty("checked", true);

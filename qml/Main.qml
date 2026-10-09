@@ -408,6 +408,225 @@ ApplicationWindow {
             }
         }
     }
+    // A section of the inspector: a bold title with, as needed, an on/off box (the body is
+    // dimmed while off), a reset button and a fold arrow.
+    component Section: ColumnLayout {
+        id: section
+        property string title
+        property bool checkable: false
+        property bool checked: true
+        property bool resettable: false
+        property bool expanded: true
+        property string tip: ""
+        signal toggled(bool on)
+        signal reset
+        default property alias content: sectionBody.data
+        Layout.fillWidth: true
+        spacing: 8
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 4
+            CheckBox {
+                objectName: section.objectName ? section.objectName + "-on" : ""
+                visible: section.checkable
+                checked: section.checked
+                padding: 0
+                enabled: win.selection.locked !== true
+                onToggled: section.toggled(checked)
+            }
+            Label {
+                text: section.title
+                font.bold: true
+                font.pixelSize: 12
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+                HoverHandler {
+                    id: sectionHover
+                }
+                TapHandler {
+                    onTapped: section.expanded = !section.expanded
+                }
+                ToolTip.visible: section.tip !== "" && sectionHover.hovered
+                ToolTip.text: section.tip
+            }
+            ToolButton {
+                objectName: section.objectName ? section.objectName + "-reset" : ""
+                visible: section.resettable
+                enabled: win.selection.locked !== true
+                text: "↺"
+                implicitWidth: 24
+                implicitHeight: 22
+                onClicked: section.reset()
+                ToolTip.visible: hovered
+                ToolTip.text: "Reset " + section.title.toLowerCase()
+            }
+            ToolButton {
+                text: section.expanded ? "▾" : "▸"
+                implicitWidth: 22
+                implicitHeight: 22
+                onClicked: section.expanded = !section.expanded
+            }
+        }
+        ColumnLayout {
+            id: sectionBody
+            Layout.fillWidth: true
+            spacing: 8
+            visible: section.expanded
+            enabled: !section.checkable || section.checked
+            opacity: enabled ? 1 : .45
+        }
+        Rule {}
+    }
+    // One value of the selected clip: its name, a number box with steppers, a keyframe diamond
+    // for animatable values, and a slider. Each gesture is one undo step.
+    component ValueRow: ColumnLayout {
+        id: valueRow
+        property string key
+        property string label
+        property real from: 0
+        property real to: 1
+        property real stepSize: .01
+        property real defaultValue: 0
+        property int decimals: 2
+        property string unit: ""
+        // The number shown is the value times this (100 for percent).
+        property real shown: 1
+        property bool animatable: false
+        property string sliderName: ""
+        property string tip: ""
+        readonly property bool keyed: animatable && (win.selection.keyed || {})[key] === true
+        readonly property bool animated: animatable && ((win.selection.keyframeCount || {})[key] || 0) > 0
+        // Animated values show their value at the playhead.
+        readonly property real value: animated ? Number((win.selection.animated || {})[key] ?? defaultValue) : Number(win.selection[key] ?? defaultValue)
+        function commit(v) {
+            editor.setClip(key, Math.max(from, Math.min(to, v)));
+        }
+        Layout.fillWidth: true
+        spacing: 0
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 2
+            Label {
+                text: valueRow.label
+                color: valueRow.animated ? win.mint : Math.abs(valueRow.value - valueRow.defaultValue) > 1e-9 ? "#e7edf2" : win.muted
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+            }
+            TextField {
+                objectName: valueRow.sliderName ? valueRow.sliderName + "-box" : ""
+                implicitWidth: 62
+                implicitHeight: 24
+                padding: 4
+                horizontalAlignment: Text.AlignRight
+                font.pixelSize: 11
+                selectByMouse: true
+                enabled: win.selection.locked !== true
+                text: (valueRow.value * valueRow.shown).toFixed(valueRow.decimals) + valueRow.unit
+                onEditingFinished: {
+                    const v = parseFloat(text);
+                    if (isFinite(v))
+                        valueRow.commit(v / valueRow.shown);
+                }
+                background: Rectangle {
+                    radius: 4
+                    color: "#11161c"
+                    border.color: parent.activeFocus ? win.mint : "#2b333e"
+                }
+            }
+            ColumnLayout {
+                spacing: 0
+                enabled: win.selection.locked !== true
+                Repeater {
+                    model: [1, -1]
+                    ToolButton {
+                        required property int modelData
+                        text: modelData > 0 ? "▴" : "▾"
+                        implicitWidth: 16
+                        implicitHeight: 12
+                        padding: 0
+                        font.pixelSize: 9
+                        autoRepeat: true
+                        onClicked: valueRow.commit(valueRow.value + modelData * valueRow.stepSize)
+                    }
+                }
+            }
+            ToolButton {
+                objectName: "keyframe-" + valueRow.key
+                visible: valueRow.animatable
+                enabled: win.selection.playheadInside === true && win.selection.locked !== true
+                implicitWidth: 24
+                implicitHeight: 22
+                text: valueRow.keyed ? "◆" : "◇"
+                palette.buttonText: valueRow.animated ? "#ffd479" : "#e7edf2"
+                onClicked: editor.toggleKeyframe(valueRow.key)
+                ToolTip.visible: hovered
+                ToolTip.text: valueRow.keyed ? "Remove keyframe" : "Add keyframe at playhead"
+            }
+        }
+        // The keyframe at the playhead: how it moves on to the next one.
+        ComboBox {
+            objectName: "keyframeEasing-" + valueRow.key
+            Layout.fillWidth: true
+            visible: valueRow.keyed
+            readonly property var easings: ["smooth", "linear", "in", "out", "hold"]
+            model: ["Ease in and out", "Linear", "Ease in (slow start)", "Ease out (slow end)", "Hold until the next keyframe"]
+            currentIndex: Math.max(0, easings.indexOf((win.selection.keyEasing || {})[valueRow.key] || "smooth"))
+            onActivated: editor.setKeyframeEasing(valueRow.key, easings[currentIndex])
+            ToolTip.visible: hovered
+            ToolTip.text: "How the value moves from this keyframe to the next"
+        }
+        Slider {
+            objectName: valueRow.sliderName
+            Layout.fillWidth: true
+            from: valueRow.from
+            to: valueRow.to
+            stepSize: valueRow.stepSize
+            value: valueRow.value
+            enabled: win.selection.locked !== true
+            onPressedChanged: if (!pressed)
+                valueRow.commit(value)
+            onMoved: if (!pressed)
+                valueRow.commit(value)
+            ToolTip.visible: hovered && valueRow.tip !== ""
+            ToolTip.text: valueRow.tip + (valueRow.tip ? ". " : "") + "Double-click to reset."
+            TapHandler {
+                acceptedButtons: Qt.LeftButton
+                onDoubleTapped: valueRow.commit(valueRow.defaultValue)
+            }
+        }
+    }
+    // A section of values; reset puts all of them back to their defaults in one undo step.
+    // Rows: { key, name, lo, hi, step, def, dec, unit, shown, anim, tip }.
+    component ValueGroup: Section {
+        id: group
+        property var rows: []
+        property string prefix: ""
+        resettable: true
+        onReset: {
+            const values = {};
+            for (const r of rows)
+                values[r.key] = r.def ?? 0;
+            editor.setClipValues(values);
+        }
+        Repeater {
+            model: group.rows
+            ValueRow {
+                required property var modelData
+                key: modelData.key
+                label: modelData.name
+                from: modelData.lo
+                to: modelData.hi
+                stepSize: modelData.step ?? .01
+                defaultValue: modelData.def ?? 0
+                decimals: modelData.dec ?? 2
+                unit: modelData.unit ?? ""
+                shown: modelData.shown ?? 1
+                animatable: modelData.anim === true
+                sliderName: modelData.obj ?? (group.prefix ? group.prefix + modelData.key : "")
+                tip: modelData.tip ?? ""
+            }
+        }
+    }
     component Caption: Label {
         color: win.muted
         font.pixelSize: 10
@@ -2342,12 +2561,104 @@ ApplicationWindow {
                                 onActivated: editor.setClip("track", currentIndex)
                             }
                             Rule { visible: win.timingPage }
-                            ColumnLayout {
+                            RowLayout {
+                                visible: win.picPage("basic") || win.audioPage("basic")
+                                Layout.fillWidth: true
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: win.selection.playheadInside ? "◇ sets a keyframe at the playhead" : "Move the playhead into the clip to animate"
+                                    color: win.muted
+                                    font.pixelSize: 10
+                                    wrapMode: Text.Wrap
+                                }
+                                Action {
+                                    objectName: "previousKeyframe"
+                                    text: "◀◆"
+                                    padding: 6
+                                    onClicked: win.goTo(editor.adjacentKeyframe(false))
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Previous keyframe"
+                                }
+                                Action {
+                                    objectName: "nextKeyframe"
+                                    text: "◆▶"
+                                    padding: 6
+                                    onClicked: win.goTo(editor.adjacentKeyframe(true))
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Next keyframe"
+                                }
+                            }
+                            ValueGroup {
+                                objectName: "transformSection"
+                                title: "Transform"
+                                prefix: "prop-"
+                                visible: win.picPage("basic")
+                                rows: [
+                                    { key: "scale", name: "Scale", lo: .1, hi: 5, step: .01, def: 1, dec: 0, unit: "%", shown: 100, anim: true },
+                                    { key: "x", name: "Position X", lo: -1, hi: 1, step: .01, anim: true, tip: "Left (−) or right (+), in frame widths" },
+                                    { key: "y", name: "Position Y", lo: -1, hi: 1, step: .01, anim: true, tip: "Up (−) or down (+), in frame heights" },
+                                    { key: "rotation", name: "Rotation", lo: -180, hi: 180, step: 1, dec: 0, unit: "°", anim: true }
+                                ]
+                            }
+                            ValueGroup {
+                                objectName: "opacitySection"
+                                title: "Opacity"
+                                prefix: "prop-"
+                                visible: win.picPage("basic") && win.selectionKind !== "adjust"
+                                rows: [
+                                    { key: "opacity", name: "Opacity", lo: 0, hi: 1, def: 1, dec: 0, unit: "%", shown: 100, anim: true }
+                                ]
+                            }
+                            ValueGroup {
+                                objectName: "cropSection"
+                                title: "Crop"
+                                prefix: "prop-"
+                                visible: win.picPage("basic") && win.selectionKind === "media"
+                                rows: [
+                                    { key: "crop", name: "All edges", lo: 0, hi: .45, dec: 0, unit: "%", shown: 100 },
+                                    { key: "cropLeft", name: "Left", lo: 0, hi: .9, dec: 0, unit: "%", shown: 100 },
+                                    { key: "cropRight", name: "Right", lo: 0, hi: .9, dec: 0, unit: "%", shown: 100 },
+                                    { key: "cropTop", name: "Top", lo: 0, hi: .9, dec: 0, unit: "%", shown: 100 },
+                                    { key: "cropBottom", name: "Bottom", lo: 0, hi: .9, dec: 0, unit: "%", shown: 100 }
+                                ]
+                            }
+                            ValueGroup {
+                                objectName: "lightSection"
+                                title: "Light"
+                                prefix: "prop-"
+                                visible: win.adjustPage("basic")
+                                rows: [
+                                    { key: "exposure", name: "Exposure", lo: -3, hi: 3, step: .05, unit: " EV", tip: "In stops, like a camera" },
+                                    { key: "brightness", name: "Brightness", lo: -.5, hi: .5, step: .01 },
+                                    { key: "contrast", name: "Contrast", lo: .1, hi: 3, step: .01, def: 1 },
+                                    { key: "saturation", name: "Saturation", lo: 0, hi: 3, step: .01, def: 1 }
+                                ]
+                            }
+                            ValueGroup {
+                                objectName: "blurSection"
+                                title: "Blur"
+                                prefix: "prop-"
+                                visible: win.onTab("effects")
+                                rows: [
+                                    { key: "blur", name: "Blur", lo: 0, hi: 1, dec: 0, unit: "%", shown: 100 }
+                                ]
+                            }
+                            ValueGroup {
+                                objectName: "volumeSection"
+                                title: "Volume and fades"
+                                prefix: "prop-"
+                                visible: win.audioPage("basic")
+                                rows: [
+                                    { key: "volume", name: "Volume", lo: 0, hi: 4, step: .01, def: 1, dec: 0, unit: "%", shown: 100, anim: true },
+                                    { key: "pan", name: "Balance", lo: -1, hi: 1, step: .05, anim: true, tip: "Left (−) or right (+)" },
+                                    { key: "fadeIn", name: "Fade in", lo: 0, hi: 5, step: .1, dec: 1, unit: " s" },
+                                    { key: "fadeOut", name: "Fade out", lo: 0, hi: 5, step: .1, dec: 1, unit: " s" }
+                                ]
+                            }
+                            Section {
+                                title: "Transition from the previous clip"
                                 Layout.fillWidth: true
                                 visible: (win.selection.audioOnly !== true) && (win.onTab("animation"))
-                                Caption {
-                                    text: "TRANSITION FROM PREVIOUS CLIP"
-                                }
                                 Label {
                                     Layout.fillWidth: true
                                     visible: win.selection.canTransition !== true
@@ -2404,13 +2715,11 @@ ApplicationWindow {
                             // Blur or mosaic area: what it does and how strongly. Move and resize it
                             // in the preview; its position can be keyframed.
                             // Adjustment layer: its look (below) applies to every track under it.
-                            ColumnLayout {
+                            Section {
+                                title: "Adjustment layer"
                                 Layout.fillWidth: true
                                 visible: (win.selection.effect === "adjust") && (win.onTab("basic"))
                                 spacing: 4
-                                Caption {
-                                    text: "ADJUSTMENT LAYER"
-                                }
                                 Label {
                                     Layout.fillWidth: true
                                     wrapMode: Text.Wrap
@@ -2441,13 +2750,11 @@ ApplicationWindow {
                                         editor.setClip("opacity", value)
                                 }
                             }
-                            ColumnLayout {
+                            Section {
+                                title: "Blur or mosaic area"
                                 Layout.fillWidth: true
                                 visible: ((win.selection.effect || "") !== "" && win.selection.effect !== "adjust") && (win.onTab("effect"))
                                 spacing: 4
-                                Caption {
-                                    text: "BLUR / MOSAIC AREA"
-                                }
                                 ComboBox {
                                     objectName: "effectType"
                                     Layout.fillWidth: true
@@ -2540,12 +2847,12 @@ ApplicationWindow {
                             }
                             // Shape: kind, colours, outline and size. Move, resize and rotate it in
                             // the preview like any overlay.
-                            ColumnLayout {
+                            Section {
+                                title: "Shape"
                                 objectName: "graphicSection"
                                 Layout.fillWidth: true
                                 visible: ((win.selection.graphic || "") !== "") && (win.onTab("shape"))
                                 spacing: 6
-                                Caption { text: "SHAPE" }
                                 ComboBox {
                                     objectName: "graphicKind"
                                     Layout.fillWidth: true
@@ -2621,12 +2928,10 @@ ApplicationWindow {
                                 }
                                 Rule {}
                             }
-                            ColumnLayout {
+                            Section {
+                                title: (win.selection.graphic || "") !== "" ? "Text in the shape" : "Text"
                                 Layout.fillWidth: true
                                 visible: (win.selection.assetId === "" && (win.selection.effect || "") === "" && ["arrow", "line"].indexOf(win.selection.graphic || "") < 0) && (win.onTab("text") || win.onTab("shape"))
-                                Caption {
-                                    text: (win.selection.graphic || "") !== "" ? "TEXT IN SHAPE" : "TITLE / CAPTION"
-                                }
                                 TextArea {
                                     id: titleText
                                     objectName: "titleText"
@@ -3056,14 +3361,11 @@ ApplicationWindow {
                                 }
                             }
                             // Presenter overlays: corner placement, shape, border, shadow, green screen.
-                            ColumnLayout {
+                            Section {
+                                title: ({ basic: "Placement", mask: "Shape and frame", cutout: "Cut out", canvas: "Background" })[win.inspectorSub] || "Picture"
                                 Layout.fillWidth: true
                                 visible: (win.selection.audioOnly !== true && (win.selection.effect || "") === "" && editor.clipBounds(win.s.selectedId).width !== undefined) && (win.picPage("basic") || win.picPage("mask") || win.picPage("cutout") || win.picPage("canvas"))
                                 spacing: 6
-                                Caption {
-                                    visible: win.picPage("basic")
-                                    text: "PRESENTER OVERLAY"
-                                }
                                 RowLayout {
                                     visible: win.picPage("basic")
                                     Layout.fillWidth: true
@@ -3324,43 +3626,17 @@ ApplicationWindow {
                                         ToolTip.text: "Hides what is inside the mask instead"
                                     }
                                 }
-                                Repeater {
-                                    model: [
-                                        { key: "radius", name: "Corner radius", lo: 0, hi: .5, step: .01, show: "rounded" },
-                                        { key: "feather", name: "Soft edge", lo: 0, hi: .5, step: .01, show: "" },
-                                        { key: "border", name: "Border", lo: 0, hi: .03, step: .001, show: "" },
-                                        { key: "shadow", name: "Shadow", lo: 0, hi: 1, step: .05, show: "" }
-                                    ]
-                                    ColumnLayout {
-                                        required property var modelData
-                                        Layout.fillWidth: true
-                                        spacing: 0
-                                        visible: (modelData.show === "" || win.selection.shape === modelData.show) && (win.picPage("mask"))
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            Label {
-                                                text: modelData.name
-                                                color: win.muted
-                                                Layout.fillWidth: true
-                                            }
-                                            Label {
-                                                text: Number(win.selection[modelData.key] ?? 0).toFixed(modelData.key === "border" ? 3 : 2)
-                                                font.pixelSize: 10
-                                            }
-                                        }
-                                        Slider {
-                                            objectName: "style-" + modelData.key
-                                            Layout.fillWidth: true
-                                            from: modelData.lo
-                                            to: modelData.hi
-                                            stepSize: modelData.step
-                                            value: win.selection[modelData.key] ?? 0
-                                            onPressedChanged: if (!pressed)
-                                                editor.setClip(modelData.key, value)
-                                            onMoved: if (!pressed)
-                                                editor.setClip(modelData.key, value)
-                                        }
-                                    }
+                                ValueGroup {
+                                    objectName: "frameSection"
+                                    title: "Edge and frame"
+                                    visible: win.picPage("mask")
+                                    prefix: "style-"
+                                    rows: [
+                                        { key: "radius", name: "Corner radius", lo: 0, hi: .5, dec: 0, unit: "%", shown: 100 },
+                                        { key: "feather", name: "Soft edge", lo: 0, hi: .5, dec: 0, unit: "%", shown: 100, tip: "Fades the picture out towards its edge" },
+                                        { key: "border", name: "Border", lo: 0, hi: .03, step: .001, dec: 1, unit: "%", shown: 100, tip: "A ring around the picture, in percent of the frame height" },
+                                        { key: "shadow", name: "Shadow", lo: 0, hi: 1, step: .05, dec: 0, unit: "%", shown: 100 }
+                                    ].filter(r => r.key !== "radius" || win.selection.shape === "rounded")
                                 }
                                 RowLayout {
                                     visible: ((win.selection.border || 0) > 0) && (win.picPage("mask"))
@@ -3791,7 +4067,7 @@ ApplicationWindow {
                                 task: "upscale"
                                 flag: "aiUpscale"
                                 infoKey: "upscale"
-                                visible: (win.selection.upscaleHeight || 0) > 0
+                                visible: win.picPage("enhance") && (win.selection.upscaleHeight || 0) > 0
                                 label: "Enhance resolution (AI, up to " + (win.selection.upscaleHeight || 0) + "p)"
                                 runningText: "Upscaling…"
                                 doneText: "Sharper picture ready ✓"
@@ -3812,236 +4088,13 @@ ApplicationWindow {
                                 ToolTip.visible: hovered
                                 ToolTip.text: "Animates the selected clips with keyframes you can change afterwards"
                             }
-                            RowLayout {
-                                visible: win.picPage("basic") || win.audioPage("basic")
-                                Layout.fillWidth: true
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: win.selection.playheadInside ? "◇ sets a keyframe at the playhead" : "Move the playhead into the clip to animate"
-                                    color: win.muted
-                                    font.pixelSize: 10
-                                    wrapMode: Text.Wrap
-                                }
-                                Action {
-                                    objectName: "previousKeyframe"
-                                    text: "◀◆"
-                                    padding: 6
-                                    onClicked: win.goTo(editor.adjacentKeyframe(false))
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Previous keyframe"
-                                }
-                                Action {
-                                    objectName: "nextKeyframe"
-                                    text: "◆▶"
-                                    padding: 6
-                                    onClicked: win.goTo(editor.adjacentKeyframe(true))
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Next keyframe"
-                                }
-                            }
-                            Repeater {
-                                model: [
-                                    {
-                                        key: "scale",
-                                        name: "Scale",
-                                        lo: .1,
-                                        hi: 5,
-                                        step: .01
-                                    },
-                                    {
-                                        key: "x",
-                                        name: "Horizontal position",
-                                        lo: -1,
-                                        hi: 1,
-                                        step: .01
-                                    },
-                                    {
-                                        key: "y",
-                                        name: "Vertical position",
-                                        lo: -1,
-                                        hi: 1,
-                                        step: .01
-                                    },
-                                    {
-                                        key: "rotation",
-                                        name: "Rotation",
-                                        lo: -180,
-                                        hi: 180,
-                                        step: 1
-                                    },
-                                    {
-                                        key: "crop",
-                                        name: "Crop all edges",
-                                        lo: 0,
-                                        hi: .45,
-                                        step: .01
-                                    },
-                                    {
-                                        key: "cropLeft",
-                                        name: "Crop left",
-                                        lo: 0,
-                                        hi: .9,
-                                        step: .01
-                                    },
-                                    {
-                                        key: "cropRight",
-                                        name: "Crop right",
-                                        lo: 0,
-                                        hi: .9,
-                                        step: .01
-                                    },
-                                    {
-                                        key: "cropTop",
-                                        name: "Crop top",
-                                        lo: 0,
-                                        hi: .9,
-                                        step: .01
-                                    },
-                                    {
-                                        key: "cropBottom",
-                                        name: "Crop bottom",
-                                        lo: 0,
-                                        hi: .9,
-                                        step: .01
-                                    },
-                                    {
-                                        key: "opacity",
-                                        name: "Opacity",
-                                        lo: 0,
-                                        hi: 1,
-                                        step: .01
-                                    },
-                                    {
-                                        key: "exposure",
-                                        name: "Exposure (stops)",
-                                        lo: -3,
-                                        hi: 3,
-                                        step: .05
-                                    },
-                                    {
-                                        key: "brightness",
-                                        name: "Brightness",
-                                        lo: -.5,
-                                        hi: .5,
-                                        step: .01
-                                    },
-                                    {
-                                        key: "contrast",
-                                        name: "Contrast",
-                                        lo: .1,
-                                        hi: 3,
-                                        step: .01
-                                    },
-                                    {
-                                        key: "saturation",
-                                        name: "Saturation",
-                                        lo: 0,
-                                        hi: 3,
-                                        step: .01
-                                    },
-                                    {
-                                        key: "blur",
-                                        name: "Blur",
-                                        lo: 0,
-                                        hi: 1,
-                                        step: .01
-                                    },
-                                    {
-                                        key: "volume",
-                                        name: "Volume",
-                                        lo: 0,
-                                        hi: 4,
-                                        step: .01
-                                    },
-                                    {
-                                        key: "pan",
-                                        name: "Pan (left − / right +)",
-                                        lo: -1,
-                                        hi: 1,
-                                        step: .05
-                                    },
-                                    {
-                                        key: "fadeIn",
-                                        name: "Fade in (sec)",
-                                        lo: 0,
-                                        hi: 5,
-                                        step: .1
-                                    },
-                                    {
-                                        key: "fadeOut",
-                                        name: "Fade out (sec)",
-                                        lo: 0,
-                                        hi: 5,
-                                        step: .1
-                                    }
-                                ]
-                                ColumnLayout {
-                                    visible: win.propertyPage(modelData.key)
-                                    id: propertyRow
-                                    required property var modelData
-                                    readonly property bool animatable: ["scale", "x", "y", "rotation", "opacity", "volume", "pan"].indexOf(modelData.key) >= 0
-                                    readonly property bool animated: animatable && ((win.selection.keyframeCount || {})[modelData.key] || 0) > 0
-                                    // Animated properties show their value at the playhead.
-                                    readonly property real current: animated ? win.selection.animated[modelData.key] : Number(win.selection[modelData.key] ?? 0)
-                                    Layout.fillWidth: true
-                                    spacing: 0
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        Label {
-                                            text: modelData.name
-                                            color: propertyRow.animated ? win.mint : win.muted
-                                            Layout.fillWidth: true
-                                        }
-                                        Label {
-                                            text: propertyRow.current.toFixed(2)
-                                            font.pixelSize: 10
-                                        }
-                                        ToolButton {
-                                            objectName: "keyframe-" + modelData.key
-                                            visible: propertyRow.animatable
-                                            enabled: win.selection.playheadInside === true && win.selection.locked !== true
-                                            implicitWidth: 24
-                                            implicitHeight: 22
-                                            text: (win.selection.keyed || {})[modelData.key] ? "◆" : "◇"
-                                            palette.buttonText: propertyRow.animated ? "#ffd479" : "#e7edf2"
-                                            onClicked: editor.toggleKeyframe(modelData.key)
-                                            ToolTip.visible: hovered
-                                            ToolTip.text: (win.selection.keyed || {})[modelData.key] ? "Remove keyframe" : "Add keyframe at playhead"
-                                        }
-                                    }
-                                    // The keyframe at the playhead: how it moves on to the next one.
-                                    ComboBox {
-                                        objectName: "keyframeEasing-" + modelData.key
-                                        Layout.fillWidth: true
-                                        visible: (win.selection.keyed || {})[modelData.key] === true
-                                        readonly property var easings: ["smooth", "linear", "in", "out", "hold"]
-                                        model: ["Ease in and out", "Linear", "Ease in (slow start)", "Ease out (slow end)", "Hold until the next keyframe"]
-                                        currentIndex: Math.max(0, easings.indexOf((win.selection.keyEasing || {})[modelData.key] || "smooth"))
-                                        onActivated: editor.setKeyframeEasing(modelData.key, easings[currentIndex])
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "How the value moves from this keyframe to the next"
-                                    }
-                                    Slider {
-                                        Layout.fillWidth: true
-                                        from: modelData.lo
-                                        to: modelData.hi
-                                        stepSize: modelData.step
-                                        value: propertyRow.current
-                                        onPressedChanged: if (!pressed)
-                                            editor.setClip(modelData.key, value)
-                                        onMoved: if (!pressed)
-                                            editor.setClip(modelData.key, value)
-                                    }
-                                }
-                            }
                             // Sound: clean-up, tone and dynamics of the clip's audio.
-                            ColumnLayout {
+                            Section {
+                                title: ({ basic: "Sound", voice: "Voice", cleanup: "Presets and tools" })[win.selectionKind === "audio" ? win.inspectorTab : win.inspectorSub] || "Sound"
                                 objectName: "soundSection"
                                 visible: (win.selection.hasAudio === true) && (win.audioPage("basic") || win.audioPage("voice") || win.audioPage("cleanup"))
                                 Layout.fillWidth: true
                                 spacing: 6
-                                Rule {}
-                                Caption { text: "SOUND" }
                                 Action {
                                     visible: win.audioPage("basic")
                                     objectName: "extractAudio"
@@ -4079,52 +4132,49 @@ ApplicationWindow {
                                         currentIndex = 0;
                                     }
                                 }
-                                Repeater {
-                                    model: [
-                                        { key: "lowCut", name: "Low cut (Hz)", lo: 0, hi: 300, step: 5, tip: "Removes rumble, hum and wind below this frequency" },
-                                        { key: "denoise", name: "Noise reduction", lo: 0, hi: 1, step: .01, tip: "Reduces steady hiss and hum" },
-                                        { key: "dereverb", name: "Less room echo", lo: 0, hi: 1, step: .01, tip: "Turns down the echo of the room that trails each word (hall, bare rooms)" },
-                                        { key: "gate", name: "Noise gate", lo: 0, hi: 1, step: .01, tip: "Lowers the sound between phrases" },
-                                        { key: "eqLow", name: "Bass (dB)", lo: -12, hi: 12, step: .5, tip: "Below 100 Hz" },
-                                        { key: "eqMid", name: "Presence (dB)", lo: -12, hi: 12, step: .5, tip: "Around 2.5 kHz, where speech is clear" },
-                                        { key: "eqHigh", name: "Treble (dB)", lo: -12, hi: 12, step: .5, tip: "Above 8 kHz" },
-                                        { key: "deess", name: "De-esser", lo: 0, hi: 1, step: .01, tip: "Softens sharp S sounds" },
-                                        { key: "compressor", name: "Compressor", lo: 0, hi: 1, step: .01, tip: "Evens out loud and quiet parts" },
-                                        { key: "reverb", name: "Reverb", lo: 0, hi: 1, step: .01, tip: "The sound of a room" },
-                                        { key: "echo", name: "Echo", lo: 0, hi: 1, step: .01, tip: "Repeats a third of a second apart" },
-                                        { key: "pitch", name: "Pitch (semitones)", lo: -12, hi: 12, step: .5, tip: "Higher or lower voice at the same speed" }
+                                ValueGroup {
+                                    objectName: "cleanupSection"
+                                    title: "Clean-up"
+                                    visible: win.audioPage("cleanup")
+                                    prefix: "sound-"
+                                    rows: [
+                                        { key: "lowCut", name: "Low cut", lo: 0, hi: 300, step: 5, dec: 0, unit: " Hz", tip: "Removes rumble, hum and wind below this frequency" },
+                                        { key: "denoise", name: "Noise reduction", lo: 0, hi: 1, dec: 0, unit: "%", shown: 100, tip: "Reduces steady hiss and hum" },
+                                        { key: "dereverb", name: "Less room echo", lo: 0, hi: 1, dec: 0, unit: "%", shown: 100, tip: "Turns down the echo of the room that trails each word (hall, bare rooms)" },
+                                        { key: "gate", name: "Noise gate", lo: 0, hi: 1, dec: 0, unit: "%", shown: 100, tip: "Lowers the sound between phrases" }
                                     ]
-                                    RowLayout {
-                                        visible: win.soundPage(soundRow.modelData.key)
-                                        id: soundRow
-                                        required property var modelData
-                                        Layout.fillWidth: true
-                                        Label {
-                                            text: soundRow.modelData.name
-                                            color: Number(win.selection[soundRow.modelData.key] || 0) !== 0 ? win.mint : win.muted
-                                            Layout.preferredWidth: 105
-                                        }
-                                        Slider {
-                                            objectName: "sound-" + soundRow.modelData.key
-                                            Layout.fillWidth: true
-                                            from: soundRow.modelData.lo
-                                            to: soundRow.modelData.hi
-                                            stepSize: soundRow.modelData.step
-                                            value: Number(win.selection[soundRow.modelData.key] || 0)
-                                            enabled: win.selection.locked !== true
-                                            onPressedChanged: if (!pressed)
-                                                editor.setClip(soundRow.modelData.key, value)
-                                            onMoved: if (!pressed)
-                                                editor.setClip(soundRow.modelData.key, value)
-                                            ToolTip.visible: hovered
-                                            ToolTip.text: soundRow.modelData.tip
-                                        }
-                                        Label {
-                                            text: Number(win.selection[soundRow.modelData.key] || 0).toFixed(soundRow.modelData.hi > 1 ? 0 : 2)
-                                            font.pixelSize: 10
-                                            Layout.preferredWidth: 28
-                                        }
-                                    }
+                                }
+                                ValueGroup {
+                                    objectName: "toneSection"
+                                    title: "Tone"
+                                    visible: win.audioPage("cleanup")
+                                    prefix: "sound-"
+                                    rows: [
+                                        { key: "eqLow", name: "Bass", lo: -12, hi: 12, step: .5, dec: 1, unit: " dB", tip: "Below 100 Hz" },
+                                        { key: "eqMid", name: "Presence", lo: -12, hi: 12, step: .5, dec: 1, unit: " dB", tip: "Around 2.5 kHz, where speech is clear" },
+                                        { key: "eqHigh", name: "Treble", lo: -12, hi: 12, step: .5, dec: 1, unit: " dB", tip: "Above 8 kHz" },
+                                        { key: "deess", name: "De-esser", lo: 0, hi: 1, dec: 0, unit: "%", shown: 100, tip: "Softens sharp S sounds" }
+                                    ]
+                                }
+                                ValueGroup {
+                                    objectName: "dynamicsSection"
+                                    title: "Dynamics"
+                                    visible: win.audioPage("cleanup")
+                                    prefix: "sound-"
+                                    rows: [
+                                        { key: "compressor", name: "Compressor", lo: 0, hi: 1, dec: 0, unit: "%", shown: 100, tip: "Evens out loud and quiet parts" }
+                                    ]
+                                }
+                                ValueGroup {
+                                    objectName: "roomSection"
+                                    title: "Room and pitch"
+                                    visible: win.audioPage("voice")
+                                    prefix: "sound-"
+                                    rows: [
+                                        { key: "reverb", name: "Reverb", lo: 0, hi: 1, dec: 0, unit: "%", shown: 100, tip: "The sound of a room" },
+                                        { key: "echo", name: "Echo", lo: 0, hi: 1, dec: 0, unit: "%", shown: 100, tip: "Repeats a third of a second apart" },
+                                        { key: "pitch", name: "Pitch", lo: -12, hi: 12, step: .5, dec: 1, unit: " st", tip: "Higher or lower voice at the same speed, in semitones" }
+                                    ]
                                 }
                                 RowLayout {
                                     visible: win.audioPage("voice")
@@ -4172,13 +4222,12 @@ ApplicationWindow {
                                 }
                             }
                             // Colour and look of the clip's picture.
-                            ColumnLayout {
+                            Section {
+                                title: ({ basic: "Look", hsl: "Selective colour", curves: "Curves", wheels: "Colour wheels", lut: "LUT" })[win.inspectorSub] || "Colour"
                                 objectName: "lookSection"
                                 visible: (win.selection.picture === true) && (win.onTab("adjust"))
                                 Layout.fillWidth: true
                                 spacing: 6
-                                Rule {}
-                                Caption { text: "COLOUR & LOOK" }
                                 ComboBox {
                                     visible: win.adjustPage("basic")
                                     id: lookPreset
@@ -4220,58 +4269,40 @@ ApplicationWindow {
                                     ToolTip.visible: hovered
                                     ToolTip.text: "Measures the clip and sets brightness, contrast, temperature and tint for a full range and neutral greys"
                                 }
-                                Repeater {
-                                    model: [
+                                ValueGroup {
+                                    objectName: "colourSection"
+                                    title: "Colour"
+                                    visible: win.adjustPage("basic")
+                                    prefix: "look-"
+                                    rows: [
                                         { key: "temperature", name: "Temperature", lo: -1, hi: 1, tip: "Warmer (right) or cooler (left) light" },
                                         { key: "tint", name: "Tint", lo: -1, hi: 1, tip: "Magenta (right) or green (left)" },
-                                        { key: "vibrance", name: "Vibrance", lo: -1, hi: 1, tip: "Saturates muted colours more than strong ones; skin stays natural" },
+                                        { key: "vibrance", name: "Vibrance", lo: -1, hi: 1, tip: "Saturates muted colours more than strong ones; skin stays natural" }
+                                    ]
+                                }
+                                ValueGroup {
+                                    objectName: "tonesSection"
+                                    title: "Tones"
+                                    visible: win.adjustPage("basic")
+                                    prefix: "look-"
+                                    rows: [
                                         { key: "shadows", name: "Shadows", lo: -1, hi: 1, tip: "Lift or deepen the dark parts" },
                                         { key: "highlights", name: "Highlights", lo: -1, hi: 1, tip: "Recover or brighten the bright parts" },
                                         { key: "whites", name: "Whites", lo: -1, hi: 1, tip: "Where the brightest tones end: up makes them clip sooner, down softens them" },
-                                        { key: "blacks", name: "Blacks", lo: -1, hi: 1, tip: "Where the darkest tones end: down deepens them, up fades them like film" },
-                                        { key: "sharpen", name: "Sharpen", lo: 0, hi: 1, tip: "Contrast-adaptive sharpening" },
-                                        { key: "glow", name: "Glow", lo: 0, hi: 1, tip: "A soft glow around bright areas" },
-                                        { key: "vignette", name: "Vignette", lo: 0, hi: 1, tip: "Darker corners draw the eye to the centre" },
-                                        { key: "grain", name: "Film grain", lo: 0, hi: 1, tip: "Moving grain like film" }
+                                        { key: "blacks", name: "Blacks", lo: -1, hi: 1, tip: "Where the darkest tones end: down deepens them, up fades them like film" }
                                     ]
-                                    ColumnLayout {
-                                        visible: win.adjustPage("basic")
-                                        id: lookRow
-                                        required property var modelData
-                                        Layout.fillWidth: true
-                                        spacing: 0
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            Label {
-                                                text: lookRow.modelData.name
-                                                color: Number(win.selection[lookRow.modelData.key] || 0) !== 0 ? win.mint : win.muted
-                                                Layout.fillWidth: true
-                                            }
-                                            Label {
-                                                text: Number(win.selection[lookRow.modelData.key] || 0).toFixed(2)
-                                                font.pixelSize: 10
-                                            }
-                                        }
-                                        Slider {
-                                            objectName: "look-" + lookRow.modelData.key
-                                            Layout.fillWidth: true
-                                            from: lookRow.modelData.lo
-                                            to: lookRow.modelData.hi
-                                            stepSize: .01
-                                            value: Number(win.selection[lookRow.modelData.key] || 0)
-                                            enabled: win.selection.locked !== true
-                                            onPressedChanged: if (!pressed)
-                                                editor.setClip(lookRow.modelData.key, value)
-                                            onMoved: if (!pressed)
-                                                editor.setClip(lookRow.modelData.key, value)
-                                            ToolTip.visible: hovered
-                                            ToolTip.text: lookRow.modelData.tip + ". Double-click to reset."
-                                            TapHandler {
-                                                acceptedButtons: Qt.LeftButton
-                                                onDoubleTapped: editor.setClip(lookRow.modelData.key, 0)
-                                            }
-                                        }
-                                    }
+                                }
+                                ValueGroup {
+                                    objectName: "detailsSection"
+                                    title: "Details"
+                                    visible: win.adjustPage("basic")
+                                    prefix: "look-"
+                                    rows: [
+                                        { key: "sharpen", name: "Sharpen", lo: 0, hi: 1, dec: 0, unit: "%", shown: 100, tip: "Contrast-adaptive sharpening" },
+                                        { key: "glow", name: "Glow", lo: 0, hi: 1, dec: 0, unit: "%", shown: 100, tip: "A soft glow around bright areas" },
+                                        { key: "vignette", name: "Vignette", lo: 0, hi: 1, dec: 0, unit: "%", shown: 100, tip: "Darker corners draw the eye to the centre" },
+                                        { key: "grain", name: "Film grain", lo: 0, hi: 1, dec: 0, unit: "%", shown: 100, tip: "Moving grain like film" }
+                                    ]
                                 }
                                 // Tone curves: drag points, click to add one, double-click to remove it.
                                 RowLayout {
@@ -4655,13 +4686,12 @@ ApplicationWindow {
                                 }
                             }
                             // Style effects and camera movement of the clip's picture.
-                            ColumnLayout {
+                            Section {
+                                title: win.onTab("effects") ? "Style effect" : "Enhance"
                                 objectName: "effectsSection"
                                 visible: (win.selection.picture === true) && (win.onTab("effects") || win.picPage("enhance"))
                                 Layout.fillWidth: true
                                 spacing: 6
-                                Rule {}
-                                Caption { text: "EFFECTS" }
                                 RowLayout {
                                     visible: win.onTab("effects")
                                     Layout.fillWidth: true
@@ -4694,115 +4724,50 @@ ApplicationWindow {
                                         ToolTip.text: "Effect strength"
                                     }
                                 }
-                                RowLayout {
-                                    visible: (win.selection.video === true) && (win.onTab("effects"))
-                                    Layout.fillWidth: true
-                                    Label {
-                                        text: "Motion blur"
-                                        color: Number(win.selection.motionBlur || 0) > 0 ? win.mint : win.muted
-                                        Layout.preferredWidth: 105
-                                    }
-                                    Slider {
-                                        objectName: "motionBlur"
-                                        Layout.fillWidth: true
-                                        from: 0
-                                        to: 1
-                                        stepSize: .01
-                                        value: Number(win.selection.motionBlur || 0)
-                                        enabled: win.selection.locked !== true
-                                        onPressedChanged: if (!pressed)
-                                            editor.setClip("motionBlur", value)
-                                        onMoved: if (!pressed)
-                                            editor.setClip("motionBlur", value)
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Smears fast movement across frames"
-                                    }
+                                ValueGroup {
+                                    objectName: "motionBlurSection"
+                                    title: "Motion blur"
+                                    visible: win.selection.video === true && win.onTab("effects")
+                                    rows: [
+                                        { key: "motionBlur", obj: "motionBlur", name: "Amount", lo: 0, hi: 1, dec: 0, unit: "%", shown: 100, tip: "Smears fast movement across frames" }
+                                    ]
                                 }
-                                CheckBox {
+                                Section {
                                     objectName: "stabilize"
-                                    visible: (win.selection.video === true) && (win.picPage("enhance"))
-                                    text: "Stabilize"
+                                    title: "Stabilize"
+                                    tip: "Smooths a shaky hand-held camera; the edges are filled in"
+                                    visible: win.selection.video === true && win.picPage("enhance")
+                                    checkable: true
                                     checked: win.selection.stabilize === true
-                                    enabled: win.selection.locked !== true
-                                    onToggled: editor.setClip("stabilize", checked)
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Smooths a shaky hand-held camera; the edges are filled in"
-                                }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    visible: (win.selection.video === true && win.selection.stabilize === true) && (win.picPage("enhance"))
-                                    Label {
-                                        text: "Strength"
-                                        color: win.muted
-                                    }
-                                    Slider {
-                                        objectName: "stabilizeStrength"
-                                        Layout.fillWidth: true
-                                        from: 0
-                                        to: 1
+                                    onToggled: on => editor.setClip("stabilize", on)
+                                    resettable: true
+                                    onReset: editor.setClipValues({ stabilizeStrength: .33, stabilizeZoom: false })
+                                    ValueRow {
+                                        key: "stabilizeStrength"
+                                        label: "Strength"
+                                        sliderName: "stabilizeStrength"
                                         stepSize: .05
-                                        value: win.selection.stabilizeStrength ?? .33
-                                        onPressedChanged: if (!pressed)
-                                            editor.setClip("stabilizeStrength", value)
-                                        onMoved: if (!pressed)
-                                            editor.setClip("stabilizeStrength", value)
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "How much shake is evened out; stronger may also smooth intended camera moves"
+                                        defaultValue: .33
+                                        decimals: 0
+                                        unit: "%"
+                                        shown: 100
+                                        tip: "How much shake is evened out; stronger may also smooth intended camera moves"
                                     }
                                     CheckBox {
                                         objectName: "stabilizeZoom"
-                                        text: "Zoom in"
+                                        text: "Zoom in so no filled-in edge shows"
                                         checked: win.selection.stabilizeZoom === true
                                         onToggled: editor.setClip("stabilizeZoom", checked)
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Zooms in a little so no filled-in edge shows"
                                     }
                                 }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    visible: (win.selection.video === true) && (win.picPage("enhance"))
-                                    Label {
-                                        text: "Video noise"
-                                        color: win.muted
-                                    }
-                                    Slider {
-                                        objectName: "videoDenoise"
-                                        Layout.fillWidth: true
-                                        from: 0
-                                        to: 1
-                                        stepSize: .05
-                                        value: win.selection.videoDenoise ?? 0
-                                        enabled: win.selection.locked !== true
-                                        onPressedChanged: if (!pressed)
-                                            editor.setClip("videoDenoise", value)
-                                        onMoved: if (!pressed)
-                                            editor.setClip("videoDenoise", value)
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Calms grain and noise in dark or low-light video by averaging neighbouring frames"
-                                    }
-                                }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    visible: (win.selection.video === true) && (win.picPage("enhance"))
-                                    Label {
-                                        text: "Flicker"
-                                        color: win.muted
-                                    }
-                                    Slider {
-                                        objectName: "deflicker"
-                                        Layout.fillWidth: true
-                                        from: 0
-                                        to: 1
-                                        stepSize: .05
-                                        value: win.selection.deflicker ?? 0
-                                        enabled: win.selection.locked !== true
-                                        onPressedChanged: if (!pressed)
-                                            editor.setClip("deflicker", value)
-                                        onMoved: if (!pressed)
-                                            editor.setClip("deflicker", value)
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Evens out brightness that pulses from frame to frame (lamps, time-lapses); stronger compares more frames"
-                                    }
+                                ValueGroup {
+                                    objectName: "noiseSection"
+                                    title: "Noise and flicker"
+                                    visible: win.selection.video === true && win.picPage("enhance")
+                                    rows: [
+                                        { key: "videoDenoise", obj: "videoDenoise", name: "Video noise", lo: 0, hi: 1, step: .05, dec: 0, unit: "%", shown: 100, tip: "Calms grain and noise in dark or low-light video by averaging neighbouring frames" },
+                                        { key: "deflicker", obj: "deflicker", name: "Flicker", lo: 0, hi: 1, step: .05, dec: 0, unit: "%", shown: 100, tip: "Evens out brightness that pulses from frame to frame (lamps, time-lapses); stronger compares more frames" }
+                                    ]
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true

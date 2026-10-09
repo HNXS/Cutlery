@@ -53,12 +53,21 @@ What goes where:
 - **More:** edit by text, remove pauses, beats and markers, scene detection, track, copy and
   paste attributes, detach, unlink, relink.
 
+## Inspector sections — package 1b, done
+
+- **Sections:** each part of a page is a section with a bold title, a fold arrow and, where it
+  makes sense, a reset button (↺, one undo step) and an on/off box that dims the section while it
+  is off (e.g. Stabilize).
+- **Value rows:** each value shows its name, a number box with its unit (%, °, dB, Hz, s, EV) and
+  ▴/▾ steppers, a keyframe diamond (◇, ◆ at a keyframe, yellow while animated) for animatable
+  values, and a slider. A double-click on the slider resets the value; typing in the box sets it.
+- **Converted so far:** Transform, Opacity, Crop, Light, Blur, Volume and fades, the sound tools
+  (Clean-up, Tone, Dynamics, Room and pitch), Colour, Tones, Details, Edge and frame, Stabilize,
+  Noise and flicker, and Motion blur. The other pages have section titles; their controls keep
+  their own form.
+
 ## Still to do
 
-- **Inspector sections (package 1b):** one section look throughout. Each section has an on/off
-  check box, a bold title, collapse, reset (↺) and a keyframe diamond (◇). Each value row has its
-  label above, a slider, a number box with steppers and its own ◇. A footer holds "Apply to all"
-  and "Save as preset" where they make sense.
 - **Asset panel (package 2):**
   - An icon tab row: Media, Audio, Text, Stickers, Effects, Transitions, Captions, Filters,
     Adjustment.
