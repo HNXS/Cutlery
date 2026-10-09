@@ -1,5 +1,15 @@
 # Validation record
 
+## Windows portable build — 2026-10-09, player bar and start screen (0.6 development)
+
+[GitHub Actions run 37921224959](https://github.com/HNXS/Cutlery/actions/runs/37921224959) on commit `298955a57f3feaaa052c6adadb8f8b889fd5e27b` passed every step on its first attempt.
+
+New coverage:
+
+- **Start screen:** a click on the "New project" banner starts a project and closes the start screen.
+- **Player bar:** the time, the frame and play buttons and the frame shape are found by their names in the UI tests.
+- **Screenshots:** with `CUTLERY_UI_SHOTS` set, the start screen is saved as well.
+
 ## Windows portable build — 2026-10-09, timeline tool row, track header icons, clip colours, top bar (0.6 development)
 
 [GitHub Actions run 37909749864](https://github.com/HNXS/Cutlery/actions/runs/37909749864) on commit `cfb90d968b24c2d533be4d7b5c7bceb34969de60` passed every step on its first attempt.
