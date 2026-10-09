@@ -119,8 +119,10 @@ click is one undo step.
 - **Audio tab:** the sound effects are listed as tiles by category; a click adds one at the playhead. "Listen and more…" opens the list for listening and for a whoosh on every transition.
 - **Media tiles:** media used in the timeline carries an "Added" mark on its picture.
 - **Sections:** perspective (on/off, reset), 3D tilt, green or blue screen (on/off, reset), removing by brightness, text spacing, and outline, shadow and glow with their colours now use sections and value rows.
+- **Video › Mask:** the sections Shape (reset to a rectangle), Free mask, and Edge and frame with the border colour.
+- **Text:** the sections Style (templates, letter animation, accent, caption highlight), Font (font, size with number box, bold, italic, alignment), Colour, Saved styles, Spacing, and Outline, shadow and glow.
 
 ## Still to do
 
 - **Asset panel:** a narrow category column per tab, once the tabs hold more than a screenful.
-- A section look for the rest: shape and frame, canvas, and the title settings above spacing.
+- A section look for the rest of the shape page (arrows and lines) and the transition settings.

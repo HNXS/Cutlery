@@ -460,6 +460,8 @@ ApplicationWindow {
         property bool resettable: false
         property bool expanded: true
         property string tip: ""
+        // False for a page made only of sections: no title row and no rule.
+        property bool header: true
         signal toggled(bool on)
         signal reset
         default property alias content: sectionBody.data
@@ -467,6 +469,7 @@ ApplicationWindow {
         spacing: 8
         RowLayout {
             Layout.fillWidth: true
+            visible: section.header
             spacing: 4
             CheckBox {
                 objectName: section.objectName ? section.objectName + "-on" : ""
@@ -513,11 +516,13 @@ ApplicationWindow {
             id: sectionBody
             Layout.fillWidth: true
             spacing: 8
-            visible: section.expanded
+            visible: section.expanded || !section.header
             enabled: !section.checkable || section.checked
             opacity: enabled ? 1 : .45
         }
-        Rule {}
+        Rule {
+            visible: section.header
+        }
     }
     // One value of the selected clip: its name, a number box with steppers, a keyframe diamond
     // for animatable values, and a slider. Each gesture is one undo step.
@@ -3368,113 +3373,302 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                     onClicked: editor.setClip("text", titleText.text)
                                 }
-                                // Title templates: the first line is the name or heading, the
-                                // next lines the role or subtitle.
-                                ComboBox {
-                                    objectName: "titleStyle"
-                                    Layout.fillWidth: true
-                                    visible: (win.selection.captionStyle || "") === ""
-                                    readonly property var styles: ["", "lowerThird", "lowerThirdLine", "lowerThirdRight", "titleCard", "banner", "quote"]
-                                    model: ["Plain title", "Lower third (plate)", "Lower third (line)", "Lower third (right)", "Title card", "Banner across the bottom", "Quote"]
-                                    currentIndex: Math.max(0, styles.indexOf(win.selection.titleStyle || ""))
-                                    onActivated: editor.setClip("titleStyle", styles[currentIndex])
-                                }
-                                // Plain titles can build up character by character or word by word.
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    visible: (win.selection.titleStyle || "") === "" && (win.selection.captionStyle || "") === "" && !win.selection.graphic
+                                Section {
+                                    objectName: "titleLayout"
+                                    title: "Style"
+                                    spacing: 6
+                                    // Title templates: the first line is the name or heading, the
+                                    // next lines the role or subtitle.
                                     ComboBox {
-                                        objectName: "textAnimation"
+                                        objectName: "titleStyle"
                                         Layout.fillWidth: true
-                                        readonly property var kinds: ["", "typewriter", "words", "rise", "pop", "fly", "drop", "spin", "fade"]
-                                        model: ["Appears at once", "Typewriter", "Word by word", "Letters rise", "Letters pop up", "Letters fly in", "Letters drop and bounce", "Letters spin in", "Letters fade in"]
-                                        currentIndex: Math.max(0, kinds.indexOf(win.selection.textAnimation || ""))
-                                        onActivated: editor.setClip("textAnimation", kinds[currentIndex])
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Lets the text build up from the start of the clip, letter by letter or word by word"
+                                        visible: (win.selection.captionStyle || "") === ""
+                                        readonly property var styles: ["", "lowerThird", "lowerThirdLine", "lowerThirdRight", "titleCard", "banner", "quote"]
+                                        model: ["Plain title", "Lower third (plate)", "Lower third (line)", "Lower third (right)", "Title card", "Banner across the bottom", "Quote"]
+                                        currentIndex: Math.max(0, styles.indexOf(win.selection.titleStyle || ""))
+                                        onActivated: editor.setClip("titleStyle", styles[currentIndex])
                                     }
-                                    SpinBox {
-                                        objectName: "textAnimationTime"
-                                        visible: !!win.selection.textAnimation
-                                        from: 1
-                                        to: 300
-                                        value: Math.round((win.selection.textAnimationTime ?? 1.5) * 10)
-                                        editable: true
-                                        textFromValue: (v) => (v / 10).toFixed(1) + " s"
-                                        valueFromText: (t) => Math.round(parseFloat(t) * 10)
-                                        onValueModified: editor.setClip("textAnimationTime", value / 10)
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Time until the whole text is shown"
-                                    }
-                                }
-                                RowLayout {
-                                    visible: (win.selection.titleStyle || "") !== ""
-                                    Label {
-                                        text: "Accent"
-                                        color: win.muted
+                                    // Plain titles can build up character by character or word by word.
+                                    RowLayout {
                                         Layout.fillWidth: true
-                                    }
-                                    Repeater {
-                                        model: ["#64d8bc", "#ffd23f", "#ec6f5a", "#5fa8ff", "#c38bff", "#ffffff"]
-                                        Rectangle {
-                                            required property string modelData
-                                            width: 20
-                                            height: 20
-                                            radius: 10
-                                            color: modelData
-                                            border.width: win.selection.accentColor === modelData ? 3 : 1
-                                            border.color: win.selection.accentColor === modelData ? win.mint : "#6481a0"
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: editor.setClip("accentColor", parent.modelData)
-                                            }
+                                        visible: (win.selection.titleStyle || "") === "" && (win.selection.captionStyle || "") === "" && !win.selection.graphic
+                                        ComboBox {
+                                            objectName: "textAnimation"
+                                            Layout.fillWidth: true
+                                            readonly property var kinds: ["", "typewriter", "words", "rise", "pop", "fly", "drop", "spin", "fade"]
+                                            model: ["Appears at once", "Typewriter", "Word by word", "Letters rise", "Letters pop up", "Letters fly in", "Letters drop and bounce", "Letters spin in", "Letters fade in"]
+                                            currentIndex: Math.max(0, kinds.indexOf(win.selection.textAnimation || ""))
+                                            onActivated: editor.setClip("textAnimation", kinds[currentIndex])
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Lets the text build up from the start of the clip, letter by letter or word by word"
+                                        }
+                                        SpinBox {
+                                            objectName: "textAnimationTime"
+                                            visible: !!win.selection.textAnimation
+                                            from: 1
+                                            to: 300
+                                            value: Math.round((win.selection.textAnimationTime ?? 1.5) * 10)
+                                            editable: true
+                                            textFromValue: (v) => (v / 10).toFixed(1) + " s"
+                                            valueFromText: (t) => Math.round(parseFloat(t) * 10)
+                                            onValueModified: editor.setClip("textAnimationTime", value / 10)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Time until the whole text is shown"
                                         }
                                     }
-                                }
-                                CheckBox {
-                                    objectName: "titleSlide"
-                                    visible: (win.selection.titleStyle || "").startsWith("lowerThird")
-                                    text: win.selection.titleStyle === "lowerThirdRight" ? "Slide in from the right" : "Slide in from the left"
-                                    checked: win.selection.titleSlide !== false
-                                    onToggled: editor.setClip("titleSlide", checked)
-                                }
-                                Label {
-                                    Layout.fillWidth: true
-                                    visible: (win.selection.titleStyle || "") !== ""
-                                    wrapMode: Text.Wrap
-                                    font.pixelSize: 11
-                                    color: win.muted
-                                    text: "First line: name or heading. Next lines: role or subtitle. Fade in/out sets how it appears; lower thirds also slide in."
-                                }
-                                // Captions with word timing (automatic captions) can highlight
-                                // the spoken word. Editing the words keeps the timing only while
-                                // the number of words stays the same.
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    visible: win.selection.timedWords === true || (win.selection.captionStyle || "") !== ""
-                                    spacing: 4
-                                    ComboBox {
-                                        objectName: "captionStyle"
-                                        Layout.fillWidth: true
-                                        readonly property var styles: ["", "karaoke", "word"]
-                                        model: ["Plain caption", "Karaoke: highlight the spoken word", "One word at a time"]
-                                        currentIndex: Math.max(0, styles.indexOf(win.selection.captionStyle || ""))
-                                        onActivated: editor.setClip("captionStyle", styles[currentIndex])
-                                    }
                                     RowLayout {
-                                        visible: (win.selection.captionStyle || "") !== ""
+                                        visible: (win.selection.titleStyle || "") !== ""
                                         Label {
-                                            text: "Highlight"
+                                            text: "Accent"
                                             color: win.muted
                                             Layout.fillWidth: true
                                         }
                                         Repeater {
-                                            model: ["#ffd23f", "#64d8bc", "#ff6fae", "#5fa8ff", "#ffffff"]
+                                            model: ["#64d8bc", "#ffd23f", "#ec6f5a", "#5fa8ff", "#c38bff", "#ffffff"]
                                             Rectangle {
                                                 required property string modelData
                                                 width: 20
                                                 height: 20
                                                 radius: 10
+                                                color: modelData
+                                                border.width: win.selection.accentColor === modelData ? 3 : 1
+                                                border.color: win.selection.accentColor === modelData ? win.mint : "#6481a0"
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    onClicked: editor.setClip("accentColor", parent.modelData)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    CheckBox {
+                                        objectName: "titleSlide"
+                                        visible: (win.selection.titleStyle || "").startsWith("lowerThird")
+                                        text: win.selection.titleStyle === "lowerThirdRight" ? "Slide in from the right" : "Slide in from the left"
+                                        checked: win.selection.titleSlide !== false
+                                        onToggled: editor.setClip("titleSlide", checked)
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible: (win.selection.titleStyle || "") !== ""
+                                        wrapMode: Text.Wrap
+                                        font.pixelSize: 11
+                                        color: win.muted
+                                        text: "First line: name or heading. Next lines: role or subtitle. Fade in/out sets how it appears; lower thirds also slide in."
+                                    }
+                                    // Captions with word timing (automatic captions) can highlight
+                                    // the spoken word. Editing the words keeps the timing only while
+                                    // the number of words stays the same.
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        visible: win.selection.timedWords === true || (win.selection.captionStyle || "") !== ""
+                                        spacing: 4
+                                        ComboBox {
+                                            objectName: "captionStyle"
+                                            Layout.fillWidth: true
+                                            readonly property var styles: ["", "karaoke", "word"]
+                                            model: ["Plain caption", "Karaoke: highlight the spoken word", "One word at a time"]
+                                            currentIndex: Math.max(0, styles.indexOf(win.selection.captionStyle || ""))
+                                            onActivated: editor.setClip("captionStyle", styles[currentIndex])
+                                        }
+                                        RowLayout {
+                                            visible: (win.selection.captionStyle || "") !== ""
+                                            Label {
+                                                text: "Highlight"
+                                                color: win.muted
+                                                Layout.fillWidth: true
+                                            }
+                                            Repeater {
+                                                model: ["#ffd23f", "#64d8bc", "#ff6fae", "#5fa8ff", "#ffffff"]
+                                                Rectangle {
+                                                    required property string modelData
+                                                    width: 20
+                                                    height: 20
+                                                    radius: 10
+                                                    color: modelData
+                                                    border.width: win.selection.highlightColor === modelData ? 3 : 1
+                                                    border.color: win.selection.highlightColor === modelData ? win.mint : "#6481a0"
+                                                    MouseArea {
+                                                        anchors.fill: parent
+                                                        onClicked: editor.setClip("highlightColor", parent.modelData)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            visible: win.selection.timedWords !== true
+                                            wrapMode: Text.Wrap
+                                            font.pixelSize: 11
+                                            color: win.muted
+                                            text: "The word count changed, so this caption shows plainly. Generate captions again for word timing."
+                                        }
+                                    }
+                                }
+                                // Typography: font, size, weight and alignment.
+                                Section {
+                                    objectName: "fontSection"
+                                    title: "Font"
+                                    spacing: 6
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        ComboBox {
+                                            id: fontBox
+                                            objectName: "fontFamily"
+                                            Layout.fillWidth: true
+                                            editable: true
+                                            // Read again when the favourites change, which reorders the list.
+                                            property var families: (win.s.fontFavorites || []).length >= 0 ? editor.fontFamilies() : []
+                                            model: families
+                                            currentIndex: families.indexOf(win.selection.fontFamily || "Arial")
+                                            onActivated: index => editor.setClip("fontFamily", families[index])
+                                            onAccepted: {
+                                                const i = families.findIndex(f => f.toLowerCase() === editText.toLowerCase());
+                                                if (i >= 0)
+                                                    editor.setClip("fontFamily", families[i]);
+                                            }
+                                            delegate: ItemDelegate {
+                                                required property string modelData
+                                                required property int index
+                                                width: ListView.view ? ListView.view.width : 200
+                                                text: ((win.s.fontFavorites || []).indexOf(modelData) >= 0 ? "★ " : "") + modelData
+                                                font.family: modelData
+                                                highlighted: fontBox.highlightedIndex === index
+                                            }
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Type to find a font. Fonts you add are kept in Cutlery's data folder."
+                                        }
+                                        ToolButton {
+                                            objectName: "favoriteFont"
+                                            readonly property bool starred: (win.s.fontFavorites || []).indexOf(win.selection.fontFamily || "") >= 0
+                                            text: starred ? "★" : "☆"
+                                            onClicked: editor.toggleFontFavorite(win.selection.fontFamily || "")
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: starred ? "Remove this font from the favourites" : "Keep this font at the top of the list (every project)"
+                                        }
+                                        Action {
+                                            objectName: "addFont"
+                                            text: "+ Font"
+                                            padding: 6
+                                            onClicked: fontFileDialog.open()
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Add a .ttf or .otf font file"
+                                        }
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 4
+                                        Repeater {
+                                            model: [
+                                                { key: "bold", label: "B" },
+                                                { key: "italic", label: "I" }
+                                            ]
+                                            Button {
+                                                required property var modelData
+                                                objectName: "text-" + modelData.key
+                                                text: modelData.label
+                                                checkable: true
+                                                checked: win.selection[modelData.key] === true
+                                                font.bold: modelData.key === "bold"
+                                                font.italic: modelData.key === "italic"
+                                                implicitWidth: 34
+                                                onClicked: editor.setClip(modelData.key, checked)
+                                            }
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        Repeater {
+                                            model: [
+                                                { key: "left", label: "⯇ Left" },
+                                                { key: "center", label: "Centre" },
+                                                { key: "right", label: "Right ⯈" }
+                                            ]
+                                            Button {
+                                                required property var modelData
+                                                objectName: "align-" + modelData.key
+                                                text: modelData.label
+                                                checkable: true
+                                                checked: (win.selection.align || "center") === modelData.key
+                                                padding: 4
+                                                onClicked: editor.setClip("align", modelData.key)
+                                            }
+                                        }
+                                    }
+                                    ValueRow {
+                                        key: "fontSize"
+                                        label: "Size"
+                                        from: 8
+                                        to: 500
+                                        stepSize: 1
+                                        decimals: 0
+                                        defaultValue: 72
+                                        sliderName: "fontSize"
+                                    }
+                                }
+                                Section {
+                                    objectName: "textColours"
+                                    title: "Colour"
+                                    spacing: 6
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        TextField {
+                                            Layout.fillWidth: true
+                                            text: win.selection.textColor || "#ffffff"
+                                            placeholderText: "Text colour (#rrggbb)"
+                                            onEditingFinished: editor.setClip("textColor", text)
+                                        }
+                                        // A second colour turns the letters into a top-to-bottom gradient.
+                                        TextField {
+                                            objectName: "gradientColor"
+                                            Layout.fillWidth: true
+                                            visible: !win.selection.titleStyle && !win.selection.captionStyle
+                                            text: win.selection.gradientColor || ""
+                                            placeholderText: "Gradient to (#rrggbb)"
+                                            onEditingFinished: editor.setClip("gradientColor", text.trim())
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "The letters fade from the text colour at the top to this colour at the bottom. Leave empty for one colour."
+                                        }
+                                    }
+                                    Flow {
+                                        Layout.fillWidth: true
+                                        spacing: 4
+                                        visible: (win.s.brandColors || []).length > 0
+                                        Repeater {
+                                            model: win.s.brandColors || []
+                                            Rectangle {
+                                                required property string modelData
+                                                objectName: "brandTextColor-" + modelData
+                                                width: 18
+                                                height: 18
+                                                radius: 9
+                                                color: modelData
+                                                border.width: win.selection.textColor === modelData ? 3 : 1
+                                                border.color: win.selection.textColor === modelData ? win.mint : "#6481a0"
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    onClicked: editor.setClip("textColor", parent.modelData)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Words between asterisks (*like this*) take this colour in plain titles.
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        visible: (win.selection.captionStyle || "") === "" && (win.selection.titleStyle || "") === "" && win.selection.text !== undefined
+                                        Label {
+                                            text: "*Highlight*"
+                                            color: (win.selection.text || "").indexOf("*") >= 0 ? win.mint : win.muted
+                                            Layout.fillWidth: true
+                                            ToolTip.visible: highlightHover.hovered
+                                            ToolTip.text: "Put asterisks around words in the text, *like this*, to show them in this colour"
+                                            HoverHandler { id: highlightHover }
+                                        }
+                                        Repeater {
+                                            model: ["#ffd23f", "#64d8bc", "#ff6fae", "#5fa8ff", "#ff5a5f"].concat(win.s.brandColors || [])
+                                            Rectangle {
+                                                required property string modelData
+                                                objectName: "titleHighlight-" + modelData
+                                                width: 18
+                                                height: 18
+                                                radius: 9
                                                 color: modelData
                                                 border.width: win.selection.highlightColor === modelData ? 3 : 1
                                                 border.color: win.selection.highlightColor === modelData ? win.mint : "#6481a0"
@@ -3485,227 +3679,54 @@ ApplicationWindow {
                                             }
                                         }
                                     }
-                                    Label {
-                                        Layout.fillWidth: true
-                                        visible: win.selection.timedWords !== true
-                                        wrapMode: Text.Wrap
-                                        font.pixelSize: 11
-                                        color: win.muted
-                                        text: "The word count changed, so this caption shows plainly. Generate captions again for word timing."
-                                    }
                                 }
-                                RowLayout {
-                                    Label {
-                                        text: "Font size"
+                                Section {
+                                    objectName: "savedStyles"
+                                    title: "Saved styles"
+                                    spacing: 6
+                                    // Saved text styles (for every project): apply to the selected titles,
+                                    // or save this title's look under a name.
+                                    RowLayout {
                                         Layout.fillWidth: true
-                                        color: win.muted
-                                    }
-                                    SpinBox {
-                                        from: 8
-                                        to: 500
-                                        value: win.selection.fontSize || 72
-                                        editable: true
-                                        onValueModified: editor.setClip("fontSize", value)
-                                    }
-                                }
-                                // Saved text styles (for every project): apply to the selected titles,
-                                // or save this title's look under a name.
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    ComboBox {
-                                        id: styleChoice
-                                        objectName: "textStyle"
-                                        Layout.fillWidth: true
-                                        readonly property var styles: win.s.textStyles || []
-                                        model: [styles.length ? "Apply a style…" : "No saved styles"].concat(styles.map(st => st.name))
-                                        enabled: styles.length > 0 && win.selection.locked !== true
-                                        onActivated: index => {
-                                            if (index > 0)
-                                                editor.applyTextStyle(styles[index - 1].name);
-                                            currentIndex = 0;
+                                        ComboBox {
+                                            id: styleChoice
+                                            objectName: "textStyle"
+                                            Layout.fillWidth: true
+                                            readonly property var styles: win.s.textStyles || []
+                                            model: [styles.length ? "Apply a style…" : "No saved styles"].concat(styles.map(st => st.name))
+                                            enabled: styles.length > 0 && win.selection.locked !== true
+                                            onActivated: index => {
+                                                if (index > 0)
+                                                    editor.applyTextStyle(styles[index - 1].name);
+                                                currentIndex = 0;
+                                            }
                                         }
-                                    }
-                                    ToolButton {
-                                        objectName: "saveTextStyle"
-                                        text: "Save…"
-                                        enabled: !!win.selection.text
-                                        onClicked: styleDialog.open()
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Keep this title's font, colours and effects as a style for every project"
-                                    }
-                                    ToolButton {
-                                        text: "⋯"
-                                        visible: styleChoice.styles.length > 0
-                                        onClicked: styleMenu.popup()
-                                        Menu {
-                                            id: styleMenu
-                                            title: "Remove a style"
-                                            Instantiator {
-                                                model: styleChoice.styles
-                                                delegate: MenuItem {
-                                                    required property var modelData
-                                                    text: "Remove “" + modelData.name + "”"
-                                                    onTriggered: editor.removeTextStyle(modelData.name)
+                                        ToolButton {
+                                            objectName: "saveTextStyle"
+                                            text: "Save…"
+                                            enabled: !!win.selection.text
+                                            onClicked: styleDialog.open()
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Keep this title's font, colours and effects as a style for every project"
+                                        }
+                                        ToolButton {
+                                            text: "⋯"
+                                            visible: styleChoice.styles.length > 0
+                                            onClicked: styleMenu.popup()
+                                            Menu {
+                                                id: styleMenu
+                                                title: "Remove a style"
+                                                Instantiator {
+                                                    model: styleChoice.styles
+                                                    delegate: MenuItem {
+                                                        required property var modelData
+                                                        text: "Remove “" + modelData.name + "”"
+                                                        onTriggered: editor.removeTextStyle(modelData.name)
+                                                    }
+                                                    onObjectAdded: (index, object) => styleMenu.insertItem(index, object)
+                                                    onObjectRemoved: (index, object) => styleMenu.removeItem(object)
                                                 }
-                                                onObjectAdded: (index, object) => styleMenu.insertItem(index, object)
-                                                onObjectRemoved: (index, object) => styleMenu.removeItem(object)
                                             }
-                                        }
-                                    }
-                                }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    TextField {
-                                        Layout.fillWidth: true
-                                        text: win.selection.textColor || "#ffffff"
-                                        placeholderText: "Text colour (#rrggbb)"
-                                        onEditingFinished: editor.setClip("textColor", text)
-                                    }
-                                    // A second colour turns the letters into a top-to-bottom gradient.
-                                    TextField {
-                                        objectName: "gradientColor"
-                                        Layout.fillWidth: true
-                                        visible: !win.selection.titleStyle && !win.selection.captionStyle
-                                        text: win.selection.gradientColor || ""
-                                        placeholderText: "Gradient to (#rrggbb)"
-                                        onEditingFinished: editor.setClip("gradientColor", text.trim())
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "The letters fade from the text colour at the top to this colour at the bottom. Leave empty for one colour."
-                                    }
-                                }
-                                Flow {
-                                    Layout.fillWidth: true
-                                    spacing: 4
-                                    visible: (win.s.brandColors || []).length > 0
-                                    Repeater {
-                                        model: win.s.brandColors || []
-                                        Rectangle {
-                                            required property string modelData
-                                            objectName: "brandTextColor-" + modelData
-                                            width: 18
-                                            height: 18
-                                            radius: 9
-                                            color: modelData
-                                            border.width: win.selection.textColor === modelData ? 3 : 1
-                                            border.color: win.selection.textColor === modelData ? win.mint : "#6481a0"
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: editor.setClip("textColor", parent.modelData)
-                                            }
-                                        }
-                                    }
-                                }
-                                // Words between asterisks (*like this*) take this colour in plain titles.
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    visible: (win.selection.captionStyle || "") === "" && (win.selection.titleStyle || "") === "" && win.selection.text !== undefined
-                                    Label {
-                                        text: "*Highlight*"
-                                        color: (win.selection.text || "").indexOf("*") >= 0 ? win.mint : win.muted
-                                        Layout.fillWidth: true
-                                        ToolTip.visible: highlightHover.hovered
-                                        ToolTip.text: "Put asterisks around words in the text, *like this*, to show them in this colour"
-                                        HoverHandler { id: highlightHover }
-                                    }
-                                    Repeater {
-                                        model: ["#ffd23f", "#64d8bc", "#ff6fae", "#5fa8ff", "#ff5a5f"].concat(win.s.brandColors || [])
-                                        Rectangle {
-                                            required property string modelData
-                                            objectName: "titleHighlight-" + modelData
-                                            width: 18
-                                            height: 18
-                                            radius: 9
-                                            color: modelData
-                                            border.width: win.selection.highlightColor === modelData ? 3 : 1
-                                            border.color: win.selection.highlightColor === modelData ? win.mint : "#6481a0"
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: editor.setClip("highlightColor", parent.modelData)
-                                            }
-                                        }
-                                    }
-                                }
-                                // Typography: font, weight, alignment, spacing, outline, shadow, box.
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    ComboBox {
-                                        id: fontBox
-                                        objectName: "fontFamily"
-                                        Layout.fillWidth: true
-                                        editable: true
-                                        // Read again when the favourites change, which reorders the list.
-                                        property var families: (win.s.fontFavorites || []).length >= 0 ? editor.fontFamilies() : []
-                                        model: families
-                                        currentIndex: families.indexOf(win.selection.fontFamily || "Arial")
-                                        onActivated: index => editor.setClip("fontFamily", families[index])
-                                        onAccepted: {
-                                            const i = families.findIndex(f => f.toLowerCase() === editText.toLowerCase());
-                                            if (i >= 0)
-                                                editor.setClip("fontFamily", families[i]);
-                                        }
-                                        delegate: ItemDelegate {
-                                            required property string modelData
-                                            required property int index
-                                            width: ListView.view ? ListView.view.width : 200
-                                            text: ((win.s.fontFavorites || []).indexOf(modelData) >= 0 ? "★ " : "") + modelData
-                                            font.family: modelData
-                                            highlighted: fontBox.highlightedIndex === index
-                                        }
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Type to find a font. Fonts you add are kept in Cutlery's data folder."
-                                    }
-                                    ToolButton {
-                                        objectName: "favoriteFont"
-                                        readonly property bool starred: (win.s.fontFavorites || []).indexOf(win.selection.fontFamily || "") >= 0
-                                        text: starred ? "★" : "☆"
-                                        onClicked: editor.toggleFontFavorite(win.selection.fontFamily || "")
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: starred ? "Remove this font from the favourites" : "Keep this font at the top of the list (every project)"
-                                    }
-                                    Action {
-                                        objectName: "addFont"
-                                        text: "+ Font"
-                                        padding: 6
-                                        onClicked: fontFileDialog.open()
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Add a .ttf or .otf font file"
-                                    }
-                                }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 4
-                                    Repeater {
-                                        model: [
-                                            { key: "bold", label: "B" },
-                                            { key: "italic", label: "I" }
-                                        ]
-                                        Button {
-                                            required property var modelData
-                                            objectName: "text-" + modelData.key
-                                            text: modelData.label
-                                            checkable: true
-                                            checked: win.selection[modelData.key] === true
-                                            font.bold: modelData.key === "bold"
-                                            font.italic: modelData.key === "italic"
-                                            implicitWidth: 34
-                                            onClicked: editor.setClip(modelData.key, checked)
-                                        }
-                                    }
-                                    Item { Layout.fillWidth: true }
-                                    Repeater {
-                                        model: [
-                                            { key: "left", label: "⯇ Left" },
-                                            { key: "center", label: "Centre" },
-                                            { key: "right", label: "Right ⯈" }
-                                        ]
-                                        Button {
-                                            required property var modelData
-                                            objectName: "align-" + modelData.key
-                                            text: modelData.label
-                                            checkable: true
-                                            checked: (win.selection.align || "center") === modelData.key
-                                            padding: 4
-                                            onClicked: editor.setClip("align", modelData.key)
                                         }
                                     }
                                 }
@@ -3769,6 +3790,7 @@ ApplicationWindow {
                             // Presenter overlays: corner placement, shape, border, shadow, green screen.
                             Section {
                                 title: ({ basic: "Placement", mask: "Shape and frame", cutout: "Cut out", canvas: "Background" })[win.inspectorSub] || "Picture"
+                                header: !win.picPage("mask")
                                 Layout.fillWidth: true
                                 visible: (win.selection.audioOnly !== true && (win.selection.effect || "") === "" && editor.clipBounds(win.s.selectedId).width !== undefined) && (win.picPage("basic") || win.picPage("mask") || win.picPage("cutout") || win.picPage("canvas"))
                                 spacing: 6
@@ -3942,63 +3964,75 @@ ApplicationWindow {
                                         }
                                     }
                                 }
-                                ComboBox {
+                                Section {
+                                    objectName: "shapeSection"
+                                    title: "Shape"
                                     visible: win.picPage("mask")
-                                    id: overlayShape
-                                    objectName: "overlayShape"
-                                    Layout.fillWidth: true
-                                    readonly property var shapes: ["rect", "rounded", "circle"]
-                                    model: ["Rectangle", "Rounded corners", "Circle"]
-                                    currentIndex: Math.max(0, shapes.indexOf(win.selection.shape || "rect"))
-                                    onActivated: editor.setClip("shape", shapes[currentIndex])
+                                    resettable: (win.selection.shape || "rect") !== "rect"
+                                    onReset: editor.setClip("shape", "rect")
+                                    ComboBox {
+                                        id: overlayShape
+                                        objectName: "overlayShape"
+                                        Layout.fillWidth: true
+                                        readonly property var shapes: ["rect", "rounded", "circle"]
+                                        model: ["Rectangle", "Rounded corners", "Circle"]
+                                        currentIndex: Math.max(0, shapes.indexOf(win.selection.shape || "rect"))
+                                        onActivated: editor.setClip("shape", shapes[currentIndex])
+                                    }
                                 }
                                 // Free mask: points clicked on the preview.
-                                RowLayout {
+                                Section {
+                                    objectName: "freeMask"
+                                    title: "Free mask"
+                                    tip: "Keeps only what is inside an outline you click on the preview"
                                     visible: win.picPage("mask")
-                                    Layout.fillWidth: true
-                                    Action {
-                                        objectName: "drawMask"
+                                    spacing: 4
+                                    RowLayout {
                                         Layout.fillWidth: true
-                                        enabled: win.selection.locked !== true
-                                        text: win.drawingMask ? "Done (" + (win.selection.maskOutline || []).length + " points)" : (win.selection.mask ? "Edit mask" : "Draw mask")
-                                        onClicked: win.drawingMask = !win.drawingMask
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Click around what should stay visible in the preview, point by point (at least 3); everything outside is hidden. Works with the soft edge."
-                                    }
-                                    Action {
-                                        objectName: "removeMaskPoint"
-                                        visible: win.drawingMask
-                                        text: "↶ Point"
-                                        enabled: (win.selection.maskOutline || []).length > 0
-                                        onClicked: editor.removeMaskPoint()
-                                    }
-                                    Action {
-                                        objectName: "clearMask"
-                                        visible: !!win.selection.mask || win.drawingMask
-                                        text: "Remove"
-                                        onClicked: {
-                                            editor.clearMask();
-                                            win.drawingMask = false;
+                                        Action {
+                                            objectName: "drawMask"
+                                            Layout.fillWidth: true
+                                            enabled: win.selection.locked !== true
+                                            text: win.drawingMask ? "Done (" + (win.selection.maskOutline || []).length + " points)" : (win.selection.mask ? "Edit mask" : "Draw mask")
+                                            onClicked: win.drawingMask = !win.drawingMask
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Click around what should stay visible in the preview, point by point (at least 3); everything outside is hidden. Works with the soft edge."
+                                        }
+                                        Action {
+                                            objectName: "removeMaskPoint"
+                                            visible: win.drawingMask
+                                            text: "↶ Point"
+                                            enabled: (win.selection.maskOutline || []).length > 0
+                                            onClicked: editor.removeMaskPoint()
+                                        }
+                                        Action {
+                                            objectName: "clearMask"
+                                            visible: !!win.selection.mask || win.drawingMask
+                                            text: "Remove"
+                                            onClicked: {
+                                                editor.clearMask();
+                                                win.drawingMask = false;
+                                            }
                                         }
                                     }
-                                }
-                                RowLayout {
-                                    visible: (!!win.selection.mask) && (win.picPage("mask"))
-                                    CheckBox {
-                                        objectName: "maskSmooth"
-                                        text: "Smooth curve"
-                                        checked: win.selection.maskSmooth === true
-                                        onToggled: editor.setClip("maskSmooth", checked)
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "A rounded curve through the points instead of straight lines"
-                                    }
-                                    CheckBox {
-                                        objectName: "maskInvert"
-                                        text: "Invert"
-                                        checked: win.selection.maskInvert === true
-                                        onToggled: editor.setClip("maskInvert", checked)
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Hides what is inside the mask instead"
+                                    RowLayout {
+                                        visible: !!win.selection.mask
+                                        CheckBox {
+                                            objectName: "maskSmooth"
+                                            text: "Smooth curve"
+                                            checked: win.selection.maskSmooth === true
+                                            onToggled: editor.setClip("maskSmooth", checked)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "A rounded curve through the points instead of straight lines"
+                                        }
+                                        CheckBox {
+                                            objectName: "maskInvert"
+                                            text: "Invert"
+                                            checked: win.selection.maskInvert === true
+                                            onToggled: editor.setClip("maskInvert", checked)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Hides what is inside the mask instead"
+                                        }
                                     }
                                 }
                                 ValueGroup {
@@ -4012,27 +4046,27 @@ ApplicationWindow {
                                         { key: "border", name: "Border", lo: 0, hi: .03, step: .001, dec: 1, unit: "%", shown: 100, tip: "A ring around the picture, in percent of the frame height" },
                                         { key: "shadow", name: "Shadow", lo: 0, hi: 1, step: .05, dec: 0, unit: "%", shown: 100 }
                                     ].filter(r => r.key !== "radius" || win.selection.shape === "rounded")
-                                }
-                                RowLayout {
-                                    visible: ((win.selection.border || 0) > 0) && (win.picPage("mask"))
-                                    Label {
-                                        text: "Border colour"
-                                        color: win.muted
-                                        Layout.fillWidth: true
-                                    }
-                                    Repeater {
-                                        model: ["#ffffff", "#000000", "#64d8bc", "#ffd479", "#ec6f5a"]
-                                        Rectangle {
-                                            required property string modelData
-                                            width: 20
-                                            height: 20
-                                            radius: 10
-                                            color: modelData
-                                            border.width: win.selection.borderColor === modelData ? 3 : 1
-                                            border.color: win.selection.borderColor === modelData ? win.mint : "#6481a0"
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: editor.setClip("borderColor", parent.modelData)
+                                    RowLayout {
+                                        visible: (win.selection.border || 0) > 0
+                                        Label {
+                                            text: "Border colour"
+                                            color: win.muted
+                                            Layout.fillWidth: true
+                                        }
+                                        Repeater {
+                                            model: ["#ffffff", "#000000", "#64d8bc", "#ffd479", "#ec6f5a"]
+                                            Rectangle {
+                                                required property string modelData
+                                                width: 20
+                                                height: 20
+                                                radius: 10
+                                                color: modelData
+                                                border.width: win.selection.borderColor === modelData ? 3 : 1
+                                                border.color: win.selection.borderColor === modelData ? win.mint : "#6481a0"
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    onClicked: editor.setClip("borderColor", parent.modelData)
+                                                }
                                             }
                                         }
                                     }

@@ -1092,6 +1092,8 @@ class UiTest : public QObject {
         auto *style = findItem(window->contentItem(), "titleStyle");
         QTRY_VERIFY(style && style->isVisible());
         QCOMPARE(style->property("currentIndex").toInt(), 1);
+        if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS"))
+            window->grabWindow().save(qEnvironmentVariable("CUTLERY_UI_SHOTS") + "/text.png");
         style->setProperty("currentIndex", 4);
         QVERIFY(QMetaObject::invokeMethod(style, "activated", Q_ARG(int, 4)));
         QCOMPARE(editor.project().clip(lower.id)->titleStyle, QString("titleCard"));
