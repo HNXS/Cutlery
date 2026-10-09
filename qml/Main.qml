@@ -1501,6 +1501,24 @@ ApplicationWindow {
                                                 fillMode: Image.PreserveAspectCrop
                                                 asynchronous: true
                                             }
+                                            // "Added": the media is used on the timeline.
+                                            Rectangle {
+                                                objectName: "added-" + mediaTile.modelData.id
+                                                visible: mediaTile.modelData.used === true
+                                                z: 1
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.bottom: parent.bottom
+                                                height: 13
+                                                color: "#cc12403a"
+                                                Label {
+                                                    anchors.centerIn: parent
+                                                    text: "Added"
+                                                    font.pixelSize: 8
+                                                    font.bold: true
+                                                    color: win.mint
+                                                }
+                                            }
                                             Label {
                                                 anchors.centerIn: parent
                                                 visible: poster.strip.status !== "ready"
@@ -1721,11 +1739,11 @@ ApplicationWindow {
                                     Action {
                                         visible: win.leftTab === "audio"
                                         objectName: "openSounds"
-                                        text: "♪ Sounds…"
+                                        text: "♪ Listen and more…"
                                         Layout.fillWidth: true
                                         onClicked: soundDialog.open()
                                         ToolTip.visible: hovered
-                                        ToolTip.text: "Sound effects: mouse clicks, keyboard typing and whooshes, free to use"
+                                        ToolTip.text: "Listen to the sound effects, or put a whoosh on every transition"
                                     }
                                 }
                                 RowLayout {
@@ -2121,6 +2139,50 @@ ApplicationWindow {
                                     color: win.muted
                                     font.pixelSize: 11
                                     text: "Record a voice-over with ● Voice-over under the player; it lands at the playhead."
+                                }
+                                // Sound effects by category: a click adds one at the playhead.
+                                Repeater {
+                                    model: {
+                                        if (win.leftTab !== "audio")
+                                            return [];
+                                        const groups = [];
+                                        for (const sound of editor.sounds()) {
+                                            let g = groups.find(x => x.category === sound.category);
+                                            if (!g) {
+                                                g = { category: sound.category, sounds: [] };
+                                                groups.push(g);
+                                            }
+                                            g.sounds.push(sound);
+                                        }
+                                        return groups;
+                                    }
+                                    ColumnLayout {
+                                        id: soundGroup
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        spacing: 6
+                                        Caption {
+                                            text: soundGroup.modelData.category.toUpperCase()
+                                        }
+                                        Flow {
+                                            Layout.fillWidth: true
+                                            spacing: 6
+                                            Repeater {
+                                                model: soundGroup.modelData.sounds
+                                                Tile {
+                                                    required property var modelData
+                                                    objectName: "soundTile-" + modelData.id
+                                                    text: modelData.name
+                                                    glyph: /click|mouse/i.test(modelData.category + modelData.name) ? "⌖" : /typ|key/i.test(modelData.category + modelData.name) ? "⌨" : /whoosh|swoosh|swish/i.test(modelData.category + modelData.name) ? "≋" : "♪"
+                                                    swatch: "#1f3340"
+                                                    implicitWidth: 112
+                                                    onClicked: editor.addSound(modelData.id)
+                                                    ToolTip.visible: hovered
+                                                    ToolTip.text: modelData.name + " · " + Number(modelData.seconds).toFixed(1) + " s · " + modelData.licence + "\nAdds it at the playhead."
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                                 // Effects, transitions and looks for the selected clip, as tiles.
                                 Caption {
@@ -3647,51 +3709,57 @@ ApplicationWindow {
                                         }
                                     }
                                 }
-                                Repeater {
-                                    model: [
-                                        { key: "letterSpacing", name: "Letter spacing", lo: -0.1, hi: 0.5, def: 0 },
-                                        { key: "lineSpacing", name: "Line spacing", lo: 0.7, hi: 3, def: 1 },
-                                        { key: "outline", name: "Outline", lo: 0, hi: 0.25, def: 0 },
-                                        { key: "textShadow", name: "Shadow", lo: 0, hi: 1, def: 1 },
-                                        { key: "textGlow", name: "Glow", lo: 0, hi: 1, def: 0 },
-                                        { key: "background", name: "Background box", lo: 0, hi: 1, def: 0 }
+                                ValueGroup {
+                                    objectName: "textSpacing"
+                                    title: "Spacing"
+                                    prefix: "text-"
+                                    rows: [
+                                        { key: "letterSpacing", name: "Letter spacing", lo: -0.1, hi: 0.5, def: 0, shown: 100, dec: 0, unit: "%" },
+                                        { key: "lineSpacing", name: "Line spacing", lo: 0.7, hi: 3, def: 1, dec: 2, unit: "×" }
                                     ]
-                                    RowLayout {
-                                        id: textStyleRow
-                                        required property var modelData
-                                        Layout.fillWidth: true
-                                        Label {
-                                            text: textStyleRow.modelData.name
-                                            color: win.muted
-                                            Layout.preferredWidth: 95
-                                        }
-                                        Slider {
-                                            objectName: "text-" + textStyleRow.modelData.key
+                                }
+                                ValueGroup {
+                                    objectName: "textEffects"
+                                    title: "Outline, shadow and glow"
+                                    prefix: "text-"
+                                    rows: [
+                                        { key: "outline", name: "Outline", lo: 0, hi: 0.25, def: 0, shown: 100, dec: 0, unit: "%" },
+                                        { key: "textShadow", name: "Shadow", lo: 0, hi: 1, def: 1, shown: 100, dec: 0, unit: "%" },
+                                        { key: "textGlow", name: "Glow", lo: 0, hi: 1, def: 0, shown: 100, dec: 0, unit: "%" },
+                                        { key: "background", name: "Background box", lo: 0, hi: 1, def: 0, shown: 100, dec: 0, unit: "%" }
+                                    ]
+                                    // Outline, glow and box colours.
+                                    Repeater {
+                                        model: [
+                                            { key: "outlineColor", name: "Outline colour", colours: ["#000000", "#ffffff", "#ffd23f"] },
+                                            { key: "textGlowColor", name: "Glow colour", colours: ["#ffd23f", "#ffffff", "#ff4fd8"] },
+                                            { key: "backgroundColor", name: "Box colour", colours: ["#000000", "#ffffff", "#64d8bc"] }
+                                        ]
+                                        RowLayout {
+                                            id: textColourRow
+                                            required property var modelData
                                             Layout.fillWidth: true
-                                            from: textStyleRow.modelData.lo
-                                            to: textStyleRow.modelData.hi
-                                            stepSize: .01
-                                            value: win.selection[textStyleRow.modelData.key] ?? textStyleRow.modelData.def
-                                            onPressedChanged: if (!pressed)
-                                                editor.setClip(textStyleRow.modelData.key, value)
-                                            onMoved: if (!pressed)
-                                                editor.setClip(textStyleRow.modelData.key, value)
-                                        }
-                                        // Outline and box colours.
-                                        Repeater {
-                                            model: textStyleRow.modelData.key === "outline" ? ["#000000", "#ffffff", "#ffd23f"] : textStyleRow.modelData.key === "background" ? ["#000000", "#ffffff", "#64d8bc"] : textStyleRow.modelData.key === "textGlow" ? ["#ffd23f", "#ffffff", "#ff4fd8"] : []
-                                            Rectangle {
-                                                required property string modelData
-                                                readonly property string colorKey: textStyleRow.modelData.key === "outline" ? "outlineColor" : textStyleRow.modelData.key === "textGlow" ? "textGlowColor" : "backgroundColor"
-                                                width: 16
-                                                height: 16
-                                                radius: 8
-                                                color: modelData
-                                                border.width: win.selection[colorKey] === modelData ? 3 : 1
-                                                border.color: win.selection[colorKey] === modelData ? win.mint : "#6481a0"
-                                                MouseArea {
-                                                    anchors.fill: parent
-                                                    onClicked: editor.setClip(parent.colorKey, parent.modelData)
+                                            Label {
+                                                text: textColourRow.modelData.name
+                                                color: win.muted
+                                                Layout.fillWidth: true
+                                            }
+                                            Repeater {
+                                                model: textColourRow.modelData.colours
+                                                Rectangle {
+                                                    required property string modelData
+                                                    objectName: textColourRow.modelData.key + "-" + modelData
+                                                    width: 18
+                                                    height: 18
+                                                    radius: 9
+                                                    color: modelData
+                                                    border.width: win.selection[textColourRow.modelData.key] === modelData ? 3 : 1
+                                                    border.color: win.selection[textColourRow.modelData.key] === modelData ? win.mint : "#6481a0"
+                                                    MouseArea {
+                                                        anchors.fill: parent
+                                                        enabled: win.selection.locked !== true
+                                                        onClicked: editor.setClip(textColourRow.modelData.key, parent.modelData)
+                                                    }
                                                 }
                                             }
                                         }
@@ -3729,20 +3797,17 @@ ApplicationWindow {
                                     }
                                 }
                                 // Corner pin: move the picture's corners, e.g. into a screen in a photo.
-                                CheckBox {
-                                    id: pinToggle
+                                Section {
                                     objectName: "cornerPin"
+                                    title: "Perspective"
+                                    tip: "Moves the corners: places the picture into a four-sided shape, e.g. onto a screen or a sign in another picture"
                                     visible: (!!win.selection.assetId && win.selection.picture === true) && (win.picPage("basic"))
-                                    text: "Perspective (move the corners)"
+                                    checkable: true
                                     checked: (win.selection.cornerPin || []).length === 8
-                                    enabled: win.selection.locked !== true
-                                    onToggled: editor.setClip("cornerPin", checked ? [0, 0, 1, 0, 0, 1, 1, 1] : [])
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Places the picture into a four-sided shape, e.g. onto a screen or a sign in another picture"
-                                }
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    visible: (pinToggle.visible && pinToggle.checked) && (win.picPage("basic"))
+                                    expanded: checked
+                                    resettable: checked
+                                    onToggled: on => editor.setClip("cornerPin", on ? [0, 0, 1, 0, 0, 1, 1, 1] : [])
+                                    onReset: editor.setClip("cornerPin", [0, 0, 1, 0, 0, 1, 1, 1])
                                     spacing: 0
                                     Repeater {
                                         model: [
@@ -3795,42 +3860,14 @@ ApplicationWindow {
                                     }
                                 }
                                 // 3D tilt: lean or turn the picture, seen in perspective.
-                                Repeater {
-                                    model: [
-                                        { key: "tiltX", name: "Lean back", tip: "Leans the top away (or, below zero, towards you)" },
-                                        { key: "tiltY", name: "Turn", tip: "Turns the right side away (or, below zero, towards you)" }
+                                ValueGroup {
+                                    objectName: "tilt"
+                                    title: "3D tilt"
+                                    visible: (!!win.selection.assetId && win.selection.picture === true) && (win.picPage("basic"))
+                                    rows: [
+                                        { key: "tiltX", name: "Lean back", lo: -70, hi: 70, step: 1, dec: 0, unit: "°", obj: "tilt-tiltX", tip: "Leans the top away (or, below zero, towards you)" },
+                                        { key: "tiltY", name: "Turn", lo: -70, hi: 70, step: 1, dec: 0, unit: "°", obj: "tilt-tiltY", tip: "Turns the right side away (or, below zero, towards you)" }
                                     ]
-                                    RowLayout {
-                                        id: tiltRow
-                                        required property var modelData
-                                        Layout.fillWidth: true
-                                        visible: (!!win.selection.assetId && win.selection.picture === true) && (win.picPage("basic"))
-                                        Label {
-                                            text: tiltRow.modelData.name
-                                            color: (win.selection[tiltRow.modelData.key] || 0) !== 0 ? win.mint : win.muted
-                                            Layout.preferredWidth: 80
-                                        }
-                                        Slider {
-                                            objectName: "tilt-" + tiltRow.modelData.key
-                                            Layout.fillWidth: true
-                                            from: -70
-                                            to: 70
-                                            stepSize: 1
-                                            value: win.selection[tiltRow.modelData.key] || 0
-                                            enabled: win.selection.locked !== true
-                                            onPressedChanged: if (!pressed)
-                                                editor.setClip(tiltRow.modelData.key, value)
-                                            onMoved: if (!pressed)
-                                                editor.setClip(tiltRow.modelData.key, value)
-                                            ToolTip.visible: hovered
-                                            ToolTip.text: tiltRow.modelData.tip
-                                        }
-                                        Label {
-                                            text: Math.round(win.selection[tiltRow.modelData.key] || 0) + "°"
-                                            font.pixelSize: 10
-                                            Layout.preferredWidth: 30
-                                        }
-                                    }
                                 }
                                 // Canvas fill: what shows around a picture that does not fill the frame,
                                 // e.g. a portrait video in a landscape project.
@@ -4011,17 +4048,18 @@ ApplicationWindow {
                                     statusName: "cutoutStatus"
                                     runName: "cutoutAnalyze"
                                 }
-                                CheckBox {
-                                    visible: win.picPage("cutout")
+                                Section {
                                     objectName: "chromaKey"
-                                    text: "Remove green/blue screen"
-                                    checked: win.selection.chromaKey || false
-                                    onToggled: editor.setClip("chromaKey", checked)
-                                }
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    visible: (win.selection.chromaKey === true) && (win.picPage("cutout"))
-                                    spacing: 0
+                                    title: "Green or blue screen"
+                                    tip: "Removes a green or blue screen behind the picture"
+                                    visible: win.picPage("cutout")
+                                    checkable: true
+                                    checked: win.selection.chromaKey === true
+                                    expanded: checked
+                                    resettable: checked
+                                    onToggled: on => editor.setClip("chromaKey", on)
+                                    onReset: editor.setClipValues({ keySimilarity: .25, keyBlend: .08 })
+                                    spacing: 4
                                     RowLayout {
                                         Label {
                                             text: "Screen colour"
@@ -4063,78 +4101,64 @@ ApplicationWindow {
                                             ToolTip.text: "Click the green or blue screen in the viewer to key out exactly that colour"
                                         }
                                     }
-                                    Repeater {
-                                        model: [
-                                            { key: "keySimilarity", name: "Tolerance", lo: .01, hi: .6 },
-                                            { key: "keyBlend", name: "Edge softness", lo: 0, hi: .4 }
-                                        ]
-                                        ColumnLayout {
-                                            required property var modelData
-                                            Layout.fillWidth: true
-                                            spacing: 0
-                                            Label {
-                                                text: modelData.name + "  " + Number(win.selection[modelData.key] ?? 0).toFixed(2)
-                                                color: win.muted
-                                            }
-                                            Slider {
-                                                Layout.fillWidth: true
-                                                from: modelData.lo
-                                                to: modelData.hi
-                                                stepSize: .01
-                                                value: win.selection[modelData.key] ?? 0
-                                                onPressedChanged: if (!pressed)
-                                                    editor.setClip(modelData.key, value)
-                                                onMoved: if (!pressed)
-                                                    editor.setClip(modelData.key, value)
-                                            }
-                                        }
+                                    ValueRow {
+                                        key: "keySimilarity"
+                                        label: "Tolerance"
+                                        from: .01
+                                        to: .6
+                                        defaultValue: .25
+                                        sliderName: "keySimilarity"
+                                        tip: "How far a colour may be from the screen colour and still be removed"
+                                    }
+                                    ValueRow {
+                                        key: "keyBlend"
+                                        label: "Edge softness"
+                                        to: .4
+                                        defaultValue: .08
+                                        sliderName: "keyBlend"
                                     }
                                 }
-                                RowLayout {
+                                Section {
+                                    objectName: "brightnessKey"
+                                    title: "Remove by brightness"
                                     visible: win.picPage("cutout")
-                                    Layout.fillWidth: true
-                                    Label {
-                                        text: "Remove by brightness"
-                                        color: win.muted
+                                    resettable: (win.selection.lumaKey || "") !== ""
+                                    onReset: editor.setClipValues({ lumaTolerance: .1, lumaSoftness: .05 })
+                                    spacing: 4
+                                    RowLayout {
                                         Layout.fillWidth: true
-                                    }
-                                    ComboBox {
-                                        objectName: "lumaKey"
-                                        model: [{ id: "", label: "Off" }, { id: "dark", label: "Black" }, { id: "light", label: "White" }]
-                                        textRole: "label"
-                                        valueRole: "id"
-                                        currentIndex: Math.max(0, ["", "dark", "light"].indexOf(win.selection.lumaKey || ""))
-                                        onActivated: editor.setClip("lumaKey", currentValue)
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "Makes black (or white) parts transparent, e.g. for fire, smoke or light effects on black"
-                                    }
-                                }
-                                Repeater {
-                                    model: (win.selection.lumaKey || "") === "" ? [] : [
-                                        { key: "lumaTolerance", name: "Brightness tolerance", lo: .01, hi: .6 },
-                                        { key: "lumaSoftness", name: "Brightness edge softness", lo: 0, hi: .5 }
-                                    ]
-                                    ColumnLayout {
-                                        visible: win.picPage("cutout")
-                                        required property var modelData
-                                        Layout.fillWidth: true
-                                        spacing: 0
                                         Label {
-                                            text: modelData.name + "  " + Number(win.selection[modelData.key] ?? 0).toFixed(2)
+                                            text: "Make transparent"
                                             color: win.muted
-                                        }
-                                        Slider {
-                                            objectName: modelData.key
                                             Layout.fillWidth: true
-                                            from: modelData.lo
-                                            to: modelData.hi
-                                            stepSize: .01
-                                            value: win.selection[modelData.key] ?? 0
-                                            onPressedChanged: if (!pressed)
-                                                editor.setClip(modelData.key, value)
-                                            onMoved: if (!pressed)
-                                                editor.setClip(modelData.key, value)
                                         }
+                                        ComboBox {
+                                            objectName: "lumaKey"
+                                            model: [{ id: "", label: "Off" }, { id: "dark", label: "Black" }, { id: "light", label: "White" }]
+                                            textRole: "label"
+                                            valueRole: "id"
+                                            currentIndex: Math.max(0, ["", "dark", "light"].indexOf(win.selection.lumaKey || ""))
+                                            onActivated: editor.setClip("lumaKey", currentValue)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Makes black (or white) parts transparent, e.g. for fire, smoke or light effects on black"
+                                        }
+                                    }
+                                    ValueRow {
+                                        visible: (win.selection.lumaKey || "") !== ""
+                                        key: "lumaTolerance"
+                                        label: "Tolerance"
+                                        to: .6
+                                        from: .01
+                                        defaultValue: .1
+                                        sliderName: (win.selection.lumaKey || "") !== "" ? "lumaTolerance" : ""
+                                    }
+                                    ValueRow {
+                                        visible: (win.selection.lumaKey || "") !== ""
+                                        key: "lumaSoftness"
+                                        label: "Edge softness"
+                                        to: .5
+                                        defaultValue: .05
+                                        sliderName: (win.selection.lumaKey || "") !== "" ? "lumaSoftness" : ""
                                     }
                                 }
                                 RowLayout {

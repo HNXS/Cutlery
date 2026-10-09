@@ -114,10 +114,13 @@ click is one undo step.
   - A side column with Cutlery, Home, Open project, Recover autosave, Preferences, Show at start and Skip.
   - On the right: a large "New project" banner that starts in the preferred shape in one click, the six shapes, the notice after an unclean exit, recent projects as tiles and the templates.
 
+## Sounds, media and remaining controls — package 5, done
+
+- **Audio tab:** the sound effects are listed as tiles by category; a click adds one at the playhead. "Listen and more…" opens the list for listening and for a whoosh on every transition.
+- **Media tiles:** media used in the timeline carries an "Added" mark on its picture.
+- **Sections:** perspective (on/off, reset), 3D tilt, green or blue screen (on/off, reset), removing by brightness, text spacing, and outline, shadow and glow with their colours now use sections and value rows.
+
 ## Still to do
 
-- **Asset panel, still to do:**
-  - A narrow category column per tab, once the tabs hold more than a screenful.
-  - Media tiles with an "Added" badge.
-  - Sound effects listed in the Audio tab itself.
-- A section look for the remaining controls (perspective, keys, text settings).
+- **Asset panel:** a narrow category column per tab, once the tabs hold more than a screenful.
+- A section look for the rest: shape and frame, canvas, and the title settings above spacing.
