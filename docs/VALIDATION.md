@@ -1,5 +1,18 @@
 # Validation record
 
+## Windows portable build — 2026-10-09, frame rate of a project with clips (0.6 development)
+
+[GitHub Actions run 37993929900](https://github.com/HNXS/Cutlery/actions/runs/37993929900) on commit `99f40dfa6999872eb618ac022d7333ace5dbaa86` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `frameRateChange`:**
+  - From 25 to 30 fps, these keep their times: touching clips (still touching), keyframes, the transition, caption words, markers, the export range and the total length.
+  - At 29.97 fps a clip is not run past its 2 s of media.
+  - At 10 fps, markers that meet on one frame keep the first.
+  - In the editor the change is one undo step, and the playhead keeps its time.
+- **UI test `keyframeControls`:** Project settings opens on 160 × 90 and 30 fps. Choosing 60 doubles the clip's frames, and undo puts back 30.
+
 ## Windows portable build — 2026-10-09, editing proxies (0.6 development)
 
 [GitHub Actions run 37978486157](https://github.com/HNXS/Cutlery/actions/runs/37978486157) on commit `ccf71e3856943dbb7306aa5c56c1540d88a2d480` passed every step on its first attempt.
