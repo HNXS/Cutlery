@@ -86,19 +86,29 @@ Layouts. The panel is wider (400 px, at least 330), so the labels fit.
 Tiles show a glyph over a label, a mint "+" on hover and a mint frame for the current choice; each
 click is one undo step.
 
+## Timeline and top bar — package 3, done
+
+- **Tool row above the timeline:**
+  - Left: undo, redo, split, cut away before the playhead, cut away after it, delete, marker,
+    freeze frame, reverse, mirror and turn by 90°.
+  - Right: add a track, edge snap, fit, and zoom out, slider and zoom in.
+  - Each tool is a glyph with its name in the tooltip. A tool is enabled only when it applies to
+    the selection (split, trim and freeze need the playhead inside the clip); switches such as
+    reverse and mirror turn mint while on.
+- **Track headers:** the name and ⋯ menu, then drawn icons for lock, picture (eye), sound
+  (speaker), solo, magnet and snap. A hidden or muted track shows its eye or speaker crossed out.
+  Tracks are lower (68 px).
+- **Clip colours by kind:** video and pictures teal, sound blue, text red, shapes amber, blur and
+  mosaic areas purple, adjustment layers ochre.
+- **Top bar:** the name, size and frame rate in the middle ("not saved" when there are changes),
+  Save and a filled mint Export button on the right. Undo and redo moved to the tool row.
+
 ## Still to do
 
 - **Asset panel, still to do:**
   - A narrow category column per tab, once the tabs hold more than a screenful.
   - Media tiles with an "Added" badge.
   - Sound effects listed in the Audio tab itself.
-- **Timeline and top bar (package 3):**
-  - A tool row above the timeline:
-    - left: select, undo, redo, split, delete left and right, delete, marker, freeze, reverse,
-      mirror, rotate, crop;
-    - right: record, magnet, snapping, linking, zoom out, zoom slider, zoom in.
-  - Track headers with type icon, lock, eye and speaker icons.
-  - Clip colours by type: video teal, text red, sticker amber, effect purple, filter indigo,
-    adjustment ochre, audio blue.
-  - Player bar with the current time in the accent colour, the total, play, fit, aspect ratio and
-    full screen.
+- Player bar: the current time in mint, the total, play, fit, aspect ratio and full screen in one row.
+- Start screen in the same style.
+- A section look for the remaining controls (perspective, keys, text settings).

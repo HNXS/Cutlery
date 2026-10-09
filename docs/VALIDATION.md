@@ -1,5 +1,14 @@
 # Validation record
 
+## Windows portable build — 2026-10-09, timeline tool row, track header icons, clip colours, top bar (0.6 development)
+
+[GitHub Actions run 37909749864](https://github.com/HNXS/Cutlery/actions/runs/37909749864) on commit `cfb90d968b24c2d533be4d7b5c7bceb34969de60` passed every step on its first attempt.
+
+New coverage:
+
+- **UI test `aiCutoutControls`:** the tool row splits the selected clip at the playhead and cuts away everything after the playhead (the clip becomes 20 frames long). Mirror sets flip. Each is one undo step.
+- **UI test `dragDropAndMagnet`:** works with the lower tracks (68 px) and turns the magnet on with the new track icon.
+
 ## Windows portable build — 2026-10-09, asset panel in icon tabs (0.6 development)
 
 [GitHub Actions run 37906758782](https://github.com/HNXS/Cutlery/actions/runs/37906758782) on commit `07f98ce5f874c2f69098a3344721f3dbf0132b7d` passed every step on its first attempt.

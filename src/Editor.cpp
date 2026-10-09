@@ -390,6 +390,7 @@ QVariantList Editor::clips() const {
                               {"duration", c.duration},
                               {"title", c.assetId.isEmpty() && c.effect.isEmpty()},
                               {"effect", c.effect},
+                              {"graphic", c.graphic},
                               {"audio", c.audioOnly || (a && a->kind == "audio")},
                               {"hasAudio", a && a->hasAudio},
                               {"sourceIn", c.sourceIn.seconds()},

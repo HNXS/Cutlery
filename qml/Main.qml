@@ -1147,60 +1147,70 @@ ApplicationWindow {
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
+        // Top bar: name and save state in the middle, saving and exporting on the right.
         Rectangle {
+            objectName: "topBar"
             Layout.fillWidth: true
-            implicitHeight: 64
-            color: "#171d24"
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 16
-                spacing: 12
+            implicitHeight: 46
+            color: "#12171d"
+            Label {
+                anchors.left: parent.left
+                anchors.leftMargin: 16
+                anchors.verticalCenter: parent.verticalCenter
+                text: "CUTLERY"
+                font.pixelSize: 15
+                font.bold: true
+                font.letterSpacing: 3
+                color: win.mint
+            }
+            ColumnLayout {
+                anchors.centerIn: parent
+                spacing: 0
                 Label {
-                    text: "CUTLERY"
-                    font.pixelSize: 21
+                    objectName: "projectTitle"
+                    Layout.alignment: Qt.AlignHCenter
+                    text: (win.s.dirty ? "• " : "") + win.s.name
                     font.bold: true
-                    font.letterSpacing: 3
-                    color: win.mint
                 }
-                Rectangle {
-                    width: 1
-                    Layout.fillHeight: true
-                    color: "#34404a"
+                Label {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: win.s.width + " × " + win.s.height + "  ·  " + win.s.fps.toFixed(2).replace(/\.00$/, "") + " fps" + (win.s.dirty ? "  ·  not saved" : "")
+                    color: win.muted
+                    font.pixelSize: 10
                 }
-                ColumnLayout {
-                    spacing: 2
-                    Label {
-                        text: win.s.name
-                        font.bold: true
-                    }
-                    Label {
-                        text: win.s.width + " × " + win.s.height + "  /  " + win.s.fps.toFixed(2) + " fps"
-                        color: win.muted
-                        font.pixelSize: 10
-                    }
-                }
-                Item {
-                    Layout.fillWidth: true
-                }
+            }
+            RowLayout {
+                anchors.right: parent.right
+                anchors.rightMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 8
                 Action {
-                    text: "Undo"
-                    enabled: win.s.canUndo
-                    onClicked: editor.undo()
-                }
-                Action {
-                    text: "Redo"
-                    enabled: win.s.canRedo
-                    onClicked: editor.redo()
-                }
-                Action {
-                    text: "Save project"
+                    text: "Save"
+                    implicitHeight: 30
                     onClicked: win.saveProject()
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Save the project (" + win.shortcut("save") + ")"
                 }
-                Action {
-                    text: "Export video ↗"
+                Button {
+                    objectName: "exportButton"
+                    text: "⇪  Export"
+                    implicitHeight: 30
                     enabled: win.s.duration > 0 && !win.s.busy
                     onClicked: exportSettings.open()
-                    palette.buttonText: win.mint
+                    background: Rectangle {
+                        radius: 6
+                        color: parent.down ? "#4fbfa5" : parent.hovered ? "#7be3ca" : win.mint
+                        opacity: parent.enabled ? 1 : .4
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: "#0f2620"
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        leftPadding: 10
+                        rightPadding: 10
+                    }
                 }
             }
         }

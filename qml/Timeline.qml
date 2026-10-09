@@ -9,7 +9,7 @@ FocusScope {
     property real playbackFrame: -1
     property bool snapping: true
     property real snapGuide: -1
-    readonly property int rowHeight: 86
+    readonly property int rowHeight: 68
     readonly property int labelWidth: 174
     property int renameIndex: -1
     property int markerIndex: -1
@@ -89,6 +89,119 @@ FocusScope {
         snapGuide = result !== raw ? result : -1;
         return result;
     }
+    // A tool in the row above the timeline: a glyph, its name in the tooltip, mint while on.
+    component IconTool: AbstractButton {
+        id: iconTool
+        property string glyph
+        property string tip
+        implicitWidth: 30
+        implicitHeight: 28
+        hoverEnabled: true
+        contentItem: Text {
+            text: iconTool.glyph
+            font.pixelSize: 15
+            color: !iconTool.enabled ? "#56616b" : iconTool.checked ? "#64d8bc" : iconTool.hovered ? "#ffffff" : "#c3d0d9"
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+        background: Rectangle {
+            radius: 5
+            color: iconTool.down ? "#36444d" : iconTool.hovered && iconTool.enabled ? "#26313a" : "transparent"
+        }
+        ToolTip.visible: hovered && tip !== ""
+        ToolTip.text: tip
+    }
+    // A switch in a track header, drawn as a small picture: lock, eye, speaker, solo, magnet or
+    // snap. "Off" states of the eye and speaker are crossed out.
+    component TrackIcon: AbstractButton {
+        id: trackIcon
+        property string kind
+        property string tip
+        checkable: true
+        implicitWidth: 22
+        implicitHeight: 22
+        hoverEnabled: true
+        // The eye and speaker show what is on; their switch hides or mutes.
+        readonly property bool inverted: kind === "eye" || kind === "speaker"
+        readonly property bool lit: inverted ? !checked : checked
+        onCheckedChanged: icon.requestPaint()
+        onHoveredChanged: icon.requestPaint()
+        onEnabledChanged: icon.requestPaint()
+        background: Rectangle {
+            radius: 4
+            color: trackIcon.checked && !trackIcon.inverted ? "#24463f" : trackIcon.hovered ? "#2b3742" : "transparent"
+        }
+        contentItem: Canvas {
+            id: icon
+            onPaint: {
+                const c = getContext("2d");
+                c.reset();
+                const w = width, h = height;
+                const on = trackIcon.inverted ? !trackIcon.checked : trackIcon.checked;
+                c.strokeStyle = c.fillStyle = !trackIcon.enabled ? "#56616b" : trackIcon.checked && !trackIcon.inverted ? "#64d8bc" : trackIcon.inverted && trackIcon.checked ? "#ec947e" : "#aebbc6";
+                c.lineWidth = 1.4;
+                c.lineCap = "round";
+                c.beginPath();
+                const k = trackIcon.kind;
+                if (k === "lock") {
+                    c.rect(w * .28, h * .46, w * .44, h * .34);
+                    c.moveTo(w * .36, h * .46);
+                    c.arc(w * .5, h * .4, w * .14, Math.PI, 0);
+                    c.lineTo(w * .64, h * .46);
+                } else if (k === "eye") {
+                    c.moveTo(w * .18, h * .5);
+                    c.quadraticCurveTo(w * .5, h * .18, w * .82, h * .5);
+                    c.quadraticCurveTo(w * .5, h * .82, w * .18, h * .5);
+                    c.moveTo(w * .58, h * .5);
+                    c.arc(w * .5, h * .5, w * .08, 0, 2 * Math.PI);
+                } else if (k === "speaker") {
+                    c.moveTo(w * .2, h * .4);
+                    c.lineTo(w * .32, h * .4);
+                    c.lineTo(w * .48, h * .26);
+                    c.lineTo(w * .48, h * .74);
+                    c.lineTo(w * .32, h * .6);
+                    c.lineTo(w * .2, h * .6);
+                    c.closePath();
+                    if (on) {
+                        c.moveTo(w * .6, h * .38);
+                        c.quadraticCurveTo(w * .7, h * .5, w * .6, h * .62);
+                        c.moveTo(w * .68, h * .3);
+                        c.quadraticCurveTo(w * .84, h * .5, w * .68, h * .7);
+                    }
+                } else if (k === "solo") {
+                    c.moveTo(w * .26, h * .62);
+                    c.arc(w * .5, h * .55, w * .24, Math.PI, 0);
+                    c.rect(w * .22, h * .56, w * .1, h * .2);
+                    c.rect(w * .68, h * .56, w * .1, h * .2);
+                } else if (k === "magnet") {
+                    c.moveTo(w * .3, h * .26);
+                    c.lineTo(w * .3, h * .52);
+                    c.arc(w * .5, h * .52, w * .2, Math.PI, 0, true);
+                    c.lineTo(w * .7, h * .26);
+                    c.moveTo(w * .24, h * .34);
+                    c.lineTo(w * .36, h * .34);
+                    c.moveTo(w * .64, h * .34);
+                    c.lineTo(w * .76, h * .34);
+                } else if (k === "snap") {
+                    c.moveTo(w * .3, h * .24);
+                    c.lineTo(w * .3, h * .76);
+                    c.moveTo(w * .7, h * .24);
+                    c.lineTo(w * .7, h * .76);
+                    c.moveTo(w * .38, h * .5);
+                    c.lineTo(w * .62, h * .5);
+                }
+                c.stroke();
+                if (trackIcon.inverted && trackIcon.checked) {
+                    c.beginPath();
+                    c.moveTo(w * .2, h * .8);
+                    c.lineTo(w * .8, h * .2);
+                    c.stroke();
+                }
+            }
+        }
+        ToolTip.visible: hovered && tip !== ""
+        ToolTip.text: tip
+    }
     component Tool: Button {
         implicitHeight: 29
         padding: 8
@@ -113,67 +226,162 @@ FocusScope {
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
-        RowLayout {
+        // Tools above the timeline: editing on the left, tracks, snapping and zoom on the right.
+        Rectangle {
             Layout.fillWidth: true
-            Layout.margins: 10
-            spacing: 8
-            Label {
-                text: "TIMELINE"
-                font.pixelSize: 10
-                font.letterSpacing: 1.3
-                color: "#8c9aa8"
-            }
-            Tool {
-                text: "+ Track"
-                enabled: root.state.tracks < 64
-                onClicked: editor.addTrack()
-            }
-            CheckBox {
-                text: "Edge snap"
-                checked: root.snapping
-                onToggled: root.snapping = checked
-                ToolTip.visible: hovered
-                ToolTip.text: "Snap to clip edges, the playhead and timeline start"
-            }
-            Label {
-                visible: root.state.analyzing
-                text: "Reading thumbnails and waveforms…"
-                color: "#8c9aa8"
-                font.pixelSize: 10
-            }
-            Item {
-                Layout.fillWidth: true
-            }
-            Tool {
-                text: "Split"
-                enabled: root.state.selectedId.length > 0 && !root.state.selected.locked
-                onClicked: editor.split()
-            }
-            Tool {
-                text: "Delete"
-                enabled: root.state.selectedId.length > 0 && !root.state.selected.locked
-                onClicked: editor.remove(false)
-            }
-            Tool {
-                text: "Fit"
-                onClicked: root.fit()
-                ToolTip.visible: hovered
-                ToolTip.text: "Fit the whole edit in the timeline"
-            }
-            Tool {
-                text: "−"
-                onClicked: root.zoom(1 / 1.4)
-            }
-            Slider {
-                from: Math.log(.25)
-                to: Math.log(240)
-                value: Math.log(root.pixelsPerSecond)
-                Layout.preferredWidth: 110
-                onMoved: root.pixelsPerSecond = Math.exp(value)
-            }
-            Tool {
-                text: "+"
-                onClicked: root.zoom(1.4)
+            implicitHeight: 38
+            color: "#1a2129"
+            RowLayout {
+                objectName: "timelineTools"
+                anchors.fill: parent
+                anchors.leftMargin: 8
+                anchors.rightMargin: 10
+                spacing: 2
+                readonly property var sel: root.state.selected || ({})
+                readonly property bool editable: root.state.selectedId.length > 0 && !sel.locked
+                readonly property bool atPlayhead: editable && root.state.playhead > sel.start && root.state.playhead < sel.start + sel.duration
+                readonly property bool picture: editable && sel.picture === true && sel.audioOnly !== true
+                IconTool {
+                    objectName: "toolUndo"
+                    glyph: "↶"
+                    tip: "Undo"
+                    enabled: root.state.canUndo
+                    onClicked: editor.undo()
+                }
+                IconTool {
+                    objectName: "toolRedo"
+                    glyph: "↷"
+                    tip: "Redo"
+                    enabled: root.state.canRedo
+                    onClicked: editor.redo()
+                }
+                Rectangle {
+                    width: 1
+                    height: 18
+                    color: "#34404b"
+                }
+                IconTool {
+                    objectName: "toolSplit"
+                    glyph: "✂"
+                    tip: "Split at the playhead"
+                    enabled: parent.atPlayhead
+                    onClicked: editor.split()
+                }
+                IconTool {
+                    objectName: "toolTrimStart"
+                    glyph: "⇤"
+                    tip: "Cut away the part before the playhead"
+                    enabled: parent.atPlayhead
+                    onClicked: editor.trimClip(root.state.selectedId, root.state.playhead, parent.sel.start + parent.sel.duration)
+                }
+                IconTool {
+                    objectName: "toolTrimEnd"
+                    glyph: "⇥"
+                    tip: "Cut away the part after the playhead"
+                    enabled: parent.atPlayhead
+                    onClicked: editor.trimClip(root.state.selectedId, parent.sel.start, root.state.playhead)
+                }
+                IconTool {
+                    objectName: "toolDelete"
+                    glyph: "✕"
+                    tip: "Delete the selected clip"
+                    enabled: parent.editable
+                    onClicked: editor.remove(false)
+                }
+                Rectangle {
+                    width: 1
+                    height: 18
+                    color: "#34404b"
+                }
+                IconTool {
+                    objectName: "toolMarker"
+                    glyph: "⚑"
+                    tip: "Add or remove a marker at the playhead"
+                    onClicked: editor.toggleMarker()
+                }
+                IconTool {
+                    objectName: "toolFreeze"
+                    glyph: "❄"
+                    tip: "Freeze frame here (2 s)"
+                    enabled: parent.atPlayhead && parent.sel.video === true
+                    onClicked: editor.freezeFrame(2)
+                }
+                IconTool {
+                    objectName: "toolReverse"
+                    glyph: "⇆"
+                    tip: "Play backwards"
+                    enabled: parent.editable && parent.sel.picture !== false && !!parent.sel.assetId
+                    checkable: true
+                    checked: parent.sel.reverse === true
+                    onClicked: editor.setClip("reverse", checked)
+                }
+                IconTool {
+                    objectName: "toolMirror"
+                    glyph: "⇋"
+                    tip: "Mirror"
+                    enabled: parent.picture
+                    checkable: true
+                    checked: parent.sel.flip === true
+                    onClicked: editor.setClip("flip", checked)
+                }
+                IconTool {
+                    objectName: "toolRotate"
+                    glyph: "↻"
+                    tip: "Turn by 90°"
+                    enabled: parent.picture
+                    onClicked: {
+                        const r = (Number(parent.sel.rotation || 0) + 90 + 180) % 360 - 180;
+                        editor.setClip("rotation", r);
+                    }
+                }
+                Label {
+                    visible: root.state.analyzing
+                    text: "  Reading thumbnails and waveforms…"
+                    color: "#8c9aa8"
+                    font.pixelSize: 10
+                }
+                Item {
+                    Layout.fillWidth: true
+                }
+                IconTool {
+                    objectName: "toolAddTrack"
+                    glyph: "＋"
+                    tip: "Add a track"
+                    enabled: root.state.tracks < 64
+                    onClicked: editor.addTrack()
+                }
+                IconTool {
+                    objectName: "toolSnap"
+                    glyph: "⊟"
+                    tip: "Edge snap: snap to clip edges, the playhead and timeline start"
+                    checkable: true
+                    checked: root.snapping
+                    onClicked: root.snapping = checked
+                }
+                IconTool {
+                    objectName: "toolFit"
+                    glyph: "⤢"
+                    tip: "Fit the whole edit in the timeline"
+                    onClicked: root.fit()
+                }
+                IconTool {
+                    glyph: "−"
+                    tip: "Zoom out"
+                    onClicked: root.zoom(1 / 1.4)
+                }
+                Slider {
+                    objectName: "timelineZoom"
+                    from: Math.log(.25)
+                    to: Math.log(240)
+                    value: Math.log(root.pixelsPerSecond)
+                    Layout.preferredWidth: 110
+                    onMoved: root.pixelsPerSecond = Math.exp(value)
+                }
+                IconTool {
+                    glyph: "+"
+                    tip: "Zoom in"
+                    onClicked: root.zoom(1.4)
+                }
             }
         }
         RowLayout {
@@ -350,87 +558,24 @@ FocusScope {
                                     }
                                 }
                                 Row {
-                                    spacing: 3
+                                    spacing: 2
                                     Repeater {
                                         model: [
-                                            {
-                                                key: "locked",
-                                                label: "L",
-                                                tip: "Lock editing"
-                                            },
-                                            {
-                                                key: "muted",
-                                                label: "M",
-                                                tip: "Mute track audio"
-                                            },
-                                            {
-                                                key: "solo",
-                                                label: "S",
-                                                tip: "Solo track audio"
-                                            },
-                                            {
-                                                key: "hidden",
-                                                label: "V",
-                                                tip: "Hide track picture"
-                                            }
+                                            { key: "locked", kind: "lock", tip: "Lock editing" },
+                                            { key: "hidden", kind: "eye", tip: "Show or hide the track's picture" },
+                                            { key: "muted", kind: "speaker", tip: "Mute or unmute the track's sound" },
+                                            { key: "solo", kind: "solo", tip: "Solo: hear only this track" },
+                                            { key: "magnetic", kind: "magnet", tip: "Magnet: keep clips together from frame 0. Switching it on closes gaps and overlaps; Undo restores them." },
+                                            { key: "snapping", kind: "snap", tip: "Snap edges while dragging on this track (Edge snap must be on)" }
                                         ]
-                                        Button {
-                                            required property var modelData
-                                            width: 33
-                                            height: 24
-                                            text: modelData.label
-                                            checkable: true
-                                            checked: track[modelData.key] || false
-                                            onClicked: editor.setTrack(trackIndex, modelData.key, checked)
-                                            background: Rectangle {
-                                                radius: 4
-                                                color: parent.checked ? "#64d8bc" : "#303d47"
-                                            }
-                                            contentItem: Text {
-                                                text: parent.text
-                                                color: parent.checked ? "#10241f" : "#c3d0d9"
-                                                horizontalAlignment: Text.AlignHCenter
-                                                verticalAlignment: Text.AlignVCenter
-                                                font.pixelSize: 10
-                                                font.bold: true
-                                            }
-                                            ToolTip.visible: hovered
-                                            ToolTip.text: modelData.tip
-                                        }
-                                    }
-                                }
-                                Row {
-                                    spacing: 4
-                                    Repeater {
-                                        model: [
-                                            {
-                                                key: "snapping",
-                                                label: "Snap",
-                                                tip: "Align edges while dragging on this track (Edge snap must be on)"
-                                            },
-                                            {
-                                                key: "magnetic",
-                                                label: "Magnet",
-                                                tip: "Keep clips together from frame 0. Enabling closes existing gaps and overlaps; Undo restores them."
-                                            }
-                                        ]
-                                        Button {
+                                        TrackIcon {
                                             required property var modelData
                                             objectName: modelData.key + "-" + trackIndex
-                                            width: 69
-                                            height: 22
-                                            text: modelData.label
-                                            checkable: true
+                                            kind: modelData.kind
+                                            tip: modelData.tip
                                             checked: track[modelData.key] || false
                                             enabled: modelData.key !== "magnetic" || !track.locked
                                             onClicked: editor.setTrack(trackIndex, modelData.key, checked)
-                                            background: Rectangle {
-                                                radius: 4
-                                                color: parent.checked ? "#356457" : "#303d47"
-                                                border.color: parent.checked ? "#64d8bc" : "#44525c"
-                                            }
-                                            ToolTip.visible: hovered
-                                            ToolTip.text: modelData.tip
                                         }
                                     }
                                 }
@@ -636,7 +781,9 @@ FocusScope {
                                 height: root.rowHeight - 8
                                 radius: 5
                                 clip: true
-                                color: modelData.effect ? "#4d3f66" : modelData.title ? "#59453e" : modelData.audio ? "#28564c" : "#334a65"
+                                // One colour per kind of clip: video and pictures teal, sound blue, text red, shapes
+                                // amber, blur areas purple, adjustment layers ochre.
+                                color: modelData.effect === "adjust" ? "#6e5c2e" : modelData.effect ? "#553a6a" : modelData.graphic ? "#7d5a22" : modelData.title ? "#7a3530" : modelData.audio ? "#1c3f63" : "#0f5650"
                                 opacity: modelData.locked ? .65 : 1
                                 readonly property bool chosen: (root.state.selectedIds || []).indexOf(modelData.id) >= 0
                                 border.width: chosen ? 2 : 1

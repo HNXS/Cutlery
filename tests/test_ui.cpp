@@ -97,7 +97,7 @@ class UiTest : public QObject {
         auto *viewport = findItem(window->contentItem(), "trackViewport");
         QVERIFY(viewport);
         auto trackPoint = [&](int track, int frame) {
-            return viewport->mapToScene(QPointF(double(frame) / 30 * 48, (2 - track) * 86 + 43))
+            return viewport->mapToScene(QPointF(double(frame) / 30 * 48, (2 - track) * 68 + 34))
                 .toPoint();
         };
         auto *library = findItem(window->contentItem(), "mediaLibrary");
@@ -1502,6 +1502,29 @@ class UiTest : public QObject {
                 window->grabWindow().save(qEnvironmentVariable("CUTLERY_UI_SHOTS") + "/left-" + tab + ".png");
             }
         window->setProperty("leftTab", "media");
+        // Tools above the timeline: split and mirror the selected clip, each one undo step.
+        editor.seek(20);
+        auto *split = findItem(window->contentItem(), "toolSplit");
+        QTRY_VERIFY(split && split->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(split, "clicked"));
+        QCOMPARE(editor.project().clips.size(), 2);
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), 1);
+        editor.select(id);
+        auto *trimEnd = findItem(window->contentItem(), "toolTrimEnd");
+        QTRY_VERIFY(trimEnd && trimEnd->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(trimEnd, "clicked"));
+        QCOMPARE(editor.project().clips.first().duration, qint64(20));
+        editor.undo();
+        auto *mirror = findItem(window->contentItem(), "toolMirror");
+        QTRY_VERIFY(mirror && mirror->isEnabled());
+        mirror->setProperty("checked", true);
+        QVERIFY(QMetaObject::invokeMethod(mirror, "clicked"));
+        QVERIFY(editor.project().clips.first().flip);
+        editor.undo();
+        QVERIFY(!editor.project().clips.first().flip);
+        if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS"))
+            window->grabWindow().save(qEnvironmentVariable("CUTLERY_UI_SHOTS") + "/window.png");
         // Pictures of every inspector page, for looking at the layout.
         if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS")) {
             for (const auto &[tab, sub] : std::initializer_list<std::pair<const char *, const char *>>{
