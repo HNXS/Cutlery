@@ -1,5 +1,20 @@
 # Validation record
 
+## Windows portable build — 2026-10-09, free masks, 10-bit and HDR export, less room echo (0.6 development)
+
+[GitHub Actions run 37885377037](https://github.com/HNXS/Cutlery/actions/runs/37885377037) on commit `0c17881c0571da28d5a6ff264b6e3ecfb5c55393` passed every step on its first attempt. The FFmpeg check now also requires `sidechaingate` and `asplit`.
+
+New coverage:
+
+- **Engine test `freeMasksDeepColourAndRoomEcho`:**
+  - **Masks:** points clicked through the editor make a mask from the third one on, and the outline on the canvas matches the clicks. Only the inside is shown; the smooth curve bulges between points; "Invert" hides the inside. Taking points away removes the mask and undo brings it back; broken masks are refused.
+  - **AV1 HDR10:** 10-bit, marked PQ / BT.2020, with the timeline's white at about 203 nits (Y ≈ 572).
+  - **VP9 10-bit:** BT.709, with red at its BT.709 brightness (Y ≈ 250). HDR in MPEG-4 is refused.
+  - **Less room echo:** in an exported WAV the echo after a word is more than 10 dB quieter and the word less than 3 dB quieter.
+- **UI tests:**
+  - **`exportDialog`:** the colour choice only for formats that hold 10 bits.
+  - **`aiCutoutControls`:** three clicks on the preview after "Draw mask" make a mask, and "Remove" clears it.
+
 ## Windows portable build — 2026-10-09, HDR to SDR tone mapping, source colour range and matrix, video noise and flicker reduction (0.6 development)
 
 [GitHub Actions run 37881969826](https://github.com/HNXS/Cutlery/actions/runs/37881969826) on commit `0373610cb5af2ff7ddd3d78a288daec368c136a2` passed every step on its first attempt. The FFmpeg check now also requires `setparams`, `zscale`, `tonemap`, `atadenoise` and `deflicker`.
