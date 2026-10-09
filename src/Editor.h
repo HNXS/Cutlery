@@ -10,6 +10,9 @@
 #include "SoundLibrary.h"
 #include <QJsonArray>
 #include <QObject>
+#include <QPair>
+#include <QPointF>
+#include <QVector>
 #include <QProcess>
 #include <QQuickImageProvider>
 #include <QElapsedTimer>
@@ -410,6 +413,11 @@ class Editor final : public QObject {
     // Sets the selected clip's key colour from its own picture (keys off) at a point of the
     // canvas (fractions of its width and height) at the playhead, and turns the colour key on.
     Q_INVOKABLE void pickKeyColor(double x, double y);
+    // Free mask of the selected picture: a point added where the canvas was clicked (canvas
+    // fractions), the last one taken away, or the whole mask removed.
+    Q_INVOKABLE void addMaskPoint(double x, double y);
+    Q_INVOKABLE void removeMaskPoint();
+    Q_INVOKABLE void clearMask();
     // Finds the beats in the selected clip's sound and puts a timeline marker on every
     // `every`-th one (1, 2 or 4), asynchronously (state "beats": status finding|done|failed,
     // count, bpm). Existing markers stay; one undo step.
@@ -494,6 +502,8 @@ class Editor final : public QObject {
     QVariantMap m_autoColour;
     QVariantMap m_soundMeasure;
     bool m_uncleanExit = false, m_ownsLock = false;
+    // Points of a free mask being drawn on a clip, until there are enough for a mask.
+    QPair<QString, QVector<QPointF>> m_maskDraft;
     QProcess *m_soundProcess = nullptr;
     // Runs FFmpeg on source seconds [from, from + length) of an asset's sound with `filter` and
     // calls `done` with its log, or with an empty one when it fails.

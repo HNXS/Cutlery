@@ -48,6 +48,10 @@ struct Asset {
 };
 // Variable frame rate: the nominal and average rates of a stream differ by more than 1 %.
 bool isVariableRate(double nominal, double average);
+// The points of a free mask ("x,y x,y …"); empty when the text is not 3 to 64 points within the
+// picture.
+QVector<QPointF> maskPoints(const QString &mask);
+QString maskText(const QVector<QPointF> &points);
 // A standard frame rate close to `rate` (23.976 … 60), or `rate` itself when none is near.
 double standardRate(double rate);
 // A property value at a clip-local frame. Smooth keyframes ease in and out towards the next one;
@@ -163,6 +167,8 @@ struct Clip {
     // The level of the background noise noise reduction works against, in dBFS (−80..−20), as
     // measured in a quiet part of the clip; 0 for FFmpeg's default of −50.
     double noiseFloor = 0;
+    // Less room echo (0 off, up to 1): the sound that dies away after each word is turned down.
+    double dereverb = 0;
     // Style effect: "", "shake", "glitch", "vhs", "film", "sketch" (edges), "poster" (fewer
     // colours), "fisheye" (bulge from the centre) or "mirror" (left half reflected), at
     // fxStrength (0..1). Motion blur
@@ -228,6 +234,11 @@ struct Clip {
     double shadow = 0; // soft drop shadow strength, 0..1
     // Soft edge of the overlay's shape, as a fraction of the picture's shorter side (0..0.5).
     double feather = 0;
+    // Free mask: the picture is kept inside (or with maskInvert outside) a shape through these
+    // points, "x,y x,y …" as fractions of the picture (3 to 64 points); maskSmooth draws a smooth
+    // curve through them instead of straight lines.
+    QString mask;
+    bool maskSmooth = false, maskInvert = false;
     // Corner pin (perspective): where the picture's top-left, top-right, bottom-left and
     // bottom-right corners go, as x, y fractions of its own box (0..1); 8 values, or empty for
     // none. The picture is warped into that four-sided shape; outside it is transparent.
@@ -254,6 +265,7 @@ struct Clip {
     bool eyeContact = false;
     bool styled() const {
         return shape != "rect" || border > 0 || shadow > 0 || aiCutout || feather > 0 ||
+               !mask.isEmpty() ||
                !cornerPin.isEmpty() || tiltX != 0 || tiltY != 0;
     }
     double staticValue(const QString &property) const;

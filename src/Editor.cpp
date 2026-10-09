@@ -1,4 +1,5 @@
 #include "Editor.h"
+#include <numbers>
 #include "Interchange.h"
 #include "Captions.h"
 #include "RenderGraph.h"
@@ -519,6 +520,26 @@ qint64 Editor::adjacentCut(bool forward) const {
         }
     return target;
 }
+// A point of the canvas (fractions) in the picture of a clip (fractions of its box), through the
+// clip's position, size and rotation at the playhead; and back.
+static QPointF canvasToPicture(const QVariantMap &b, QPointF canvas, QSizeF frame) {
+    const double w = b["width"].toDouble() * frame.width(), h = b["height"].toDouble() * frame.height();
+    const double cx = (b["x"].toDouble() + b["width"].toDouble() / 2) * frame.width(),
+                 cy = (b["y"].toDouble() + b["height"].toDouble() / 2) * frame.height();
+    const double a = -b["rotation"].toDouble() * std::numbers::pi / 180;
+    const double dx = canvas.x() * frame.width() - cx, dy = canvas.y() * frame.height() - cy;
+    return {(dx * std::cos(a) - dy * std::sin(a)) / std::max(1e-9, w) + 0.5,
+            (dx * std::sin(a) + dy * std::cos(a)) / std::max(1e-9, h) + 0.5};
+}
+static QPointF pictureToCanvas(const QVariantMap &b, QPointF picture, QSizeF frame) {
+    const double w = b["width"].toDouble() * frame.width(), h = b["height"].toDouble() * frame.height();
+    const double cx = (b["x"].toDouble() + b["width"].toDouble() / 2) * frame.width(),
+                 cy = (b["y"].toDouble() + b["height"].toDouble() / 2) * frame.height();
+    const double a = b["rotation"].toDouble() * std::numbers::pi / 180;
+    const double dx = (picture.x() - 0.5) * w, dy = (picture.y() - 0.5) * h;
+    return {(cx + dx * std::cos(a) - dy * std::sin(a)) / frame.width(),
+            (cy + dx * std::sin(a) + dy * std::cos(a)) / frame.height()};
+}
 QVariantMap Editor::state() const {
     QVariantMap selected;
     for (const auto &c : m_project.clips)
@@ -534,6 +555,22 @@ QVariantMap Editor::state() const {
                                       m_project.asset(c.assetId)->kind == "video"},
                         {"variableRate", m_project.asset(c.assetId) &&
                                              m_project.asset(c.assetId)->variableRate},
+                        {"maskOutline",
+                         [&] {
+                             // The mask's points (or those drawn so far) on the canvas.
+                             QVariantList outline;
+                             const auto bounds = clipBounds(c.id);
+                             if (bounds.isEmpty())
+                                 return outline;
+                             const auto points = m_maskDraft.first == c.id ? m_maskDraft.second
+                                                                           : maskPoints(c.mask);
+                             for (const auto &point : points) {
+                                 const auto at = pictureToCanvas(
+                                     bounds, point, QSizeF(m_project.width, m_project.height));
+                                 outline << QVariantMap{{"x", at.x()}, {"y", at.y()}};
+                             }
+                             return outline;
+                         }()},
                         {"hdr", m_project.asset(c.assetId) && !c.audioOnly
                                     ? m_project.asset(c.assetId)->hdr
                                     : QString()},
@@ -651,6 +688,7 @@ QVariantMap Editor::state() const {
             PROP(stabilizeStrength);
             PROP(stabilizeZoom);
             PROP(videoDenoise);
+            PROP(dereverb);
             PROP(deflicker);
             PROP(colorRange);
             PROP(colorMatrix);
@@ -692,6 +730,9 @@ QVariantMap Editor::state() const {
             PROP(muted);
             PROP(hidden);
             PROP(shape);
+            PROP(mask);
+            PROP(maskSmooth);
+            PROP(maskInvert);
             PROP(radius);
             PROP(feather);
             PROP(effectShape);
@@ -2581,6 +2622,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             {"gainY", &Clip::gainY},
             {"stabilizeStrength", &Clip::stabilizeStrength},
             {"videoDenoise", &Clip::videoDenoise},
+            {"dereverb", &Clip::dereverb},
             {"deflicker", &Clip::deflicker},
             {"exposure", &Clip::exposure},
             {"echo", &Clip::echo},
@@ -2734,6 +2776,9 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(aiUpscale, toBool);
         FIELD(eyeContact, toBool);
         FIELD(shape, toString);
+        FIELD(mask, toString);
+        FIELD(maskSmooth, toBool);
+        FIELD(maskInvert, toBool);
         FIELD(borderColor, toString);
         FIELD(keyColor, toString);
 #undef FIELD
@@ -2774,6 +2819,53 @@ QVariantMap Editor::clipBounds(const QString &id) const {
             {"height", size.height() / m_project.height},
             {"rotation", c->valueAt("rotation", local)},
             {"inside", local >= 0 && local < c->duration}};
+}
+void Editor::addMaskPoint(double x, double y) {
+    const auto *c = m_project.clip(m_selected);
+    const auto bounds = c ? clipBounds(c->id) : QVariantMap{};
+    if (!c || bounds.isEmpty() || !c->titleStyle.isEmpty() || !c->effect.isEmpty())
+        return fail("Select a video, picture, title or shape to mask");
+    const QSizeF frame(m_project.width, m_project.height);
+    auto point = canvasToPicture(bounds, {x, y}, frame);
+    point = {std::clamp(point.x(), 0., 1.), std::clamp(point.y(), 0., 1.)};
+    // The points drawn so far are kept beside the mask until there are three of them.
+    auto points = m_maskDraft.first == c->id ? m_maskDraft.second : maskPoints(c->mask);
+    if (points.size() >= 64)
+        return fail("A mask has at most 64 points");
+    points << point;
+    if (points.size() < 3) {
+        m_maskDraft = {c->id, points};
+        emit changed();
+        return;
+    }
+    m_maskDraft = {};
+    setClip("mask", maskText(points));
+}
+void Editor::removeMaskPoint() {
+    const auto *c = m_project.clip(m_selected);
+    if (!c)
+        return;
+    auto points = m_maskDraft.first == c->id ? m_maskDraft.second : maskPoints(c->mask);
+    if (points.isEmpty())
+        return;
+    points.removeLast();
+    if (points.size() < 3) {
+        m_maskDraft = {c->id, points};
+        if (!c->mask.isEmpty())
+            setClip("mask", QString());
+        else
+            emit changed();
+        return;
+    }
+    setClip("mask", maskText(points));
+}
+void Editor::clearMask() {
+    m_maskDraft = {};
+    const auto *c = m_project.clip(m_selected);
+    if (c && !c->mask.isEmpty())
+        setClip("mask", QString());
+    else
+        emit changed();
 }
 void Editor::placeClip(const QString &corner) {
     const auto *c = m_project.clip(m_selected);
@@ -4497,6 +4589,7 @@ void Editor::pasteAttributes(const QString &group) {
         c->gate = from.gate;
         c->denoise = from.denoise;
         c->noiseFloor = from.noiseFloor;
+        c->dereverb = from.dereverb;
         c->deess = from.deess;
         c->reverb = from.reverb;
         c->pitch = from.pitch;
@@ -4509,6 +4602,9 @@ void Editor::pasteAttributes(const QString &group) {
         // and hold the value from the last one inside.
         c->keyframes = from.keyframes;
         c->shape = from.shape;
+        c->mask = from.mask;
+        c->maskSmooth = from.maskSmooth;
+        c->maskInvert = from.maskInvert;
         c->radius = from.radius;
         c->feather = from.feather;
         c->cornerPin = from.cornerPin;
@@ -6120,6 +6216,11 @@ static ExportSettings exportSettings(const QVariantMap &m) {
         throw std::runtime_error("Captions beside the video are SRT or VTT");
     s.channels = m.value("channels", 2).toInt();
     s.sampleRate = m.value("sampleRate", 48000).toInt();
+    s.dynamicRange = m.value("dynamicRange").toString();
+    if (!QStringList{"", "10bit", "pq", "hlg"}.contains(s.dynamicRange))
+        throw std::runtime_error("Unknown colour depth or HDR choice");
+    if (!s.dynamicRange.isEmpty() && !deepColourFormat(s.format))
+        throw std::runtime_error("10-bit and HDR export need HEVC, AV1, VP9 or ProRes 422");
     if (s.channels != 1 && s.channels != 2)
         throw std::runtime_error("Export sound in mono (1) or stereo (2)");
     if (s.sampleRate != 48000 && s.sampleRate != 44100)
@@ -6624,7 +6725,8 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
             throw std::runtime_error("Cannot create render folder");
         RenderOptions options;
         options.highQuality = true;
-        options.pixelFormat = encoder.pixelFormat;
+        options.pixelFormat =
+            encoder.graphPixelFormat.isEmpty() ? encoder.pixelFormat : encoder.graphPixelFormat;
         options.videoTail = encoder.videoTail;
         options.transparent = encoder.alpha;
         options.video = !encoder.audioOnly;

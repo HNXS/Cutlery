@@ -34,6 +34,10 @@ ApplicationWindow {
     property string convertAsset: ""
     // The next click on the viewer picks the selected clip's key colour.
     property bool pickingKey: false
+    // Drawing a free mask: clicks on the canvas add its points.
+    property bool drawingMask: false
+    readonly property string maskClip: s ? s.selectedId : ""
+    onMaskClipChanged: drawingMask = false
     property var exportChoice: ({
             format: "h264",
             quality: "high",
@@ -1755,6 +1759,49 @@ ApplicationWindow {
                                     editor.pickKeyColor(mouse.x / width, mouse.y / height);
                                 }
                             }
+                            // Drawing a free mask: each click adds a point; the outline so far
+                            // is shown over the picture.
+                            MouseArea {
+                                objectName: "maskDrawer"
+                                anchors.fill: parent
+                                z: 11
+                                visible: win.drawingMask && win.s.selectedId.length > 0
+                                cursorShape: Qt.CrossCursor
+                                onClicked: function (mouse) {
+                                    editor.addMaskPoint(mouse.x / width, mouse.y / height);
+                                }
+                            }
+                            Canvas {
+                                id: maskOutline
+                                objectName: "maskOutline"
+                                anchors.fill: parent
+                                z: 11
+                                visible: win.drawingMask && win.s.selectedId.length > 0
+                                readonly property var points: win.selection.maskOutline || []
+                                onPointsChanged: requestPaint()
+                                onVisibleChanged: requestPaint()
+                                onPaint: {
+                                    const ctx = getContext("2d");
+                                    ctx.reset();
+                                    if (points.length === 0)
+                                        return;
+                                    ctx.lineWidth = 2;
+                                    ctx.strokeStyle = "#64d8bc";
+                                    ctx.beginPath();
+                                    ctx.moveTo(points[0].x * width, points[0].y * height);
+                                    for (let i = 1; i < points.length; ++i)
+                                        ctx.lineTo(points[i].x * width, points[i].y * height);
+                                    if (points.length >= 3)
+                                        ctx.closePath();
+                                    ctx.stroke();
+                                    ctx.fillStyle = "#ffd479";
+                                    for (let i = 0; i < points.length; ++i) {
+                                        ctx.beginPath();
+                                        ctx.arc(points[i].x * width, points[i].y * height, i === 0 ? 5 : 3.5, 0, 2 * Math.PI);
+                                        ctx.fill();
+                                    }
+                                }
+                            }
                             // Selected clip on the canvas: drag inside to move, drag a corner to
                             // resize around the centre. One undo step on release; animated
                             // properties get a keyframe at the playhead.
@@ -3008,6 +3055,54 @@ ApplicationWindow {
                                     currentIndex: Math.max(0, shapes.indexOf(win.selection.shape || "rect"))
                                     onActivated: editor.setClip("shape", shapes[currentIndex])
                                 }
+                                // Free mask: points clicked on the preview.
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Action {
+                                        objectName: "drawMask"
+                                        Layout.fillWidth: true
+                                        enabled: win.selection.locked !== true
+                                        text: win.drawingMask ? "Done (" + (win.selection.maskOutline || []).length + " points)" : (win.selection.mask ? "Edit mask" : "Draw mask")
+                                        onClicked: win.drawingMask = !win.drawingMask
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Click around what should stay visible in the preview, point by point (at least 3); everything outside is hidden. Works with the soft edge."
+                                    }
+                                    Action {
+                                        objectName: "removeMaskPoint"
+                                        visible: win.drawingMask
+                                        text: "↶ Point"
+                                        enabled: (win.selection.maskOutline || []).length > 0
+                                        onClicked: editor.removeMaskPoint()
+                                    }
+                                    Action {
+                                        objectName: "clearMask"
+                                        visible: !!win.selection.mask || win.drawingMask
+                                        text: "Remove"
+                                        onClicked: {
+                                            editor.clearMask();
+                                            win.drawingMask = false;
+                                        }
+                                    }
+                                }
+                                RowLayout {
+                                    visible: !!win.selection.mask
+                                    CheckBox {
+                                        objectName: "maskSmooth"
+                                        text: "Smooth curve"
+                                        checked: win.selection.maskSmooth === true
+                                        onToggled: editor.setClip("maskSmooth", checked)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "A rounded curve through the points instead of straight lines"
+                                    }
+                                    CheckBox {
+                                        objectName: "maskInvert"
+                                        text: "Invert"
+                                        checked: win.selection.maskInvert === true
+                                        onToggled: editor.setClip("maskInvert", checked)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Hides what is inside the mask instead"
+                                    }
+                                }
                                 Repeater {
                                     model: [
                                         { key: "radius", name: "Corner radius", lo: 0, hi: .5, step: .01, show: "rounded" },
@@ -3735,6 +3830,7 @@ ApplicationWindow {
                                         { label: "Clear voice", values: { lowCut: 80, denoise: .4, gate: .2, eqMid: 3, deess: .3, compressor: .5 } },
                                         { label: "Warm podcast voice", values: { lowCut: 60, denoise: .3, eqLow: 3, eqMid: 2, eqHigh: -1, deess: .4, compressor: .6 } },
                                         { label: "Noisy room", values: { lowCut: 120, denoise: .8, gate: .5, eqMid: 2, compressor: .4 } },
+                                        { label: "Echoing room", values: { lowCut: 80, denoise: .3, dereverb: .7, eqMid: 2, compressor: .4 } },
                                         { label: "Phone call", values: { lowCut: 300, eqLow: -12, eqMid: 6, eqHigh: -12, compressor: .7 } },
                                         { label: "Music: more punch", values: { eqLow: 4, eqHigh: 3, compressor: .3 } }
                                     ]
@@ -3742,7 +3838,7 @@ ApplicationWindow {
                                     onActivated: index => {
                                         const preset = presets[index].values;
                                         if (preset) {
-                                            const values = { eqLow: 0, eqMid: 0, eqHigh: 0, lowCut: 0, compressor: 0, gate: 0, denoise: 0, deess: 0, reverb: 0, echo: 0 };
+                                            const values = { eqLow: 0, eqMid: 0, eqHigh: 0, lowCut: 0, compressor: 0, gate: 0, denoise: 0, dereverb: 0, deess: 0, reverb: 0, echo: 0 };
                                             for (const k in preset)
                                                 values[k] = preset[k];
                                             editor.setClipValues(values);
@@ -3754,6 +3850,7 @@ ApplicationWindow {
                                     model: [
                                         { key: "lowCut", name: "Low cut (Hz)", lo: 0, hi: 300, step: 5, tip: "Removes rumble, hum and wind below this frequency" },
                                         { key: "denoise", name: "Noise reduction", lo: 0, hi: 1, step: .01, tip: "Reduces steady hiss and hum" },
+                                        { key: "dereverb", name: "Less room echo", lo: 0, hi: 1, step: .01, tip: "Turns down the echo of the room that trails each word (hall, bare rooms)" },
                                         { key: "gate", name: "Noise gate", lo: 0, hi: 1, step: .01, tip: "Lowers the sound between phrases" },
                                         { key: "eqLow", name: "Bass (dB)", lo: -12, hi: 12, step: .5, tip: "Below 100 Hz" },
                                         { key: "eqMid", name: "Presence (dB)", lo: -12, hi: 12, step: .5, tip: "Around 2.5 kHz, where speech is clear" },
@@ -5806,6 +5903,13 @@ ApplicationWindow {
             { id: "small", label: "Small file" }
         ]
         readonly property var heights: [0, 720, 1080, 1440, 2160]
+        readonly property var deepFormats: ["hevc", "av1", "vp9", "prores"]
+        readonly property var dynamicRanges: [
+            { id: "", label: "8-bit (standard)" },
+            { id: "10bit", label: "10-bit (smoother gradients)" },
+            { id: "pq", label: "HDR10 (PQ, BT.2020)" },
+            { id: "hlg", label: "HDR HLG (BT.2020)" }
+        ]
         readonly property var frameRates: [
             { value: 0, label: "Project" },
             { value: 23.976, label: "23.976" }, { value: 24, label: "24" }, { value: 25, label: "25" },
@@ -5850,6 +5954,7 @@ ApplicationWindow {
             exportBitrate.currentIndex = Math.max(0, bitrates.indexOf(settings.bitrate || 0));
             exportCaptions.currentIndex = Math.max(0, captionFiles.findIndex(f => f.id === (settings.captions || "")));
             exportSound.currentIndex = Math.max(0, soundFormats.findIndex(f => f.channels === (settings.channels || 2) && f.sampleRate === (settings.sampleRate || 48000)));
+            exportDynamicRange.currentIndex = Math.max(0, dynamicRanges.findIndex(d => d.id === (settings.dynamicRange || "")));
         }
         function changed() {
             current = {
@@ -5861,9 +5966,10 @@ ApplicationWindow {
                 bitrate: bitrates[exportBitrate.currentIndex],
                 captions: captionFiles[exportCaptions.currentIndex].id,
                 channels: soundFormats[exportSound.currentIndex].channels,
-                sampleRate: soundFormats[exportSound.currentIndex].sampleRate
+                sampleRate: soundFormats[exportSound.currentIndex].sampleRate,
+                dynamicRange: deepFormats.indexOf(formats[exportFormat.currentIndex].id) >= 0 ? dynamicRanges[exportDynamicRange.currentIndex].id : ""
             };
-            const match = presets.findIndex(p => p.settings && p.settings.format === current.format && p.settings.quality === current.quality && p.settings.height === current.height && p.settings.loudness === current.loudness && current.fps === 0 && current.bitrate === 0 && current.channels === 2 && current.sampleRate === 48000 && current.captions === "");
+            const match = presets.findIndex(p => p.settings && p.settings.format === current.format && p.settings.quality === current.quality && p.settings.height === current.height && p.settings.loudness === current.loudness && current.fps === 0 && current.bitrate === 0 && current.channels === 2 && current.sampleRate === 48000 && current.captions === "" && current.dynamicRange === "");
             exportPreset.currentIndex = Math.max(0, match);
         }
         onAboutToShow: apply(win.exportChoice)
@@ -5925,6 +6031,18 @@ ApplicationWindow {
                 model: exportSettings.heights.map(h => h === 0 ? "Project (" + win.s.width + " × " + win.s.height + ")" : h === 2160 ? "4K (2160p)" : h + "p")
                 enabled: !exportSettings.preview.audio
                 onActivated: exportSettings.changed()
+            }
+            Label { text: "Colour" }
+            ComboBox {
+                id: exportDynamicRange
+                objectName: "exportDynamicRange"
+                Layout.fillWidth: true
+                model: exportSettings.dynamicRanges
+                textRole: "label"
+                enabled: exportSettings.deepFormats.indexOf(exportSettings.current.format) >= 0
+                onActivated: exportSettings.changed()
+                ToolTip.visible: hovered
+                ToolTip.text: "10-bit avoids banding in skies and gradients. HDR marks the video for HDR screens; the picture keeps its look with white at 203 nits. Needs HEVC, AV1, VP9 or ProRes 422."
             }
             Label { text: "Frame rate" }
             ComboBox {

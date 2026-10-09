@@ -92,7 +92,7 @@ const QVector<QPair<QString, double Clip::*>> &lookFields() {
         {"eqMid", &Clip::eqMid},             {"eqHigh", &Clip::eqHigh},
         {"lowCut", &Clip::lowCut},           {"compressor", &Clip::compressor},
         {"gate", &Clip::gate},               {"denoise", &Clip::denoise},
-        {"noiseFloor", &Clip::noiseFloor},
+        {"noiseFloor", &Clip::noiseFloor},   {"dereverb", &Clip::dereverb},
         {"videoDenoise", &Clip::videoDenoise}, {"deflicker", &Clip::deflicker},
         {"deess", &Clip::deess},             {"motionBlur", &Clip::motionBlur},
         {"reverb", &Clip::reverb},           {"echo", &Clip::echo},
@@ -204,6 +204,27 @@ const QStringList &graphicKinds() {
                                    "info",      "cursor",  "click", "lightbulb", "badge",
                                    "play",      "bell",    "pin",   "clock"};
     return kinds;
+}
+QVector<QPointF> maskPoints(const QString &mask) {
+    QVector<QPointF> points;
+    const auto pairs = mask.split(' ', Qt::SkipEmptyParts);
+    if (pairs.size() < 3 || pairs.size() > 64)
+        return {};
+    for (const auto &pair : pairs) {
+        const auto xy = pair.split(',');
+        bool okX = false, okY = false;
+        const double x = xy.value(0).toDouble(&okX), y = xy.value(1).toDouble(&okY);
+        if (xy.size() != 2 || !okX || !okY || !(x >= 0 && x <= 1 && y >= 0 && y <= 1))
+            return {};
+        points << QPointF(x, y);
+    }
+    return points;
+}
+QString maskText(const QVector<QPointF> &points) {
+    QStringList pairs;
+    for (const auto &p : points)
+        pairs << QString::number(p.x(), 'f', 4) + "," + QString::number(p.y(), 'f', 4);
+    return pairs.join(' ');
 }
 QSizeF Project::pictureSize(const Clip &c, double boxWidth, double boxHeight) const {
     if (!c.effect.isEmpty())
@@ -468,6 +489,13 @@ QJsonObject Project::json(const QString &base) const {
         o["radius"] = c.radius;
         if (c.feather > 0)
             o["feather"] = c.feather;
+        if (!c.mask.isEmpty()) {
+            o["mask"] = c.mask;
+            if (c.maskSmooth)
+                o["maskSmooth"] = true;
+            if (c.maskInvert)
+                o["maskInvert"] = true;
+        }
         if (c.tiltX != 0)
             o["tiltX"] = c.tiltX;
         if (c.tiltY != 0)
@@ -719,6 +747,9 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.shape = j["shape"].toString("rect");
         c.radius = j["radius"].toDouble(0.12);
         c.feather = j["feather"].toDouble(0);
+        c.mask = j["mask"].toString();
+        c.maskSmooth = j["maskSmooth"].toBool(false);
+        c.maskInvert = j["maskInvert"].toBool(false);
         c.tiltX = j["tiltX"].toDouble(0);
         c.tiltY = j["tiltY"].toDouble(0);
         for (const auto &v : j["cornerPin"].toArray())
@@ -848,6 +879,7 @@ void Project::validate() const {
         require(QStringList{"rect", "rounded", "circle"}.contains(c.shape) &&
                     bounded(c.radius, 0, 0.5) && bounded(c.border, 0, 0.1) &&
                     bounded(c.feather, 0, 0.5) &&
+                    (c.mask.isEmpty() || !maskPoints(c.mask).isEmpty()) &&
                     bounded(c.tiltX, -70, 70) && bounded(c.tiltY, -70, 70) &&
                     (c.cornerPin.isEmpty() ||
                      (c.cornerPin.size() == 8 &&
@@ -914,6 +946,7 @@ void Project::validate() const {
                     bounded(c.eqHigh, -12, 12) && bounded(c.lowCut, 0, 300) &&
                     bounded(c.compressor, 0, 1) && bounded(c.gate, 0, 1) &&
                     bounded(c.denoise, 0, 1) && bounded(c.deess, 0, 1) &&
+                    bounded(c.dereverb, 0, 1) &&
                     (c.noiseFloor == 0 || bounded(c.noiseFloor, -80, -20)) &&
                     bounded(c.pitch, -12, 12),
                 "Invalid sound setting");
