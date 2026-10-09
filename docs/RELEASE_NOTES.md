@@ -4,6 +4,7 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Inspector in tabs:** the settings of the selected clip are sorted into tabs and sub-tabs (e.g. Video › Basic, Cutout, Mask, Canvas, Enhance; Audio; Speed; Animation; Adjust › HSL, Curves, Wheels, LUT; Effects; More) instead of one long list; with nothing selected it shows the project's details.
 - **Free masks:** click points around what should stay visible (straight or smooth, also inverted) to cut a picture to any shape.
 - **10-bit and HDR export:** HEVC, AV1, VP9 and ProRes can be exported in 10 bits, as HDR10 or as HLG.
 - **Less room echo:** turns down the echo of bare rooms and halls after each word (sound tools, "Echoing room" preset).

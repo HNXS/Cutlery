@@ -1,5 +1,18 @@
 # Validation record
 
+## Windows portable build — 2026-10-09, inspector in tabs and sub-tabs (0.6 development)
+
+[GitHub Actions run 37901996536](https://github.com/HNXS/Cutlery/actions/runs/37901996536) on commit `24203962a4b3ce270b99ca6669879fcd5d80e532` passed every step on its first attempt.
+
+New coverage:
+
+- **UI test `aiCutoutControls`:**
+  - A video without sound gets the tabs Video, Speed, Animation, Adjust, Effects and More.
+  - Clicking "Speed" shows the freeze controls.
+  - The sub-tab chosen under Video is kept after visiting another tab.
+  - With nothing selected, the project details are shown and there are no tabs.
+- **Every other UI test:** each one opens the page its controls are on, so all of them work through the new tabs.
+
 ## Windows portable build — 2026-10-09, free masks, 10-bit and HDR export, less room echo (0.6 development)
 
 [GitHub Actions run 37885377037](https://github.com/HNXS/Cutlery/actions/runs/37885377037) on commit `0c17881c0571da28d5a6ff264b6e3ecfb5c55393` passed every step on its first attempt. The FFmpeg check now also requires `sidechaingate` and `asplit`.

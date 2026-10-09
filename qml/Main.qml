@@ -38,6 +38,85 @@ ApplicationWindow {
     property bool drawingMask: false
     readonly property string maskClip: s ? s.selectedId : ""
     onMaskClipChanged: drawingMask = false
+    // Inspector pages: tabs across the top and sub-tabs below them, chosen by what is selected.
+    // The choice is kept per kind of selection, so switching between clips keeps the page.
+    readonly property string selectionKind: !s || !s.selectedId ? ""
+        : selection.effect === "adjust" ? "adjust"
+        : (selection.effect || "") !== "" ? "area"
+        : (selection.graphic || "") !== "" ? "shape"
+        : (selection.assetId || "") === "" ? "text"
+        : selection.picture !== true ? "audio" : "media"
+    readonly property var inspectorTabs: {
+        const audio = { id: "audio", label: "Audio", subs: [{ id: "basic", label: "Basic" }, { id: "voice", label: "Voice" }, { id: "cleanup", label: "Clean-up" }] };
+        const adjust = { id: "adjust", label: "Adjust", subs: [{ id: "basic", label: "Basic" }, { id: "hsl", label: "HSL" }, { id: "curves", label: "Curves" }, { id: "wheels", label: "Wheels" }, { id: "lut", label: "LUT" }] };
+        const more = { id: "more", label: "More", subs: [] };
+        const basic = { id: "basic", label: "Basic", subs: [] };
+        const animation = { id: "animation", label: "Animation", subs: [] };
+        switch (selectionKind) {
+        case "media":
+            return [{ id: "video", label: "Video", subs: [{ id: "basic", label: "Basic" }, { id: "cutout", label: "Cutout" }, { id: "mask", label: "Mask" }, { id: "canvas", label: "Canvas" }, { id: "enhance", label: "Enhance" }] }]
+                .concat(selection.hasAudio === true ? [audio] : [])
+                .concat([{ id: "speed", label: "Speed", subs: [] }, animation, adjust, { id: "effects", label: "Effects", subs: [] }, more]);
+        case "audio":
+            return [{ id: "basic", label: "Basic", subs: [] }, { id: "voice", label: "Voice", subs: [] }, { id: "cleanup", label: "Clean-up", subs: [] }, { id: "speed", label: "Speed", subs: [] }, more];
+        case "text":
+            return [{ id: "text", label: "Text", subs: [] }, basic, animation, more];
+        case "shape":
+            return [{ id: "shape", label: "Shape", subs: [] }, basic, animation, more];
+        case "area":
+            return [{ id: "effect", label: "Effect", subs: [] }, basic, more];
+        case "adjust":
+            return [adjust, basic, more];
+        }
+        return [];
+    }
+    property var inspectorChoice: ({})
+    readonly property string inspectorTab: {
+        const chosen = inspectorChoice[selectionKind] || "";
+        return inspectorTabs.some(t => t.id === chosen) ? chosen : (inspectorTabs.length ? inspectorTabs[0].id : "");
+    }
+    readonly property var inspectorSubs: (inspectorTabs.find(t => t.id === inspectorTab) || { subs: [] }).subs
+    readonly property string inspectorSub: {
+        const chosen = inspectorChoice[selectionKind + "/" + inspectorTab] || "";
+        return inspectorSubs.some(t => t.id === chosen) ? chosen : (inspectorSubs.length ? inspectorSubs[0].id : "");
+    }
+    function chooseInspector(tab, sub) {
+        const choice = Object.assign({}, inspectorChoice);
+        if (tab)
+            choice[selectionKind] = tab;
+        if (sub)
+            choice[selectionKind + "/" + (tab || inspectorTab)] = sub;
+        inspectorChoice = choice;
+    }
+    function onTab(tab) {
+        return inspectorTab === tab;
+    }
+    // A page of the picture (Video tab, or Basic for titles, shapes and areas).
+    function picPage(sub) {
+        return (inspectorTab === "video" && inspectorSub === sub) || (sub === "basic" && inspectorTab === "basic" && selectionKind !== "audio");
+    }
+    // A page of the sound (its own tabs for sound clips, the Audio tab's sub-tabs otherwise).
+    function audioPage(sub) {
+        return (selectionKind === "audio" && inspectorTab === sub) || (inspectorTab === "audio" && inspectorSub === sub);
+    }
+    function adjustPage(sub) {
+        return inspectorTab === "adjust" && inspectorSub === sub;
+    }
+    // Start, length and speed: the Speed tab, or Basic where there is none.
+    readonly property bool timingPage: onTab("speed") || (onTab("basic") && ["text", "shape", "area", "adjust"].indexOf(selectionKind) >= 0)
+    // Where each animatable or plain value of the clip is set.
+    function propertyPage(key) {
+        if (["volume", "pan", "fadeIn", "fadeOut"].indexOf(key) >= 0)
+            return audioPage("basic");
+        if (["exposure", "brightness", "contrast", "saturation"].indexOf(key) >= 0)
+            return adjustPage("basic");
+        if (key === "blur")
+            return onTab("effects");
+        return picPage("basic");
+    }
+    function soundPage(key) {
+        return audioPage(["reverb", "echo", "pitch"].indexOf(key) >= 0 ? "voice" : "cleanup");
+    }
     property var exportChoice: ({
             format: "h264",
             quality: "high",
@@ -278,7 +357,8 @@ ApplicationWindow {
         readonly property bool working: info.status === "running" || info.status === "queued"
         readonly property string missing: (win.s.aiMissing || {})[task] || ""
         Layout.fillWidth: true
-        visible: win.selection[infoKey] !== undefined
+        property bool shown: true
+        visible: shown && win.selection[infoKey] !== undefined
         spacing: 4
         CheckBox {
             objectName: ai.flag
@@ -2001,32 +2081,165 @@ ApplicationWindow {
                 }
             }
             Rectangle {
-                SplitView.preferredWidth: 272
-                SplitView.minimumWidth: 235
+                objectName: "inspector"
+                SplitView.preferredWidth: 330
+                SplitView.minimumWidth: 270
                 color: "#171d24"
-                ScrollView {
+                ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 16
+                    spacing: 0
+                    // Tabs for what is selected; sub-tabs below for the bigger ones.
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 34
+                        color: "#1c232b"
+                        visible: win.inspectorTabs.length > 0
+                        ListView {
+                            id: inspectorTabRow
+                            objectName: "inspectorTabs"
+                            anchors.fill: parent
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 8
+                            orientation: ListView.Horizontal
+                            clip: true
+                            spacing: 2
+                            model: win.inspectorTabs
+                            delegate: AbstractButton {
+                                required property var modelData
+                                objectName: "inspectorTab-" + modelData.id
+                                height: inspectorTabRow.height
+                                implicitWidth: tabLabel.implicitWidth + 16
+                                readonly property bool active: win.inspectorTab === modelData.id
+                                onClicked: win.chooseInspector(modelData.id, "")
+                                contentItem: Label {
+                                    id: tabLabel
+                                    text: parent.modelData.label
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    font.pixelSize: 12
+                                    font.bold: parent.active
+                                    color: parent.active ? win.mint : (parent.hovered ? "#e7edf2" : win.muted)
+                                }
+                                background: Rectangle {
+                                    color: "transparent"
+                                    Rectangle {
+                                        anchors.bottom: parent.bottom
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        width: parent.width - 12
+                                        height: 2
+                                        radius: 1
+                                        color: win.mint
+                                        visible: parent.parent.active
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 12
+                        Layout.rightMargin: 12
+                        Layout.topMargin: 8
+                        implicitHeight: 26
+                        radius: 5
+                        color: "#11161c"
+                        visible: win.inspectorSubs.length > 0
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 2
+                            spacing: 2
+                            Repeater {
+                                model: win.inspectorSubs
+                                AbstractButton {
+                                    required property var modelData
+                                    objectName: "inspectorSub-" + modelData.id
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    readonly property bool active: win.inspectorSub === modelData.id
+                                    onClicked: win.chooseInspector(win.inspectorTab, modelData.id)
+                                    contentItem: Label {
+                                        text: parent.modelData.label
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        font.pixelSize: 11
+                                        elide: Text.ElideRight
+                                        color: parent.active ? "#e7edf2" : win.muted
+                                    }
+                                    background: Rectangle {
+                                        radius: 4
+                                        color: parent.active ? "#2f3a45" : "transparent"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.margins: 14
                     clip: true
                     contentWidth: availableWidth
                     ColumnLayout {
                         width: parent.width
                         spacing: 12
-                        Caption {
-                            text: "CLIP INSPECTOR"
-                        }
                         Label {
-                            text: win.selection.name || "Select a clip"
-                            font.pixelSize: 17
+                            objectName: "inspectorTitle"
+                            visible: win.s.selectedId.length > 0
+                            text: win.selection.name || ""
+                            font.pixelSize: 14
                             font.bold: true
                             Layout.fillWidth: true
-                            wrapMode: Text.Wrap
+                            elide: Text.ElideRight
                         }
-                        Label {
+                        // Nothing selected: the project's details.
+                        ColumnLayout {
+                            objectName: "projectDetails"
                             visible: !win.s.selectedId.length
-                            text: "Select a timeline clip to trim,\ntransform or adjust its sound."
-                            color: win.muted
-                            lineHeight: 1.5
+                            Layout.fillWidth: true
+                            spacing: 8
+                            Caption {
+                                text: "PROJECT"
+                            }
+                            Repeater {
+                                model: [
+                                    { key: "Name", value: win.s.name || "Untitled" },
+                                    { key: "Saved", value: win.s.path || "Not saved yet" },
+                                    { key: "Canvas", value: win.s.width + " × " + win.s.height },
+                                    { key: "Frame rate", value: Number(win.s.fps).toFixed(2).replace(/\.00$/, "") + " fps" },
+                                    { key: "Length", value: win.clock(win.s.duration || 0) }
+                                ]
+                                RowLayout {
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    Label {
+                                        text: modelData.key
+                                        color: win.muted
+                                        Layout.preferredWidth: 80
+                                        Layout.alignment: Qt.AlignTop
+                                    }
+                                    Label {
+                                        text: modelData.value
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WrapAnywhere
+                                    }
+                                }
+                            }
+                            Rule {}
+                            Label {
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                text: "Select a clip on the timeline to edit it: its settings appear here in tabs."
+                                color: win.muted
+                                font.pixelSize: 11
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Action {
+                                    objectName: "projectPreferences"
+                                    text: "Preferences…"
+                                    onClicked: preferencesDialog.open()
+                                }
+                            }
                         }
                         Label {
                             visible: win.selection.locked || false
@@ -2041,6 +2254,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             spacing: 12
                             Label {
+                                visible: win.timingPage
                                 text: "Timing • values in frames"
                                 color: win.muted
                                 font.pixelSize: 10
@@ -2065,6 +2279,7 @@ ApplicationWindow {
                                     }
                                 ]
                                 RowLayout {
+                                    visible: win.timingPage
                                     required property var modelData
                                     Layout.fillWidth: true
                                     Label {
@@ -2085,7 +2300,7 @@ ApplicationWindow {
                             }
                             RowLayout {
                                 Layout.fillWidth: true
-                                visible: win.selection.video === true && (win.selection.speed ?? 1) < 1
+                                visible: (win.selection.video === true && (win.selection.speed ?? 1) < 1) && (win.onTab("speed"))
                                 Label {
                                     text: "Slow motion"
                                     color: win.muted
@@ -2106,7 +2321,7 @@ ApplicationWindow {
                             ComboBox {
                                 objectName: "speedRamp"
                                 Layout.fillWidth: true
-                                visible: win.selection.video === true || (!!win.selection.assetId && win.selection.picture !== true)
+                                visible: (win.selection.video === true || (!!win.selection.assetId && win.selection.picture !== true)) && (win.onTab("speed"))
                                 enabled: win.selection.locked !== true
                                 readonly property var presets: ["montage", "hero", "bullet", "jumpCut", "flashIn", "flashOut"]
                                 model: ["Speed ramp…", "Montage (fast, slow, fast)", "Hero (slow moment)", "Bullet (long slow moment)", "Jump cut (slow, then fast)", "Flash in (fast, then normal)", "Flash out (speeds up)"]
@@ -2119,16 +2334,17 @@ ApplicationWindow {
                                 ToolTip.text: "Cuts the clip (and its sound) into parts that play faster and slower; the parts stay editable"
                             }
                             ComboBox {
+                                visible: win.onTab("more")
                                 Layout.fillWidth: true
                                 model: editor.trackList
                                 textRole: "name"
                                 currentIndex: win.selection.track ?? 0
                                 onActivated: editor.setClip("track", currentIndex)
                             }
-                            Rule {}
+                            Rule { visible: win.timingPage }
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                visible: win.selection.audioOnly !== true
+                                visible: (win.selection.audioOnly !== true) && (win.onTab("animation"))
                                 Caption {
                                     text: "TRANSITION FROM PREVIOUS CLIP"
                                 }
@@ -2190,7 +2406,7 @@ ApplicationWindow {
                             // Adjustment layer: its look (below) applies to every track under it.
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                visible: win.selection.effect === "adjust"
+                                visible: (win.selection.effect === "adjust") && (win.onTab("basic"))
                                 spacing: 4
                                 Caption {
                                     text: "ADJUSTMENT LAYER"
@@ -2227,7 +2443,7 @@ ApplicationWindow {
                             }
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                visible: (win.selection.effect || "") !== "" && win.selection.effect !== "adjust"
+                                visible: ((win.selection.effect || "") !== "" && win.selection.effect !== "adjust") && (win.onTab("effect"))
                                 spacing: 4
                                 Caption {
                                     text: "BLUR / MOSAIC AREA"
@@ -2327,7 +2543,7 @@ ApplicationWindow {
                             ColumnLayout {
                                 objectName: "graphicSection"
                                 Layout.fillWidth: true
-                                visible: (win.selection.graphic || "") !== ""
+                                visible: ((win.selection.graphic || "") !== "") && (win.onTab("shape"))
                                 spacing: 6
                                 Caption { text: "SHAPE" }
                                 ComboBox {
@@ -2407,7 +2623,7 @@ ApplicationWindow {
                             }
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                visible: win.selection.assetId === "" && (win.selection.effect || "") === "" && ["arrow", "line"].indexOf(win.selection.graphic || "") < 0
+                                visible: (win.selection.assetId === "" && (win.selection.effect || "") === "" && ["arrow", "line"].indexOf(win.selection.graphic || "") < 0) && (win.onTab("text") || win.onTab("shape"))
                                 Caption {
                                     text: (win.selection.graphic || "") !== "" ? "TEXT IN SHAPE" : "TITLE / CAPTION"
                                 }
@@ -2842,12 +3058,14 @@ ApplicationWindow {
                             // Presenter overlays: corner placement, shape, border, shadow, green screen.
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                visible: win.selection.audioOnly !== true && (win.selection.effect || "") === "" && editor.clipBounds(win.s.selectedId).width !== undefined
+                                visible: (win.selection.audioOnly !== true && (win.selection.effect || "") === "" && editor.clipBounds(win.s.selectedId).width !== undefined) && (win.picPage("basic") || win.picPage("mask") || win.picPage("cutout") || win.picPage("canvas"))
                                 spacing: 6
                                 Caption {
+                                    visible: win.picPage("basic")
                                     text: "PRESENTER OVERLAY"
                                 }
                                 RowLayout {
+                                    visible: win.picPage("basic")
                                     Layout.fillWidth: true
                                     Repeater {
                                         model: [
@@ -2874,7 +3092,7 @@ ApplicationWindow {
                                 CheckBox {
                                     id: pinToggle
                                     objectName: "cornerPin"
-                                    visible: !!win.selection.assetId && win.selection.picture === true
+                                    visible: (!!win.selection.assetId && win.selection.picture === true) && (win.picPage("basic"))
                                     text: "Perspective (move the corners)"
                                     checked: (win.selection.cornerPin || []).length === 8
                                     enabled: win.selection.locked !== true
@@ -2884,7 +3102,7 @@ ApplicationWindow {
                                 }
                                 ColumnLayout {
                                     Layout.fillWidth: true
-                                    visible: pinToggle.visible && pinToggle.checked
+                                    visible: (pinToggle.visible && pinToggle.checked) && (win.picPage("basic"))
                                     spacing: 0
                                     Repeater {
                                         model: [
@@ -2946,7 +3164,7 @@ ApplicationWindow {
                                         id: tiltRow
                                         required property var modelData
                                         Layout.fillWidth: true
-                                        visible: !!win.selection.assetId && win.selection.picture === true
+                                        visible: (!!win.selection.assetId && win.selection.picture === true) && (win.picPage("basic"))
                                         Label {
                                             text: tiltRow.modelData.name
                                             color: (win.selection[tiltRow.modelData.key] || 0) !== 0 ? win.mint : win.muted
@@ -2978,7 +3196,7 @@ ApplicationWindow {
                                 // e.g. a portrait video in a landscape project.
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    visible: !!win.selection.assetId && win.selection.picture === true
+                                    visible: (!!win.selection.assetId && win.selection.picture === true) && (win.picPage("canvas"))
                                     Label {
                                         text: "Background"
                                         color: win.selection.canvasFill ? win.mint : win.muted
@@ -3012,6 +3230,7 @@ ApplicationWindow {
                                 // Anchor: the point that zoom and rotation keep in place, e.g. a corner for
                                 // a zoom into that corner.
                                 RowLayout {
+                                    visible: win.picPage("basic")
                                     Layout.fillWidth: true
                                     Label {
                                         text: "Anchor"
@@ -3047,6 +3266,7 @@ ApplicationWindow {
                                     }
                                 }
                                 ComboBox {
+                                    visible: win.picPage("mask")
                                     id: overlayShape
                                     objectName: "overlayShape"
                                     Layout.fillWidth: true
@@ -3057,6 +3277,7 @@ ApplicationWindow {
                                 }
                                 // Free mask: points clicked on the preview.
                                 RowLayout {
+                                    visible: win.picPage("mask")
                                     Layout.fillWidth: true
                                     Action {
                                         objectName: "drawMask"
@@ -3085,7 +3306,7 @@ ApplicationWindow {
                                     }
                                 }
                                 RowLayout {
-                                    visible: !!win.selection.mask
+                                    visible: (!!win.selection.mask) && (win.picPage("mask"))
                                     CheckBox {
                                         objectName: "maskSmooth"
                                         text: "Smooth curve"
@@ -3114,7 +3335,7 @@ ApplicationWindow {
                                         required property var modelData
                                         Layout.fillWidth: true
                                         spacing: 0
-                                        visible: modelData.show === "" || win.selection.shape === modelData.show
+                                        visible: (modelData.show === "" || win.selection.shape === modelData.show) && (win.picPage("mask"))
                                         RowLayout {
                                             Layout.fillWidth: true
                                             Label {
@@ -3142,7 +3363,7 @@ ApplicationWindow {
                                     }
                                 }
                                 RowLayout {
-                                    visible: (win.selection.border || 0) > 0
+                                    visible: ((win.selection.border || 0) > 0) && (win.picPage("mask"))
                                     Label {
                                         text: "Border colour"
                                         color: win.muted
@@ -3166,6 +3387,7 @@ ApplicationWindow {
                                     }
                                 }
                                 AiOption {
+                                    shown: win.picPage("cutout")
                                     task: "matte"
                                     flag: "aiCutout"
                                     infoKey: "cutout"
@@ -3176,6 +3398,7 @@ ApplicationWindow {
                                     runName: "cutoutAnalyze"
                                 }
                                 CheckBox {
+                                    visible: win.picPage("cutout")
                                     objectName: "chromaKey"
                                     text: "Remove green/blue screen"
                                     checked: win.selection.chromaKey || false
@@ -3183,7 +3406,7 @@ ApplicationWindow {
                                 }
                                 ColumnLayout {
                                     Layout.fillWidth: true
-                                    visible: win.selection.chromaKey === true
+                                    visible: (win.selection.chromaKey === true) && (win.picPage("cutout"))
                                     spacing: 0
                                     RowLayout {
                                         Label {
@@ -3254,6 +3477,7 @@ ApplicationWindow {
                                     }
                                 }
                                 RowLayout {
+                                    visible: win.picPage("cutout")
                                     Layout.fillWidth: true
                                     Label {
                                         text: "Remove by brightness"
@@ -3277,6 +3501,7 @@ ApplicationWindow {
                                         { key: "lumaSoftness", name: "Brightness edge softness", lo: 0, hi: .5 }
                                     ]
                                     ColumnLayout {
+                                        visible: win.picPage("cutout")
                                         required property var modelData
                                         Layout.fillWidth: true
                                         spacing: 0
@@ -3299,6 +3524,7 @@ ApplicationWindow {
                                     }
                                 }
                                 RowLayout {
+                                    visible: win.picPage("basic")
                                     Layout.fillWidth: true
                                     Label {
                                         text: "Blend mode"
@@ -3319,12 +3545,13 @@ ApplicationWindow {
                                 Rule {}
                             }
                             Caption {
+                                visible: win.onTab("more")
                                 text: "PICTURE & SOUND"
                             }
                             Action {
                                 objectName: "removePauses"
                                 Layout.fillWidth: true
-                                visible: win.selection.hasAudio === true && win.selection.reverse !== true
+                                visible: (win.selection.hasAudio === true && win.selection.reverse !== true) && (win.onTab("more"))
                                 enabled: win.selection.locked !== true
                                 text: "Remove pauses…"
                                 onClicked: pauseDialog.open()
@@ -3341,7 +3568,7 @@ ApplicationWindow {
                                 // The words as text, so the choice resets only when they change.
                                 readonly property string wordsKey: (t.clipId || "") + ":" + words.map(w => w.start + w.text).join("|")
                                 property var chosen: []
-                                visible: win.selection.hasAudio === true && win.selection.reverse !== true
+                                visible: (win.selection.hasAudio === true && win.selection.reverse !== true) && (win.onTab("more"))
                                 onWordsKeyChanged: chosen = []
                                 function toggle(i) {
                                     const next = chosen.slice();
@@ -3449,7 +3676,7 @@ ApplicationWindow {
                             // Beat markers for cutting to music; clips snap to them.
                             RowLayout {
                                 Layout.fillWidth: true
-                                visible: win.selection.hasAudio === true && win.selection.reverse !== true
+                                visible: (win.selection.hasAudio === true && win.selection.reverse !== true) && (win.onTab("more"))
                                 Action {
                                     objectName: "markBeats"
                                     Layout.fillWidth: true
@@ -3470,7 +3697,7 @@ ApplicationWindow {
                             // Cutting on the markers (beats or your own).
                             RowLayout {
                                 Layout.fillWidth: true
-                                visible: (win.s.markers || []).length > 0
+                                visible: ((win.s.markers || []).length > 0) && (win.onTab("more"))
                                 Action {
                                     objectName: "splitAtMarkers"
                                     Layout.fillWidth: true
@@ -3494,7 +3721,7 @@ ApplicationWindow {
                             ColumnLayout {
                                 objectName: "variableRate"
                                 Layout.fillWidth: true
-                                visible: win.selection.variableRate === true
+                                visible: (win.selection.variableRate === true) && (win.onTab("speed"))
                                 Label {
                                     Layout.fillWidth: true
                                     wrapMode: Text.Wrap
@@ -3515,7 +3742,7 @@ ApplicationWindow {
                             }
                             RowLayout {
                                 Layout.fillWidth: true
-                                visible: win.selection.video === true
+                                visible: (win.selection.video === true) && (win.onTab("speed"))
                                 Action {
                                     objectName: "freezeFrame"
                                     Layout.fillWidth: true
@@ -3542,7 +3769,7 @@ ApplicationWindow {
                             Action {
                                 objectName: "splitScenes"
                                 Layout.fillWidth: true
-                                visible: win.selection.video === true && win.selection.reverse !== true
+                                visible: (win.selection.video === true && win.selection.reverse !== true) && (win.onTab("more"))
                                 readonly property bool finding: (win.s.scenes || {}).status === "finding"
                                 enabled: win.selection.locked !== true && !finding
                                 text: finding ? "Finding scene changes…" : "Split at scene changes"
@@ -3551,6 +3778,7 @@ ApplicationWindow {
                                 ToolTip.text: "Cuts the clip into its shots, e.g. a long recording or a downloaded video. Undo restores it."
                             }
                             AiOption {
+                                shown: win.picPage("enhance")
                                 task: "eyecontact"
                                 flag: "eyeContact"
                                 infoKey: "eyeContactInfo"
@@ -3559,6 +3787,7 @@ ApplicationWindow {
                                 doneText: "Eye contact ready ✓ · untick to compare"
                             }
                             AiOption {
+                                shown: win.picPage("enhance")
                                 task: "upscale"
                                 flag: "aiUpscale"
                                 infoKey: "upscale"
@@ -3571,7 +3800,7 @@ ApplicationWindow {
                             ComboBox {
                                 objectName: "motionPreset"
                                 Layout.fillWidth: true
-                                visible: win.selection.audioOnly !== true && ((win.selection.assetId || "") === "" || win.selection.picture === true)
+                                visible: (win.selection.audioOnly !== true && ((win.selection.assetId || "") === "" || win.selection.picture === true)) && (win.onTab("animation"))
                                 enabled: win.selection.locked !== true
                                 readonly property var presets: ["", "popIn", "popOut", "slideLeft", "slideUp", "pulse", "wiggle", "none"]
                                 model: ["Add a motion…", "Pop in", "Pop out at the end", "Slide in from the left", "Slide up into place", "Pulse", "Wiggle", "Remove motion"]
@@ -3584,6 +3813,7 @@ ApplicationWindow {
                                 ToolTip.text: "Animates the selected clips with keyframes you can change afterwards"
                             }
                             RowLayout {
+                                visible: win.picPage("basic") || win.audioPage("basic")
                                 Layout.fillWidth: true
                                 Label {
                                     Layout.fillWidth: true
@@ -3746,6 +3976,7 @@ ApplicationWindow {
                                     }
                                 ]
                                 ColumnLayout {
+                                    visible: win.propertyPage(modelData.key)
                                     id: propertyRow
                                     required property var modelData
                                     readonly property bool animatable: ["scale", "x", "y", "rotation", "opacity", "volume", "pan"].indexOf(modelData.key) >= 0
@@ -3806,12 +4037,13 @@ ApplicationWindow {
                             // Sound: clean-up, tone and dynamics of the clip's audio.
                             ColumnLayout {
                                 objectName: "soundSection"
-                                visible: win.selection.hasAudio === true
+                                visible: (win.selection.hasAudio === true) && (win.audioPage("basic") || win.audioPage("voice") || win.audioPage("cleanup"))
                                 Layout.fillWidth: true
                                 spacing: 6
                                 Rule {}
                                 Caption { text: "SOUND" }
                                 Action {
+                                    visible: win.audioPage("basic")
                                     objectName: "extractAudio"
                                     Layout.fillWidth: true
                                     text: "Save sound as file…"
@@ -3821,6 +4053,7 @@ ApplicationWindow {
                                     ToolTip.text: "The clip's sound as you hear it (trim, speed, volume, sound tools), without the other clips, as WAV, MP3 or M4A"
                                 }
                                 ComboBox {
+                                    visible: win.audioPage("cleanup")
                                     objectName: "soundPreset"
                                     Layout.fillWidth: true
                                     enabled: win.selection.locked !== true
@@ -3862,6 +4095,7 @@ ApplicationWindow {
                                         { key: "pitch", name: "Pitch (semitones)", lo: -12, hi: 12, step: .5, tip: "Higher or lower voice at the same speed" }
                                     ]
                                     RowLayout {
+                                        visible: win.soundPage(soundRow.modelData.key)
                                         id: soundRow
                                         required property var modelData
                                         Layout.fillWidth: true
@@ -3893,6 +4127,7 @@ ApplicationWindow {
                                     }
                                 }
                                 RowLayout {
+                                    visible: win.audioPage("voice")
                                     Layout.fillWidth: true
                                     Label {
                                         text: "Voice"
@@ -3913,6 +4148,7 @@ ApplicationWindow {
                                 }
                                 // Measured sound tools: even loudness across clips, noise learned here.
                                 RowLayout {
+                                    visible: win.audioPage("cleanup")
                                     Layout.fillWidth: true
                                     readonly property var measure: win.s.soundMeasure || ({})
                                     Action {
@@ -3938,12 +4174,13 @@ ApplicationWindow {
                             // Colour and look of the clip's picture.
                             ColumnLayout {
                                 objectName: "lookSection"
-                                visible: win.selection.picture === true
+                                visible: (win.selection.picture === true) && (win.onTab("adjust"))
                                 Layout.fillWidth: true
                                 spacing: 6
                                 Rule {}
                                 Caption { text: "COLOUR & LOOK" }
                                 ComboBox {
+                                    visible: win.adjustPage("basic")
                                     id: lookPreset
                                     objectName: "lookPreset"
                                     Layout.fillWidth: true
@@ -3973,6 +4210,7 @@ ApplicationWindow {
                                     }
                                 }
                                 Action {
+                                    visible: win.adjustPage("basic")
                                     objectName: "autoColour"
                                     Layout.fillWidth: true
                                     readonly property bool measuring: (win.s.autoColour || {}).status === "measuring"
@@ -3997,6 +4235,7 @@ ApplicationWindow {
                                         { key: "grain", name: "Film grain", lo: 0, hi: 1, tip: "Moving grain like film" }
                                     ]
                                     ColumnLayout {
+                                        visible: win.adjustPage("basic")
                                         id: lookRow
                                         required property var modelData
                                         Layout.fillWidth: true
@@ -4036,6 +4275,7 @@ ApplicationWindow {
                                 }
                                 // Tone curves: drag points, click to add one, double-click to remove it.
                                 RowLayout {
+                                    visible: win.adjustPage("curves")
                                     Layout.fillWidth: true
                                     Label {
                                         text: "Curves"
@@ -4068,6 +4308,7 @@ ApplicationWindow {
                                     }
                                 }
                                 Canvas {
+                                    visible: win.adjustPage("curves")
                                     id: curveEditor
                                     objectName: "curveEditor"
                                     Layout.fillWidth: true
@@ -4167,6 +4408,7 @@ ApplicationWindow {
                                 }
                                 // Selective colour: change only some colours (all when none is chosen).
                                 RowLayout {
+                                    visible: win.adjustPage("hsl")
                                     Layout.fillWidth: true
                                     spacing: 3
                                     Label {
@@ -4209,6 +4451,7 @@ ApplicationWindow {
                                         { key: "hslLightness", name: "Colour lightness", lo: -1, hi: 1, step: .01 }
                                     ]
                                     ColumnLayout {
+                                        visible: win.adjustPage("hsl")
                                         id: hslRow
                                         required property var modelData
                                         Layout.fillWidth: true
@@ -4245,6 +4488,7 @@ ApplicationWindow {
                                     }
                                 }
                                 RowLayout {
+                                    visible: win.adjustPage("lut")
                                     Layout.fillWidth: true
                                     Label {
                                         objectName: "lutName"
@@ -4274,6 +4518,7 @@ ApplicationWindow {
                                 // Colour wheels: drag the point towards a colour to push it into the
                                 // shadows, midtones or highlights; double-click resets.
                                 RowLayout {
+                                    visible: win.adjustPage("wheels")
                                     Layout.fillWidth: true
                                     spacing: 6
                                     Repeater {
@@ -4368,6 +4613,7 @@ ApplicationWindow {
                                 }
                                 // LUT library: the LUTs kept in Cutlery's data folder, one pick away.
                                 RowLayout {
+                                    visible: win.adjustPage("lut")
                                     Layout.fillWidth: true
                                     ComboBox {
                                         objectName: "lutLibrary"
@@ -4391,7 +4637,7 @@ ApplicationWindow {
                                     }
                                 }
                                 RowLayout {
-                                    visible: !!win.selection.lut
+                                    visible: (!!win.selection.lut) && (win.adjustPage("lut"))
                                     Layout.fillWidth: true
                                     Label { text: "LUT strength"; color: win.muted }
                                     Slider {
@@ -4411,12 +4657,13 @@ ApplicationWindow {
                             // Style effects and camera movement of the clip's picture.
                             ColumnLayout {
                                 objectName: "effectsSection"
-                                visible: win.selection.picture === true
+                                visible: (win.selection.picture === true) && (win.onTab("effects") || win.picPage("enhance"))
                                 Layout.fillWidth: true
                                 spacing: 6
                                 Rule {}
                                 Caption { text: "EFFECTS" }
                                 RowLayout {
+                                    visible: win.onTab("effects")
                                     Layout.fillWidth: true
                                     ComboBox {
                                         id: fxChoice
@@ -4448,7 +4695,7 @@ ApplicationWindow {
                                     }
                                 }
                                 RowLayout {
-                                    visible: win.selection.video === true
+                                    visible: (win.selection.video === true) && (win.onTab("effects"))
                                     Layout.fillWidth: true
                                     Label {
                                         text: "Motion blur"
@@ -4473,7 +4720,7 @@ ApplicationWindow {
                                 }
                                 CheckBox {
                                     objectName: "stabilize"
-                                    visible: win.selection.video === true
+                                    visible: (win.selection.video === true) && (win.picPage("enhance"))
                                     text: "Stabilize"
                                     checked: win.selection.stabilize === true
                                     enabled: win.selection.locked !== true
@@ -4483,7 +4730,7 @@ ApplicationWindow {
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    visible: win.selection.video === true && win.selection.stabilize === true
+                                    visible: (win.selection.video === true && win.selection.stabilize === true) && (win.picPage("enhance"))
                                     Label {
                                         text: "Strength"
                                         color: win.muted
@@ -4513,7 +4760,7 @@ ApplicationWindow {
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    visible: win.selection.video === true
+                                    visible: (win.selection.video === true) && (win.picPage("enhance"))
                                     Label {
                                         text: "Video noise"
                                         color: win.muted
@@ -4536,7 +4783,7 @@ ApplicationWindow {
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    visible: win.selection.video === true
+                                    visible: (win.selection.video === true) && (win.picPage("enhance"))
                                     Label {
                                         text: "Flicker"
                                         color: win.muted
@@ -4559,7 +4806,7 @@ ApplicationWindow {
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    visible: win.selection.video === true && !!win.selection.hdr
+                                    visible: (win.selection.video === true && !!win.selection.hdr) && (win.picPage("enhance"))
                                     Label {
                                         text: "HDR"
                                         color: win.muted
@@ -4579,7 +4826,7 @@ ApplicationWindow {
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    visible: win.selection.video === true
+                                    visible: (win.selection.video === true) && (win.picPage("enhance"))
                                     Label {
                                         text: "Source colours"
                                         color: win.muted
@@ -4610,36 +4857,44 @@ ApplicationWindow {
                                 }
                             }
                             RowLayout {
+                                visible: win.onTab("speed") || win.picPage("basic")
                                 CheckBox {
                                     text: "Reverse"
+                                    visible: win.onTab("speed")
                                     checked: win.selection.reverse || false
                                     onToggled: editor.setClip("reverse", checked)
                                 }
                                 CheckBox {
                                     text: "Flip"
+                                    visible: win.picPage("basic")
                                     checked: win.selection.flip || false
                                     onToggled: editor.setClip("flip", checked)
                                 }
                                 CheckBox {
                                     objectName: "flipVertical"
                                     text: "Upside down"
+                                    visible: win.picPage("basic")
                                     checked: win.selection.flipVertical || false
                                     onToggled: editor.setClip("flipVertical", checked)
                                 }
                             }
                             RowLayout {
+                                visible: win.audioPage("basic") || win.picPage("basic")
                                 CheckBox {
                                     text: "Mute"
+                                    visible: win.audioPage("basic")
                                     checked: win.selection.muted || false
                                     onToggled: editor.setClip("muted", checked)
                                 }
                                 CheckBox {
                                     text: "Hide"
+                                    visible: win.picPage("basic")
                                     checked: win.selection.hidden || false
                                     onToggled: editor.setClip("hidden", checked)
                                 }
                             }
                             RowLayout {
+                                visible: win.onTab("more")
                                 Layout.fillWidth: true
                                 Action {
                                     objectName: "copyClip"
@@ -4670,14 +4925,14 @@ ApplicationWindow {
                             }
                             Action {
                                 text: "Detach audio to new track"
-                                visible: win.selection.canDetach || false
+                                visible: (win.selection.canDetach || false) && (win.onTab("more"))
                                 Layout.fillWidth: true
                                 onClicked: editor.detachAudio()
                             }
                             Action {
                                 objectName: "unlinkClip"
                                 text: "Unlink picture and sound"
-                                visible: (win.selection.linkedCount || 0) > 0
+                                visible: ((win.selection.linkedCount || 0) > 0) && (win.onTab("more"))
                                 enabled: win.selection.locked !== true
                                 Layout.fillWidth: true
                                 onClicked: editor.unlinkClip()
@@ -4686,12 +4941,13 @@ ApplicationWindow {
                             }
                             Action {
                                 text: "Relink source media…"
-                                visible: (win.selection.assetId || "").length > 0
+                                visible: ((win.selection.assetId || "").length > 0) && (win.onTab("more"))
                                 Layout.fillWidth: true
                                 onClicked: relinkDialog.open()
                             }
                         }
                     }
+                }
                 }
             }
         }

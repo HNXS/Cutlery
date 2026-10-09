@@ -81,7 +81,7 @@ The current development build saves schema 11 (colour and look settings, LUTs); 
 
 To build it yourself on Windows, run `./tools/Build-Local.ps1` (see [BUILDING](docs/BUILDING.md)).
 
-See the [release notes](docs/RELEASE_NOTES.md), [what remains](docs/ROADMAP.md), [drag/drop and magnetic tracks](docs/TIMELINE.md), [BUILDING](docs/BUILDING.md), [PORTABLE](docs/PORTABLE.md), [architecture](docs/ARCHITECTURE.md), [feature status](docs/FEATURE_STATUS.md), [offline AI](docs/AI.md), [the original blueprint](docs/BLUEPRINT.md), and [third-party notices](docs/THIRD_PARTY.md).
+See the [release notes](docs/RELEASE_NOTES.md), [what remains](docs/ROADMAP.md), [drag/drop and magnetic tracks](docs/TIMELINE.md), [BUILDING](docs/BUILDING.md), [PORTABLE](docs/PORTABLE.md), [architecture](docs/ARCHITECTURE.md), [feature status](docs/FEATURE_STATUS.md), [offline AI](docs/AI.md), [the original blueprint](docs/BLUEPRINT.md), [the UI plan](docs/UI_BLUEPRINT.md), and [third-party notices](docs/THIRD_PARTY.md).
 
 ## Development
 
