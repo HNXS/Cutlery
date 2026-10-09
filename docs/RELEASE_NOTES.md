@@ -4,6 +4,9 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **HDR videos:** HDR10 and HLG clips (e.g. from newer phones) no longer look grey and flat; they are converted to normal colours automatically ("Natural" or "Bright" in the inspector).
+- **Video noise and flicker:** calm grainy low-light video and even out flickering lamps or time-lapses (effects section; seen in playback and export).
+- **Source colours:** fix videos whose blacks look washed out or whose colours look slightly off by choosing the right colour range or colour standard.
 - **Even loudness:** select several clips and make them play equally loud in one step.
 - **Learn noise:** put the playhead on a quiet moment and press "Learn noise here" for better noise reduction.
 - **After a crash:** the start page says when Cutlery did not close normally; errors are written to a log file (Help → "Open the log folder").

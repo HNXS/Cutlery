@@ -4414,6 +4414,103 @@ ApplicationWindow {
                                         ToolTip.text: "Zooms in a little so no filled-in edge shows"
                                     }
                                 }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    visible: win.selection.video === true
+                                    Label {
+                                        text: "Video noise"
+                                        color: win.muted
+                                    }
+                                    Slider {
+                                        objectName: "videoDenoise"
+                                        Layout.fillWidth: true
+                                        from: 0
+                                        to: 1
+                                        stepSize: .05
+                                        value: win.selection.videoDenoise ?? 0
+                                        enabled: win.selection.locked !== true
+                                        onPressedChanged: if (!pressed)
+                                            editor.setClip("videoDenoise", value)
+                                        onMoved: if (!pressed)
+                                            editor.setClip("videoDenoise", value)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Calms grain and noise in dark or low-light video by averaging neighbouring frames"
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    visible: win.selection.video === true
+                                    Label {
+                                        text: "Flicker"
+                                        color: win.muted
+                                    }
+                                    Slider {
+                                        objectName: "deflicker"
+                                        Layout.fillWidth: true
+                                        from: 0
+                                        to: 1
+                                        stepSize: .05
+                                        value: win.selection.deflicker ?? 0
+                                        enabled: win.selection.locked !== true
+                                        onPressedChanged: if (!pressed)
+                                            editor.setClip("deflicker", value)
+                                        onMoved: if (!pressed)
+                                            editor.setClip("deflicker", value)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Evens out brightness that pulses from frame to frame (lamps, time-lapses); stronger compares more frames"
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    visible: win.selection.video === true && !!win.selection.hdr
+                                    Label {
+                                        text: "HDR"
+                                        color: win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    ComboBox {
+                                        objectName: "toneMap"
+                                        Layout.preferredWidth: 170
+                                        enabled: win.selection.locked !== true
+                                        readonly property var modes: ["", "bright", "off"]
+                                        model: ["Natural", "Bright", "Unconverted"]
+                                        currentIndex: Math.max(0, modes.indexOf(win.selection.toneMap || ""))
+                                        onActivated: index => editor.setClip("toneMap", modes[index])
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "This video is HDR (" + (win.selection.hdr === "hlg" ? "HLG" : "HDR10") + "). Its bright highlights are fitted into the normal picture: natural keeps contrast, bright keeps more brightness."
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    visible: win.selection.video === true
+                                    Label {
+                                        text: "Source colours"
+                                        color: win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    ComboBox {
+                                        objectName: "colorRange"
+                                        Layout.preferredWidth: 110
+                                        enabled: win.selection.locked !== true
+                                        readonly property var modes: ["", "tv", "pc"]
+                                        model: ["Range: file", "Limited", "Full"]
+                                        currentIndex: Math.max(0, modes.indexOf(win.selection.colorRange || ""))
+                                        onActivated: index => editor.setClip("colorRange", modes[index])
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Fixes a video whose blacks look grey and washed out (choose Full) or crushed and too contrasty (choose Limited)"
+                                    }
+                                    ComboBox {
+                                        objectName: "colorMatrix"
+                                        Layout.preferredWidth: 110
+                                        enabled: win.selection.locked !== true
+                                        readonly property var modes: ["", "bt601", "bt709", "bt2020"]
+                                        model: ["Colours: file", "BT.601", "BT.709", "BT.2020"]
+                                        currentIndex: Math.max(0, modes.indexOf(win.selection.colorMatrix || ""))
+                                        onActivated: index => editor.setClip("colorMatrix", modes[index])
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Fixes slightly wrong colours (skin too orange or green) when the file names the wrong colour standard: BT.601 for old SD video, BT.709 for HD"
+                                    }
+                                }
                             }
                             RowLayout {
                                 CheckBox {

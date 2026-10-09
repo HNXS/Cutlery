@@ -1256,6 +1256,8 @@ class UiTest : public QObject {
         // Style effects: a picture has the effect choice, but no motion blur or stabilizing.
         QVERIFY(findItem(window->contentItem(), "effectsSection")->isVisible());
         QVERIFY(!findItem(window->contentItem(), "stabilize")->isVisible());
+        QVERIFY(!findItem(window->contentItem(), "videoDenoise")->isVisible());
+        QVERIFY(!findItem(window->contentItem(), "colorRange")->isVisible());
         auto *fx = findItem(window->contentItem(), "fxChoice");
         QVERIFY(QMetaObject::invokeMethod(fx, "activated", Q_ARG(int, 4))); // Old film
         QCOMPARE(clip().fx, QString("film"));
@@ -1382,6 +1384,18 @@ class UiTest : public QObject {
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(window);
         QTest::qWait(100);
+        // Video noise, flicker and source colours for a video; the HDR choice only for HDR.
+        for (const char *name : {"videoDenoise", "deflicker", "colorRange", "colorMatrix"})
+            QVERIFY2(findItem(window->contentItem(), name) &&
+                         findItem(window->contentItem(), name)->isVisible(),
+                     name);
+        QVERIFY(!findItem(window->contentItem(), "toneMap")->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "colorRange"), "activated",
+                                          Q_ARG(int, 2)));
+        QCOMPARE(editor.project().clips.first().colorRange, QString("pc"));
+        QTRY_COMPARE(findItem(window->contentItem(), "colorRange")->property("currentIndex").toInt(), 2);
+        editor.undo();
+        QVERIFY(editor.project().clips.first().colorRange.isEmpty());
         auto *box = findItem(window->contentItem(), "aiCutout");
         QVERIFY(box && box->isVisible());
 #ifdef CUTLERY_AI_WORKER

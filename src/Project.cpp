@@ -93,6 +93,7 @@ const QVector<QPair<QString, double Clip::*>> &lookFields() {
         {"lowCut", &Clip::lowCut},           {"compressor", &Clip::compressor},
         {"gate", &Clip::gate},               {"denoise", &Clip::denoise},
         {"noiseFloor", &Clip::noiseFloor},
+        {"videoDenoise", &Clip::videoDenoise}, {"deflicker", &Clip::deflicker},
         {"deess", &Clip::deess},             {"motionBlur", &Clip::motionBlur},
         {"reverb", &Clip::reverb},           {"echo", &Clip::echo},
         {"pan", &Clip::pan},                 {"hslHue", &Clip::hslHue},
@@ -287,6 +288,8 @@ QJsonObject Project::json(const QString &base) const {
             o["frameRate"] = a.frameRate;
         if (a.variableRate)
             o["variableRate"] = true;
+        if (!a.hdr.isEmpty())
+            o["hdr"] = a.hdr;
         if (a.loops)
             o["loops"] = true;
         if (!a.folder.isEmpty())
@@ -387,6 +390,12 @@ QJsonObject Project::json(const QString &base) const {
         }
         if (!c.voice.isEmpty())
             o["voice"] = c.voice;
+        if (!c.colorRange.isEmpty())
+            o["colorRange"] = c.colorRange;
+        if (!c.colorMatrix.isEmpty())
+            o["colorMatrix"] = c.colorMatrix;
+        if (!c.toneMap.isEmpty())
+            o["toneMap"] = c.toneMap;
         if (!c.canvasFill.isEmpty())
             o["canvasFill"] = c.canvasFill;
         if (!c.fx.isEmpty()) {
@@ -574,6 +583,9 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         a.hasAudio = j["audio"].toBool();
         a.frameRate = j["frameRate"].toDouble(0);
         a.variableRate = j["variableRate"].toBool(false);
+        a.hdr = j["hdr"].toString();
+        if (a.hdr != "pq" && a.hdr != "hlg")
+            a.hdr.clear();
         a.loops = j["loops"].toBool(false) && a.kind == "video";
         a.folder = j["folder"].toString();
         a.rights = j["rights"].toString();
@@ -646,6 +658,9 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.lumaSoftness = j["lumaSoftness"].toDouble(0.05);
         c.fx = j["fx"].toString();
         c.voice = j["voice"].toString();
+        c.colorRange = j["colorRange"].toString();
+        c.colorMatrix = j["colorMatrix"].toString();
+        c.toneMap = j["toneMap"].toString();
         c.canvasFill = j["canvasFill"].toString();
         c.fxStrength = j["fxStrength"].toDouble(0.5);
         c.stabilize = j["stabilize"].toBool(false);
@@ -923,7 +938,11 @@ void Project::validate() const {
                             "mirror"}
                         .contains(c.fx) &&
                     bounded(c.fxStrength, 0, 1) && bounded(c.motionBlur, 0, 1) &&
-                    bounded(c.stabilizeStrength, 0, 1) &&
+                    bounded(c.stabilizeStrength, 0, 1) && bounded(c.videoDenoise, 0, 1) &&
+                    bounded(c.deflicker, 0, 1) &&
+                    QStringList{"", "tv", "pc"}.contains(c.colorRange) &&
+                    QStringList{"", "bt601", "bt709", "bt2020"}.contains(c.colorMatrix) &&
+                    QStringList{"", "bright", "off"}.contains(c.toneMap) &&
                     bounded(c.reverb, 0, 1) && bounded(c.echo, 0, 1) && bounded(c.pan, -1, 1) &&
                     bounded(c.anchorX, 0, 1) && bounded(c.anchorY, 0, 1),
                 "Invalid effect setting");
