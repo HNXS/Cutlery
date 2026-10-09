@@ -244,6 +244,18 @@ class Editor final : public QObject {
     // PCM in the data folder's conformed/) and relinks the media to it. State "conform":
     // {status: converting|done|failed, progress, assetId}.
     Q_INVOKABLE void conformFrameRate();
+    // Proxies: editing copies of videos at 540 lines (ProRes Proxy and PCM sound in the data
+    // folder's proxies/, named after the file's fingerprint) that previews and playback read
+    // instead of the original while proxies are in use; exports always read the originals.
+    // makeProxies queues the given videos (none given: every video taller than 1080 lines),
+    // skipping those with a proxy, too small or missing; they are made one after another in
+    // the background. State "proxies": {useProxies, making (name), queued, progress}; each
+    // asset has "proxy": ""|"queued"|"making"|"ready" and "proxyProgress".
+    Q_INVOKABLE void makeProxies(const QStringList &assetIds = {});
+    Q_INVOKABLE void cancelProxies();
+    // Stops making proxies and removes those of this project's media.
+    Q_INVOKABLE void deleteProxies();
+    Q_INVOKABLE void setUseProxies(bool on);
     // Makes the selected clip (a blur or mosaic area, or any overlay) follow a face in the video
     // below it: keyframes its position through its length and, for areas, sizes it to the face.
     // Analyses the faces first when needed (AI pack). State "follow": {status:
@@ -558,6 +570,13 @@ class Editor final : public QObject {
     };
     QVector<NestFrame> m_nest;
     QProcess *m_nestedProcess = nullptr;
+    QProcess *m_proxyProcess = nullptr;
+    QStringList m_proxyQueue;
+    QString m_proxyMaking;
+    double m_proxyProgress = 0;
+    bool m_useProxies = true;
+    QString proxyPath(const Asset &a) const;
+    void makeNextProxy();
     QStringList m_nestedFailed; // cache files that could not be rendered this session
     QString nestedPath(const QJsonObject &content) const;
     void storeNested(Project &parent, const QString &assetId, const Project &child) const;

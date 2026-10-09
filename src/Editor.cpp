@@ -342,7 +342,7 @@ Editor::~Editor() {
             delete t;
         }
     for (auto *p : {m_preview, m_job, m_probe, m_pauseProcess, m_loudnessProcess, m_sceneProcess,
-                    m_nestedProcess, m_autoColourProcess, m_frameProcess, m_pickProcess, m_soundProcess})
+                    m_nestedProcess, m_proxyProcess, m_autoColourProcess, m_frameProcess, m_pickProcess, m_soundProcess})
         if (p) {
             p->disconnect(this);
             p->kill();
@@ -359,7 +359,12 @@ QVariantList Editor::assets() const {
             {"kind", a.kind}, {"seconds", a.duration},
             {"missing", !a.isNested() && !QFileInfo::exists(a.path)}, {"nested", a.isNested()},
             {"folder", a.folder}, {"rights", a.rights}, {"credit", a.credit}, {"used", std::any_of(m_project.clips.begin(), m_project.clips.end(),
-                                                       [&](const Clip &c) { return c.assetId == a.id; })}};
+                                                       [&](const Clip &c) { return c.assetId == a.id; })},
+            {"proxy", m_proxyMaking == a.id         ? "making"
+                      : m_proxyQueue.contains(a.id) ? "queued"
+                      : !a.isNested() && a.kind == "video" && QFileInfo::exists(proxyPath(a)) ? "ready"
+                                                                                               : ""},
+            {"proxyProgress", m_proxyMaking == a.id ? m_proxyProgress : 0.}};
     return result;
 }
 // Distinct keyframe positions of a clip, for the timeline markers.
@@ -797,6 +802,13 @@ QVariantMap Editor::state() const {
                  return names;
              }()},
             {"nestedRendering", m_nestedProcess != nullptr},
+            {"proxies", QVariantMap{{"useProxies", m_useProxies},
+                                    {"making", [this] {
+                                         const auto *a = m_project.asset(m_proxyMaking);
+                                         return a ? a->name : QString();
+                                     }()},
+                                    {"queued", int(m_proxyQueue.size())},
+                                    {"progress", m_proxyProgress}}},
             {"importFolder", m_project.folders.contains(m_importFolder) ? m_importFolder : QString()},
             {"playhead", m_playhead},
             {"duration", m_project.duration()},
@@ -3507,6 +3519,132 @@ QVariantMap Editor::imageSequence(const QString &file) {
             {"count", end - start + 1},
             {"name", prefix.isEmpty() ? info.dir().dirName() : prefix}};
 }
+// Proxies are named after the original's fingerprint, so an edited or replaced file gets a new
+// one; they belong to this computer and are not part of the project.
+QString Editor::proxyPath(const Asset &a) const {
+    return m_data + "/proxies/" + MediaAnalysis::fingerprint(a).left(24) + "-540.mov";
+}
+void Editor::makeProxies(const QStringList &assetIds) {
+    int added = 0;
+    for (const auto &a : m_project.assets) {
+        if (!assetIds.isEmpty() ? !assetIds.contains(a.id) : a.height <= 1080)
+            continue;
+        if (a.isNested() || a.kind != "video" || a.height <= 540 || !QFileInfo(a.path).isFile() ||
+            QFileInfo::exists(proxyPath(a)) || m_proxyQueue.contains(a.id) || m_proxyMaking == a.id)
+            continue;
+        m_proxyQueue << a.id;
+        ++added;
+    }
+    if (!added)
+        return fail(assetIds.isEmpty() ? "No video taller than 1080 lines needs a proxy"
+                                       : "This video has a proxy already or is small enough");
+    makeNextProxy();
+    emit projectChanged();
+    emit changed();
+}
+void Editor::makeNextProxy() {
+    if (m_proxyProcess)
+        return;
+    while (!m_proxyQueue.isEmpty()) {
+        const auto id = m_proxyQueue.takeFirst();
+        const auto *a = m_project.asset(id);
+        if (!a || !QFileInfo(a->path).isFile())
+            continue;
+        const auto output = proxyPath(*a);
+        if (QFileInfo::exists(output) || !QDir().mkpath(QFileInfo(output).absolutePath()))
+            continue;
+        const auto temp = output + ".part.mov";
+        const double duration = a->duration;
+        auto *process = new QProcess(this);
+        m_proxyProcess = process;
+        m_proxyMaking = id;
+        m_proxyProgress = 0;
+        auto log = std::make_shared<QByteArray>();
+        auto pending = std::make_shared<QByteArray>();
+        connect(process, &QProcess::readyReadStandardError, this, [process, log] {
+            *log += process->readAllStandardError();
+            if (log->size() > 64000)
+                *log = log->right(32000);
+        });
+        connect(process, &QProcess::readyReadStandardOutput, this, [this, process, pending, duration] {
+            *pending += process->readAllStandardOutput();
+            int i;
+            while ((i = pending->indexOf('\n')) >= 0) {
+                const auto line = pending->left(i);
+                pending->remove(0, i + 1);
+                if (line.startsWith("out_time_us=") && duration > 0)
+                    m_proxyProgress = std::clamp(line.mid(12).toDouble() / 1e6 / duration, 0., 1.);
+            }
+            emit projectChanged();
+            emit changed();
+        });
+        auto complete = [this, process, temp, output, log](bool success) {
+            process->deleteLater();
+            m_proxyProcess = nullptr;
+            const auto name = m_project.asset(m_proxyMaking) ? m_project.asset(m_proxyMaking)->name : QString();
+            m_proxyMaking.clear();
+            m_proxyProgress = 0;
+            if (success && QFile::rename(temp, output)) {
+                // Previews of the clips using it now read the proxy.
+                m_previewTimer.start();
+            } else {
+                QFile::remove(temp);
+                if (process->property("cancelled").toBool() == false)
+                    fail("Making the proxy of " + name + " failed: " +
+                         QString::fromUtf8(*log).trimmed().right(300));
+            }
+            makeNextProxy();
+            emit projectChanged();
+            emit changed();
+        };
+        connect(process, &QProcess::finished, this, [complete](int code, QProcess::ExitStatus status) {
+            complete(code == 0 && status == QProcess::NormalExit);
+        });
+        connect(process, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError e) {
+            if (e == QProcess::FailedToStart)
+                complete(false);
+        });
+        QFile::remove(temp);
+        // 540 lines, the original's frame times and sound; ProRes Proxy decodes quickly.
+        process->start(executable("ffmpeg"),
+                       {"-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-progress", "pipe:1",
+                        "-i", a->path, "-map", "0:v:0", "-map", "0:a:0?", "-vf",
+                        "scale=-2:540:flags=bicubic,format=yuv422p10le", "-fps_mode", "passthrough",
+                        "-c:v", "prores_ks", "-profile:v", "0", "-c:a", "pcm_s16le", "-ar", "48000",
+                        temp});
+        return;
+    }
+}
+void Editor::cancelProxies() {
+    m_proxyQueue.clear();
+    if (m_proxyProcess) {
+        m_proxyProcess->setProperty("cancelled", true);
+        m_proxyProcess->kill();
+    }
+    emit projectChanged();
+    emit changed();
+}
+void Editor::deleteProxies() {
+    cancelProxies();
+    if (m_proxyProcess)
+        m_proxyProcess->waitForFinished(3000);
+    int removed = 0;
+    for (const auto &a : m_project.assets)
+        if (!a.isNested() && a.kind == "video" && QFile::remove(proxyPath(a)))
+            ++removed;
+    m_status = removed ? QString("Removed %1 prox%2").arg(removed).arg(removed == 1 ? "y" : "ies")
+                       : QString("No proxies to remove");
+    m_previewTimer.start();
+    emit projectChanged();
+    emit changed();
+}
+void Editor::setUseProxies(bool on) {
+    if (m_useProxies == on)
+        return;
+    m_useProxies = on;
+    m_previewTimer.start();
+    emit changed();
+}
 void Editor::importImageSequence(const QUrl &firstImage, double fps) {
     if (m_job || m_busy)
         return fail("Wait for the current job to finish");
@@ -4140,6 +4278,11 @@ void Editor::storeNested(Project &parent, const QString &assetId, const Project 
 // note instead of its picture and sound.
 Project Editor::viewable() const {
     auto p = m_project;
+    if (m_useProxies)
+        for (auto &a : p.assets)
+            if (!a.isNested() && a.kind == "video")
+                if (const auto proxy = proxyPath(a); QFileInfo::exists(proxy))
+                    a.path = proxy;
     for (auto &c : p.clips)
         if (const auto *a = p.asset(c.assetId); a && a->isNested() && !QFileInfo::exists(a->path)) {
             c.assetId.clear();

@@ -1545,6 +1545,23 @@ class UiTest : public QObject {
         window->setProperty("leftTab", "media");
         auto *added = findItem(window->contentItem(), "added-" + editor.project().clips.first().assetId);
         QTRY_VERIFY(added && added->isVisible());
+        // Editing proxies: offered for videos; this one is too small to need one, and the player
+        // shows the proxy switch only once a proxy exists.
+        const auto proxyAsset = editor.project().clips.first().assetId;
+        auto *assetMenu = findItem(window->contentItem(), "asset-" + proxyAsset)->findChild<QObject *>("assetMenu-" + proxyAsset);
+        QVERIFY(assetMenu);
+        QObject *makeProxy = nullptr;
+        for (int i = 0; i < assetMenu->property("count").toInt() && !makeProxy; ++i) {
+            QQuickItem *item = nullptr;
+            QMetaObject::invokeMethod(assetMenu, "itemAt", Q_RETURN_ARG(QQuickItem *, item), Q_ARG(int, i));
+            if (item && item->objectName() == "makeProxy")
+                makeProxy = item;
+        }
+        QVERIFY(makeProxy && makeProxy->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(makeProxy, "triggered"));
+        QVERIFY(editor.state()["error"].toString().contains("small enough"));
+        editor.clearError();
+        QVERIFY(!findItem(window->contentItem(), "toggleProxies")->isVisible());
         if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS"))
             for (const auto &tab : {"media", "audio", "text", "stickers", "effects", "transitions", "filters", "layouts"}) {
                 window->setProperty("leftTab", tab);

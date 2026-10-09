@@ -1,5 +1,14 @@
 # Validation record
 
+## Windows portable build — 2026-10-09, editing proxies (0.6 development)
+
+[GitHub Actions run 37978486157](https://github.com/HNXS/Cutlery/actions/runs/37978486157) on commit `ccf71e3856943dbb7306aa5c56c1540d88a2d480` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `proxies`:** a 720p video gets a 540-line proxy with sound in the data folder. A blue file put in the proxy's place shows in the preview, and the red original shows again once proxies are off. Asking again, or for every video over 1080p, is refused. The project does not mention proxies, and deleting removes the proxy.
+- **UI test `aiCutoutControls`:** the library's "Make an editing proxy" refuses a video that is small enough. The player's Proxy button stays hidden while there is no proxy.
+
 ## Windows portable build — 2026-10-09, category column, shape sections, transition length (0.6 development)
 
 [GitHub Actions run 37929386650](https://github.com/HNXS/Cutlery/actions/runs/37929386650) on commit `241692784c187b8719ba33d9785eef4d35aef77f` passed every step on its first attempt.
