@@ -1016,7 +1016,7 @@ class UiTest : public QObject {
         shape->setProperty("currentIndex", 2);
         QVERIFY(QMetaObject::invokeMethod(shape, "activated", Q_ARG(int, 2)));
         QCOMPARE(clip().shape, QString("circle"));
-        auto *key = findItem(window->contentItem(), "chromaKey");
+        auto *key = findItem(window->contentItem(), "chromaKey-on");
         QVERIFY(key);
         key->setProperty("checked", true);
         QVERIFY(QMetaObject::invokeMethod(key, "toggled"));
@@ -1092,6 +1092,8 @@ class UiTest : public QObject {
         auto *style = findItem(window->contentItem(), "titleStyle");
         QTRY_VERIFY(style && style->isVisible());
         QCOMPARE(style->property("currentIndex").toInt(), 1);
+        if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS"))
+            window->grabWindow().save(qEnvironmentVariable("CUTLERY_UI_SHOTS") + "/text.png");
         style->setProperty("currentIndex", 4);
         QVERIFY(QMetaObject::invokeMethod(style, "activated", Q_ARG(int, 4)));
         QCOMPARE(editor.project().clip(lower.id)->titleStyle, QString("titleCard"));
@@ -1320,7 +1322,7 @@ class UiTest : public QObject {
         editor.undo();
         // Perspective: switching it on pins the corners where they are; sliders move them.
         page(window, "video", "basic");
-        auto *pin = findItem(window->contentItem(), "cornerPin");
+        auto *pin = findItem(window->contentItem(), "cornerPin-on");
         QTRY_VERIFY(pin && pin->isVisible());
         pin->setProperty("checked", true);
         QVERIFY(QMetaObject::invokeMethod(pin, "toggled"));
@@ -1505,6 +1507,20 @@ class UiTest : public QObject {
         auto *none = findItem(window->contentItem(), "transitionTile-none");
         QTRY_VERIFY(none && none->isVisible());
         QVERIFY(!none->isEnabled());
+        // Audio tab: sound effects as tiles; a click adds one at the playhead.
+        window->setProperty("leftTab", "audio");
+        auto *clickTile = findItem(window->contentItem(), "soundTile-click");
+        QTRY_VERIFY(clickTile && clickTile->isVisible());
+        const auto clipsBefore = editor.project().clips.size();
+        QVERIFY(QMetaObject::invokeMethod(clickTile, "clicked"));
+        QCOMPARE(editor.project().clips.size(), clipsBefore + 1);
+        QCOMPARE(editor.project().clips.back().name, QString("Mouse click"));
+        editor.undo();
+        editor.select(editor.project().clips.first().id);
+        // Media used on the timeline is marked "Added".
+        window->setProperty("leftTab", "media");
+        auto *added = findItem(window->contentItem(), "added-" + editor.project().clips.first().assetId);
+        QTRY_VERIFY(added && added->isVisible());
         if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS"))
             for (const auto &tab : {"media", "audio", "text", "stickers", "effects", "transitions", "filters", "layouts"}) {
                 window->setProperty("leftTab", tab);

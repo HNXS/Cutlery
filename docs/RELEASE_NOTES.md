@@ -5,6 +5,7 @@
 Projects are saved as schema 11; 0.5 cannot open them.
 
 - **Player and start screen:** a calmer player bar (time, play, frame steps, voice-over, scopes, frame shape) and a start screen with a "New project" banner, project tiles and a side column.
+- **Sounds, media and the remaining controls:** sound effects as tiles in the Audio tab (one click adds them at the playhead), an "Added" mark on media used in the timeline, and sections with number boxes for perspective, 3D tilt, green screen, brightness keys, the mask page and every title setting (style, font, colour, saved styles, spacing, effects).
 - **Timeline tools:** a row of tools above the timeline (split, cut away before or after the playhead, delete, marker, freeze, reverse, mirror, turn, snap and zoom), track headers with lock, eye, speaker, solo, magnet and snap icons, clips coloured by kind, and a slimmer top bar with a prominent Export button.
 - **Asset panel in tabs:** Media, Audio, Text, Stickers, Effects, Transitions, Filters and Layouts, each with its own tools; style effects, transitions, looks and LUTs are tiles that apply to the selected clip with one click.
 - **Clearer settings:** values have number boxes with units and arrows, a keyframe diamond and a slider; sections can be folded and reset in one step, and switches like Stabilize sit in the section title.

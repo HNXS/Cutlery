@@ -1,5 +1,15 @@
 # Validation record
 
+## Windows portable build — 2026-10-09, sound tiles, Added mark, sections for keys, tilt, mask and titles (0.6 development)
+
+[GitHub Actions run 37924472403](https://github.com/HNXS/Cutlery/actions/runs/37924472403) on commit `07a784530eb3b1d4c196b3303a3156a104278199` passed every step on its first attempt.
+
+New coverage:
+
+- **UI test `aiCutoutControls`:** the Mouse click tile in the Audio tab adds one clip at the playhead in one undo step. The media used on the timeline shows its "Added" mark.
+- **UI test `presenterControls`:** green screen and perspective are switched on with their section boxes. The brightness key's sliders appear once it is on. 3D tilt sets the turn from its value row.
+- **UI test `textStylesAndAdjustment`:** the title template choice works inside the new Style section.
+
 ## Windows portable build — 2026-10-09, player bar and start screen (0.6 development)
 
 [GitHub Actions run 37921224959](https://github.com/HNXS/Cutlery/actions/runs/37921224959) on commit `298955a57f3feaaa052c6adadb8f8b889fd5e27b` passed every step on its first attempt.
