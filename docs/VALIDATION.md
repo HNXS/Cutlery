@@ -1,5 +1,16 @@
 # Validation record
 
+## Windows portable build — 2026-10-09, asset panel in icon tabs (0.6 development)
+
+[GitHub Actions run 37906758782](https://github.com/HNXS/Cutlery/actions/runs/37906758782) on commit `07f98ce5f874c2f69098a3344721f3dbf0132b7d` passed every step on its first attempt.
+
+New coverage in the UI test `aiCutoutControls`:
+
+- **Effects tab:** opens from its tab button. The Glitch tile sets the selected clip's effect and is framed as the current choice.
+- **Filters tab:** the Warm look tile sets the temperature, and undo puts it back.
+- **Transitions tab:** the transition tiles stay disabled for a clip that does not follow another.
+- **Other tests:** the tests that use the old Add tab now open the Effects, Stickers or Text tab first.
+
 ## Windows portable build — 2026-10-09, inspector sections and value rows (0.6 development)
 
 [GitHub Actions run 37905156426](https://github.com/HNXS/Cutlery/actions/runs/37905156426) on commit `e96734f7f932b8026d473d59df21d4ba41469d0f` passed every step on its first attempt.
