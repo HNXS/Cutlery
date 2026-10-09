@@ -103,12 +103,21 @@ click is one undo step.
 - **Top bar:** the name, size and frame rate in the middle ("not saved" when there are changes),
   Save and a filled mint Export button on the right. Undo and redo moved to the tool row.
 
+## Player bar and start screen — package 4, done
+
+- **Player:**
+  - A "Player" heading, with "Playing" or "Paused · exact frame" on the right.
+  - Left of the bar below: the time in mint, the total and the level meter.
+  - Middle: frame back, play or pause, and frame on.
+  - Right: voice-over, scopes and the frame's shape (e.g. 16:9).
+- **Start screen:**
+  - A side column with Cutlery, Home, Open project, Recover autosave, Preferences, Show at start and Skip.
+  - On the right: a large "New project" banner that starts in the preferred shape in one click, the six shapes, the notice after an unclean exit, recent projects as tiles and the templates.
+
 ## Still to do
 
 - **Asset panel, still to do:**
   - A narrow category column per tab, once the tabs hold more than a screenful.
   - Media tiles with an "Added" badge.
   - Sound effects listed in the Audio tab itself.
-- Player bar: the current time in mint, the total, play, fit, aspect ratio and full screen in one row.
-- Start screen in the same style.
 - A section look for the remaining controls (perspective, keys, text settings).

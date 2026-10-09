@@ -460,6 +460,8 @@ class UiTest : public QObject {
         window->setProperty("startScreen", true);
         QTRY_VERIFY(start->isVisible());
         QTRY_VERIFY(findItem(window->contentItem(), "startTemplate-0"));
+        if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS"))
+            window->grabWindow().save(qEnvironmentVariable("CUTLERY_UI_SHOTS") + "/start.png");
         editor.removeTemplate("UI intro");
         QVERIFY(findItem(window->contentItem(), "startFormat-5"));
         // Choosing "Vertical 9:16" starts a project in that shape and closes the screen.
@@ -470,6 +472,14 @@ class UiTest : public QObject {
         QCOMPARE(editor.project().height, 1920);
         QTRY_VERIFY(!start->isVisible());
         QVERIFY(!window->property("startScreen").toBool());
+        // The "New project" banner starts one in the shape chosen in the preferences.
+        editor.newProject();
+        window->setProperty("startScreen", true);
+        QTRY_VERIFY(start->isVisible());
+        auto *create = findItem(window->contentItem(), "startCreate");
+        QTRY_VERIFY(create && create->isVisible() && create->width() > 100);
+        QTest::mouseClick(window, Qt::LeftButton, {}, center(create));
+        QTRY_VERIFY(!start->isVisible());
         // Preferences: the dialog shows and saves the app-wide settings.
         auto *dialog = window->findChild<QObject *>("preferencesDialog");
         QVERIFY(QMetaObject::invokeMethod(dialog, "open"));

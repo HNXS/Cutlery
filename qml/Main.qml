@@ -2240,17 +2240,17 @@ ApplicationWindow {
                     spacing: 12
                     RowLayout {
                         Layout.fillWidth: true
-                        Caption {
-                            text: "PROJECT MONITOR"
+                        Label {
+                            text: "Player"
+                            font.bold: true
                         }
                         Item {
                             Layout.fillWidth: true
                         }
                         Label {
-                            text: editor.playing ? "LIVE PLAYBACK" : "PREVIEW FRAME"
+                            text: editor.playing ? "Playing" : "Paused · exact frame"
                             color: win.muted
-                            font.pixelSize: 9
-                            font.letterSpacing: 1
+                            font.pixelSize: 10
                         }
                     }
                     Item {
@@ -2502,52 +2502,33 @@ ApplicationWindow {
                             }
                         }
                     }
-                    RowLayout {
-                        Layout.alignment: Qt.AlignHCenter
-                        spacing: 10
-                        Action {
-                            text: "−1"
-                            onClicked: win.command("previousFrame")
-                        }
-                        Action {
-                            text: editor.playing ? "Pause" : "Play"
-                            enabled: win.s.duration > 0 && !win.s.busy
-                            onClicked: editor.togglePlayback()
-                        }
-                        Action {
-                            text: "+1"
-                            onClicked: win.command("nextFrame")
-                        }
-                        Action {
-                            objectName: "voiceOver"
-                            readonly property var voice: win.s.voiceOver || ({})
-                            text: voice.recording ? "■ Stop " + Number(voice.seconds || 0).toFixed(0) + " s" : "● Voice-over"
-                            palette.buttonText: voice.recording ? "#ff6b6b" : "#e7edf2"
-                            enabled: voice.recording || (voice.available === true && !win.s.busy)
-                            onClicked: voice.recording ? editor.stopVoiceOver() : editor.startVoiceOver()
-                            ToolTip.visible: hovered
-                            ToolTip.text: voice.available === true ? "Record narration from the microphone while the timeline plays from the playhead. Use headphones so the recording does not pick up the timeline." : "No microphone found"
-                        }
+                    // Player bar: time on the left, playback in the middle, recording, scopes and
+                    // the frame's shape on the right.
+                    Item {
+                        objectName: "playerBar"
+                        Layout.fillWidth: true
+                        implicitHeight: 36
+                        RowLayout {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 10
+                            Label {
+                                objectName: "playerTime"
+                                text: win.clock(editor.playbackFrame)
+                                font.family: "Consolas"
+                                color: win.mint
+                            }
+                            Label {
+                                text: win.clock(win.s.duration)
+                                font.family: "Consolas"
+                                color: win.muted
+                            }
                         Label {
                             objectName: "playbackRate"
                             visible: editor.playbackRate !== 1 && (editor.playing || editor.playbackRate < 0)
                             text: (editor.playbackRate < 0 ? "◀◀ " : "▶▶ ") + Math.abs(editor.playbackRate) + "×"
                             color: "#ffd479"
                             font.bold: true
-                        }
-                        Label {
-                            text: win.clock(editor.playbackFrame) + " / " + win.clock(win.s.duration)
-                            font.family: "Consolas"
-                            color: win.mint
-                        }
-                        Action {
-                            objectName: "toggleScopes"
-                            text: "Scopes"
-                            highlighted: win.showScopes
-                            padding: 4
-                            onClicked: win.showScopes = !win.showScopes
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Histogram, waveform and vectorscope of the picture, to judge exposure and colour"
                         }
                         // Peak meter for the left and right channel, −60 to 0 dBFS.
                         Column {
@@ -2575,12 +2556,84 @@ ApplicationWindow {
                                 }
                             }
                         }
-                    }
-                    Label {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: "Space plays live from the playhead"
-                        color: win.muted
-                        font.pixelSize: 10
+                        }
+                        RowLayout {
+                            anchors.centerIn: parent
+                            spacing: 4
+                            Repeater {
+                                model: [
+                                    { id: "previousFrame", glyph: "⏮", tip: "One frame back" },
+                                    { id: "play", glyph: "", tip: "Play or pause (Space plays live from the playhead)" },
+                                    { id: "nextFrame", glyph: "⏭", tip: "One frame on" }
+                                ]
+                                AbstractButton {
+                                    required property var modelData
+                                    objectName: "player-" + modelData.id
+                                    implicitWidth: modelData.id === "play" ? 40 : 30
+                                    implicitHeight: modelData.id === "play" ? 34 : 28
+                                    hoverEnabled: true
+                                    enabled: modelData.id !== "play" || (win.s.duration > 0 && !win.s.busy)
+                                    onClicked: modelData.id === "play" ? editor.togglePlayback() : win.command(modelData.id)
+                                    contentItem: Text {
+                                        text: parent.modelData.id === "play" ? (editor.playing ? "❚❚" : "▶") : parent.modelData.glyph
+                                        font.pixelSize: parent.modelData.id === "play" ? 18 : 14
+                                        color: !parent.enabled ? "#56616b" : parent.hovered ? "#ffffff" : "#d7e0e7"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        radius: height / 2
+                                        color: parent.hovered && parent.enabled ? "#26313a" : "transparent"
+                                    }
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: modelData.tip
+                                }
+                            }
+                        }
+                        RowLayout {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 6
+                            Action {
+                                objectName: "voiceOver"
+                                readonly property var voice: win.s.voiceOver || ({})
+                                text: voice.recording ? "■ Stop " + Number(voice.seconds || 0).toFixed(0) + " s" : "● Voice-over"
+                                palette.buttonText: voice.recording ? "#ff6b6b" : "#e7edf2"
+                                enabled: voice.recording || (voice.available === true && !win.s.busy)
+                                onClicked: voice.recording ? editor.stopVoiceOver() : editor.startVoiceOver()
+                                ToolTip.visible: hovered
+                                ToolTip.text: voice.available === true ? "Record narration from the microphone while the timeline plays from the playhead. Use headphones so the recording does not pick up the timeline." : "No microphone found"
+                            }
+                            Action {
+                                objectName: "toggleScopes"
+                                text: "Scopes"
+                                highlighted: win.showScopes
+                                padding: 4
+                                onClicked: win.showScopes = !win.showScopes
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Histogram, waveform and vectorscope of the picture, to judge exposure and colour"
+                            }
+                            Label {
+                                objectName: "playerRatio"
+                                readonly property int divisor: {
+                                    let a = win.s.width, b = win.s.height;
+                                    while (b) {
+                                        const t = b;
+                                        b = a % b;
+                                        a = t;
+                                    }
+                                    return a || 1;
+                                }
+                                text: win.s.width / divisor > 40 ? win.s.width + "×" + win.s.height : (win.s.width / divisor) + ":" + (win.s.height / divisor)
+                                color: win.muted
+                                font.pixelSize: 11
+                                ToolTip.visible: ratioHover.hovered
+                                ToolTip.text: "The frame's shape; change it under Project → Reframe for…"
+                                HoverHandler {
+                                    id: ratioHover
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -5266,7 +5319,7 @@ ApplicationWindow {
         anchors.fill: parent
         z: 50
         visible: win.startScreen && win.s.duration === 0 && editor.assets.length === 0 && !win.s.path
-        color: "#f00f1419"
+        color: "#0f1419"
         readonly property var prefs: win.s.preferences || ({})
         function begin(format) {
             editor.configure(format.w, format.h, prefs.fpsN || 30, prefs.fpsD || 1);
@@ -5275,127 +5328,65 @@ ApplicationWindow {
         MouseArea {
             anchors.fill: parent // keeps clicks off the editor below
         }
-        ColumnLayout {
-            anchors.centerIn: parent
-            width: Math.min(parent.width - 64, 760)
-            spacing: 18
-            Label {
-                text: "Start a project"
-                font.pixelSize: 26
-                font.bold: true
-            }
-            Label {
-                text: "Choose the shape of the video. You can change it later under Project → Reframe for…"
-                color: win.muted
-                wrapMode: Text.Wrap
-                Layout.fillWidth: true
-            }
-            GridLayout {
-                Layout.fillWidth: true
-                columns: 3
-                columnSpacing: 12
-                rowSpacing: 12
-                Repeater {
-                    model: win.projectFormats
-                    delegate: Rectangle {
-                        id: formatTile
-                        required property var modelData
-                        required property int index
-                        objectName: "startFormat-" + index
-                        signal clicked
-                        onClicked: startPage.begin(modelData)
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 92
-                        radius: 8
-                        color: tileMouse.containsMouse ? "#2a3640" : "#1d252e"
-                        border.color: modelData.w === startPage.prefs.width && modelData.h === startPage.prefs.height ? win.mint : "#34404c"
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.margins: 12
-                            spacing: 12
-                            // The canvas shape, to scale.
-                            Item {
-                                Layout.preferredWidth: 48
-                                Layout.preferredHeight: 48
-                                Rectangle {
-                                    anchors.centerIn: parent
-                                    width: 44 * Math.min(1, formatTile.modelData.w / formatTile.modelData.h)
-                                    height: 44 * Math.min(1, formatTile.modelData.h / formatTile.modelData.w)
-                                    radius: 3
-                                    color: "transparent"
-                                    border.color: win.mint
-                                    border.width: 2
-                                }
-                            }
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 3
-                                Label {
-                                    text: formatTile.modelData.label
-                                    font.bold: true
-                                }
-                                Label {
-                                    text: formatTile.modelData.w + " × " + formatTile.modelData.h + " · " + formatTile.modelData.hint
-                                    color: win.muted
-                                    font.pixelSize: 11
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                }
-                            }
-                        }
-                        MouseArea {
-                            id: tileMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: formatTile.clicked()
-                        }
-                    }
+        // Left: the app and the places to go; right: new projects, recent ones and templates.
+        Rectangle {
+            id: startSide
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 210
+            color: "#12171d"
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 20
+                spacing: 8
+                Label {
+                    text: "CUTLERY"
+                    font.pixelSize: 18
+                    font.bold: true
+                    font.letterSpacing: 3
+                    color: win.mint
                 }
-            }
-            // After a session that did not end normally: what to do now, and where the log is.
-            Rectangle {
-                objectName: "uncleanExitNotice"
-                visible: win.s.uncleanExit === true
-                Layout.fillWidth: true
-                implicitHeight: noticeRow.implicitHeight + 16
-                radius: 6
-                color: "#3a2f1c"
-                border.color: "#e5c07b"
-                RowLayout {
-                    id: noticeRow
-                    anchors.fill: parent
-                    anchors.margins: 8
+                Label {
+                    text: "Local video editor"
+                    color: win.muted
+                    font.pixelSize: 11
+                }
+                Item {
+                    implicitHeight: 14
+                }
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 32
+                    radius: 6
+                    color: "#222b34"
                     Label {
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        text: "Cutlery did not close normally last time." + (win.s.hasRecovery ? " Your unsaved work can be recovered with “Recover autosave”." : "") + " The log may tell why: " + (win.s.logPath || "")
-                    }
-                    Action {
-                        text: "Open log folder"
-                        onClicked: Qt.openUrlExternally("file:///" + String(win.s.logPath || "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/[^\/]*$/, ""))
-                    }
-                    ToolButton {
-                        objectName: "dismissUncleanExit"
-                        text: "✕"
-                        onClicked: editor.dismissUncleanExit()
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left
+                        anchors.leftMargin: 10
+                        text: "⌂  Home"
+                        color: win.mint
                     }
                 }
-            }
-            RowLayout {
-                spacing: 10
                 Action {
+                    Layout.fillWidth: true
                     text: "Open project…"
                     onClicked: win.guarded("open")
                 }
                 Action {
                     objectName: "startRecover"
+                    Layout.fillWidth: true
                     visible: win.s.hasRecovery
                     text: "Recover autosave"
                     onClicked: win.guarded("recover")
                 }
-                Item {
+                Action {
                     Layout.fillWidth: true
+                    text: "Preferences…"
+                    onClicked: preferencesDialog.open()
+                }
+                Item {
+                    Layout.fillHeight: true
                 }
                 CheckBox {
                     objectName: "startScreenAgain"
@@ -5403,48 +5394,250 @@ ApplicationWindow {
                     checked: startPage.prefs.startScreen !== false
                     onToggled: editor.setPreferences({ startScreen: checked })
                 }
-            }
-            Label {
-                visible: (win.s.recent || []).length > 0
-                text: "Recent projects"
-                color: win.muted
-            }
-            Repeater {
-                model: (win.s.recent || []).slice(0, 6)
-                delegate: ItemDelegate {
-                    required property var modelData
-                    required property int index
-                    objectName: "startRecent-" + index
+                Action {
+                    objectName: "startEmpty"
                     Layout.fillWidth: true
-                    enabled: modelData.exists
-                    text: modelData.name + (modelData.exists ? "" : " (missing)") + "    " + modelData.path
-                    onClicked: win.guarded("recent:" + modelData.path)
+                    text: "Skip to the editor"
+                    onClicked: win.startScreen = false
                 }
             }
-            Label {
-                visible: (win.s.templates || []).length > 0
-                text: "From a template"
-                color: win.muted
-            }
-            Flow {
-                Layout.fillWidth: true
-                spacing: 8
-                visible: (win.s.templates || []).length > 0
-                Repeater {
-                    model: win.s.templates || []
-                    delegate: Action {
-                        required property var modelData
-                        required property int index
-                        objectName: "startTemplate-" + index
-                        text: modelData.name
-                        onClicked: win.guarded("template:" + modelData.name)
+        }
+        ScrollView {
+            anchors.left: startSide.right
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            contentWidth: availableWidth
+            clip: true
+            ColumnLayout {
+                x: 36
+                y: 28
+                width: Math.min(parent.width - 72, 900)
+                spacing: 16
+                // New project in the shape last used (or the first), one click.
+                Rectangle {
+                    objectName: "startCreate"
+                    Layout.fillWidth: true
+                    implicitHeight: 96
+                    radius: 10
+                    gradient: Gradient {
+                        orientation: Gradient.Horizontal
+                        GradientStop {
+                            position: 0
+                            color: "#1f7a68"
+                        }
+                        GradientStop {
+                            position: 1
+                            color: "#3b3f80"
+                        }
+                    }
+                    readonly property var format: win.projectFormats.find(f => f.w === startPage.prefs.width && f.h === startPage.prefs.height) || win.projectFormats[0]
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 22
+                        spacing: 16
+                        Label {
+                            text: "＋"
+                            font.pixelSize: 34
+                            color: "white"
+                        }
+                        ColumnLayout {
+                            spacing: 2
+                            Label {
+                                text: "New project"
+                                font.pixelSize: 22
+                                font.bold: true
+                                color: "white"
+                            }
+                            Label {
+                                text: parent.parent.parent.format.label + " · " + parent.parent.parent.format.w + " × " + parent.parent.parent.format.h + " — or choose another shape below"
+                                color: "#d8f3ec"
+                            }
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: startPage.begin(parent.format)
                     }
                 }
-            }
-            Action {
-                objectName: "startEmpty"
-                text: "Skip"
-                onClicked: win.startScreen = false
+                Label {
+                    text: "Shape of the video (you can change it later under Project → Reframe for…)"
+                    color: win.muted
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+                GridLayout {
+                    Layout.fillWidth: true
+                    columns: 3
+                    columnSpacing: 12
+                    rowSpacing: 12
+                    Repeater {
+                        model: win.projectFormats
+                        delegate: Rectangle {
+                            id: formatTile
+                            required property var modelData
+                            required property int index
+                            objectName: "startFormat-" + index
+                            signal clicked
+                            onClicked: startPage.begin(modelData)
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 92
+                            radius: 8
+                            color: tileMouse.containsMouse ? "#2a3640" : "#1d252e"
+                            border.color: modelData.w === startPage.prefs.width && modelData.h === startPage.prefs.height ? win.mint : "#34404c"
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 12
+                                // The canvas shape, to scale.
+                                Item {
+                                    Layout.preferredWidth: 48
+                                    Layout.preferredHeight: 48
+                                    Rectangle {
+                                        anchors.centerIn: parent
+                                        width: 44 * Math.min(1, formatTile.modelData.w / formatTile.modelData.h)
+                                        height: 44 * Math.min(1, formatTile.modelData.h / formatTile.modelData.w)
+                                        radius: 3
+                                        color: "transparent"
+                                        border.color: win.mint
+                                        border.width: 2
+                                    }
+                                }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 3
+                                    Label {
+                                        text: formatTile.modelData.label
+                                        font.bold: true
+                                    }
+                                    Label {
+                                        text: formatTile.modelData.w + " × " + formatTile.modelData.h + " · " + formatTile.modelData.hint
+                                        color: win.muted
+                                        font.pixelSize: 11
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+                            MouseArea {
+                                id: tileMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: formatTile.clicked()
+                            }
+                        }
+                    }
+                }
+                // After a session that did not end normally: what to do now, and where the log is.
+                Rectangle {
+                    objectName: "uncleanExitNotice"
+                    visible: win.s.uncleanExit === true
+                    Layout.fillWidth: true
+                    implicitHeight: noticeRow.implicitHeight + 16
+                    radius: 6
+                    color: "#3a2f1c"
+                    border.color: "#e5c07b"
+                    RowLayout {
+                        id: noticeRow
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: "Cutlery did not close normally last time." + (win.s.hasRecovery ? " Your unsaved work can be recovered with “Recover autosave”." : "") + " The log may tell why: " + (win.s.logPath || "")
+                        }
+                        Action {
+                            text: "Open log folder"
+                            onClicked: Qt.openUrlExternally("file:///" + String(win.s.logPath || "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/[^\/]*$/, ""))
+                        }
+                        ToolButton {
+                            objectName: "dismissUncleanExit"
+                            text: "✕"
+                            onClicked: editor.dismissUncleanExit()
+                        }
+                    }
+                }
+                Label {
+                    visible: (win.s.recent || []).length > 0
+                    text: "Projects"
+                    font.bold: true
+                    font.pixelSize: 15
+                }
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    Repeater {
+                        model: (win.s.recent || []).slice(0, 12)
+                        delegate: AbstractButton {
+                            required property var modelData
+                            required property int index
+                            objectName: "startRecent-" + index
+                            width: 168
+                            height: 112
+                            padding: 8
+                            enabled: modelData.exists
+                            hoverEnabled: true
+                            onClicked: win.guarded("recent:" + modelData.path)
+                            background: Rectangle {
+                                radius: 8
+                                color: parent.hovered ? "#2a3640" : "#1d252e"
+                                border.color: parent.hovered ? win.mint : "#34404c"
+                            }
+                            contentItem: ColumnLayout {
+                                spacing: 4
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 48
+                                    radius: 5
+                                    color: "#0f141a"
+                                    Label {
+                                        anchors.centerIn: parent
+                                        text: "▶"
+                                        color: "#4c5966"
+                                        font.pixelSize: 18
+                                    }
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: parent.parent.modelData.name + (parent.parent.modelData.exists ? "" : " (missing)")
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: parent.parent.modelData.path
+                                    color: win.muted
+                                    font.pixelSize: 10
+                                    elide: Text.ElideMiddle
+                                }
+                            }
+                            ToolTip.visible: hovered
+                            ToolTip.text: modelData.path
+                        }
+                    }
+                }
+                Label {
+                    visible: (win.s.templates || []).length > 0
+                    text: "From a template"
+                    color: win.muted
+                }
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    visible: (win.s.templates || []).length > 0
+                    Repeater {
+                        model: win.s.templates || []
+                        delegate: Action {
+                            required property var modelData
+                            required property int index
+                            objectName: "startTemplate-" + index
+                            text: modelData.name
+                            onClicked: win.guarded("template:" + modelData.name)
+                        }
+                    }
+                }
             }
         }
     }
