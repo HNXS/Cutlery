@@ -710,7 +710,7 @@ class UiTest : public QObject {
         QCOMPARE(choice->property("currentIndex").toInt(), 0);
         editor.removeTextStyle("Red heading");
         // An adjustment layer from the Add tab shows its own inspector section.
-        findItem(window->contentItem(), "leftTabs")->setProperty("currentIndex", 1);
+        window->setProperty("leftTab", "effects");
         auto *adjust = findItem(window->contentItem(), "addAdjustment");
         QTRY_VERIFY(adjust && adjust->isVisible());
         QVERIFY(QMetaObject::invokeMethod(adjust, "clicked"));
@@ -1041,7 +1041,7 @@ class UiTest : public QObject {
         QCOMPARE(clip().scale, 1.);
         QCOMPARE(clip().x, 0.);
         // A mosaic area: added from the library panel, configured in its own section.
-        findItem(window->contentItem(), "leftTabs")->setProperty("currentIndex", 1); // the Add tab
+        window->setProperty("leftTab", "effects");
         press("addMosaicArea");
         const auto area = editor.project().clips.last();
         QCOMPARE(area.effect, QString("pixelate"));
@@ -1063,6 +1063,7 @@ class UiTest : public QObject {
         for (const auto &c : editor.state()["brandColors"].toStringList())
             editor.removeBrandColor(c);
         editor.setBrandLogo({});
+        window->setProperty("leftTab", "stickers");
         auto *brandField = findItem(window->contentItem(), "brandColorField");
         QVERIFY(brandField && brandField->isVisible());
         brandField->setProperty("text", "#123456");
@@ -1073,6 +1074,7 @@ class UiTest : public QObject {
         editor.removeBrandColor("#123456");
         QTRY_VERIFY(!findItem(window->contentItem(), "brandColor-#123456"));
         // A lower third from the library panel; its style can be changed in the inspector.
+        window->setProperty("leftTab", "text");
         press("addLowerThird");
         const auto lower = editor.project().clips.last();
         QCOMPARE(lower.titleStyle, QString("lowerThird"));
@@ -1444,6 +1446,73 @@ class UiTest : public QObject {
         QCOMPARE(window->property("inspectorTabs").toList().size(), 0);
         editor.select(id);
         QTRY_VERIFY(!findItem(window->contentItem(), "projectDetails")->isVisible());
+        // Values: typed into the number box (in percent), stepped, and reset with the section.
+        page(window, "video", "basic");
+        auto *scaleBox = findItem(window->contentItem(), "prop-scale-box");
+        QVERIFY(scaleBox && scaleBox->isVisible());
+        scaleBox->setProperty("text", "150");
+        QVERIFY(QMetaObject::invokeMethod(scaleBox, "editingFinished"));
+        QCOMPARE(editor.project().clips.first().scale, 1.5);
+        QTRY_COMPARE(scaleBox->property("text").toString(), QString("150%"));
+        auto *reset = findItem(window->contentItem(), "transformSection-reset");
+        QVERIFY(reset && reset->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(reset, "clicked"));
+        QCOMPARE(editor.project().clips.first().scale, 1.);
+        editor.undo();
+        QCOMPARE(editor.project().clips.first().scale, 1.5);
+        editor.undo();
+        QCOMPARE(editor.project().clips.first().scale, 1.);
+        // A section with an on/off box: stabilizing.
+        page(window, "video", "enhance");
+        auto *stabilizeOn = findItem(window->contentItem(), "stabilize-on");
+        QVERIFY(stabilizeOn && stabilizeOn->isVisible());
+        stabilizeOn->setProperty("checked", true);
+        QVERIFY(QMetaObject::invokeMethod(stabilizeOn, "toggled"));
+        QVERIFY(editor.project().clips.first().stabilize);
+        QTRY_VERIFY(findItem(window->contentItem(), "stabilizeStrength")->isEnabled());
+        editor.undo();
+        QVERIFY(!editor.project().clips.first().stabilize);
+        // The asset panel's tabs: a style effect and a look as tiles for the selected clip; a
+        // transition only when the clip follows another.
+        auto *effectsTab = findItem(window->contentItem(), "leftTab-effects");
+        QVERIFY(effectsTab);
+        QVERIFY(QMetaObject::invokeMethod(effectsTab, "clicked"));
+        QCOMPARE(window->property("leftTab").toString(), QString("effects"));
+        auto *glitch = findItem(window->contentItem(), "fxTile-glitch");
+        QTRY_VERIFY(glitch && glitch->isVisible() && glitch->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(glitch, "clicked"));
+        QCOMPARE(editor.project().clips.first().fx, QString("glitch"));
+        QTRY_VERIFY(glitch->property("checked").toBool());
+        editor.undo();
+        window->setProperty("leftTab", "filters");
+        auto *warm = findItem(window->contentItem(), "lookTile-1");
+        QTRY_VERIFY(warm && warm->isVisible() && warm->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(warm, "clicked"));
+        QCOMPARE(editor.project().clips.first().temperature, .35);
+        editor.undo();
+        QCOMPARE(editor.project().clips.first().temperature, 0.);
+        window->setProperty("leftTab", "transitions");
+        auto *none = findItem(window->contentItem(), "transitionTile-none");
+        QTRY_VERIFY(none && none->isVisible());
+        QVERIFY(!none->isEnabled());
+        if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS"))
+            for (const auto &tab : {"media", "audio", "text", "stickers", "effects", "transitions", "filters", "layouts"}) {
+                window->setProperty("leftTab", tab);
+                QTest::qWait(50);
+                window->grabWindow().save(qEnvironmentVariable("CUTLERY_UI_SHOTS") + "/left-" + tab + ".png");
+            }
+        window->setProperty("leftTab", "media");
+        // Pictures of every inspector page, for looking at the layout.
+        if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS")) {
+            for (const auto &[tab, sub] : std::initializer_list<std::pair<const char *, const char *>>{
+                     {"video", "basic"}, {"video", "cutout"}, {"video", "mask"}, {"video", "canvas"},
+                     {"video", "enhance"}, {"speed", ""}, {"animation", ""}, {"adjust", "basic"},
+                     {"adjust", "wheels"}, {"effects", ""}, {"more", ""}}) {
+                page(window, tab, sub);
+                QTest::qWait(50);
+                window->grabWindow().save(qEnvironmentVariable("CUTLERY_UI_SHOTS") + "/" + tab + "-" + sub + ".png");
+            }
+        }
         // Video noise, flicker and source colours for a video; the HDR choice only for HDR.
         page(window, "video", "enhance");
         for (const char *name : {"videoDenoise", "deflicker", "colorRange", "colorMatrix"})
@@ -1490,6 +1559,7 @@ class UiTest : public QObject {
         QTRY_COMPARE(status->property("text").toString(), QString("Speaker found ✓"));
         QVERIFY(!findItem(window->contentItem(), "cutoutAnalyze")->isVisible());
         // AI upscale of the 90p clip, to 360p: the same flow.
+        page(window, "video", "enhance");
         auto *sharpen = findItem(window->contentItem(), "aiUpscale");
         QVERIFY(sharpen && sharpen->isVisible() && sharpen->isEnabled());
         sharpen->setProperty("checked", true);

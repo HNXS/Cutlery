@@ -53,18 +53,45 @@ What goes where:
 - **More:** edit by text, remove pauses, beats and markers, scene detection, track, copy and
   paste attributes, detach, unlink, relink.
 
+## Inspector sections — package 1b, done
+
+- **Sections:** each part of a page is a section with a bold title, a fold arrow and, where it
+  makes sense, a reset button (↺, one undo step) and an on/off box that dims the section while it
+  is off (e.g. Stabilize).
+- **Value rows:** each value shows its name, a number box with its unit (%, °, dB, Hz, s, EV) and
+  ▴/▾ steppers, a keyframe diamond (◇, ◆ at a keyframe, yellow while animated) for animatable
+  values, and a slider. A double-click on the slider resets the value; typing in the box sets it.
+- **Converted so far:** Transform, Opacity, Crop, Light, Blur, Volume and fades, the sound tools
+  (Clean-up, Tone, Dynamics, Room and pitch), Colour, Tones, Details, Edge and frame, Stabilize,
+  Noise and flicker, and Motion blur. The other pages have section titles; their controls keep
+  their own form.
+
+## Asset panel — package 2, done
+
+The left panel has icon tabs: Media, Audio, Text, Stickers, Effects, Transitions, Filters and
+Layouts. The panel is wider (400 px, at least 330), so the labels fit.
+
+- **Media:** the library as before (import, views and folders, search, tiles).
+- **Audio:** sound effects, a shortcut to the library's sound files, and a hint to the voice-over
+  button.
+- **Text:** title, caption, the five title templates, and auto captions.
+- **Stickers:** shapes, icons and the brand kit (colours and logo).
+- **Effects:** blur and mosaic areas, and the adjustment layer. Below them, style effects as tiles
+  for the selected clip; its current effect is framed in mint.
+- **Transitions:** tiles for each transition into the selected clip. They are enabled only when
+  the clip directly follows another; the length is set in the inspector.
+- **Filters:** looks as tiles, the LUT library as tiles, and adding a LUT file.
+- **Layouts:** arranging the selected pictures, and your own layouts.
+
+Tiles show a glyph over a label, a mint "+" on hover and a mint frame for the current choice; each
+click is one undo step.
+
 ## Still to do
 
-- **Inspector sections (package 1b):** one section look throughout. Each section has an on/off
-  check box, a bold title, collapse, reset (↺) and a keyframe diamond (◇). Each value row has its
-  label above, a slider, a number box with steppers and its own ◇. A footer holds "Apply to all"
-  and "Save as preset" where they make sense.
-- **Asset panel (package 2):**
-  - An icon tab row: Media, Audio, Text, Stickers, Effects, Transitions, Captions, Filters,
-    Adjustment.
-  - Each tab has a narrow category column (e.g. Media: Local, Library; Audio: Sound effects,
-    Recorded; Text: Add text, Styles, Templates, Auto captions).
-  - Tiles have previews, a duration, an "Added" badge and a "+" on hover.
+- **Asset panel, still to do:**
+  - A narrow category column per tab, once the tabs hold more than a screenful.
+  - Media tiles with an "Added" badge.
+  - Sound effects listed in the Audio tab itself.
 - **Timeline and top bar (package 3):**
   - A tool row above the timeline:
     - left: select, undo, redo, split, delete left and right, delete, marker, freeze, reverse,
