@@ -1,5 +1,20 @@
 # Validation record
 
+## Windows portable build — 2026-10-09, HDR to SDR tone mapping, source colour range and matrix, video noise and flicker reduction (0.6 development)
+
+[GitHub Actions run 37881969826](https://github.com/HNXS/Cutlery/actions/runs/37881969826) on commit `0373610cb5af2ff7ddd3d78a288daec368c136a2` passed every step on its first attempt. The FFmpeg check now also requires `setparams`, `zscale`, `tonemap`, `atadenoise` and `deflicker`.
+
+New coverage:
+
+- **Engine test `sourceColoursAndNoise`:**
+  - **HDR:** an HDR10 (PQ) file is recognised on import; tone-mapped it is brighter than the unconverted signal, and "Bright" differs from "Natural".
+  - **Range:** a limited-range black marked as full becomes true black when read as limited.
+  - **Matrix:** BT.709 gives back the pure red that BT.601 changes.
+  - **Video noise:** noise between neighbouring pixels is reduced by more than 30 %.
+  - **Flicker:** the brightness jump between two frames is at least halved.
+  - The settings are saved, and out-of-range values are refused.
+- **UI test `aiCutoutControls`:** the new controls show for a video and the HDR choice stays hidden for SDR; choosing "Full" range sets the clip and undo restores it. A picture clip does not show them.
+
 ## Windows portable build — 2026-10-08, even loudness, noise learned at the playhead, session log and unclean-exit notice (0.6 development)
 
 [GitHub Actions run 37830678750](https://github.com/HNXS/Cutlery/actions/runs/37830678750) on commit `348d89e52d5525cba0fd02accedba2d738aefa0c` passed every step on its first attempt.

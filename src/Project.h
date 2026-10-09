@@ -26,6 +26,8 @@ struct Asset {
     bool variableRate = false;
     // Animated GIFs repeat, so their clips can be any length.
     bool loops = false;
+    // HDR video: "pq" (HDR10, SMPTE 2084) or "hlg" (hybrid log-gamma); empty for SDR.
+    QString hdr;
     // The media library folder it is in; empty for the top level.
     QString folder;
     // Usage rights, as the user records them: "" (not recorded), "own" (made by the user),
@@ -172,6 +174,16 @@ struct Clip {
     // whether it zooms in that far so no mirrored edge shows.
     double stabilizeStrength = 0.33;
     bool stabilizeZoom = false;
+    // Video noise reduction over neighbouring frames (0 off, up to 1), and flicker removal that
+    // evens out the brightness of successive frames (0 off, up to 1: 3 to 15 frames compared).
+    double videoDenoise = 0, deflicker = 0;
+    // How the source's colours are read when its file says it wrongly: colour range "" (as the
+    // file says), "tv" (limited, 16–235) or "pc" (full, 0–255), and the YUV matrix "" (as the
+    // file says), "bt601", "bt709" or "bt2020".
+    QString colorRange, colorMatrix;
+    // HDR sources are mapped to the SDR picture: "" filmic (hable), "bright" (mobius, keeps more
+    // of the highlights' brightness) or "off" (the signal shown as it is).
+    QString toneMap;
     // Room reverb and a distinct echo, 0..1.
     double reverb = 0, echo = 0;
     // Pitch in semitones (−12..12) without changing the tempo.

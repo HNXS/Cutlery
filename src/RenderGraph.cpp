@@ -36,6 +36,35 @@ QString filterPath(const QString &path) {
 static QString num(double v) {
     return QString::number(v, 'f', 9);
 }
+// Filters that read a source's colours right, ending in a comma: a colour range or YUV matrix
+// the user set for a file that says it wrongly, and HDR mapped to the SDR picture.
+static QString sourceColour(const Clip &c, const Asset &a) {
+    QStringList params;
+    if (!c.colorRange.isEmpty())
+        params << "range=" + c.colorRange;
+    if (!c.colorMatrix.isEmpty())
+        params << "colorspace=" + QString(c.colorMatrix == "bt601"    ? "smpte170m"
+                                          : c.colorMatrix == "bt2020" ? "bt2020nc"
+                                                                      : "bt709");
+    const bool hdr = !a.hdr.isEmpty() && c.toneMap != "off";
+    if (hdr) {
+        // zscale needs every property of the source, which files often leave out.
+        params << "color_trc=" + QString(a.hdr == "pq" ? "smpte2084" : "arib-std-b67")
+               << "color_primaries=bt2020";
+        if (c.colorMatrix.isEmpty())
+            params << "colorspace=bt2020nc";
+        if (c.colorRange.isEmpty())
+            params << "range=tv";
+    }
+    QString f = params.isEmpty() ? QString() : "setparams=" + params.join(':') + ",";
+    if (hdr)
+        // To linear light (100 nits as SDR white), BT.709 primaries, then the highlights
+        // compressed into the SDR range and the result encoded as BT.709.
+        f += QString("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,"
+                     "tonemap=tonemap=%1:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv444p,")
+                 .arg(c.toneMap == "bright" ? "mobius" : "hable");
+    return f;
+}
 static bool animatedGeometry(const Clip &c) {
     return c.keyframes.contains("scale") || c.keyframes.contains("x") ||
            c.keyframes.contains("y") || c.keyframes.contains("rotation");
@@ -1157,7 +1186,21 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             // input seek would drop a long-held frame that began before it).
             source += QString("fps=%1,trim=start=%2,")
                           .arg(fps, num(std::fmod(std::max(0., seek - pre), n.asset->duration)));
+        if (up.path.isEmpty() && n.asset)
+            source += sourceColour(c, *n.asset);
         QString f = timing(source, !n.image);
+        // Noise and flicker are judged over neighbouring frames at the project's rate.
+        if (c.videoDenoise > 0 && !n.image) {
+            // Adaptive temporal averaging: pixels that change less than the thresholds between
+            // frames are averaged over a window of 5 to 15 frames.
+            const auto a = num(0.02 + 0.13 * c.videoDenoise), b = num(0.05 + 0.75 * c.videoDenoise);
+            f += QString(",atadenoise=0a=%1:1a=%1:2a=%1:0b=%2:1b=%2:2b=%2:s=%3")
+                     .arg(a, b)
+                     .arg(5 + 2 * int(std::lround(5 * c.videoDenoise)));
+        }
+        if (c.deflicker > 0 && !n.image)
+            f += QString(",deflicker=size=%1:mode=pm")
+                     .arg(3 + 2 * int(std::lround(6 * c.deflicker)));
         // Camera shake is measured on the source picture, before scaling.
         if (c.stabilize && !n.image) {
             // The search range in source pixels (FFmpeg allows up to 64); zooming in by it on

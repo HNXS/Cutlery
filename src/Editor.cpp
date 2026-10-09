@@ -534,6 +534,9 @@ QVariantMap Editor::state() const {
                                       m_project.asset(c.assetId)->kind == "video"},
                         {"variableRate", m_project.asset(c.assetId) &&
                                              m_project.asset(c.assetId)->variableRate},
+                        {"hdr", m_project.asset(c.assetId) && !c.audioOnly
+                                    ? m_project.asset(c.assetId)->hdr
+                                    : QString()},
                         {"locked", m_project.trackSettings[c.track].locked},
                         {"linkedCount", int(m_project.linkedClips(c.id).size())},
                         {"canDetach", !c.audioOnly && m_project.asset(c.assetId) &&
@@ -647,6 +650,11 @@ QVariantMap Editor::state() const {
             PROP(titleSlide);
             PROP(stabilizeStrength);
             PROP(stabilizeZoom);
+            PROP(videoDenoise);
+            PROP(deflicker);
+            PROP(colorRange);
+            PROP(colorMatrix);
+            PROP(toneMap);
             PROP(exposure);
             PROP(echo);
             PROP(pan);
@@ -1732,6 +1740,11 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                         const double nominal = rate("r_frame_rate"), average = rate("avg_frame_rate");
                         a.frameRate = average > 0 ? average : nominal;
                         a.variableRate = isVariableRate(nominal, average);
+                        // HDR video, shown on the SDR timeline through tone mapping.
+                        const auto transfer = s["color_transfer"].toString();
+                        a.hdr = transfer == "smpte2084"      ? "pq"
+                                : transfer == "arib-std-b67" ? "hlg"
+                                                             : QString();
                         // Phones store portrait video as rotated landscape; FFmpeg decodes
                         // it upright, so report the upright size.
                         int rotation = s["tags"].toObject()["rotate"].toString().toInt();
@@ -1759,6 +1772,7 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                     a.duration = m_prefs.value("stillSeconds").toDouble();
                     a.frameRate = 0;
                     a.variableRate = false;
+                    a.hdr.clear();
                 }
                 if ((a.width == 0 && !a.hasAudio) || a.duration <= 0)
                     throw std::runtime_error("No supported finite video/audio stream found");
@@ -2566,6 +2580,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             {"gainX", &Clip::gainX},
             {"gainY", &Clip::gainY},
             {"stabilizeStrength", &Clip::stabilizeStrength},
+            {"videoDenoise", &Clip::videoDenoise},
+            {"deflicker", &Clip::deflicker},
             {"exposure", &Clip::exposure},
             {"echo", &Clip::echo},
             {"pan", &Clip::pan},
@@ -2692,6 +2708,9 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(stabilizeZoom, toBool);
         FIELD(textAnimation, toString);
         FIELD(slowMotion, toString);
+        FIELD(colorRange, toString);
+        FIELD(colorMatrix, toString);
+        FIELD(toneMap, toString);
         FIELD(bold, toBool);
         FIELD(italic, toBool);
         FIELD(align, toString);
@@ -4447,6 +4466,8 @@ void Editor::pasteAttributes(const QString &group) {
         c->fxStrength = from.fxStrength;
         c->canvasFill = from.canvasFill;
         c->motionBlur = from.motionBlur;
+        c->videoDenoise = from.videoDenoise;
+        c->deflicker = from.deflicker;
         if (group == "look")
             return;
         c->scale = from.scale;
@@ -4463,6 +4484,9 @@ void Editor::pasteAttributes(const QString &group) {
         c->cropBottom = from.cropBottom;
         c->flip = from.flip;
         c->flipVertical = from.flipVertical;
+        c->colorRange = from.colorRange;
+        c->colorMatrix = from.colorMatrix;
+        c->toneMap = from.toneMap;
         c->blendMode = from.blendMode;
         c->volume = from.volume;
         c->eqLow = from.eqLow;

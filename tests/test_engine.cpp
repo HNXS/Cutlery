@@ -16,6 +16,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <algorithm>
 #include <array>
 #include <functional>
 #include <limits>
@@ -3801,6 +3802,142 @@ class EngineTest : public QObject {
         }
         Editor again(&frames);
         QVERIFY(!again.state()["uncleanExit"].toBool());
+    }
+    void sourceColoursAndNoise() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // An HDR10 (PQ) grey, a limited-range black wrongly marked as full range, a pure red
+        // stored with the BT.709 matrix but not marked, grainy grey noise and a picture that
+        // flickers between two brightnesses.
+        const auto pq = dir.filePath("pq.mov"), black = dir.filePath("black.mkv"),
+                   red = dir.filePath("red.mkv"), grain = dir.filePath("grain.mkv"),
+                   flicker = dir.filePath("flicker.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "color=c=0x808080:s=64x64:d=1:r=25,format=yuv422p10le,setparams=color_trc="
+                     "smpte2084:color_primaries=bt2020:colorspace=bt2020nc",
+                     "-c:v", "prores_ks",
+                     "-color_trc", "smpte2084", "-color_primaries", "bt2020", "-colorspace",
+                     "bt2020nc", pq});
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "color=c=black:s=64x64:d=1:r=25,format=yuv420p,setparams=range=pc", "-c:v",
+                     "ffv1", "-color_range", "pc", black});
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "color=c=red:s=64x64:d=1:r=25,scale=out_color_matrix=bt709,format=yuv444p,"
+                     "setparams=colorspace=unknown",
+                     "-c:v", "ffv1", red});
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "color=c=gray:s=64x64:d=1:r=25,format=yuv444p,noise=alls=15:allf=t", "-c:v",
+                     "ffv1", grain});
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "color=c=gray:s=64x64:d=1:r=25,format=yuv444p,geq=lum='100+40*mod(N\\,2)':cb=128:cr=128",
+                     "-c:v", "ffv1", flicker});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(64, 64, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(pq), QUrl::fromLocalFile(black),
+                            QUrl::fromLocalFile(red), QUrl::fromLocalFile(grain),
+                            QUrl::fromLocalFile(flicker)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 5, 15000);
+        QHash<QString, QString> clipOf;
+        for (const auto &a : editor.project().assets) {
+            editor.addAsset(a.id, 0);
+            for (const auto &c : editor.project().clips)
+                if (c.assetId == a.id)
+                    clipOf[QFileInfo(a.path).baseName()] = c.id;
+            QCOMPARE(a.hdr, QString(a.name == "pq.mov" ? "pq" : ""));
+        }
+        editor.select(clipOf["pq"]);
+        QCOMPARE(editor.state()["selected"].toMap()["hdr"].toString(), QString("pq"));
+        const auto graph = dir.filePath("graph.txt");
+        // The picture of one clip alone at a frame. The timeline is rendered from its start, so
+        // filters that look at neighbouring frames have them.
+        auto render = [&](const QString &name, qint64 frame, const std::function<void(Clip &)> &set) {
+            Project p = editor.project();
+            p.clips.erase(std::remove_if(p.clips.begin(), p.clips.end(),
+                                         [&](const Clip &c) { return c.id != clipOf[name]; }),
+                          p.clips.end());
+            p.clips[0].track = 0;
+            p.clips[0].start = 0;
+            set(p.clips[0]);
+            RenderOptions options;
+            options.audio = false;
+            options.to = frame + 8;
+            const auto plan = compileRender(p, dir.filePath("work"), 64, 64, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", frame / 25.)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        auto pixel = [&](const QString &name, qint64 frame, const std::function<void(Clip &)> &set) {
+            return render(name, frame, set).pixelColor(32, 32);
+        };
+        // HDR is mapped to SDR: brighter than the raw signal; "bright" differs from natural.
+        const auto natural = pixel("pq", 5, [](Clip &) {}),
+                   bright = pixel("pq", 5, [](Clip &c) { c.toneMap = "bright"; }),
+                   raw = pixel("pq", 5, [](Clip &c) { c.toneMap = "off"; });
+        QVERIFY2(natural.red() > raw.red() + 15, qPrintable(QString("%1 %2").arg(natural.red()).arg(raw.red())));
+        QVERIFY2(bright.red() != natural.red(), qPrintable(QString::number(bright.red())));
+        // Limited range read as such: true black instead of dark grey.
+        const auto asFile = pixel("black", 5, [](Clip &) {}),
+                   limited = pixel("black", 5, [](Clip &c) { c.colorRange = "tv"; });
+        QVERIFY2(asFile.red() >= 12 && limited.red() <= 3,
+                 qPrintable(QString("%1 %2").arg(asFile.red()).arg(limited.red())));
+        // The BT.709 matrix gives back the pure red; BT.601 (assumed for unmarked files) does not.
+        const auto as601 = pixel("red", 5, [](Clip &) {}),
+                   as709 = pixel("red", 5, [](Clip &c) { c.colorMatrix = "bt709"; });
+        QVERIFY2(as709.red() > 245 && as709.green() < 8 && as709.blue() < 8,
+                 qPrintable(QColor(as709).name()));
+        QVERIFY2(std::abs(as601.green() - as709.green()) + std::abs(as601.blue() - as709.blue()) +
+                         std::abs(as601.red() - as709.red()) > 15,
+                 qPrintable(QColor(as601).name()));
+        // Video noise reduction: neighbouring pixels differ less.
+        auto roughness = [&](double amount) {
+            const auto image = render("grain", 12, [&](Clip &c) { c.videoDenoise = amount; });
+            double sum = 0;
+            for (int y = 8; y < 56; ++y)
+                for (int x = 8; x < 56; ++x)
+                    sum += std::abs(qGray(image.pixel(x, y)) - qGray(image.pixel(x + 1, y)));
+            return sum / (48 * 48);
+        };
+        const double noisy = roughness(0), calm = roughness(1);
+        QVERIFY2(calm < noisy * 0.7, qPrintable(QString("%1 %2").arg(calm).arg(noisy)));
+        // Flicker removal: two neighbouring frames come closer in brightness.
+        auto step = [&](double amount) {
+            return std::abs(pixel("flicker", 12, [&](Clip &c) { c.deflicker = amount; }).red() -
+                            pixel("flicker", 13, [&](Clip &c) { c.deflicker = amount; }).red());
+        };
+        const int flickering = step(0), even = step(1);
+        QVERIFY2(even < flickering / 2, qPrintable(QString("%1 %2").arg(even).arg(flickering)));
+        // Set through the editor, saved, and refused when out of range.
+        editor.select(clipOf["grain"]);
+        editor.setClip("videoDenoise", 0.4);
+        editor.setClip("deflicker", 0.6);
+        editor.setClip("colorRange", "pc");
+        editor.setClip("colorMatrix", "bt601");
+        editor.setClip("toneMap", "bright");
+        const auto back = Project::fromJson(editor.project().json(), {});
+        const Clip *saved = nullptr;
+        for (const auto &c : back.clips)
+            if (c.id == clipOf["grain"])
+                saved = &c;
+        QVERIFY(saved);
+        QCOMPARE(saved->videoDenoise, 0.4);
+        QCOMPARE(saved->deflicker, 0.6);
+        QCOMPARE(saved->colorRange, QString("pc"));
+        QCOMPARE(saved->colorMatrix, QString("bt601"));
+        QCOMPARE(saved->toneMap, QString("bright"));
+        QCOMPARE(back.asset(editor.project().clips[0].assetId)->hdr, QString("pq"));
+        editor.setClip("colorMatrix", "xyz");
+        QVERIFY(!editor.state()["error"].toString().isEmpty());
+        editor.clearError();
+        editor.setClip("videoDenoise", 2);
+        QVERIFY(!editor.state()["error"].toString().isEmpty());
+        editor.clearError();
     }
     void evenLoudnessAndNoise() {
         const auto ffmpeg = Editor::executable("ffmpeg");
