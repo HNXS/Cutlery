@@ -16,6 +16,9 @@ const QVector<QPair<QString, double>> &exportFrameRates() {
         {"30", 30}, {"50", 50}, {"60000/1001", 60000 / 1001.}, {"60", 60}};
     return rates;
 }
+bool deepColourFormat(const QString &format) {
+    return format == "hevc" || format == "av1" || format == "vp9" || format == "prores";
+}
 bool audioFormat(const QString &format) {
     return format == "mp3" || format == "m4a" || format == "wav";
 }
@@ -176,6 +179,38 @@ QVector<Encoder> encoderCandidates(const ExportSettings &s, QSize size, double f
                 e.audioArguments << "-ac" << "1";
             if (s.sampleRate != 48000)
                 e.audioArguments << "-ar" << QString::number(s.sampleRate);
+        }
+        if (!s.dynamicRange.isEmpty() && !e.audioOnly && deepColourFormat(s.format)) {
+            // 10 bits a channel: P010 for the hardware encoders, planar 10-bit for software;
+            // ProRes is 10-bit already.
+            const bool hardware = e.name.endsWith("_nvenc") || e.name.endsWith("_amf") ||
+                                  e.name.endsWith("_qsv") || e.name.endsWith("_mf");
+            if (e.name != "prores_ks")
+                e.pixelFormat = hardware ? "p010le" : "yuv420p10le";
+            if (e.name.startsWith("hevc_") && !e.name.endsWith("_mf"))
+                e.videoArguments << "-profile:v" << "main10";
+            if (e.name == "libvpx-vp9")
+                e.videoArguments << "-profile:v" << "2";
+            const bool hdr = s.dynamicRange != "10bit";
+            const QString trc = s.dynamicRange == "pq"    ? "smpte2084"
+                                : s.dynamicRange == "hlg" ? "arib-std-b67"
+                                                          : "bt709",
+                          primaries = hdr ? "bt2020" : "bt709", matrix = hdr ? "bt2020nc" : "bt709";
+            // The timeline's RGB picture, converted with the right matrix (and for HDR into
+            // linear light, BT.2020 primaries and the HDR curve, SDR white at 203 nits), then
+            // marked as such for the encoder and players.
+            e.graphPixelFormat = hdr ? "gbrpf32le" : "rgba";
+            e.videoTail =
+                (hdr ? QString("setparams=color_trc=bt709:color_primaries=bt709:colorspace=gbr:"
+                               "range=pc,zscale=t=linear,zscale=p=bt2020:t=%1:m=bt2020nc:r=tv:"
+                               "npl=203,format=%2")
+                           .arg(trc, e.pixelFormat)
+                     : QString("scale=out_color_matrix=bt709:out_range=tv,format=%1")
+                           .arg(e.pixelFormat)) +
+                QString(",setparams=color_trc=%1:color_primaries=%2:colorspace=%3:range=tv")
+                    .arg(trc, primaries, matrix);
+            e.videoArguments << "-color_primaries" << primaries << "-color_trc" << trc
+                             << "-colorspace" << matrix << "-color_range" << "tv";
         }
         if (s.fps > 0)
             for (const auto &[rate, value] : exportFrameRates())

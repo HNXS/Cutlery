@@ -24,7 +24,13 @@ struct ExportSettings {
     int bitrate = 0;
     // Sound: 2 (stereo) or 1 (mono) channels, at 48000 or 44100 Hz.
     int channels = 2, sampleRate = 48000;
+    // Picture: "" (8-bit SDR as before), "10bit" (10-bit BT.709 SDR), "pq" (HDR10: BT.2020 with
+    // the PQ curve) or "hlg" (BT.2020 hybrid log-gamma). 10-bit and HDR need HEVC, AV1, VP9 or
+    // ProRes; the timeline's SDR picture keeps its look, its white at 203 nits.
+    QString dynamicRange;
 };
+// Whether a format can be exported in 10 bits and as HDR.
+bool deepColourFormat(const QString &format);
 // Frame rates an export can be set to, as FFmpeg rates ("30000/1001") paired with their value.
 const QVector<QPair<QString, double>> &exportFrameRates();
 // One concrete way to produce that format. Candidates are tried in order; hardware encoders are
@@ -33,6 +39,9 @@ struct Encoder {
     QString name, label;
     QStringList videoArguments, audioArguments;
     QString pixelFormat = "yuv420p", extension = "mp4";
+    // The render graph's own last pixel format when the tail below converts from it; empty for
+    // pixelFormat.
+    QString graphPixelFormat;
     bool probe = false;
     bool audioOnly = false; // no video stream; videoArguments and pixelFormat are unused
     bool noAudio = false;   // picture only (GIF)

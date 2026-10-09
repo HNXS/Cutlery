@@ -4,6 +4,9 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Free masks:** click points around what should stay visible (straight or smooth, also inverted) to cut a picture to any shape.
+- **10-bit and HDR export:** HEVC, AV1, VP9 and ProRes can be exported in 10 bits, as HDR10 or as HLG.
+- **Less room echo:** turns down the echo of bare rooms and halls after each word (sound tools, "Echoing room" preset).
 - **HDR videos:** HDR10 and HLG clips (e.g. from newer phones) no longer look grey and flat; they are converted to normal colours automatically ("Natural" or "Bright" in the inspector).
 - **Video noise and flicker:** calm grainy low-light video and even out flickering lamps or time-lapses (effects section; seen in playback and export).
 - **Source colours:** fix videos whose blacks look washed out or whose colours look slightly off by choosing the right colour range or colour standard.

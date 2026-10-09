@@ -122,7 +122,31 @@ static QVector<double> pinCorners(const Clip &c, int w, int h) {
     }
     return k;
 }
-// Alpha mask of a styled overlay: rounded rectangle or circle, antialiased.
+// The outline of a free mask in a w × h picture: straight lines through its points, or a
+// smooth closed curve through them (Catmull-Rom as cubic Béziers).
+static QPainterPath maskPath(const Clip &c, double w, double h) {
+    const auto fractions = maskPoints(c.mask);
+    QVector<QPointF> p;
+    for (const auto &f : fractions)
+        p << QPointF(f.x() * w, f.y() * h);
+    QPainterPath path;
+    if (p.size() < 3)
+        return path;
+    path.moveTo(p[0]);
+    const int n = int(p.size());
+    for (int i = 0; i < n; ++i) {
+        const auto &p0 = p[(i + n - 1) % n], &p1 = p[i], &p2 = p[(i + 1) % n],
+                   &p3 = p[(i + 2) % n];
+        if (c.maskSmooth)
+            path.cubicTo(p1 + (p2 - p0) / 6, p2 - (p3 - p1) / 6, p2);
+        else
+            path.lineTo(p2);
+    }
+    path.closeSubpath();
+    return path;
+}
+// Alpha mask of a styled overlay: rounded rectangle or circle, antialiased, within its free
+// mask.
 static QImage overlayMask(const Clip &c, int w, int h) {
     QImage mask(w, h, QImage::Format_ARGB32_Premultiplied);
     mask.fill(Qt::transparent);
@@ -136,12 +160,20 @@ static QImage overlayMask(const Clip &c, int w, int h) {
         paint.setPen(Qt::NoPen);
         paint.setBrush(Qt::white);
         const QRectF area = QRectF(0, 0, w, h).adjusted(inset, inset, -inset, -inset);
+        QPainterPath shape;
         if (c.shape == "circle")
-            paint.drawEllipse(area);
+            shape.addEllipse(area);
         else {
             const double r = c.shape == "rounded" ? c.radius * std::min(w, h) : 0;
-            paint.drawRoundedRect(area, std::max(0., r - inset), std::max(0., r - inset));
+            shape.addRoundedRect(area, std::max(0., r - inset), std::max(0., r - inset));
         }
+        if (!c.mask.isEmpty()) {
+            QPainterPath whole;
+            whole.addRect(0, 0, w, h);
+            const auto outline = maskPath(c, w, h);
+            shape = shape.intersected(c.maskInvert ? whole.subtracted(outline) : outline);
+        }
+        paint.drawPath(shape);
     }
     const int radius = int(std::lround(feather / 6));
     if (radius < 1)
@@ -1417,7 +1449,7 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             nodes << stillInput(ys, "piny") + QString(",format=gray16[piny%1]").arg(id);
             f = QString("[pin%1][pinx%1][piny%1]remap=fill=black@0,format=rgba").arg(id);
         }
-        if (c.shape != "rect" || c.feather > 0) {
+        if (c.shape != "rect" || c.feather > 0 || !c.mask.isEmpty()) {
             // Multiply the picture's alpha by the shape: keeps chroma-key transparency.
             const auto id = QString::number(serial++);
             nodes << f + QString(",format=gbrap[pic%1]").arg(id);
@@ -2085,6 +2117,18 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             a += QString(",afftdn=nr=%1:nf=%2")
                      .arg(num(6 + 24 * c.denoise))
                      .arg(num(c.noiseFloor != 0 ? c.noiseFloor : -50));
+        if (c.dereverb > 0) {
+            // Less room echo: a gate keyed by a copy of the sound whose level a slow-recovering
+            // compressor evens out. After each word the compressor still holds the word's gain,
+            // so the echo trailing it falls below the threshold and is turned down (by up to
+            // 24 dB), while the next word, as loud as the last, opens the gate again.
+            const auto id = QString::number(serial++);
+            a += QString(",asplit[drv%1][drk%1];[drk%1]acompressor=threshold=0.01:ratio=20:attack=5:"
+                         "release=3000:makeup=60[drs%1];[drv%1][drs%1]sidechaingate=threshold=%2:"
+                         "ratio=4:attack=2:release=%3:range=%4:detection=rms")
+                     .arg(id, num(std::pow(10, (-15 + 9 * c.dereverb) / 20)),
+                          num(60 - 30 * c.dereverb), num(std::pow(10, (-6 - 18 * c.dereverb) / 20)));
+        }
         if (c.gate > 0)
             // Opens above a threshold from −60 dB (gentle) to −30 dB (strong).
             a += QString(",agate=threshold=%1:ratio=4:attack=5:release=150:range=%2")

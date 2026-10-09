@@ -13,6 +13,7 @@
 #include <QImageReader>
 #include <QPainter>
 #include <QJsonDocument>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -3802,6 +3803,169 @@ class EngineTest : public QObject {
         }
         Editor again(&frames);
         QVERIFY(!again.state()["uncleanExit"].toBool());
+    }
+    void freeMasksDeepColourAndRoomEcho() {
+        const auto ffmpeg = Editor::executable("ffmpeg"), ffprobe = Editor::executable("ffprobe");
+        QVERIFY2(!ffmpeg.isEmpty() && !ffprobe.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        QImage white(160, 90, QImage::Format_RGB32), red(160, 90, QImage::Format_RGB32);
+        white.fill(Qt::white);
+        red.fill(QColor(255, 0, 0));
+        QVERIFY(white.save(dir.filePath("white.png")) && red.save(dir.filePath("red.png")));
+        // Words of 0.3 s each second in a reverberant room.
+        const auto room = dir.filePath("room.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "aevalsrc='if(lt(mod(t\\,1)\\,0.3)\\,0.5*sin(2*PI*300*t)*sin(2*PI*5*t)\\,0)':d=4:s=48000",
+                     "-af", "aecho=in_gain=0.8:out_gain=0.9:delays=60|130|210|300|420:decays=0.6|0.5|0.4|0.3|0.25",
+                     "-ac", "2", room});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("white.png")),
+                            QUrl::fromLocalFile(dir.filePath("red.png")), QUrl::fromLocalFile(room)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 3, 15000);
+        QString whiteId, redId, roomId;
+        for (const auto &a : editor.project().assets)
+            (a.name.startsWith("white") ? whiteId : a.name.startsWith("red") ? redId : roomId) = a.id;
+        editor.addAsset(whiteId, 0);
+        const auto clipId = editor.project().clips.back().id;
+        editor.select(clipId);
+        editor.setClip("duration", 25);
+
+        // Free mask drawn on the canvas: two points are not a mask yet, the third makes one.
+        editor.seek(5);
+        editor.addMaskPoint(0.25, 0.25);
+        editor.addMaskPoint(0.75, 0.25);
+        QVERIFY(editor.project().clip(clipId)->mask.isEmpty());
+        QCOMPARE(editor.state()["selected"].toMap()["maskOutline"].toList().size(), 2);
+        editor.addMaskPoint(0.75, 0.75);
+        editor.addMaskPoint(0.25, 0.75);
+        const auto points = maskPoints(editor.project().clip(clipId)->mask);
+        QCOMPARE(points.size(), 4);
+        QVERIFY(std::abs(points[2].x() - 0.75) < 0.01 && std::abs(points[2].y() - 0.75) < 0.01);
+        const auto outline = editor.state()["selected"].toMap()["maskOutline"].toList();
+        QCOMPARE(outline.size(), 4);
+        QVERIFY(std::abs(outline[0].toMap()["x"].toDouble() - 0.25) < 0.01);
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Project &project, qint64 frame) {
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 160, 90, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        auto lit = [](const QImage &image, int x, int y) { return qGray(image.pixel(x, y)) > 200; };
+        auto image = still(editor.project(), 5);
+        QVERIFY(lit(image, 80, 45) && !lit(image, 10, 10) && !lit(image, 150, 80));
+        // A smooth curve passes through the corners and bulges out between them.
+        QVERIFY(lit(image, 43, 25) && !lit(image, 80, 19));
+        editor.setClip("maskSmooth", true);
+        image = still(editor.project(), 5);
+        QVERIFY(lit(image, 80, 45) && lit(image, 80, 19) && !lit(image, 10, 10));
+        // Inverted: the inside is hidden.
+        editor.setClip("maskSmooth", false);
+        editor.setClip("maskInvert", true);
+        image = still(editor.project(), 5);
+        QVERIFY(!lit(image, 80, 45) && lit(image, 10, 10));
+        editor.setClip("maskInvert", false);
+        // Taking points away: below three there is no mask; undo brings it back.
+        editor.removeMaskPoint();
+        QCOMPARE(maskPoints(editor.project().clip(clipId)->mask).size(), 3);
+        editor.removeMaskPoint();
+        QVERIFY(editor.project().clip(clipId)->mask.isEmpty());
+        editor.undo();
+        QCOMPARE(maskPoints(editor.project().clip(clipId)->mask).size(), 3);
+        // Saved, and refused when broken.
+        QCOMPARE(Project::fromJson(editor.project().json(), {}).clip(clipId)->mask,
+                 editor.project().clip(clipId)->mask);
+        editor.setClip("mask", "0.1,0.1 2,0.5 0.3,0.9");
+        QVERIFY(!editor.state()["error"].toString().isEmpty());
+        editor.clearError();
+        editor.clearMask();
+        QVERIFY(editor.project().clip(clipId)->mask.isEmpty());
+
+        // 10-bit and HDR export: AV1 as HDR10 puts the timeline's white at 203 nits on the PQ
+        // curve; VP9 in 10-bit BT.709 keeps red's BT.709 brightness.
+        editor.addAsset(redId, 0);
+        editor.select(editor.project().clips.back().id);
+        editor.setClip("duration", 25);
+        auto probe = [&](const QString &file) {
+            return QJsonDocument::fromJson(run(ffprobe, {"-v", "error", "-show_streams", "-select_streams",
+                                                         "v:0", "-of", "json", file}))
+                .object()["streams"]
+                .toArray()[0]
+                .toObject();
+        };
+        auto luma = [&](const QString &file, double at) {
+            const auto raw = run(ffmpeg, {"-v", "error", "-ss", QString::number(at), "-i", file, "-vf",
+                                          "crop=2:2:80:44", "-frames:v", "1", "-pix_fmt", "yuv420p10le",
+                                          "-f", "rawvideo", "-"});
+            return raw.size() >= 2 ? int(quint8(raw[0])) | int(quint8(raw[1])) << 8 : -1;
+        };
+        const auto hdr = dir.filePath("hdr.mp4");
+        editor.exportWith(QUrl::fromLocalFile(hdr), {{"format", "av1"}, {"quality", "small"}, {"dynamicRange", "pq"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 90000);
+        QVERIFY2(QFileInfo::exists(hdr), qPrintable(editor.state()["error"].toString()));
+        auto info = probe(hdr);
+        QCOMPARE(info["pix_fmt"].toString(), QString("yuv420p10le"));
+        QCOMPARE(info["color_transfer"].toString(), QString("smpte2084"));
+        QCOMPARE(info["color_primaries"].toString(), QString("bt2020"));
+        QVERIFY2(std::abs(luma(hdr, 0.4) - 572) < 12, qPrintable(QString::number(luma(hdr, 0.4))));
+        const auto deep = dir.filePath("deep.webm");
+        editor.exportWith(QUrl::fromLocalFile(deep), {{"format", "vp9"}, {"quality", "small"}, {"dynamicRange", "10bit"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 90000);
+        QVERIFY2(QFileInfo::exists(deep), qPrintable(editor.state()["error"].toString()));
+        info = probe(deep);
+        QCOMPARE(info["pix_fmt"].toString(), QString("yuv420p10le"));
+        QCOMPARE(info["color_space"].toString(), QString("bt709"));
+        QVERIFY2(std::abs(luma(deep, 1.4) - 250) < 12, qPrintable(QString::number(luma(deep, 1.4))));
+        // Only formats with 10 bits can have them.
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("no.mp4")), {{"format", "mpeg4"}, {"dynamicRange", "pq"}});
+        QVERIFY(editor.state()["error"].toString().contains("10-bit"));
+        editor.clearError();
+
+        // Less room echo: the echo after each word is turned down, the word itself hardly.
+        editor.newProject();
+        editor.configure(160, 90, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(room)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id, 0);
+        editor.select(editor.project().clips.back().id);
+        auto level = [&](const QString &file, double start, double length) {
+            QProcess p;
+            p.start(ffmpeg, {"-v", "info", "-i", file, "-af",
+                             QString("atrim=start=%1:duration=%2,astats=measure_perchannel=none")
+                                 .arg(start)
+                                 .arg(length),
+                             "-f", "null", "-"});
+            p.waitForFinished(30000);
+            const auto m = QRegularExpression("RMS level dB:\\s+(-?[0-9.]+|-inf)")
+                               .match(QString::fromUtf8(p.readAllStandardError()));
+            return m.captured(1) == "-inf" ? -150. : m.captured(1).toDouble();
+        };
+        auto exportSound = [&](const QString &name, double amount) {
+            editor.setClip("dereverb", amount);
+            const auto out = dir.filePath(name);
+            editor.exportWith(QUrl::fromLocalFile(out), {{"format", "wav"}});
+            [&] { QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000); }();
+            return out;
+        };
+        const auto dry = exportSound("plain.wav", 0), clean = exportSound("clean.wav", 1);
+        const double wordBefore = level(dry, 2.05, 0.2), wordAfter = level(clean, 2.05, 0.2);
+        const double tailBefore = level(dry, 2.4, 0.3), tailAfter = level(clean, 2.4, 0.3);
+        QVERIFY2(wordAfter > wordBefore - 3, qPrintable(QString("%1 %2").arg(wordBefore).arg(wordAfter)));
+        QVERIFY2(tailAfter < tailBefore - 10, qPrintable(QString("%1 %2").arg(tailBefore).arg(tailAfter)));
+        editor.setClip("dereverb", 1.5);
+        QVERIFY(!editor.state()["error"].toString().isEmpty());
+        editor.clearError();
     }
     void sourceColoursAndNoise() {
         const auto ffmpeg = Editor::executable("ffmpeg");

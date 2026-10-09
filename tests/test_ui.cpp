@@ -866,6 +866,15 @@ class UiTest : public QObject {
                  QString("8 Mbit/s"));
         choose("exportFormat", 4); // ProRes takes no bitrate
         QTRY_VERIFY(!findItem(window->contentItem(), "exportBitrate")->isEnabled());
+        // 10-bit and HDR only for formats that can hold them.
+        QTRY_VERIFY(findItem(window->contentItem(), "exportDynamicRange")->isEnabled());
+        choose("exportDynamicRange", 2);
+        QCOMPARE(dialog->property("current").toMap()["dynamicRange"].toString(), QString("pq"));
+        choose("exportFormat", 0);
+        QTRY_VERIFY(!findItem(window->contentItem(), "exportDynamicRange")->isEnabled());
+        QCOMPARE(dialog->property("current").toMap()["dynamicRange"].toString(), QString());
+        choose("exportDynamicRange", 0);
+        choose("exportFormat", 4);
         QVERIFY(findItem(window->contentItem(), "exportFps")->isEnabled());
         choose("exportFps", 0);
         choose("exportBitrate", 0);
@@ -1396,6 +1405,22 @@ class UiTest : public QObject {
         QTRY_COMPARE(findItem(window->contentItem(), "colorRange")->property("currentIndex").toInt(), 2);
         editor.undo();
         QVERIFY(editor.project().clips.first().colorRange.isEmpty());
+        // Free mask: "Draw mask" lets clicks on the preview add points.
+        auto *drawMask = findItem(window->contentItem(), "drawMask");
+        QVERIFY(drawMask && drawMask->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(drawMask, "clicked"));
+        auto *drawer = findItem(window->contentItem(), "maskDrawer");
+        QTRY_VERIFY(drawer && drawer->isVisible());
+        for (const auto &at : {QPointF(0.2, 0.2), QPointF(0.8, 0.2), QPointF(0.5, 0.8)})
+            QTest::mouseClick(window, Qt::LeftButton, {},
+                              drawer->mapToScene(QPointF(at.x() * drawer->width(), at.y() * drawer->height()))
+                                  .toPoint());
+        QTRY_COMPARE(maskPoints(editor.project().clips.first().mask).size(), 3);
+        QTRY_VERIFY(findItem(window->contentItem(), "maskSmooth")->isVisible());
+        QVERIFY(drawMask->property("text").toString().contains("3 points"));
+        QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "clearMask"), "clicked"));
+        QVERIFY(editor.project().clips.first().mask.isEmpty());
+        QTRY_VERIFY(!drawer->isVisible());
         auto *box = findItem(window->contentItem(), "aiCutout");
         QVERIFY(box && box->isVisible());
 #ifdef CUTLERY_AI_WORKER

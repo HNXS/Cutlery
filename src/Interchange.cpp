@@ -34,14 +34,14 @@ void noteLosses(const Clip &c, QMap<QString, int> &what) {
         what["colour settings"]++;
     if (c.scale != 1 || c.x != 0 || c.y != 0 || c.rotation != 0 || c.crop != 0 || c.flip ||
         c.flipVertical || c.cropLeft != 0 || c.cropRight != 0 || c.cropTop != 0 ||
-        c.cropBottom != 0 || c.shape != "rect" || c.feather > 0 || !c.cornerPin.isEmpty() ||
+        c.cropBottom != 0 || c.shape != "rect" || c.feather > 0 || !c.mask.isEmpty() || !c.cornerPin.isEmpty() ||
         c.tiltX != 0 || c.tiltY != 0)
         what["position, size, crop and shape"]++;
     if (!c.transition.isEmpty())
         what["transitions (as straight cuts)"]++;
     if (!c.fx.isEmpty() || c.blur > 0 || c.sharpen > 0 || c.glow > 0 || c.vignette > 0 ||
         c.grain > 0 || c.stabilize || c.videoDenoise > 0 || c.deflicker > 0 || c.chromaKey || c.aiCutout ||
-        !c.lumaKey.isEmpty() || !c.blendMode.isEmpty() || c.pitch != 0 || !c.voice.isEmpty() ||
+        !c.lumaKey.isEmpty() || !c.blendMode.isEmpty() || c.pitch != 0 || !c.voice.isEmpty() || c.dereverb > 0 ||
         !c.canvasFill.isEmpty())
         what["effects"]++;
     if (c.reverse)
