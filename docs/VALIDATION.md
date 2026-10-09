@@ -1,5 +1,16 @@
 # Validation record
 
+## Windows portable build — 2026-10-09, inspector sections and value rows (0.6 development)
+
+[GitHub Actions run 37905156426](https://github.com/HNXS/Cutlery/actions/runs/37905156426) on commit `e96734f7f932b8026d473d59df21d4ba41469d0f` passed every step on its first attempt.
+
+New coverage in the UI test `aiCutoutControls`:
+
+- **Number box:** typing 150 into the scale box sets the scale to 1.5, and the box then shows "150%".
+- **Reset:** ↺ on Transform resets the scale in one undo step.
+- **On/off box:** switching Stabilize on enables its strength; undo switches it off again.
+- **All other UI tests:** they pass with the new sections and value rows; the object names they use are unchanged.
+
 ## Windows portable build — 2026-10-09, inspector in tabs and sub-tabs (0.6 development)
 
 [GitHub Actions run 37901996536](https://github.com/HNXS/Cutlery/actions/runs/37901996536) on commit `24203962a4b3ce270b99ca6669879fcd5d80e532` passed every step on its first attempt.
