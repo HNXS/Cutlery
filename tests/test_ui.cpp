@@ -32,6 +32,18 @@ class UiTest : public QObject {
         QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, to);
         QTest::qWait(30);
     }
+    // Opens an inspector page: "video" means the picture's Basic page (its own tab for media,
+    // Basic for titles and shapes) and "audio" the sound pages (tabs of their own for sound clips).
+    static void page(QQuickWindow *window, const QString &tab, const QString &sub = {}) {
+        const auto kind = window->property("selectionKind").toString();
+        QString t = tab, s = sub;
+        if (tab == "video" && kind != "media")
+            t = sub.isEmpty() || sub == "basic" ? "basic" : tab, s = {};
+        if (tab == "audio" && kind == "audio")
+            t = sub.isEmpty() ? "basic" : sub, s = {};
+        QVERIFY(QMetaObject::invokeMethod(window, "chooseInspector", Q_ARG(QVariant, t), Q_ARG(QVariant, s)));
+        QCoreApplication::processEvents();
+    }
     static QPoint center(QQuickItem *item) {
         return item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint();
     }
@@ -266,6 +278,7 @@ class UiTest : public QObject {
         QCOMPARE(editor.state()["selectedId"].toString(), second);
         QCOMPARE(editor.project().clips.last().transitionFrames, qint64(15));
         QCOMPARE(editor.project().transitionLength(editor.project().clips.last()), qint64(15));
+        page(window, "animation");
         auto *type = findItem(window->contentItem(), "transitionType");
         QVERIFY(type && type->isVisible());
         QTRY_COMPARE(type->property("currentText").toString(), QString("Dissolve"));
@@ -311,6 +324,7 @@ class UiTest : public QObject {
             QVERIFY(QMetaObject::invokeMethod(item, "clicked"));
         };
         editor.seek(0);
+        page(window, "video", "basic");
         auto *diamond = findItem(window->contentItem(), "keyframe-scale");
         press(diamond);
         QTRY_COMPARE(editor.project().clips.first().keyframes["scale"].size(), 1);
@@ -563,6 +577,8 @@ class UiTest : public QObject {
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(window);
         // Choose German and start: the transcript is there already, so the words show at once.
+        QTRY_VERIFY(!window->property("selectionKind").toString().isEmpty());
+        page(window, "more");
         auto *language = findItem(window->contentItem(), "wordLanguage");
         QTRY_VERIFY(language && language->isVisible());
         language->setProperty("currentIndex", 1);
@@ -615,6 +631,8 @@ class UiTest : public QObject {
         QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(window);
+        QTRY_VERIFY(!window->property("selectionKind").toString().isEmpty());
+        page(window, "adjust", "curves");
         auto *curve = findItem(window->contentItem(), "curveEditor");
         QTRY_VERIFY(curve && curve->width() > 50);
         // Scroll the inspector so the curve is on screen.
@@ -697,7 +715,9 @@ class UiTest : public QObject {
         QTRY_VERIFY(adjust && adjust->isVisible());
         QVERIFY(QMetaObject::invokeMethod(adjust, "clicked"));
         QCOMPARE(editor.project().clips.last().effect, QString("adjust"));
+        page(window, "basic");
         QTRY_VERIFY(findItem(window->contentItem(), "adjustStrength")->isVisible());
+        page(window, "adjust", "basic");
         QVERIFY(findItem(window->contentItem(), "lookSection")->isVisible());
         // Layouts need two selected clips; "Full size" one.
         QVERIFY(!findItem(window->contentItem(), "arrange-side")->isEnabled());
@@ -939,6 +959,7 @@ class UiTest : public QObject {
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(window);
         QTest::qWait(100);
+        page(window, "video", "basic");
         auto press = [&](const QString &name) {
             auto *item = findItem(window->contentItem(), name);
             QVERIFY2(item && item->isVisible() && item->isEnabled(), qPrintable(name));
@@ -1055,6 +1076,7 @@ class UiTest : public QObject {
         press("addLowerThird");
         const auto lower = editor.project().clips.last();
         QCOMPARE(lower.titleStyle, QString("lowerThird"));
+        page(window, "text");
         auto *style = findItem(window->contentItem(), "titleStyle");
         QTRY_VERIFY(style && style->isVisible());
         QCOMPARE(style->property("currentIndex").toInt(), 1);
@@ -1203,6 +1225,8 @@ class UiTest : public QObject {
         QVERIFY2(!engine.rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(window);
+        QTRY_VERIFY(!window->property("selectionKind").toString().isEmpty());
+        page(window, "adjust", "basic");
         auto *section = findItem(window->contentItem(), "lookSection");
         QTRY_VERIFY(section && section->isVisible());
         auto *preset = findItem(window->contentItem(), "lookPreset");
@@ -1224,6 +1248,7 @@ class UiTest : public QObject {
         QCOMPARE(clip().lut, QDir::cleanPath(lut));
         QTRY_COMPARE(findItem(window->contentItem(), "lutName")->property("text").toString(),
                      QString("LUT: look"));
+        page(window, "adjust", "lut");
         QTRY_VERIFY(findItem(window->contentItem(), "lutStrength")->isVisible());
         editor.setClip("lut", dir.filePath("keys.json"));
         QVERIFY(editor.state()["error"].toString().contains(".cube"));
@@ -1263,6 +1288,7 @@ class UiTest : public QObject {
         editor.undo();
         editor.select(id);
         // Style effects: a picture has the effect choice, but no motion blur or stabilizing.
+        page(window, "effects");
         QVERIFY(findItem(window->contentItem(), "effectsSection")->isVisible());
         QVERIFY(!findItem(window->contentItem(), "stabilize")->isVisible());
         QVERIFY(!findItem(window->contentItem(), "videoDenoise")->isVisible());
@@ -1281,6 +1307,7 @@ class UiTest : public QObject {
         QCOMPARE(clip().fx, QString("mirror"));
         editor.undo();
         // Perspective: switching it on pins the corners where they are; sliders move them.
+        page(window, "video", "basic");
         auto *pin = findItem(window->contentItem(), "cornerPin");
         QTRY_VERIFY(pin && pin->isVisible());
         pin->setProperty("checked", true);
@@ -1295,6 +1322,7 @@ class UiTest : public QObject {
         editor.undo();
         QVERIFY(clip().cornerPin.isEmpty());
         // Colour wheels: set from the wheel, reset by double-click.
+        page(window, "adjust", "wheels");
         auto *wheel = findItem(window->contentItem(), "wheel-gain");
         QTRY_VERIFY(wheel && wheel->isVisible());
         QVERIFY(QMetaObject::invokeMethod(wheel, "set", Q_ARG(QVariant, 2.0), Q_ARG(QVariant, 0.0)));
@@ -1302,6 +1330,7 @@ class UiTest : public QObject {
         QCOMPARE(clip().gainY, 0.);
         editor.undo();
         QCOMPARE(clip().gainX, 0.);
+        page(window, "video", "basic");
         auto *tilt = findItem(window->contentItem(), "tilt-tiltY");
         QTRY_VERIFY(tilt && tilt->isVisible());
         tilt->setProperty("value", 30);
@@ -1309,6 +1338,7 @@ class UiTest : public QObject {
         QCOMPARE(clip().tiltY, 30.);
         editor.undo();
         // Canvas fill for pictures that do not cover the frame.
+        page(window, "video", "canvas");
         auto *fill = findItem(window->contentItem(), "canvasFill");
         QTRY_VERIFY(fill && fill->isVisible());
         QVERIFY(QMetaObject::invokeMethod(fill, "activated", Q_ARG(int, 1)));
@@ -1393,7 +1423,29 @@ class UiTest : public QObject {
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(window);
         QTest::qWait(100);
+        // Tabs for a video without sound; the sub-tab chosen is kept when switching back.
+        QStringList tabs;
+        for (const auto &t : window->property("inspectorTabs").toList())
+            tabs << t.toMap()["id"].toString();
+        QCOMPARE(tabs, (QStringList{"video", "speed", "animation", "adjust", "effects", "more"}));
+        QVERIFY(!findItem(window->contentItem(), "projectDetails")->isVisible());
+        auto *speedTab = findItem(window->contentItem(), "inspectorTab-speed");
+        QVERIFY(speedTab);
+        QVERIFY(QMetaObject::invokeMethod(speedTab, "clicked"));
+        QCOMPARE(window->property("inspectorTab").toString(), QString("speed"));
+        QTRY_VERIFY(findItem(window->contentItem(), "freezeFrame")->isVisible());
+        page(window, "video", "mask");
+        page(window, "speed");
+        page(window, "video");
+        QCOMPARE(window->property("inspectorSub").toString(), QString("mask"));
+        // Nothing selected: the project's details.
+        editor.select("");
+        QTRY_VERIFY(findItem(window->contentItem(), "projectDetails")->isVisible());
+        QCOMPARE(window->property("inspectorTabs").toList().size(), 0);
+        editor.select(id);
+        QTRY_VERIFY(!findItem(window->contentItem(), "projectDetails")->isVisible());
         // Video noise, flicker and source colours for a video; the HDR choice only for HDR.
+        page(window, "video", "enhance");
         for (const char *name : {"videoDenoise", "deflicker", "colorRange", "colorMatrix"})
             QVERIFY2(findItem(window->contentItem(), name) &&
                          findItem(window->contentItem(), name)->isVisible(),
@@ -1406,6 +1458,7 @@ class UiTest : public QObject {
         editor.undo();
         QVERIFY(editor.project().clips.first().colorRange.isEmpty());
         // Free mask: "Draw mask" lets clicks on the preview add points.
+        page(window, "video", "mask");
         auto *drawMask = findItem(window->contentItem(), "drawMask");
         QVERIFY(drawMask && drawMask->isVisible());
         QVERIFY(QMetaObject::invokeMethod(drawMask, "clicked"));
@@ -1421,6 +1474,7 @@ class UiTest : public QObject {
         QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "clearMask"), "clicked"));
         QVERIFY(editor.project().clips.first().mask.isEmpty());
         QTRY_VERIFY(!drawer->isVisible());
+        page(window, "video", "cutout");
         auto *box = findItem(window->contentItem(), "aiCutout");
         QVERIFY(box && box->isVisible());
 #ifdef CUTLERY_AI_WORKER
@@ -1500,6 +1554,8 @@ class UiTest : public QObject {
         QVERIFY(window);
         QTest::qWait(100);
         // Sound presets set every sound value in one undo step.
+        QTRY_VERIFY(!window->property("selectionKind").toString().isEmpty());
+        page(window, "audio", "cleanup");
         auto *section = findItem(window->contentItem(), "soundSection");
         QTRY_VERIFY(section && section->isVisible());
         const auto selectedId = editor.project().clips.first().id;
@@ -1509,6 +1565,7 @@ class UiTest : public QObject {
         QCOMPARE(editor.project().clip(selectedId)->compressor, .5);
         editor.undo();
         QCOMPARE(editor.project().clip(selectedId)->lowCut, 0.);
+        page(window, "more");
         auto *open = findItem(window->contentItem(), "removePauses");
         QVERIFY(open && open->isVisible() && open->isEnabled());
         QVERIFY(QMetaObject::invokeMethod(open, "clicked"));
