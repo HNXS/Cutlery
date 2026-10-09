@@ -4769,14 +4769,23 @@ void Editor::pasteAttributes(const QString &group) {
     });
 }
 void Editor::configure(int w, int h, int n, int d) {
-    mutate([&](Project &p) {
-        if (!p.clips.empty() && (p.fpsN != n || p.fpsD != d))
-            throw std::runtime_error("Set the frame rate before adding clips");
+    const bool rateChanges = m_project.fpsN != n || m_project.fpsD != d;
+    if (rateChanges && !m_nest.isEmpty())
+        return fail("Go back to the main timeline to change the frame rate");
+    const double factor = (double(n) / std::max(1, d)) / (double(m_project.fpsN) / m_project.fpsD);
+    const bool done = mutate([&](Project &p) {
         p.width = w;
         p.height = h;
-        p.fpsN = n;
-        p.fpsD = d;
+        // Clips, keyframes and markers keep their times at the new rate.
+        if (rateChanges)
+            p.changeFrameRate(n, d);
     });
+    if (done && rateChanges) {
+        m_playhead = qRound64(m_playhead * factor);
+        m_status = QString("Frame rate changed to %1 fps").arg(QString::number(double(n) / d, 'g', 5));
+        m_previewTimer.start();
+        emit changed();
+    }
 }
 void Editor::requestPreview() {
     if (m_preview) {

@@ -176,6 +176,46 @@ bool Clip::timedWords() const {
     return assetId.isEmpty() && !wordStarts.isEmpty() &&
            wordStarts.size() == captionWords(text).size();
 }
+void Project::changeFrameRate(int n, int d) {
+    if (n <= 0 || d <= 0)
+        throw std::runtime_error("Invalid frame rate");
+    const double factor = (double(n) / d) / (double(fpsN) / fpsD);
+    auto convert = [&](qint64 frame) { return qRound64(frame * factor); };
+    for (auto &c : clips) {
+        const auto start = convert(c.start), end = convert(c.start + c.duration);
+        auto duration = std::max<qint64>(1, end - start);
+        if (const auto *a = asset(c.assetId); a && !a->endless() && !a->isNested() && a->duration > 0) {
+            // Whole frames of media left after the source in point at the new rate.
+            const auto room = qint64(std::floor((a->duration - c.sourceIn.seconds()) /
+                                                c.speed.seconds() * n / d + 1e-6));
+            if (duration > room && room >= 1)
+                duration = room;
+        }
+        c.start = start;
+        c.duration = duration;
+        c.scaleKeyframes(factor);
+        for (auto &w : c.wordStarts)
+            w = convert(w);
+        if (c.transitionFrames > 0)
+            c.transitionFrames = std::max<qint64>(2, convert(c.transitionFrames));
+    }
+    QVector<Marker> moved;
+    for (auto m : markers) {
+        m.frame = convert(m.frame);
+        if (!moved.isEmpty() && moved.last().frame == m.frame)
+            continue; // at most one per frame: the earlier one stays
+        moved << m;
+    }
+    markers = moved;
+    if (inPoint >= 0)
+        inPoint = convert(inPoint);
+    if (outPoint >= 0)
+        outPoint = convert(outPoint);
+    if (inPoint >= 0 && outPoint >= 0 && outPoint <= inPoint)
+        outPoint = inPoint + 1;
+    fpsN = n;
+    fpsD = d;
+}
 void Clip::scaleKeyframes(double factor) {
     for (auto &list : keyframes) {
         QVector<Keyframe> scaled;

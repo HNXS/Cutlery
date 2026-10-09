@@ -3124,6 +3124,76 @@ class EngineTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
         QCOMPARE(editor.project().assets.last().frameRate, 0.);
     }
+    void frameRateChange() {
+        // 25 fps: two clips that touch, keyframes, a marker, an export range, a transition and a
+        // caption with word timing.
+        auto p = sample();
+        p.fpsN = 25;
+        p.assets[0].duration = 2;
+        p.clips[0].duration = 50;
+        p.clips[0].keyframes["opacity"] = {{0, 1}, {25, 0.5}, {49, 0}};
+        auto second = p.clips[0];
+        second.id = "second";
+        second.start = 50;
+        second.duration = 25;
+        second.keyframes.clear();
+        second.transition = "fade";
+        second.transitionFrames = 10;
+        p.clips << second;
+        Clip caption;
+        caption.id = "caption";
+        caption.track = 1;
+        caption.start = 5;
+        caption.duration = 40;
+        caption.text = "one two three";
+        caption.wordStarts = {0, 10, 20};
+        p.clips << caption;
+        p.markers = {{30, "Beat"}, {31, "Close"}};
+        p.inPoint = 10;
+        p.outPoint = 60;
+        const double seconds = p.seconds();
+        p.changeFrameRate(30, 1);
+        QCOMPARE(p.fpsN, 30);
+        QCOMPARE(p.clips[0].start, qint64(0));
+        QCOMPARE(p.clips[0].duration, qint64(60));
+        QCOMPARE(p.clips[1].start, qint64(60)); // still touching
+        QCOMPARE(p.clips[1].duration, qint64(30));
+        QCOMPARE(p.clips[0].keyframes["opacity"][1].frame, qint64(30));
+        QCOMPARE(p.clips[0].keyframes["opacity"][2].frame, qint64(59));
+        QCOMPARE(p.clips[1].transitionFrames, qint64(12));
+        QCOMPARE(p.clips[2].start, qint64(6));
+        QCOMPARE(p.clips[2].wordStarts, (QVector<qint64>{0, 12, 24}));
+        QCOMPARE(p.markers.size(), 2);
+        QCOMPARE(p.markers[0].frame, qint64(36));
+        QCOMPARE(p.markers[1].frame, qint64(37));
+        QCOMPARE(p.inPoint, qint64(12));
+        QCOMPARE(p.outPoint, qint64(72));
+        QCOMPARE(p.seconds(), seconds);
+        p.validate();
+        // 29.97: 2 s of media hold 59 whole frames, so the first clip is not run past its end.
+        p.changeFrameRate(30000, 1001);
+        QCOMPARE(p.clips[0].duration, qint64(59));
+        QCOMPARE(p.clips[1].start, qint64(60));
+        // Down to 10 fps: markers that meet on one frame keep the first.
+        p.changeFrameRate(10, 1);
+        QCOMPARE(p.markers.size(), 1);
+        QCOMPARE(p.markers[0].name, QString("Beat"));
+        p.validate();
+        // In the editor: one undo step, and the playhead keeps its time.
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.addTitle();
+        const auto title = editor.project().clips.first();
+        editor.seek(25);
+        editor.configure(320, 180, 50, 1);
+        QCOMPARE(editor.project().fpsN, 50);
+        QCOMPARE(editor.project().clips.first().duration, title.duration * 2);
+        QCOMPARE(editor.state()["playhead"].toLongLong(), qint64(50));
+        editor.undo();
+        QCOMPARE(editor.project().fpsN, 25);
+        QCOMPARE(editor.project().clips.first().duration, title.duration);
+    }
     void proxies() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
