@@ -3124,6 +3124,87 @@ class EngineTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
         QCOMPARE(editor.project().assets.last().frameRate, 0.);
     }
+    void openProjects() {
+        QTemporaryDir dir;
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        auto projects = [&] { return editor.state()["projects"].toList(); };
+        auto current = [&] {
+            const auto list = projects();
+            for (int i = 0; i < list.size(); ++i)
+                if (list[i].toMap()["current"].toBool())
+                    return i;
+            return -1;
+        };
+        QCOMPARE(projects().size(), 1);
+        // An untouched project is replaced, not kept beside the new one.
+        editor.newProject();
+        QCOMPARE(projects().size(), 1);
+        editor.addTitle();
+        const auto first = editor.project().clips.first().id;
+        const auto a = dir.filePath("A.cutlery");
+        QVERIFY(editor.save(QUrl::fromLocalFile(a)));
+        editor.seek(12);
+        editor.select(first);
+        // A second project: its own timeline and history.
+        editor.newProject();
+        QCOMPARE(projects().size(), 2);
+        QCOMPARE(current(), 1);
+        QVERIFY(editor.project().clips.empty());
+        QVERIFY(!editor.state()["canUndo"].toBool());
+        editor.addTitle();
+        editor.addTitle();
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        QVERIFY(editor.state()["dirty"].toBool());
+        QVERIFY(editor.state()["anyDirty"].toBool());
+        QCOMPARE(projects()[0].toMap()["name"].toString(), QString("A"));
+        QVERIFY(!projects()[0].toMap()["dirty"].toBool());
+        // Back to the first: its clips, selection, playhead and undo history.
+        editor.switchProject(0);
+        QCOMPARE(current(), 0);
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        QCOMPARE(editor.state()["selectedId"].toString(), first);
+        QCOMPARE(editor.state()["playhead"].toLongLong(), qint64(12));
+        QVERIFY(!editor.state()["dirty"].toBool());
+        QVERIFY(editor.state()["anyDirty"].toBool()); // the other one is not saved
+        editor.undo();
+        QVERIFY(editor.project().clips.empty());
+        editor.redo();
+        // Opening a project that is open shows it.
+        editor.switchProject(1);
+        QVERIFY(editor.openProject(QUrl::fromLocalFile(a)));
+        QCOMPARE(projects().size(), 2);
+        QCOMPARE(current(), 0);
+        // Closing another project keeps the shown one; closing the shown one shows a neighbour.
+        editor.closeProject(1);
+        QCOMPARE(projects().size(), 1);
+        QCOMPARE(current(), 0);
+        // Only the shown project is left (changed by the undo and redo above).
+        QCOMPARE(editor.state()["anyDirty"].toBool(), editor.state()["dirty"].toBool());
+        editor.newProject();
+        editor.addTitle();
+        editor.closeProject(1);
+        QCOMPARE(current(), 0);
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        // At most 8 at once.
+        for (int i = 0; i < 7; ++i) {
+            editor.newProject();
+            editor.addTitle();
+        }
+        QCOMPARE(projects().size(), 8);
+        editor.newProject();
+        QVERIFY(editor.state()["error"].toString().contains("8"));
+        editor.clearError();
+        QCOMPARE(projects().size(), 8);
+        // Closing the last open project leaves a new empty one.
+        while (projects().size() > 1)
+            editor.closeProject(0);
+        editor.closeProject(0);
+        QCOMPARE(projects().size(), 1);
+        QVERIFY(editor.project().clips.empty());
+        QVERIFY(editor.state()["path"].toString().isEmpty());
+    }
     void frameRateChange() {
         // 25 fps: two clips that touch, keyframes, a marker, an export range, a transition and a
         // caption with word timing.
@@ -6483,6 +6564,11 @@ class EngineTest : public QObject {
         beats.clips = {a, b, c};
         beats.markers = {{20}, {45}, {60}, {100}};
         saveProject(beats, file);
+        // The edited project is closed first: opening its file again would lose the changes.
+        QVERIFY(!editor.openProject(QUrl::fromLocalFile(file)));
+        QVERIFY(editor.state()["error"].toString().contains("unsaved changes"));
+        editor.clearError();
+        editor.closeProject(0);
         QVERIFY(editor.openProject(QUrl::fromLocalFile(file)));
         editor.select("a");
         editor.toggleSelect("b");
@@ -7428,7 +7514,7 @@ class EngineTest : public QObject {
         };
         for (const auto &kind : {"check", "cross", "star", "heart", "warning", "info", "cursor",
                                  "click", "lightbulb", "play", "bell", "pin", "clock"}) {
-            editor.newProject();
+            editor.closeProject(0); // the only open project: a new empty one takes its place
             editor.configure(320, 180, 25, 1);
             editor.seek(0);
             editor.addGraphic(kind);

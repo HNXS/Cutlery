@@ -349,6 +349,25 @@ class UiTest : public QObject {
             editor.undo();
             QCOMPARE(editor.project().fpsN, 30);
         }
+        // A second open project shows tabs; a click switches, × closes one.
+        {
+            auto *tabs = findItem(window->contentItem(), "projectTabs");
+            QVERIFY(tabs && !tabs->isVisible());
+            editor.newProject();
+            QTRY_VERIFY(tabs->isVisible());
+            QVERIFY(editor.project().clips.empty());
+            if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS")) {
+                QTest::qWait(50);
+                window->grabWindow().save(qEnvironmentVariable("CUTLERY_UI_SHOTS") + "/tabs.png");
+            }
+            auto *first = findItem(window->contentItem(), "projectTab-0");
+            QTRY_VERIFY(first);
+            QVERIFY(QMetaObject::invokeMethod(first, "clicked"));
+            QCOMPARE(editor.project().clips.first().id, id);
+            QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "closeProjectTab-1"), "clicked"));
+            QTRY_VERIFY(!tabs->isVisible());
+            QCOMPARE(editor.project().clips.first().id, id);
+        }
         editor.seek(0);
         page(window, "video", "basic");
         auto *diamond = findItem(window->contentItem(), "keyframe-scale");

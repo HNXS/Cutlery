@@ -353,7 +353,9 @@ ApplicationWindow {
         return String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(sec % 60).padStart(2, "0") + ":" + String(Math.floor(frame % fps)).padStart(2, "0");
     }
     function guarded(action) {
-        if (s.dirty || s.busy) {
+        // New and opened projects go beside the shown one, which stays open.
+        const besides = action === "new" || action === "open" || action === "recover" || action.startsWith("recent:") || action.startsWith("template:");
+        if (!besides && (s.dirty || s.busy)) {
             pendingAction = action;
             discardDialog.open();
         } else
@@ -375,10 +377,23 @@ ApplicationWindow {
         }
         else if (action.startsWith("restore:"))
             editor.restoreBackup(action.substring(8));
+        else if (action.startsWith("closeProject:"))
+            editor.closeProject(Number(action.substring(13)));
         else if (action === "close") {
             allowClose = true;
             win.close();
         }
+    }
+    // Closes an open project, asking first when it has unsaved changes.
+    function closeProjectAt(index) {
+        const p = (s.projects || [])[index];
+        if (!p)
+            return;
+        if (p.dirty) {
+            pendingAction = "closeProject:" + index;
+            discardDialog.open();
+        } else
+            editor.closeProject(index);
     }
     function saveProject() {
         if (s.path.length)
@@ -387,7 +402,7 @@ ApplicationWindow {
             saveDialog.open();
     }
     onClosing: function (close) {
-        if (!allowClose && (s.dirty || s.busy)) {
+        if (!allowClose && (s.anyDirty || s.busy)) {
             close.accepted = false;
             pendingAction = "close";
             discardDialog.open();
@@ -771,6 +786,11 @@ ApplicationWindow {
             MenuItem {
                 text: "New"
                 onTriggered: win.guarded("new")
+            }
+            MenuItem {
+                objectName: "closeProjectItem"
+                text: "Close project"
+                onTriggered: win.closeProjectAt((win.s.projects || []).findIndex(p => p.current))
             }
             MenuItem {
                 text: "Open…"
@@ -1221,6 +1241,62 @@ ApplicationWindow {
                 font.bold: true
                 font.letterSpacing: 3
                 color: win.mint
+            }
+            // Open projects, when there is more than one: a click shows one, × closes it.
+            Row {
+                objectName: "projectTabs"
+                anchors.left: parent.left
+                anchors.leftMargin: 140
+                anchors.verticalCenter: parent.verticalCenter
+                // Up to the project name in the middle; further tabs are cut off.
+                width: Math.max(0, Math.min(implicitWidth, parent.width / 2 - 260))
+                clip: true
+                spacing: 4
+                visible: (win.s.projects || []).length > 1
+                Repeater {
+                    model: win.s.projects || []
+                    AbstractButton {
+                        id: projectTab
+                        required property var modelData
+                        required property int index
+                        objectName: "projectTab-" + index
+                        width: Math.min(160, tabRow.implicitWidth + 16)
+                        height: 30
+                        hoverEnabled: true
+                        onClicked: editor.switchProject(index)
+                        ToolTip.visible: hovered && modelData.path !== ""
+                        ToolTip.text: modelData.path
+                        background: Rectangle {
+                            radius: 6
+                            color: projectTab.modelData.current ? "#26313b" : projectTab.hovered ? "#1c242c" : "transparent"
+                            border.color: projectTab.modelData.current ? "#35404b" : "transparent"
+                        }
+                        contentItem: RowLayout {
+                            id: tabRow
+                            spacing: 4
+                            Label {
+                                Layout.fillWidth: true
+                                Layout.maximumWidth: 120
+                                leftPadding: 4
+                                text: (projectTab.modelData.dirty ? "• " : "") + projectTab.modelData.name
+                                elide: Text.ElideRight
+                                font.pixelSize: 11
+                                color: projectTab.modelData.current ? "#e7edf2" : win.muted
+                            }
+                            ToolButton {
+                                objectName: "closeProjectTab-" + projectTab.index
+                                text: "×"
+                                implicitWidth: 18
+                                implicitHeight: 18
+                                padding: 0
+                                font.pixelSize: 12
+                                onClicked: win.closeProjectAt(projectTab.index)
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Close " + projectTab.modelData.name
+                            }
+                        }
+                    }
+                }
             }
             ColumnLayout {
                 anchors.centerIn: parent
@@ -6657,7 +6733,7 @@ ApplicationWindow {
         standardButtons: Dialog.Discard | Dialog.Cancel
         Label {
             width: parent.width
-            text: "Discard unsaved changes and continue? An active render will be cancelled. Cancel to save your project first."
+            text: win.pendingAction.startsWith("closeProject:") ? "Close this project without saving its changes?" : win.pendingAction === "close" && win.s.anyDirty && !win.s.dirty ? "Another open project has unsaved changes. Quit without saving them? Cancel to switch to it and save." : "Discard unsaved changes and continue? An active render will be cancelled. Cancel to save your project first."
             wrapMode: Text.Wrap
         }
         onDiscarded: win.runAction(win.pendingAction)

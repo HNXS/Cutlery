@@ -83,7 +83,14 @@ class Editor final : public QObject {
     Q_INVOKABLE void setTrack(int track, const QString &key, const QVariant &value);
     Q_INVOKABLE void detachAudio();
     Q_INVOKABLE qint64 adjacentCut(bool forward) const;
+    // Several projects can be open at once (at most 8); each keeps its timeline, undo history,
+    // selection and playhead. New, Open, templates and recovery add a project unless the
+    // current one is untouched; opening a project that is open already shows it. State
+    // "projects": [{name, path, dirty, current}], "anyDirty".
     Q_INVOKABLE void newProject();
+    Q_INVOKABLE void switchProject(int index);
+    // Closes an open project without saving; closing the last one leaves a new empty project.
+    Q_INVOKABLE void closeProject(int index);
     // Templates (data folder, templates/): the project as it is, saved under a name, to start
     // new projects from; its media can then be replaced (relink) or stays as it is.
     Q_INVOKABLE QVariantList templates() const;
@@ -569,6 +576,25 @@ class Editor final : public QObject {
         qint64 playhead = 0;
     };
     QVector<NestFrame> m_nest;
+    // The open projects. The current one (m_current) lives in the members above while it is
+    // shown; its entry here is filled in when another one is shown.
+    struct OpenProject {
+        Project project;
+        QString path, selected, importFolder;
+        QStringList also;
+        QVector<Project> undo, redo;
+        QVector<NestFrame> nest;
+        qint64 playhead = 0;
+        bool dirty = false;
+    };
+    QVector<OpenProject> m_open{OpenProject{}};
+    int m_current = 0;
+    bool blankProject() const;
+    void stashProject();
+    void showProject(int index);
+    // Makes the next project a new open one, unless the current one is untouched.
+    bool addProjectSlot();
+    bool openProjectFile(const QString &path, bool replaceCurrent);
     QProcess *m_nestedProcess = nullptr;
     QProcess *m_proxyProcess = nullptr;
     QStringList m_proxyQueue;
