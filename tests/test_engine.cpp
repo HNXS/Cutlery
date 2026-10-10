@@ -4264,6 +4264,117 @@ class EngineTest : public QObject {
         Editor again(&frames);
         QVERIFY(!again.state()["uncleanExit"].toBool());
     }
+    void trackedMask() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        const auto graph = dir.filePath("graph.txt");
+        auto still = [&](const Project &project, qint64 frame) {
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(project, dir.filePath("work"), 160, 90, options);
+            QFile g(graph);
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, graph, {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        auto lit = [](const QImage &image, int x, int y) { return qGray(image.pixel(x, y)) > 200; };
+        // A white picture with a square mask in the middle, moved by Move X.
+        QImage white(160, 90, QImage::Format_RGB32);
+        white.fill(Qt::white);
+        QVERIFY(white.save(dir.filePath("white.png")));
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(160, 90, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(dir.filePath("white.png"))});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto clipId = editor.project().clips.back().id;
+        editor.select(clipId);
+        editor.setClip("duration", 25);
+        editor.seek(0);
+        for (const auto &[x, y] : {std::pair{.25, .25}, {.75, .25}, {.75, .75}, {.25, .75}})
+            editor.addMaskPoint(x, y);
+        QCOMPARE(maskPoints(editor.project().clip(clipId)->mask).size(), 4);
+        editor.setClip("maskX", 0.2);
+        auto image = still(editor.project(), 5);
+        QVERIFY(lit(image, 140, 45) && !lit(image, 50, 45));
+        // The outline on the canvas follows; new points are stored where the mask is unmoved.
+        QVERIFY(std::abs(editor.state()["selected"].toMap()["maskOutline"].toList()[0].toMap()["x"].toDouble() - 0.45) < 0.01);
+        // Keyframed: from 0 at frame 0 to 0.2 at frame 20.
+        editor.setClip("maskX", 0.0);
+        editor.toggleKeyframe("maskX");
+        editor.seek(20);
+        editor.toggleKeyframe("maskX");
+        editor.setClip("maskX", 0.2);
+        QCOMPARE(editor.project().clip(clipId)->keyframes.value("maskX").size(), 2);
+        image = still(editor.project(), 0);
+        QVERIFY(lit(image, 50, 45) && lit(image, 110, 45) && !lit(image, 130, 45));
+        image = still(editor.project(), 20);
+        QVERIFY(lit(image, 140, 45) && !lit(image, 50, 45));
+        // Inverted, the hole moves.
+        editor.setClip("maskInvert", true);
+        image = still(editor.project(), 20);
+        QVERIFY(lit(image, 50, 45) && !lit(image, 120, 45));
+        QCOMPARE(Project::fromJson(editor.project().json(), {}).clips.back().keyframes.value("maskX").size(), 2);
+
+        // Tracked: a badge moving over a grey video; the mask drawn around it at 1 s follows it.
+        QImage badge(80, 80, QImage::Format_RGB32);
+        badge.fill(Qt::white);
+        {
+            QPainter painter(&badge);
+            painter.fillRect(0, 0, 40, 40, Qt::black);
+            painter.fillRect(40, 40, 40, 40, QColor("#c03020"));
+            painter.setBrush(QColor("#2050d0"));
+            painter.drawEllipse(QRectF(20, 20, 40, 40));
+        }
+        QVERIFY(badge.save(dir.filePath("badge.png")));
+        const auto source = dir.filePath("moving.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=640x360:r=25:d=3", "-loop",
+                     "1", "-i", dir.filePath("badge.png"), "-filter_complex",
+                     "[0][1]overlay=x='100+t*125':y='200-t*50':shortest=1", "-c:v", "ffv1",
+                     source});
+        Editor video(&frames);
+        video.configure(640, 360, 25, 1);
+        video.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(video.project().assets.size() == 1, 15000);
+        video.addAsset(video.project().assets.first().id);
+        const auto id = video.project().clips.back().id;
+        video.select(id);
+        video.trackMask();
+        QVERIFY(video.state()["error"].toString().contains("mask"));
+        video.clearError();
+        // Badge centre at 1 s: (265, 190).
+        video.seek(25);
+        for (const auto &[x, y] : {std::pair{235., 160.}, {295., 160.}, {295., 220.}, {235., 220.}})
+            video.addMaskPoint(x / 640, y / 360);
+        video.trackMask();
+        QCOMPARE(video.state()["track"].toMap()["status"].toString(), QString("tracking"));
+        QTRY_COMPARE_WITH_TIMEOUT(video.state()["track"].toMap()["status"].toString(),
+                                  QString("done"), 60000);
+        QCOMPARE(video.state()["track"].toMap()["kind"].toString(), QString("mask"));
+        const auto *c = video.project().clip(id);
+        QVERIFY(c->keyframes.value("x").isEmpty());
+        for (int frame : {0, 25, 50, 74}) {
+            const double t = frame / 25. - 1;
+            QVERIFY2(std::abs(c->valueAt("maskX", frame) - 125 * t / 640) < 3. / 640 &&
+                         std::abs(c->valueAt("maskY", frame) + 50 * t / 360) < 3. / 360,
+                     qPrintable(QString("frame %1: %2, %3").arg(frame).arg(c->valueAt("maskX", frame) * 640).arg(c->valueAt("maskY", frame) * 360)));
+        }
+        // At 2.96 s the badge (centre 510, 92) shows through the mask; where the mask was is dark.
+        image = still(video.project(), 74);
+        auto dark = [&](int x, int y) { return qGray(image.pixel(x, y)) < 20; };
+        QVERIFY(!dark(127, 23) && dark(66, 47));
+        // One undo step.
+        video.undo();
+        QVERIFY(video.project().clip(id)->keyframes.value("maskX").isEmpty());
+    }
     void freeMasksDeepColourAndRoomEcho() {
         const auto ffmpeg = Editor::executable("ffmpeg"), ffprobe = Editor::executable("ffprobe");
         QVERIFY2(!ffmpeg.isEmpty() && !ffprobe.isEmpty(), "FFmpeg is required for integration tests");

@@ -586,9 +586,12 @@ QVariantMap Editor::state() const {
                                  return outline;
                              const auto points = m_maskDraft.first == c.id ? m_maskDraft.second
                                                                            : maskPoints(c.mask);
+                             // Where the mask is moved to at the playhead.
+                             const QPointF offset(c.valueAt("maskX", m_playhead - c.start),
+                                                  c.valueAt("maskY", m_playhead - c.start));
                              for (const auto &point : points) {
                                  const auto at = pictureToCanvas(
-                                     bounds, point, QSizeF(m_project.width, m_project.height));
+                                     bounds, point + offset, QSizeF(m_project.width, m_project.height));
                                  outline << QVariantMap{{"x", at.x()}, {"y", at.y()}};
                              }
                              return outline;
@@ -725,6 +728,8 @@ QVariantMap Editor::state() const {
             PROP(anchorY);
             PROP(slowMotion);
             PROP(stems);
+            PROP(maskX);
+            PROP(maskY);
             PROP(fontFamily);
             PROP(graphic);
             PROP(fillColor);
@@ -2936,6 +2941,8 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             {"exposure", &Clip::exposure},
             {"echo", &Clip::echo},
             {"pan", &Clip::pan},
+            {"maskX", &Clip::maskX},
+            {"maskY", &Clip::maskY},
             {"textAnimationTime", &Clip::textAnimationTime},
             {"anchorX", &Clip::anchorX},
             {"anchorY", &Clip::anchorY},
@@ -3136,7 +3143,10 @@ void Editor::addMaskPoint(double x, double y) {
     if (!c || bounds.isEmpty() || !c->titleStyle.isEmpty() || !c->effect.isEmpty())
         return fail("Select a video, picture, title or shape to mask");
     const QSizeF frame(m_project.width, m_project.height);
-    auto point = canvasToPicture(bounds, {x, y}, frame);
+    // Points are kept where the mask is when not moved.
+    const double local = m_playhead - c->start;
+    auto point = canvasToPicture(bounds, {x, y}, frame) -
+                 QPointF(c->valueAt("maskX", local), c->valueAt("maskY", local));
     point = {std::clamp(point.x(), 0., 1.), std::clamp(point.y(), 0., 1.)};
     // The points drawn so far are kept beside the mask until there are three of them.
     auto points = m_maskDraft.first == c->id ? m_maskDraft.second : maskPoints(c->mask);
@@ -4290,6 +4300,74 @@ void Editor::trackMotion() {
     m_status = "Tracking motion…";
     emit changed();
 }
+// Fractions of a clip's own picture (as shown: cropped, mirrored) and of its source picture.
+QPointF Editor::pictureToSource(const Clip &c, QPointF at) {
+    double u = at.x(), v = at.y();
+    if (c.flip)
+        u = 1 - u;
+    if (c.flipVertical)
+        v = 1 - v;
+    return {c.cropLeft + u * (1 - c.cropLeft - c.cropRight),
+            c.cropTop + v * (1 - c.cropTop - c.cropBottom)};
+}
+QPointF Editor::sourceToPicture(const Clip &c, QPointF at) {
+    double u = (at.x() - c.cropLeft) / (1 - c.cropLeft - c.cropRight),
+           v = (at.y() - c.cropTop) / (1 - c.cropTop - c.cropBottom);
+    if (c.flip)
+        u = 1 - u;
+    if (c.flipVertical)
+        v = 1 - v;
+    return {u, v};
+}
+void Editor::trackMask() {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    const auto points = c ? maskPoints(c->mask) : QVector<QPointF>{};
+    if (!c || !a || a->kind != "video" || c->audioOnly)
+        return fail("Select a video clip with a mask to track");
+    if (points.isEmpty())
+        return fail("Draw a mask around what it should follow first");
+    if (c->reverse)
+        return fail("Reversed clips cannot be tracked");
+    if (m_project.trackSettings.value(c->track).locked)
+        return fail("The track is locked");
+    const double fps = double(m_project.fpsN) / m_project.fpsD, s = c->speed.seconds();
+    const qint64 at = m_playhead >= c->start && m_playhead < c->start + c->duration ? m_playhead
+                                                                                   : c->start;
+    const auto source = [&](qint64 frame) {
+        return c->sourceIn.seconds() + (frame - c->start) / fps * s;
+    };
+    // The mask's bounds where it is at the playhead: the patch to follow.
+    const double local = at - c->start, offsetX = c->valueAt("maskX", local),
+                 offsetY = c->valueAt("maskY", local);
+    QRectF box;
+    for (const auto &point : points)
+        box |= QRectF(point + QPointF(offsetX, offsetY), QSizeF(1e-6, 1e-6));
+    const auto centre = box.center();
+    if (centre.x() < 0 || centre.x() > 1 || centre.y() < 0 || centre.y() > 1)
+        return fail("Move the mask over the part of the video to follow");
+    const auto a0 = pictureToSource(*c, box.topLeft()), a1 = pictureToSource(*c, box.bottomRight());
+    QRectF patch = QRectF(a0, a1).normalized();
+    const auto mid = patch.center();
+    patch.setSize({std::clamp(patch.width(), 0.03, 0.5), std::clamp(patch.height(), 0.03, 0.5)});
+    patch.moveCenter(mid);
+    const qint64 step = std::max<qint64>(1, qint64(std::ceil(fps / 30 - 1e-9)));
+    Tracker::Request r;
+    r.path = a->path;
+    r.width = a->width;
+    r.height = a->height;
+    r.from = source(c->start);
+    r.start = source(at);
+    r.to = source(c->start + c->duration - 1);
+    r.rate = fps / (step * s);
+    r.patch = patch;
+    m_track = {{"status", "tracking"}, {"clipId", c->id}, {"videoId", c->id}, {"step", step},
+               {"kind", "mask"}, {"offsetX", offsetX}, {"offsetY", offsetY},
+               {"centreX", centre.x()}, {"centreY", centre.y()}};
+    m_tracker->start(r);
+    m_status = "Tracking the mask…";
+    emit changed();
+}
 void Editor::cancelTracking() {
     if (!m_tracker->busy())
         return;
@@ -4317,7 +4395,9 @@ void Editor::applyTracking(const QVector<Tracker::Point> &points, const QString 
         return;
     }
     const double fps = double(m_project.fpsN) / m_project.fpsD, s = v->speed.seconds();
-    // Back to timeline frames and canvas positions.
+    const bool mask = m_track.value("kind") == "mask";
+    const QString keyX = mask ? "maskX" : "x", keyY = mask ? "maskY" : "y";
+    // Back to timeline frames and canvas positions (or mask offsets).
     QVector<qint64> frames;
     QVector<double> xs, ys;
     for (const auto &p : points) {
@@ -4325,8 +4405,19 @@ void Editor::applyTracking(const QVector<Tracker::Point> &points, const QString 
         if (frame < c->start || frame >= c->start + c->duration ||
             (!frames.isEmpty() && frame <= frames.last()))
             continue;
-        const auto at = PictureMapping(m_project, *v, frame).toCanvas(p.x, p.y);
         frames << frame;
+        if (mask) {
+            // The mask moves with the point, from where it was at the start.
+            const auto at = sourceToPicture(*c, {p.x, p.y});
+            xs << std::clamp(m_track.value("offsetX").toDouble() + at.x() -
+                                 m_track.value("centreX").toDouble(),
+                             -1., 1.);
+            ys << std::clamp(m_track.value("offsetY").toDouble() + at.y() -
+                                 m_track.value("centreY").toDouble(),
+                             -1., 1.);
+            continue;
+        }
+        const auto at = PictureMapping(m_project, *v, frame).toCanvas(p.x, p.y);
         xs << std::clamp(at.x() - 0.5, -2., 2.);
         ys << std::clamp(at.y() - 0.5, -2., 2.);
     }
@@ -4363,7 +4454,7 @@ void Editor::applyTracking(const QVector<Tracker::Point> &points, const QString 
             // Keyframes outside the tracked stretch stay, so a part tracked from another
             // moment is kept.
             const qint64 first = kx.first().frame, last = kx.last().frame;
-            for (const auto &[key, added] : {std::pair{QString("x"), kx}, std::pair{QString("y"), ky}}) {
+            for (const auto &[key, added] : {std::pair{keyX, kx}, std::pair{keyY, ky}}) {
                 QVector<Keyframe> merged;
                 for (const auto &k : clip->keyframes.value(key))
                     if (k.frame < first || k.frame > last)
@@ -4378,7 +4469,7 @@ void Editor::applyTracking(const QVector<Tracker::Point> &points, const QString 
         return;
     }
     m_track = {{"status", "done"}, {"clipId", clipId}, {"keyframes", kx.size()},
-               {"from", from}, {"to", to}, {"whole", whole}};
+               {"from", from}, {"to", to}, {"whole", whole}, {"kind", mask ? "mask" : "clip"}};
     m_status = whole ? QString("Tracked with %1 keyframes").arg(kx.size())
                      : QString("Tracked from %1 s to %2 s of the clip; lost outside that")
                            .arg(from, 0, 'f', 1)

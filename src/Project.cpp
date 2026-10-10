@@ -63,7 +63,8 @@ const QVector<QPair<QString, QString>> &transitionTypes() {
     return types;
 }
 const QStringList &animatableProperties() {
-    static const QStringList properties{"scale", "x", "y", "rotation", "opacity", "volume", "pan"};
+    static const QStringList properties{"scale", "x", "y", "rotation", "opacity", "volume", "pan",
+                                        "maskX", "maskY"};
     return properties;
 }
 // Valid range of each animatable property, shared with static-value validation.
@@ -76,7 +77,7 @@ static std::pair<double, double> propertyRange(const QString &p) {
         return {-360, 360};
     if (p == "opacity")
         return {0, 1};
-    if (p == "pan")
+    if (p == "pan" || p == "maskX" || p == "maskY")
         return {-1, 1};
     return {0, 4}; // volume
 }
@@ -105,7 +106,8 @@ const QVector<QPair<QString, double Clip::*>> &lookFields() {
         {"whites", &Clip::whites},           {"blacks", &Clip::blacks},
         {"liftX", &Clip::liftX},             {"liftY", &Clip::liftY},
         {"gammaX", &Clip::gammaX},           {"gammaY", &Clip::gammaY},
-        {"gainX", &Clip::gainX},             {"gainY", &Clip::gainY}};
+        {"gainX", &Clip::gainX},             {"gainY", &Clip::gainY},
+        {"maskX", &Clip::maskX},             {"maskY", &Clip::maskY}};
     return fields;
 }
 } // namespace
@@ -132,6 +134,10 @@ double Clip::staticValue(const QString &p) const {
         return opacity;
     if (p == "pan")
         return pan;
+    if (p == "maskX")
+        return maskX;
+    if (p == "maskY")
+        return maskY;
     return volume;
 }
 double Clip::valueAt(const QString &p, double frame) const {
@@ -1023,6 +1029,7 @@ void Project::validate() const {
                     QStringList{"", "bt601", "bt709", "bt2020"}.contains(c.colorMatrix) &&
                     QStringList{"", "bright", "off"}.contains(c.toneMap) &&
                     bounded(c.reverb, 0, 1) && bounded(c.echo, 0, 1) && bounded(c.pan, -1, 1) &&
+                    bounded(c.maskX, -1, 1) && bounded(c.maskY, -1, 1) &&
                     bounded(c.anchorX, 0, 1) && bounded(c.anchorY, 0, 1),
                 "Invalid effect setting");
         require(QStringList{"", "lowerThird", "lowerThirdLine", "lowerThirdRight", "titleCard",

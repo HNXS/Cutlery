@@ -146,13 +146,15 @@ static QPainterPath maskPath(const Clip &c, double w, double h) {
     return path;
 }
 // Alpha mask of a styled overlay: rounded rectangle or circle, antialiased, within its free
-// mask.
-static QImage overlayMask(const Clip &c, int w, int h) {
+// mask. With `pad`, only the free mask of a w × h picture is drawn, into an image `pad` larger on
+// every side, so that a moving crop of it can follow the mask's offset.
+static QImage overlayMask(const Clip &c, int pictureWidth, int pictureHeight, QPoint pad = {}) {
+    const int w = pictureWidth + 2 * pad.x(), h = pictureHeight + 2 * pad.y();
     QImage mask(w, h, QImage::Format_ARGB32_Premultiplied);
     mask.fill(Qt::transparent);
     // A soft edge: the shape is drawn smaller by half the feather and blurred, so it fades from
     // fully visible to transparent over the feather width, ending at the picture's edge.
-    const double feather = c.feather * std::min(w, h);
+    const double feather = c.feather * std::min(pictureWidth, pictureHeight);
     const double inset = feather / 2;
     {
         QPainter paint(&mask);
@@ -161,7 +163,9 @@ static QImage overlayMask(const Clip &c, int w, int h) {
         paint.setBrush(Qt::white);
         const QRectF area = QRectF(0, 0, w, h).adjusted(inset, inset, -inset, -inset);
         QPainterPath shape;
-        if (c.shape == "circle")
+        if (!pad.isNull())
+            shape.addRect(area);
+        else if (c.shape == "circle")
             shape.addEllipse(area);
         else {
             const double r = c.shape == "rounded" ? c.radius * std::min(w, h) : 0;
@@ -170,7 +174,7 @@ static QImage overlayMask(const Clip &c, int w, int h) {
         if (!c.mask.isEmpty()) {
             QPainterPath whole;
             whole.addRect(0, 0, w, h);
-            const auto outline = maskPath(c, w, h);
+            const auto outline = maskPath(c, pictureWidth, pictureHeight).translated(pad);
             shape = shape.intersected(c.maskInvert ? whole.subtracted(outline) : outline);
         }
         paint.drawPath(shape);
@@ -1459,15 +1463,47 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             nodes << stillInput(ys, "piny") + QString(",format=gray16[piny%1]").arg(id);
             f = QString("[pin%1][pinx%1][piny%1]remap=fill=black@0,format=rgba").arg(id);
         }
-        if (c.shape != "rect" || c.feather > 0 || !c.mask.isEmpty()) {
-            // Multiply the picture's alpha by the shape: keeps chroma-key transparency.
+        // Multiply the picture's alpha by a mask stream: keeps chroma-key transparency.
+        auto multiplyAlpha = [&](const QString &mask) {
             const auto id = QString::number(serial++);
             nodes << f + QString(",format=gbrap[pic%1]").arg(id);
-            nodes << stillInput(overlayMask(c, w, h), "mask") +
-                         QString(",format=gbrap[mask%1]").arg(id);
+            nodes << mask + QString(",format=gbrap[mask%1]").arg(id);
             f = QString("[pic%1][mask%1]blend=c0_mode=normal:c1_mode=normal:c2_mode=normal:"
                         "c3_mode=multiply:shortest=1,format=rgba")
                     .arg(id);
+        };
+        const bool maskMoves = !maskPoints(c.mask).isEmpty() &&
+                               (c.maskX != 0 || c.maskY != 0 || c.keyframes.contains("maskX") ||
+                                c.keyframes.contains("maskY"));
+        if (maskMoves) {
+            // The shape stays; the free mask is drawn into a larger image and cropped where its
+            // offset puts it in each frame.
+            if (c.shape != "rect" || c.feather > 0) {
+                Clip shape = c;
+                shape.mask.clear();
+                multiplyAlpha(stillInput(overlayMask(shape, w, h), "mask"));
+            }
+            auto reach = [&](const QString &property) {
+                double most = std::abs(c.staticValue(property));
+                for (const auto &k : c.keyframes.value(property))
+                    most = std::max(most, std::abs(k.value));
+                return most;
+            };
+            const QPoint pad(int(std::ceil(reach("maskX") * w)) + 2,
+                             int(std::ceil(reach("maskY") * h)) + 2);
+            const auto local = QString("(t*%1/%2-%3)").arg(p.fpsN).arg(p.fpsD).arg(base);
+            multiplyAlpha(stillInput(overlayMask(c, w, h, pad), "mask") +
+                          QString(",crop=w=%1:h=%2:x='clip(%3-(%4)*%1,0,%5)':y='clip(%6-(%7)*%2,0,%8)'")
+                              .arg(w)
+                              .arg(h)
+                              .arg(pad.x())
+                              .arg(curve(c, "maskX", local))
+                              .arg(2 * pad.x())
+                              .arg(pad.y())
+                              .arg(curve(c, "maskY", local))
+                              .arg(2 * pad.y()));
+        } else if (c.shape != "rect" || c.feather > 0 || !c.mask.isEmpty()) {
+            multiplyAlpha(stillInput(overlayMask(c, w, h), "mask"));
         }
         if (c.border > 0 || c.shadow > 0) {
             // Border and shadow are drawn once into a larger image the picture sits on.
