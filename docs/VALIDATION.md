@@ -1,5 +1,22 @@
 # Validation record
 
+## Windows portable build — 2026-10-10, voice and music apart (0.6 development)
+
+[GitHub Actions run 38053369589](https://github.com/HNXS/Cutlery/actions/runs/38053369589) on commit `e148a4e96f7a71d253c2fbb56dcb91b3df0ad499` passed every step on its first attempt.
+
+New coverage:
+
+- **Model download:** `tools/Get-Models.ps1` fetched UVR-MDX-NET-Inst_HQ_3 from the public UVR model release, and its SHA-256 matched.
+- **Real model check (CPU provider):**
+  - Input: a German sentence spoken by Piper (Thorsten) over a synthetic chord.
+  - The `separate` worker task wrote the 4-channel FLAC.
+  - Its voice part matched the original speech to within the required 12 dB.
+- **Engine test `separateVoiceAndMusic`:**
+  - With a separation in the cache, exports play the voice (1000 Hz) or the music (440 Hz) part. The recording (200 Hz) plays when the setting is "as recorded" or the separation does not cover the clip.
+  - The setting is saved in the project, and invalid values are refused.
+  - The worker with the stand-in model `half-spectrum.onnx` produced music and voice parts at 0.511 and 0.489 of the mix: half the spectrum, times the model's compensation of 1.022. The exported voice is about 6 dB below the recording.
+- **UI test `stemsControls`:** "Voice only (AI)" under Audio › Clean-up runs the separation with the stand-in model. The status then reads "Separated ✓".
+
 ## Windows portable build — 2026-10-10, German text to speech (0.6 development)
 
 [GitHub Actions run 38050315819](https://github.com/HNXS/Cutlery/actions/runs/38050315819) on commit `f6b75045cc954888940d0a378cc10daf1a1e1ecb` passed every step on its first attempt.
