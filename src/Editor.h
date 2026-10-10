@@ -393,7 +393,8 @@ class Editor final : public QObject {
             result << QVariantMap{{"id", id}, {"label", label}};
         return result;
     }
-    // Runs an AI task ("matte" for background removal, "upscale") on the selected clip's media,
+    // Runs an AI task ("matte" for background removal, "upscale", "eyecontact", "separate" for
+    // voice and music apart, see Clip::stems) on the selected clip's media,
     // covering every clip of that media using it. Results are cached per media file.
     Q_INVOKABLE void runAi(const QString &task);
     Q_INVOKABLE void cancelAi();

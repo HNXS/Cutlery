@@ -5,6 +5,8 @@
 # models. Requires the `onnx` Python package. Run in this folder.
 #  - red-matte.onnx: [1,3,32,32] -> [1,1,32,32], the matte is the input's red channel.
 #  - nearest-x2.onnx: [1,3,H,W] -> [1,3,2H,2W], nearest-neighbour upscale.
+#  - half-spectrum.onnx: [B,4,3072,256] -> the same, halved: an MDX-Net stand-in whose "music"
+#    is half the mix.
 import onnx
 from onnx import helper, TensorProto
 
@@ -30,3 +32,9 @@ y = helper.make_tensor_value_info('upscaled', TensorProto.FLOAT, [1, 3, 'h2', 'w
 scales = helper.make_tensor('scales', TensorProto.FLOAT, [4], [1, 1, 2, 2])
 node = helper.make_node('Resize', ['image', '', 'scales'], ['upscaled'], mode='nearest')
 save(helper.make_graph([node], 'nearest-x2', [x], [y], [scales]), 'nearest-x2.onnx')
+
+x = helper.make_tensor_value_info('input', TensorProto.FLOAT, ['batch_size', 4, 3072, 256])
+y = helper.make_tensor_value_info('output', TensorProto.FLOAT, ['batch_size', 4, 3072, 256])
+half = helper.make_tensor('half', TensorProto.FLOAT, [], [0.5])
+node = helper.make_node('Mul', ['input', 'half'], ['output'])
+save(helper.make_graph([node], 'half-spectrum', [x], [y], [half]), 'half-spectrum.onnx')

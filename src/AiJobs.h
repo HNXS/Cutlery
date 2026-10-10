@@ -14,7 +14,8 @@ namespace cutlery {
 //  - "faces": face boxes 8 times a second, as text (see worker/faces.cpp);
 //  - "eyecontact": the video with the presenter's gaze turned toward the camera (ProRes 422 at
 //    the source size and frame rate);
-//  - "transcribe": speech as SRT subtitles (whisper.cpp).
+//  - "transcribe": speech as SRT subtitles (whisper.cpp);
+//  - "separate": the sound as music and voice apart (4-channel FLAC, see worker/separate.cpp).
 // Jobs run one at a time in request order; each result covers a range of source seconds.
 class AiJobs final : public QObject {
     Q_OBJECT

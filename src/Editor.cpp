@@ -195,6 +195,7 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
                        {"upscale", models + "/realesr-general-x4v3.onnx"},
                        {"eyecontact", models + "/face_landmark.onnx"},
                        {"faces", models + "/face_detection_short_range.onnx"},
+                       {"separate", models + "/UVR-MDX-NET-Inst_HQ_3.onnx"},
                        {"transcribe", models + "/ggml-large-v3-turbo-q5_0.bin"},
                        {"vad", models + "/ggml-silero-v6.2.0.bin"},
                        {"whisper", whisper}},
@@ -723,6 +724,7 @@ QVariantMap Editor::state() const {
             PROP(anchorX);
             PROP(anchorY);
             PROP(slowMotion);
+            PROP(stems);
             PROP(fontFamily);
             PROP(graphic);
             PROP(fillColor);
@@ -786,6 +788,11 @@ QVariantMap Editor::state() const {
                 }
                 // Already at least 4K: nothing to gain.
                 selected["upscaleHeight"] = upscaleHeight(*a);
+            }
+            if (const auto *a = m_project.asset(c.assetId); a && a->hasAudio) {
+                auto info = m_ai->status("separate", *a);
+                info["covered"] = aiCovered("separate", *a, &c);
+                selected["stemsInfo"] = info;
             }
         }
     return {{"name", m_project.name},
@@ -870,6 +877,7 @@ QVariantMap Editor::state() const {
                                       {"upscale", m_ai->missing("upscale")},
                                       {"eyecontact", m_ai->missing("eyecontact")},
                                       {"faces", m_ai->missing("faces")},
+                                      {"separate", m_ai->missing("separate")},
                                       {"transcribe", m_ai->missing("transcribe")}}},
             {"captions", captionState()},
             {"pauses", pauseState()},
@@ -3051,6 +3059,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(stabilizeZoom, toBool);
         FIELD(textAnimation, toString);
         FIELD(slowMotion, toString);
+        FIELD(stems, toString);
         FIELD(colorRange, toString);
         FIELD(colorMatrix, toString);
         FIELD(toneMap, toString);
@@ -5436,6 +5445,8 @@ bool Editor::usesAi(const Clip &c, const QString &task) const {
         return speaks(m_project, c) && !c.reverse;
     if (task == "eyecontact")
         return c.eyeContact;
+    if (task == "separate")
+        return !c.stems.isEmpty();
     return task == "upscale" ? c.aiUpscale : c.aiCutout;
 }
 QString Editor::aiVariant(const QString &task, const Asset &a) const {
@@ -5472,6 +5483,11 @@ bool Editor::aiCovered(const QString &task, const Asset &a, const Clip *c) const
 }
 void Editor::addAiMedia(RenderOptions &options) const {
     for (const auto &c : m_project.clips)
+        if (const auto *a = m_project.asset(c.assetId);
+            a && a->hasAudio && !c.stems.isEmpty() && !options.stems.contains(a->id))
+            if (const auto r = m_ai->result("separate", *a); !r.path.isEmpty())
+                options.stems.insert(a->id, r);
+    for (const auto &c : m_project.clips)
         if (const auto *a = m_project.asset(c.assetId); a && a->kind == "video") {
             if (c.aiCutout && !options.mattes.contains(a->id))
                 if (const auto m = m_ai->result("matte", *a); !m.path.isEmpty())
@@ -5501,8 +5517,8 @@ bool Editor::startAi(const QString &task, const Asset &a, const Clip *extra) {
 void Editor::runAi(const QString &task) {
     const auto *c = m_project.clip(m_selected);
     const auto *a = c ? m_project.asset(c->assetId) : nullptr;
-    if (!a || a->kind != "video")
-        return fail("AI processing works on video clips");
+    if (task == "separate" ? !a || !a->hasAudio : !a || a->kind != "video")
+        return fail(task == "separate" ? "Select a clip with sound" : "AI processing works on video clips");
     if (!m_ai->available(task))
         return fail(m_ai->missing(task) + " Download the AI pack next to Cutlery.exe.");
     if (task == "upscale" && upscaleHeight(*a) == 0)

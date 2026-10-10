@@ -2060,11 +2060,27 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         if (t1 <= t0)
             continue; // Handles beyond the source are silent.
         const double s = c.speed.seconds(), d = secs(c.duration), k = secs(n.aPre);
-        const int in =
-            addInput(n, c.sourceIn.seconds() + (c.reverse ? d - t1 : t0) * s);
-        QString a = QString("[%1:a:0]atrim=duration=%2,asetpts=PTS-STARTPTS")
-                        .arg(in)
-                        .arg(num((t1 - t0) * s));
+        const double seek = c.sourceIn.seconds() + (c.reverse ? d - t1 : t0) * s;
+        // Voice or music alone, from the separated sound when it covers this stretch.
+        const auto stem = c.stems.isEmpty() || !n.asset || n.asset->loops
+                              ? MatteSource{}
+                              : o.stems.value(n.asset->id);
+        const bool separated = !stem.path.isEmpty() && stem.start <= seek + 1e-3 &&
+                               stem.end + 0.05 >= seek + (t1 - t0) * s;
+        int in = 0;
+        QString a;
+        if (separated) {
+            r.inputs << "-protocol_whitelist" << "file,pipe" << "-ss"
+                     << num(std::max(0., seek - stem.start)) << "-i"
+                     << QFileInfo(stem.path).absoluteFilePath();
+            in = input++;
+            a = QString("[%1:a:0]pan=stereo|c0=c%2|c1=c%3,").arg(in).arg(c.stems == "voice" ? 2 : 0)
+                    .arg(c.stems == "voice" ? 3 : 1);
+        } else {
+            in = addInput(n, seek);
+            a = QString("[%1:a:0]").arg(in);
+        }
+        a += QString("atrim=duration=%1,asetpts=PTS-STARTPTS").arg(num((t1 - t0) * s));
         if (c.reverse)
             a += ",areverse";
         double tempo = s;

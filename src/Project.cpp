@@ -557,6 +557,8 @@ QJsonObject Project::json(const QString &base) const {
         o["aiUpscale"] = c.aiUpscale;
         if (c.eyeContact)
             o["eyeContact"] = true;
+        if (!c.stems.isEmpty())
+            o["stems"] = c.stems;
         o["transition"] = c.transition;
         o["transitionFrames"] = QString::number(c.transitionFrames);
         cc.append(o);
@@ -805,6 +807,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.aiCutout = j["aiCutout"].toBool();
         c.aiUpscale = j["aiUpscale"].toBool();
         c.eyeContact = j["eyeContact"].toBool(false);
+        c.stems = j["stems"].toString();
         c.transition = j["transition"].toString();
         if (j.contains("transitionFrames"))
             c.transitionFrames = integer(j["transitionFrames"]);
@@ -982,7 +985,8 @@ void Project::validate() const {
                     std::hypot(c.gainX, c.gainY) <= 1.0001 &&
                     bounded(c.glow, 0, 1) && bounded(c.vignette, 0, 1) && bounded(c.grain, 0, 1) &&
                     bounded(c.lutStrength, 0, 1) && c.lut.size() <= 4096 &&
-                    QStringList{"", "blend", "flow"}.contains(c.slowMotion),
+                    QStringList{"", "blend", "flow"}.contains(c.slowMotion) &&
+                    QStringList{"", "voice", "music"}.contains(c.stems),
                 "Invalid colour or look setting");
         require(bounded(c.eqLow, -12, 12) && bounded(c.eqMid, -12, 12) &&
                     bounded(c.eqHigh, -12, 12) && bounded(c.lowCut, 0, 300) &&

@@ -4427,6 +4427,150 @@ class EngineTest : public QObject {
         QVERIFY(!editor.state()["error"].toString().isEmpty());
         editor.clearError();
     }
+    void separateVoiceAndMusic() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // The recording: a 200 Hz tone for 3 s.
+        const auto source = dir.filePath("mix.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "sine=f=200:d=3:sample_rate=44100", "-ac",
+                     "2", source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        const auto asset = editor.project().assets.first();
+        editor.addAsset(asset.id);
+        const auto clip = editor.project().clips.first().id;
+        editor.select(clip);
+        QVERIFY(editor.state()["selected"].toMap().contains("stemsInfo"));
+        // A separation in the AI cache, as the worker leaves it: music 440 Hz in channels 0-1,
+        // voice 1000 Hz in channels 2-3, from source second 0.5 to the end.
+        const auto cache = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) +
+                           "/ai";
+        QDir().mkpath(cache);
+        const auto base = cache + "/" + MediaAnalysis::fingerprint(asset) + "-separate-v1";
+        run(ffmpeg, {"-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=440:d=2.5:sample_rate=44100",
+                     "-f", "lavfi", "-i", "sine=f=1000:d=2.5:sample_rate=44100", "-filter_complex",
+                     "[0][0][1][1]amerge=inputs=4", "-ch_layout", "quad", "-c:a", "flac",
+                     base + ".flac"});
+        QFile meta(base + ".json");
+        QVERIFY(meta.open(QIODevice::WriteOnly));
+        meta.write(R"({"start": 0.5, "end": 3, "rate": 44100})");
+        meta.close();
+        auto strongest = [&](const QString &file) {
+            auto level = [&](int hz) {
+                QProcess p;
+                p.start(ffmpeg, {"-v", "info", "-i", file, "-af",
+                                 QString("bandpass=f=%1:width_type=q:w=8,astats=measure_perchannel=none").arg(hz),
+                                 "-f", "null", "-"});
+                p.waitForFinished(30000);
+                const auto m = QRegularExpression("RMS level dB:\\s+(-?[0-9.]+|-inf)")
+                                   .match(QString::fromUtf8(p.readAllStandardError()));
+                return m.captured(1) == "-inf" ? -150. : m.captured(1).toDouble();
+            };
+            int best = 0;
+            double top = -200;
+            for (int hz : {200, 440, 1000})
+                if (const double l = level(hz); l > top) {
+                    top = l;
+                    best = hz;
+                }
+            return best;
+        };
+        auto exported = [&](const QString &name) {
+            const auto out = dir.filePath(name + ".wav");
+            editor.exportWith(QUrl::fromLocalFile(out), {{"format", "wav"}});
+            [&] { QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000); }();
+            return out;
+        };
+        // The clip from source second 1: covered.
+        editor.setClip("duration", 25);
+        editor.setClip("sourceIn", 1.0);
+        QCOMPARE(editor.project().clips.first().sourceIn.seconds(), 1.);
+        QCOMPARE(strongest(exported("as-recorded")), 200);
+        editor.setClip("stems", "voice");
+        QCOMPARE(strongest(exported("voice")), 1000);
+        editor.setClip("stems", "music");
+        QCOMPARE(strongest(exported("music")), 440);
+        // Kept in the project; anything else is refused.
+        QCOMPARE(Project::fromJson(editor.project().json(), {}).clips.first().stems, QString("music"));
+        editor.setClip("stems", "drums");
+        QVERIFY(!editor.state()["error"].toString().isEmpty());
+        editor.clearError();
+        // Not covered (from source second 0): the sound as recorded.
+        editor.setClip("sourceIn", 0.0);
+        QCOMPARE(strongest(exported("uncovered")), 200);
+#ifdef CUTLERY_AI_WORKER
+        // The worker with a stand-in model whose "music" is half the spectrum: music and voice
+        // are each about half the mix and add up to it.
+        QTemporaryDir models;
+        QVERIFY(QFile::copy(CUTLERY_SOURCE_DIR "/tests/fixtures/half-spectrum.onnx",
+                            models.filePath("UVR-MDX-NET-Inst_HQ_3.onnx")));
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+        qputenv("CUTLERY_AI_MODELS", models.path().toUtf8());
+        Editor ai(&frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        ai.configure(320, 180, 25, 1);
+        const auto chord = dir.filePath("chord.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "aevalsrc=0.3*sin(2*PI*330*t)+0.2*sin(2*PI*523*t):s=44100:d=7", "-ac", "2",
+                     chord});
+        ai.importMedia({QUrl::fromLocalFile(chord)});
+        QTRY_VERIFY_WITH_TIMEOUT(ai.project().assets.size() == 1, 15000);
+        ai.addAsset(ai.project().assets.first().id);
+        ai.select(ai.project().clips.first().id);
+        QCOMPARE(ai.state()["aiMissing"].toMap()["separate"].toString(), QString());
+        ai.setClip("stems", "voice");
+        ai.runAi("separate");
+        auto info = [&] { return ai.state()["selected"].toMap()["stemsInfo"].toMap(); };
+        QTRY_VERIFY_WITH_TIMEOUT(info()["covered"].toBool(), 120000);
+        const auto made = [&] {
+            const auto base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) +
+                              "/ai/" + MediaAnalysis::fingerprint(ai.project().assets.first()) +
+                              "-separate-v1.flac";
+            return base;
+        }();
+        QCOMPARE(QString::fromUtf8(run(Editor::executable("ffprobe"),
+                                       {"-v", "error", "-show_entries", "stream=channels,sample_rate",
+                                        "-of", "csv=p=0", made}))
+                     .trimmed(),
+                 QString("44100,4"));
+        const auto pcm = run(ffmpeg, {"-v", "error", "-i", made, "-f", "f32le", "pipe:1"});
+        const auto *x = reinterpret_cast<const float *>(pcm.constData());
+        const qsizetype n = pcm.size() / 16;
+        QVERIFY2(std::abs(n - 7 * 44100) < 2000, qPrintable(QString::number(n)));
+        double music = 0, voice = 0, mix = 0;
+        for (qsizetype i = 4410; i < n - 4410; ++i) {
+            music += double(x[i * 4]) * x[i * 4];
+            voice += double(x[i * 4 + 2]) * x[i * 4 + 2];
+            const double m = x[i * 4] + x[i * 4 + 2];
+            mix += m * m;
+        }
+        // Half the spectrum, times the model's compensation of 1.022.
+        QVERIFY2(std::abs(std::sqrt(music / mix) - 0.511) < 0.01 &&
+                     std::abs(std::sqrt(voice / mix) - 0.489) < 0.01,
+                 qPrintable(QString("music %1 voice %2").arg(std::sqrt(music / mix)).arg(std::sqrt(voice / mix))));
+        // The export hears the voice part: about 6 dB below the recording.
+        auto rms = [&](const QString &file) {
+            QProcess p;
+            p.start(ffmpeg, {"-v", "info", "-i", file, "-af", "astats=measure_perchannel=none", "-f",
+                             "null", "-"});
+            p.waitForFinished(30000);
+            return QRegularExpression("RMS level dB:\\s+(-?[0-9.]+)")
+                .match(QString::fromUtf8(p.readAllStandardError()))
+                .captured(1)
+                .toDouble();
+        };
+        const auto voiceOut = dir.filePath("ai-voice.wav");
+        ai.exportWith(QUrl::fromLocalFile(voiceOut), {{"format", "wav"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!ai.state()["busy"].toBool(), 60000);
+        const double drop = rms(chord) - rms(voiceOut);
+        QVERIFY2(drop > 5 && drop < 7.5, qPrintable(QString::number(drop)));
+#endif
+    }
     void surroundExport() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

@@ -17,6 +17,7 @@ QString extension(const QString &task) {
     return task == "upscale" || task == "eyecontact" ? ".mov"
            : task == "transcribe"                    ? ".srt"
            : task == "faces"                         ? ".txt"
+           : task == "separate"                      ? ".flac"
                                                      : ".mkv";
 }
 } // namespace
@@ -98,7 +99,7 @@ void AiJobs::start(const QString &task, const Asset &a, double start, double end
                    const QString &variant) {
     if (!available(task))
         return;
-    if (task == "transcribe" ? !a.hasAudio
+    if (task == "transcribe" || task == "separate" ? !a.hasAudio
                              : a.kind != "video" || a.width <= 0 || a.height <= 0)
         return;
     Job job;
@@ -189,6 +190,8 @@ void AiJobs::run(const Job &job, const QString &rate) {
                     .arg(std::max(2, int(std::lround(a.width * fit / 2)) * 2))
                     .arg(std::max(2, int(std::lround(a.height * fit / 2)) * 2))
              << "--rate" << QString::number(matteRate);
+    } else if (job.task == "separate") {
+        resultRate = 44100;
     } else if (job.task == "transcribe") {
         args << "--whisper" << m_files.value("whisper") << "--language"
              << (job.variant.isEmpty() ? QString("auto") : job.variant);
