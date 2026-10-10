@@ -696,6 +696,7 @@ QVariantMap Editor::state() const {
             PROP(videoDenoise);
             PROP(dereverb);
             PROP(deflicker);
+            PROP(lensCorrection);
             PROP(colorRange);
             PROP(colorMatrix);
             PROP(toneMap);
@@ -2887,6 +2888,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
             {"videoDenoise", &Clip::videoDenoise},
             {"dereverb", &Clip::dereverb},
             {"deflicker", &Clip::deflicker},
+            {"lensCorrection", &Clip::lensCorrection},
             {"exposure", &Clip::exposure},
             {"echo", &Clip::echo},
             {"pan", &Clip::pan},
@@ -4954,6 +4956,7 @@ void Editor::pasteAttributes(const QString &group) {
         c->motionBlur = from.motionBlur;
         c->videoDenoise = from.videoDenoise;
         c->deflicker = from.deflicker;
+        c->lensCorrection = from.lensCorrection;
         if (group == "look")
             return;
         c->scale = from.scale;

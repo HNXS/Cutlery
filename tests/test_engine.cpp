@@ -4234,6 +4234,58 @@ class EngineTest : public QObject {
         QVERIFY(!editor.state()["error"].toString().isEmpty());
         editor.clearError();
     }
+    void lensCorrection() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // A left-to-right ramp: the grey of a pixel tells where in the source it comes from.
+        const auto board = dir.filePath("board.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i",
+                     "color=c=black:s=128x128:d=1:r=25,format=yuv444p,geq=lum='2*X':cb=128:cr=128",
+                     "-c:v", "ffv1", board});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(128, 128, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(board)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id, 0);
+        const auto id = editor.project().clips.first().id;
+        editor.select(id);
+        editor.setClip("lensCorrection", 0.5);
+        QCOMPARE(editor.project().clips.first().lensCorrection, 0.5);
+        editor.setClip("lensCorrection", 2); // out of range: refused
+        QCOMPARE(editor.project().clips.first().lensCorrection, 0.5);
+        editor.clearError();
+        auto render = [&](double amount) {
+            Project p = editor.project();
+            p.clips[0].lensCorrection = amount;
+            RenderOptions options;
+            options.audio = false;
+            options.from = 5;
+            options.to = 6;
+            const auto plan = compileRender(p, dir.filePath("work"), 128, 128, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        const auto plain = render(0), barrel = render(1), pincushion = render(-1);
+        QVERIFY(!plain.isNull() && !barrel.isNull() && !pincushion.isNull());
+        auto grey = [](const QImage &image, int x) { return qGray(image.pixel(x, 64)); };
+        // The centre stays where it is.
+        QVERIFY(std::abs(grey(barrel, 64) - grey(plain, 64)) <= 6);
+        QVERIFY(std::abs(grey(pincushion, 64) - grey(plain, 64)) <= 6);
+        // Straightening barrel distortion pulls the edge from nearer the centre of the source.
+        QVERIFY2(grey(barrel, 120) < grey(plain, 120) - 10,
+                 qPrintable(QString("%1 %2").arg(grey(barrel, 120)).arg(grey(plain, 120))));
+        // Straightening pincushion distortion zooms in to hide the empty corners.
+        QVERIFY2(grey(pincushion, 100) < grey(plain, 100) - 15,
+                 qPrintable(QString("%1 %2").arg(grey(pincushion, 100)).arg(grey(plain, 100))));
+    }
     void sourceColoursAndNoise() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
