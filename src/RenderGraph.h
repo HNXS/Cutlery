@@ -44,6 +44,9 @@ struct RenderOptions {
     // whose summary FFmpeg logs at the "info" level (see parseIntegratedLoudness).
     double gainDb = 0, limit = 0.95;
     bool measureLoudness = false;
+    // Sound channels of the mix: 2 (stereo) or 6 (5.1: FL FR FC LFE BL BR, each track placed by
+    // its Track::surround; the LFE channel stays silent).
+    int channels = 2;
     // Mattes by asset id, used by clips with AI cutout.
     QHash<QString, MatteSource> mattes;
     // AI-upscaled pictures by asset id, used instead of the source by clips with AI upscale.

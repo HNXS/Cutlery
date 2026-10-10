@@ -177,6 +177,12 @@ QVector<Encoder> encoderCandidates(const ExportSettings &s, QSize size, double f
         if (!e.noAudio) {
             if (s.channels == 1)
                 e.audioArguments << "-ac" << "1";
+            if (s.channels == 6) {
+                e.channels = 6;
+                // Opus needs the surround channel mapping for more than two channels.
+                if (e.audioArguments.contains("libopus"))
+                    e.audioArguments << "-mapping_family" << "1";
+            }
             if (s.sampleRate != 48000)
                 e.audioArguments << "-ar" << QString::number(s.sampleRate);
         }

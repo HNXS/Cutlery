@@ -6955,7 +6955,8 @@ ApplicationWindow {
             { channels: 2, sampleRate: 48000, label: "Stereo · 48 kHz" },
             { channels: 2, sampleRate: 44100, label: "Stereo · 44.1 kHz (CD, some music services)" },
             { channels: 1, sampleRate: 48000, label: "Mono · 48 kHz (speech, podcasts)" },
-            { channels: 1, sampleRate: 44100, label: "Mono · 44.1 kHz" }
+            { channels: 1, sampleRate: 44100, label: "Mono · 44.1 kHz" },
+            { channels: 6, sampleRate: 48000, label: "5.1 surround · 48 kHz (place tracks with their ⋯ menu)" }
         ]
         readonly property var loudnessTargets: [
             { value: 0, label: "Keep as mixed" },

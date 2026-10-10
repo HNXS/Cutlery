@@ -419,7 +419,8 @@ QVariantList Editor::trackList() const {
         result << QVariantMap{
             {"index", index++},       {"name", t.name},         {"locked", t.locked},
             {"muted", t.muted},       {"hidden", t.hidden},     {"solo", t.solo},
-            {"snapping", t.snapping}, {"magnetic", t.magnetic}, {"id", t.id}};
+            {"snapping", t.snapping}, {"magnetic", t.magnetic}, {"id", t.id},
+            {"surround", t.surround}};
     }
     return result;
 }
@@ -480,6 +481,8 @@ void Editor::setTrack(int track, const QString &key, const QVariant &value) {
             t.solo = value.toBool();
         else if (key == "snapping")
             t.snapping = value.toBool();
+        else if (key == "surround")
+            t.surround = value.toString();
         else if (key == "magnetic") {
             p.requireEditable(track);
             t.magnetic = value.toBool();
@@ -6627,8 +6630,10 @@ static ExportSettings exportSettings(const QVariantMap &m) {
         throw std::runtime_error("Unknown colour depth or HDR choice");
     if (!s.dynamicRange.isEmpty() && !deepColourFormat(s.format))
         throw std::runtime_error("10-bit and HDR export need HEVC, AV1, VP9 or ProRes 422");
-    if (s.channels != 1 && s.channels != 2)
-        throw std::runtime_error("Export sound in mono (1) or stereo (2)");
+    if (s.channels != 1 && s.channels != 2 && s.channels != 6)
+        throw std::runtime_error("Export sound in mono (1), stereo (2) or 5.1 (6)");
+    if (s.channels == 6 && s.format == "mp3")
+        throw std::runtime_error("MP3 holds at most two channels: choose stereo or another format");
     if (s.sampleRate != 48000 && s.sampleRate != 44100)
         throw std::runtime_error("Export sound at 48000 or 44100 Hz");
     if (s.fps != 0 && std::none_of(exportFrameRates().begin(), exportFrameRates().end(),
@@ -7028,6 +7033,7 @@ void Editor::measureLoudness(const QString &output, QSize size, const Encoder &e
         RenderOptions options;
         options.video = false;
         options.measureLoudness = true;
+        options.channels = encoder.channels; // measured as it will be heard
         options.from = m_exportFrom;
         options.to = m_exportTo;
         const auto plan = compileRender(m_exportProject, work->path(), size.width(), size.height(),
@@ -7137,6 +7143,7 @@ void Editor::startRender(const QString &output, QSize size, const Encoder &encod
         options.transparent = encoder.alpha;
         options.video = !encoder.audioOnly;
         options.audio = !encoder.noAudio;
+        options.channels = encoder.channels;
         options.from = m_exportFrom;
         options.to = m_exportTo;
         if (gainDb != 0 || m_loudness.contains("target")) {

@@ -1,5 +1,18 @@
 # Validation record
 
+## Windows portable build — 2026-10-10, 5.1 surround export (0.6 development)
+
+[GitHub Actions run 38032563964](https://github.com/HNXS/Cutlery/actions/runs/38032563964) on commit `a17bde6ed8529cfb5a83a16e1fcecc16a754d558` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `surroundExport`:** three tones on three tracks: front (440 Hz), centre (880 Hz) and rear (220 Hz).
+  - A 5.1 WAV export has six channels. Each tone is in its own channels, and LFE is silent.
+  - A 5.1 AAC (M4A) export also has six channels.
+  - MP3 refuses 5.1, and an unknown place is refused.
+  - The place is kept in the project file.
+- **UI test `exportDialog`:** choosing "5.1 surround" exports six channels.
+
 ## Windows portable build — 2026-10-10, lens distortion correction (0.6 development)
 
 [GitHub Actions run 38030909824](https://github.com/HNXS/Cutlery/actions/runs/38030909824) on commit `d5b8b0017851963a0169559427ad308981671795` passed every step on its first attempt.

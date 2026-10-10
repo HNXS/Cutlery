@@ -554,6 +554,31 @@ FocusScope {
                                                 enabled: !track.locked && root.state.tracks > 1
                                                 onTriggered: editor.removeTrack(trackIndex)
                                             }
+                                            // Where the sound goes in a 5.1 export.
+                                            Menu {
+                                                title: "Sound in 5.1"
+                                                MenuItem {
+                                                    objectName: "surround-" + trackIndex + "-front"
+                                                    text: "Front left and right"
+                                                    checkable: true
+                                                    checked: (track.surround || "") === ""
+                                                    onTriggered: editor.setTrack(trackIndex, "surround", "")
+                                                }
+                                                MenuItem {
+                                                    objectName: "surround-" + trackIndex + "-centre"
+                                                    text: "Centre (dialogue)"
+                                                    checkable: true
+                                                    checked: (track.surround || "") === "centre"
+                                                    onTriggered: editor.setTrack(trackIndex, "surround", "centre")
+                                                }
+                                                MenuItem {
+                                                    objectName: "surround-" + trackIndex + "-rear"
+                                                    text: "Rear left and right"
+                                                    checkable: true
+                                                    checked: (track.surround || "") === "rear"
+                                                    onTriggered: editor.setTrack(trackIndex, "surround", "rear")
+                                                }
+                                            }
                                         }
                                     }
                                 }
