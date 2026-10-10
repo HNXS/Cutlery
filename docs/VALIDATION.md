@@ -1,5 +1,19 @@
 # Validation record
 
+## Windows portable build — 2026-10-10, screen reader names, keyboard focus, left-panel crash fix (0.6 development)
+
+[GitHub Actions run 38035874124](https://github.com/HNXS/Cutlery/actions/runs/38035874124) on commit `77b57192c8d666c3de2aa3a7582fd5692dafec75` passed every step on its first attempt.
+
+New coverage:
+
+- **UI tests `aiCutoutControls`, `keyframeControls` and `startScreenAndPreferences`:** every visible control has a name for screen readers on these pages:
+  - all eight left tabs
+  - all fourteen inspector pages of a video
+  - the pages of a title
+  - the start screen
+- **UI test `keyframeControls`:** twelve presses of Tab move the focus through at least six controls.
+- **Crash fix:** walking the left tabs every 30 ms crashed in Qt Quick Layouts when leaving the Audio tab. After the fix this walk runs in `aiCutoutControls` on every build.
+
 ## Windows portable build — 2026-10-10, 5.1 surround export (0.6 development)
 
 [GitHub Actions run 38032563964](https://github.com/HNXS/Cutlery/actions/runs/38032563964) on commit `a17bde6ed8529cfb5a83a16e1fcecc16a754d558` passed every step on its first attempt.
