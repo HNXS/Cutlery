@@ -200,6 +200,15 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
                        {"whisper", whisper}},
                       this);
     connect(m_ai, &AiJobs::changed, this, &Editor::changed);
+    QString piper = qEnvironmentVariable("CUTLERY_PIPER");
+    if (piper.isEmpty()) {
+        piper = app + "/tts/piper";
+#ifdef Q_OS_WIN
+        piper += ".exe";
+#endif
+    }
+    m_speech = new Speech(m_data + "/cache/speech", piper, models, this);
+    connect(m_speech, &Speech::finished, this, &Editor::spoken);
     m_tracker = new Tracker(executable("ffmpeg"), this);
     connect(m_tracker, &Tracker::progressChanged, this, &Editor::changed);
     connect(m_tracker, &Tracker::finished, this, &Editor::applyTracking);
@@ -869,6 +878,15 @@ QVariantMap Editor::state() const {
             {"collect", m_collect},
             {"follow", m_follow},
             {"track", trackState()},
+            {"speech", [&] {
+                 auto state = m_speechState;
+                 state["missing"] = m_speech->missing();
+                 QVariantList voices;
+                 for (const auto &v : m_speech->voices())
+                     voices << QVariantMap{{"id", v.id}, {"name", v.name}, {"language", v.language}};
+                 state["voices"] = voices;
+                 return state;
+             }()},
             {"transcript", transcriptState()},
             {"autoColour", m_autoColour},
             {"soundMeasure", m_soundMeasure},
@@ -4356,6 +4374,76 @@ void Editor::applyTracking(const QVector<Tracker::Point> &points, const QString 
                      : QString("Tracked from %1 s to %2 s of the clip; lost outside that")
                            .arg(from, 0, 'f', 1)
                            .arg(to, 0, 'f', 1);
+    emit changed();
+}
+void Editor::speak(const QString &text, const QString &voice, double speed) {
+    const auto words = Speech::spokenText(text).split(' ', Qt::SkipEmptyParts);
+    if (words.isEmpty())
+        return fail("Type the text to speak");
+    startSpeech({{m_playhead, text}}, voice, speed);
+}
+void Editor::speakSelection(const QString &voice, double speed) {
+    QVector<std::pair<qint64, QString>> items;
+    for (const auto &id : selection())
+        if (const auto *c = m_project.clip(id);
+            c && c->assetId.isEmpty() && !Speech::spokenText(c->text).isEmpty())
+            items.push_back({c->start, c->text});
+    if (items.isEmpty())
+        return fail("Select a title to read aloud");
+    startSpeech(items, voice, speed);
+}
+void Editor::startSpeech(const QVector<std::pair<qint64, QString>> &items, const QString &voice,
+                         double speed) {
+    if (!m_speaking.isEmpty())
+        return fail("Still speaking the last text");
+    if (const auto why = m_speech->missing(); !why.isEmpty())
+        return fail(why);
+    for (const auto &[frame, text] : items) {
+        auto words = Speech::spokenText(text).split(' ', Qt::SkipEmptyParts);
+        const bool more = words.size() > 5;
+        words = words.mid(0, 5);
+        const auto request = m_speech->speak(text, voice, speed);
+        m_speaking[request] = {{"frame", frame},
+                               {"name", "Speech: " + words.join(' ') + (more ? "…" : "")}};
+    }
+    m_speechState = {{"status", "speaking"}, {"count", items.size()}};
+    m_status = "Speaking…";
+    emit changed();
+}
+void Editor::spoken(const Speech::Result &result) {
+    if (!m_speaking.contains(result.request))
+        return;
+    if (!result.error.isEmpty()) {
+        m_speaking.clear();
+        m_speechState = {{"status", "failed"}};
+        return fail(result.error);
+    }
+    m_speaking[result.request]["path"] = result.path;
+    m_speaking[result.request]["seconds"] = result.seconds;
+    for (const auto &item : std::as_const(m_speaking))
+        if (!item.contains("path"))
+            return;
+    // All spoken: placed in one step, in the order of their times.
+    auto items = m_speaking.values();
+    m_speaking.clear();
+    std::sort(items.begin(), items.end(), [](const QVariantMap &a, const QVariantMap &b) {
+        return a.value("frame").toLongLong() < b.value("frame").toLongLong();
+    });
+    int placed = 0;
+    if (!mutate([&](Project &p) {
+            for (const auto &item : items) {
+                Sound s;
+                s.name = item.value("name").toString();
+                s.path = item.value("path").toString();
+                s.seconds = item.value("seconds").toDouble();
+                placed += placeSound(p, s, item.value("frame").toLongLong());
+            }
+        })) {
+        m_speechState = {{"status", "failed"}};
+        return;
+    }
+    m_speechState = {{"status", "done"}, {"count", placed}};
+    m_status = placed == 1 ? QString("Added the speech") : QString("Added %1 speeches").arg(placed);
     emit changed();
 }
 // The source seconds a clip shows, for face analysis.

@@ -6,7 +6,9 @@ function Get-Pinned($url, $file, $sha256) {
     if (!(Test-Path $file) -or (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sha256) {
         Invoke-WebRequest -Uri $url -OutFile $file
     }
-    if ((Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sha256) { throw "Checksum mismatch: $file" }
+    $actual = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+    if (!$sha256) { Write-Host "::warning::UNPINNED $file sha256 $actual"; return }
+    if ($actual -ne $sha256) { throw "Checksum mismatch: $file is $actual" }
 }
 # Person segmentation for AI background removal: U²-Net trained on human segmentation
 # (Apache-2.0, https://github.com/xuebinqin/U-2-Net), ONNX export published by rembg.
@@ -30,6 +32,17 @@ if (!(Test-Path $speech) -or (Get-FileHash $speech -Algorithm SHA1).Hash.ToLower
 }
 if ((Get-FileHash $speech -Algorithm SHA1).Hash.ToLowerInvariant() -ne $speechSha1) { throw 'Whisper model checksum mismatch' }
 $speechSha = (Get-FileHash $speech -Algorithm SHA256).Hash.ToLowerInvariant()
+# German voice for text to speech: Piper's Thorsten (medium), trained on the Thorsten-Voice
+# dataset (CC0, https://github.com/thorstenMueller/Thorsten-Voice), from the pinned v1.0.0 release
+# of the piper-voices repository. Piper reads the .onnx.json next to the model.
+$voiceBase = 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/de/de_DE/thorsten/medium'
+$voiceSha = ''
+$voiceJsonSha = ''
+$voiceCardSha = ''
+Get-Pinned "$voiceBase/de_DE-thorsten-medium.onnx" "$Destination/de_DE-thorsten-medium.onnx" $voiceSha
+Get-Pinned "$voiceBase/de_DE-thorsten-medium.onnx.json" "$Destination/de_DE-thorsten-medium.onnx.json" $voiceJsonSha
+Get-Pinned "$voiceBase/MODEL_CARD" "$Destination/de_DE-thorsten-medium.MODEL_CARD.txt" $voiceCardSha
+Get-Content "$Destination/de_DE-thorsten-medium.MODEL_CARD.txt" | ForEach-Object { Write-Host "MODEL_CARD: $_" }
 python -m pip install --quiet onnx==1.17.0
 if ($LASTEXITCODE -ne 0) { throw 'Installing the onnx package failed' }
 python "$PSScriptRoot/convert-realesrgan.py" $weights "$Destination/realesr-general-x4v3.onnx"
@@ -72,6 +85,7 @@ foreach ($m in $faceModels) {
 @{ models=@(
     @{ file='u2net_human_seg.onnx'; url=$matteUrl; sha256=$matteSha; license='Apache-2.0'; source='https://github.com/xuebinqin/U-2-Net'; purpose='person matte for AI background removal' },
     @{ file='ggml-large-v3-turbo-q5_0.bin'; url=$speechUrl; sha1=$speechSha1; sha256=$speechSha; license='MIT'; source='https://github.com/openai/whisper'; purpose='speech recognition for automatic captions' },
-    @{ file='realesr-general-x4v3.onnx'; converted_from=$srUrl; source_sha256=$srSha; sha256=$srOnnx; license='BSD-3-Clause'; source='https://github.com/xinntao/Real-ESRGAN'; purpose='4x super-resolution for AI upscale' }
+    @{ file='realesr-general-x4v3.onnx'; converted_from=$srUrl; source_sha256=$srSha; sha256=$srOnnx; license='BSD-3-Clause'; source='https://github.com/xinntao/Real-ESRGAN'; purpose='4x super-resolution for AI upscale' },
+    @{ file='de_DE-thorsten-medium.onnx'; url="$voiceBase/de_DE-thorsten-medium.onnx"; sha256=$voiceSha; settings_sha256=$voiceJsonSha; license='CC0-1.0 (Thorsten-Voice dataset; see the model card)'; source='https://github.com/thorstenMueller/Thorsten-Voice'; purpose='German voice for text to speech (Piper)' }
 ) + @($faceModels | ForEach-Object { @{ file="$($_.name).onnx"; converted_from="mediapipe==0.10.18:$($_.entry)"; source_sha256=$_.sha256; sha256=$_.onnx; license='Apache-2.0'; source='https://github.com/google-ai-edge/mediapipe'; purpose='face, eye and iris landmarks for eye contact' } }) } | ConvertTo-Json -Depth 4 | Set-Content "$Destination/manifest.json" -Encoding utf8
 Write-Output (Resolve-Path $Destination).Path

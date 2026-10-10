@@ -1084,6 +1084,73 @@ class UiTest : public QObject {
         QCOMPARE(editor.project().height, 1350);
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void speechControls() {
+        // With Piper and a voice (CUTLERY_TEST_PIPER, CUTLERY_TEST_VOICES) text is spoken from the
+        // Audio tab and titles are read aloud; without them the panel says what is missing.
+        const auto piper = qEnvironmentVariable("CUTLERY_TEST_PIPER"),
+                   voices = qEnvironmentVariable("CUTLERY_TEST_VOICES");
+        const bool available = !piper.isEmpty() && !voices.isEmpty();
+        qputenv("CUTLERY_PIPER", available ? piper.toUtf8() : QByteArray("/nonexistent/piper"));
+        if (available)
+            qputenv("CUTLERY_AI_MODELS", voices.toUtf8());
+        QTemporaryDir dir;
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        qunsetenv("CUTLERY_PIPER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        editor.configure(1280, 720, 25, 1);
+        editor.addTitle();
+        editor.setClip("text", "Hallo zusammen");
+        editor.setClip("duration", 250);
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        window->setProperty("leftTab", "audio");
+        QTest::qWait(100);
+        auto *panel = findItem(window->contentItem(), "speechPanel");
+        QVERIFY(panel && panel->isVisible());
+        auto *speak = findItem(window->contentItem(), "speakText");
+        auto *text = findItem(window->contentItem(), "speechText");
+        QVERIFY(speak && text);
+        if (!available) {
+            QVERIFY(findItem(window->contentItem(), "speechMissing")->isVisible());
+            QVERIFY(!text->isEnabled());
+            QVERIFY(!speak->isEnabled());
+            page(window, "text");
+            auto *read = findItem(window->contentItem(), "readAloud");
+            QTRY_VERIFY(read && read->isVisible());
+            QVERIFY(!read->isEnabled());
+            return;
+        }
+        QVERIFY(!findItem(window->contentItem(), "speechMissing")->isVisible());
+        QVERIFY(findItem(window->contentItem(), "speechVoice")->isVisible());
+        QVERIFY(!speak->isEnabled());
+        text->setProperty("text", "Willkommen bei Cutlery.");
+        QTRY_VERIFY(speak->isEnabled());
+        if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS"))
+            window->grabWindow().save(qEnvironmentVariable("CUTLERY_UI_SHOTS") + "/speech.png");
+        editor.seek(50);
+        QVERIFY(QMetaObject::invokeMethod(speak, "clicked"));
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["speech"].toMap()["status"].toString(),
+                                  QString("done"), 60000);
+        QCOMPARE(editor.project().clips.size(), 2);
+        QCOMPARE(editor.project().clips.last().start, qint64(50));
+        // The title is read aloud from its settings.
+        editor.select(editor.project().clips.first().id);
+        page(window, "text");
+        auto *read = findItem(window->contentItem(), "readAloud");
+        QTRY_VERIFY(read && read->isVisible() && read->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(read, "clicked"));
+        QTRY_COMPARE_WITH_TIMEOUT(editor.project().clips.size(), 3, 60000);
+        QCOMPARE(editor.project().clips.last().name, QString("Speech: Hallo zusammen"));
+        QCOMPARE(editor.project().clips.last().start, qint64(0));
+    }
     void presenterControls() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;

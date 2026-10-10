@@ -8,6 +8,7 @@
 #include "RenderGraph.h"
 #include "Scopes.h"
 #include "SoundLibrary.h"
+#include "Speech.h"
 #include "Thumbnails.h"
 #include <QJsonArray>
 #include <QImageReader>
@@ -1952,6 +1953,121 @@ class EngineTest : public QObject {
         editor.addTitle();
         editor.trackMotion();
         QVERIFY(editor.state()["error"].toString().contains("video clip"));
+    }
+    void textToSpeech() {
+        // Piper and a voice: CUTLERY_TEST_PIPER (the executable) and CUTLERY_TEST_VOICES (a
+        // folder with .onnx voices), set by CI from the AI pack.
+        const auto piper = qEnvironmentVariable("CUTLERY_TEST_PIPER"),
+                   voices = qEnvironmentVariable("CUTLERY_TEST_VOICES");
+        if (piper.isEmpty() || voices.isEmpty())
+            QSKIP("Needs Piper and a voice (CUTLERY_TEST_PIPER, CUTLERY_TEST_VOICES)");
+        // Spoken afresh, not from an earlier run's cache.
+        QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) +
+             "/cache/speech")
+            .removeRecursively();
+        qputenv("CUTLERY_PIPER", piper.toUtf8());
+        qputenv("CUTLERY_AI_MODELS", voices.toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        qunsetenv("CUTLERY_PIPER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        editor.configure(1280, 720, 25, 1);
+        auto speech = [&] { return editor.state()["speech"].toMap(); };
+        QCOMPARE(speech()["missing"].toString(), QString());
+        QString german;
+        for (const auto &v : speech()["voices"].toList())
+            if (v.toMap()["language"].toString() == "German")
+                german = v.toMap()["id"].toString();
+        QVERIFY2(!german.isEmpty(), "a German voice");
+        // Spoken at the playhead on a free track, with umlauts and a title's highlight marks.
+        editor.addTitle();
+        editor.setClip("duration", 1500);
+        editor.seek(25);
+        editor.speak("Grüße aus Köln. Das ist *Cutlery*, ein Videoschnitt-Programm.", german);
+        QCOMPARE(speech()["status"].toString(), QString("speaking"));
+        QTRY_COMPARE_WITH_TIMEOUT(speech()["status"].toString(), QString("done"), 60000);
+        QCOMPARE(editor.project().clips.size(), 2);
+        const auto clip = editor.project().clips.last();
+        QCOMPARE(clip.start, qint64(25));
+        QVERIFY(clip.name.startsWith("Speech: Grüße aus Köln."));
+        const auto *asset = editor.project().asset(clip.assetId);
+        QVERIFY(asset && asset->kind == "audio");
+        const double seconds = asset->duration;
+        QVERIFY2(seconds > 2 && seconds < 8, qPrintable(QString::number(seconds)));
+        QCOMPARE(clip.duration, qint64(std::floor(seconds * 25 + 1e-6)));
+        // It is speech: loud enough over most of its length.
+        const auto pcm = run(Editor::executable("ffmpeg"),
+                             {"-v", "error", "-i", asset->path, "-f", "s16le", "-ac", "1", "-ar",
+                              "16000", "pipe:1"});
+        const auto *samples = reinterpret_cast<const qint16 *>(pcm.constData());
+        int loudBlocks = 0, blocks = int(pcm.size() / 2 / 1600);
+        for (int b = 0; b < blocks; ++b) {
+            double sum = 0;
+            for (int i = 0; i < 1600; ++i)
+                sum += double(samples[b * 1600 + i]) * samples[b * 1600 + i];
+            loudBlocks += std::sqrt(sum / 1600) > 300;
+        }
+        QVERIFY2(loudBlocks > blocks / 2, qPrintable(QString("%1 of %2").arg(loudBlocks).arg(blocks)));
+        // Faster speech is shorter; the same request again comes from the cache.
+        editor.seek(500);
+        editor.speak("Grüße aus Köln. Das ist Cutlery, ein Videoschnitt-Programm.", german, 1.5);
+        QTRY_COMPARE_WITH_TIMEOUT(speech()["status"].toString(), QString("done"), 60000);
+        const auto fast = editor.project().clips.last();
+        QVERIFY2(editor.project().asset(fast.assetId)->duration < seconds * 0.9,
+                 qPrintable(QString("%1 for %2").arg(editor.project().asset(fast.assetId)->duration).arg(seconds)));
+        editor.seek(1000);
+        QElapsedTimer timer;
+        timer.start();
+        editor.speak("Grüße aus Köln. Das ist *Cutlery*, ein Videoschnitt-Programm.", german);
+        QTRY_COMPARE_WITH_TIMEOUT(speech()["status"].toString(), QString("done"), 5000);
+        QCOMPARE(editor.project().clips.last().assetId, clip.assetId);
+        QVERIFY(timer.elapsed() < 2000);
+        // Selected titles are read aloud at their starts, in one undo step.
+        editor.newProject();
+        editor.addTitle();
+        const auto first = editor.state()["selectedId"].toString();
+        editor.setClip("text", "Erster Titel");
+        editor.seek(60);
+        editor.addTitle();
+        editor.setClip("text", "Zweiter Titel");
+        editor.toggleSelect(first);
+        QCOMPARE(editor.state()["selectedIds"].toStringList().size(), 2);
+        editor.speakSelection(german);
+        QTRY_COMPARE_WITH_TIMEOUT(speech()["status"].toString(), QString("done"), 60000);
+        QCOMPARE(speech()["count"].toInt(), 2);
+        QStringList spoken, titles;
+        for (const auto &c : editor.project().clips)
+            if (!c.assetId.isEmpty())
+                spoken << QString("%1 %2").arg(c.start).arg(c.name);
+            else
+                titles << QString("%1 Speech: %2").arg(c.start).arg(c.text);
+        spoken.sort();
+        titles.sort();
+        QCOMPARE(spoken, titles);
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), 2);
+        // Nothing to say.
+        editor.speak("  ", german);
+        QVERIFY(editor.state()["error"].toString().contains("text"));
+    }
+    void speechWithoutPiper() {
+        qputenv("CUTLERY_PIPER", "/nonexistent/piper");
+        FrameProvider frames;
+        Editor editor(&frames);
+        qunsetenv("CUTLERY_PIPER");
+        QVERIFY(editor.state()["speech"].toMap()["missing"].toString().contains("AI pack"));
+        editor.speak("Hallo", "de_DE-thorsten-medium");
+        QVERIFY(editor.state()["error"].toString().contains("AI pack"));
+        // WAV lengths and the spoken form of titles.
+        QCOMPARE(Speech::spokenText(" Ein *wichtiges*\n  Wort "), QString("Ein wichtiges Wort"));
+        QTemporaryDir dir;
+        QFile wav(dir.filePath("t.wav"));
+        QVERIFY(wav.open(QIODevice::WriteOnly));
+        QByteArray header("RIFF\0\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x80\x3e\0\0\0\x7d\0\0\x02\0\x10\0data\0\x7d\0\0", 44);
+        wav.write(header + QByteArray(32000, 0));
+        wav.close();
+        QCOMPARE(Speech::wavSeconds(wav.fileName()), 1.);
+        QCOMPARE(Speech::wavSeconds(dir.filePath("none.wav")), 0.);
     }
     void reframeToVertical() {
         const auto ffmpeg = Editor::executable("ffmpeg");
