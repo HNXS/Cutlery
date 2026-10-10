@@ -1,5 +1,18 @@
 # Validation record
 
+## Windows portable build — 2026-10-10, edit history list and editing proxies on import (0.6 development)
+
+[GitHub Actions run 38026400187](https://github.com/HNXS/Cutlery/actions/runs/38026400187) on commit `207d33a57f41f5114c46c3b14f37083316fb9870` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `historyList`:**
+  - The steps read "Start", "Project settings", "Added Title", "opacity of Title", "Split Title" and "Markers", with their offsets from the current step.
+  - Jumping three steps back and then two forward restores those states.
+  - Asking for more steps than there are is refused.
+- **Engine test `proxies`:** with "proxiesOnImport" on, an imported 640 × 1200 video gets a proxy, and the 720p one does not.
+- **UI test `keyframeControls`:** the History list shows every step. A click on the step before goes back, and a click on the current step goes forward again.
+
 ## Windows portable build — 2026-10-10, several open projects (0.6 development)
 
 [GitHub Actions run 38024566775](https://github.com/HNXS/Cutlery/actions/runs/38024566775) on commit `0ee885121a49a5cfc74163c3b5f60c12f6390068` passed every step on its first attempt.

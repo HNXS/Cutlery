@@ -368,6 +368,37 @@ class UiTest : public QObject {
             QTRY_VERIFY(!tabs->isVisible());
             QCOMPARE(editor.project().clips.first().id, id);
         }
+        // Edit → History lists the steps; a click goes back to one and forward again.
+        {
+            auto *dialog = window->findChild<QObject *>("historyDialog");
+            QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+            auto *list = window->findChild<QQuickItem *>("historyList");
+            QTRY_VERIFY(list && list->isVisible());
+            const auto steps = editor.history();
+            const int count = steps.size();
+            int current = 0;
+            while (steps[current].toMap()["offset"].toInt() != 0)
+                ++current;
+            QVERIFY(current >= 1);
+            QTRY_COMPARE(list->property("count").toInt(), count);
+            const auto before = editor.project().json();
+            QQuickItem *back = nullptr;
+            QTRY_VERIFY((back = findItem(list, "historyStep-" + QString::number(current - 1))));
+            QVERIFY(QMetaObject::invokeMethod(back, "clicked"));
+            QVERIFY(editor.state()["canRedo"].toBool());
+            QVERIFY(editor.project().json() != before);
+            if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS")) {
+                QTest::qWait(50);
+                window->grabWindow().save(qEnvironmentVariable("CUTLERY_UI_SHOTS") + "/history.png");
+            }
+            QQuickItem *now = nullptr;
+            QTRY_VERIFY((now = findItem(list, "historyStep-" + QString::number(current))));
+            QVERIFY(QMetaObject::invokeMethod(now, "clicked"));
+            QCOMPARE(editor.project().json(), before);
+            QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+            QTRY_VERIFY(!list->isVisible());
+            editor.select(id); // the step back went to before the title existed
+        }
         editor.seek(0);
         page(window, "video", "basic");
         auto *diamond = findItem(window->contentItem(), "keyframe-scale");
