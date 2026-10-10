@@ -55,6 +55,9 @@ struct RenderOptions {
     // Eye-contact pictures by asset id, used instead of the source (and of an upscale) by clips
     // with eye contact. Same timing as `upscaled`.
     QHash<QString, MatteSource> eyeContact;
+    // Separated sound by asset id (AI): 4 channels, music left/right then voice left/right, from
+    // source time `start`; clips with Clip::stems hear one pair instead of the source.
+    QHash<QString, MatteSource> stems;
 };
 // A title template (Clip::titleStyle) drawn tightly on a transparent image, and where its top-left
 // corner sits on a width × height canvas before the clip's x/y offset; text sizes follow the

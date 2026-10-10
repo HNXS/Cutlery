@@ -270,6 +270,10 @@ struct Clip {
     // Picture from the eye-contact copy of the asset (see AiJobs), which replaces the upscaled
     // one when both are on.
     bool eyeContact = false;
+    // Sound from the AI-separated copy of the asset (see AiJobs): "voice" (the voice alone) or
+    // "music" (everything but the voice); "" is the sound as recorded, also while the separation
+    // does not cover the clip.
+    QString stems;
     bool styled() const {
         return shape != "rect" || border > 0 || shadow > 0 || aiCutout || feather > 0 ||
                !mask.isEmpty() ||

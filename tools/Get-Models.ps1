@@ -42,6 +42,11 @@ Get-Pinned "$voiceBase/de_DE-thorsten-medium.onnx" "$Destination/de_DE-thorsten-
 Get-Pinned "$voiceBase/de_DE-thorsten-medium.onnx.json" "$Destination/de_DE-thorsten-medium.onnx.json" $voiceJsonSha
 Get-Pinned "$voiceBase/MODEL_CARD" "$Destination/de_DE-thorsten-medium.MODEL_CARD.txt" $voiceCardSha
 Get-Content "$Destination/de_DE-thorsten-medium.MODEL_CARD.txt" | Where-Object { $_.Trim() } | ForEach-Object { Write-Host "::notice::Thorsten model card: $_" }
+# Voice and music separation: UVR-MDX-NET-Inst_HQ_3 (MDX-Net, trained by the Ultimate Vocal
+# Remover developers; MIT with credit per the UVR README), from the pinned public model release.
+$stemsUrl = 'https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_HQ_3.onnx'
+$stemsSha = '317554b07fe1ea5279a77f2b1520a41ea4b93432560c4ffd08792c30fddf9adc'
+Get-Pinned $stemsUrl "$Destination/UVR-MDX-NET-Inst_HQ_3.onnx" $stemsSha
 python -m pip install --quiet onnx==1.17.0
 if ($LASTEXITCODE -ne 0) { throw 'Installing the onnx package failed' }
 python "$PSScriptRoot/convert-realesrgan.py" $weights "$Destination/realesr-general-x4v3.onnx"
@@ -85,6 +90,7 @@ foreach ($m in $faceModels) {
     @{ file='u2net_human_seg.onnx'; url=$matteUrl; sha256=$matteSha; license='Apache-2.0'; source='https://github.com/xuebinqin/U-2-Net'; purpose='person matte for AI background removal' },
     @{ file='ggml-large-v3-turbo-q5_0.bin'; url=$speechUrl; sha1=$speechSha1; sha256=$speechSha; license='MIT'; source='https://github.com/openai/whisper'; purpose='speech recognition for automatic captions' },
     @{ file='realesr-general-x4v3.onnx'; converted_from=$srUrl; source_sha256=$srSha; sha256=$srOnnx; license='BSD-3-Clause'; source='https://github.com/xinntao/Real-ESRGAN'; purpose='4x super-resolution for AI upscale' },
-    @{ file='de_DE-thorsten-medium.onnx'; url="$voiceBase/de_DE-thorsten-medium.onnx"; sha256=$voiceSha; settings_sha256=$voiceJsonSha; license='Dataset CC0-1.0 (Thorsten-Voice); fine-tuned from the lessac voice per the model card'; source='https://github.com/thorstenMueller/Thorsten-Voice'; purpose='German voice for text to speech (Piper)' }
+    @{ file='de_DE-thorsten-medium.onnx'; url="$voiceBase/de_DE-thorsten-medium.onnx"; sha256=$voiceSha; settings_sha256=$voiceJsonSha; license='Dataset CC0-1.0 (Thorsten-Voice); fine-tuned from the lessac voice per the model card'; source='https://github.com/thorstenMueller/Thorsten-Voice'; purpose='German voice for text to speech (Piper)' },
+    @{ file='UVR-MDX-NET-Inst_HQ_3.onnx'; url=$stemsUrl; sha256=$stemsSha; license='MIT (credit Ultimate Vocal Remover and its developers)'; source='https://github.com/Anjok07/ultimatevocalremovergui'; purpose='voice and music separation' }
 ) + @($faceModels | ForEach-Object { @{ file="$($_.name).onnx"; converted_from="mediapipe==0.10.18:$($_.entry)"; source_sha256=$_.sha256; sha256=$_.onnx; license='Apache-2.0'; source='https://github.com/google-ai-edge/mediapipe'; purpose='face, eye and iris landmarks for eye contact' } }) } | ConvertTo-Json -Depth 4 | Set-Content "$Destination/manifest.json" -Encoding utf8
 Write-Output (Resolve-Path $Destination).Path

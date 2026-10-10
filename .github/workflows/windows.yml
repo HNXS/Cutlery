@@ -139,6 +139,21 @@ jobs:
           build/bin/Release/cutlery-ai.exe eyecontact --ffmpeg $ff --model "$env:MODELS_DIR/face_landmark.onnx" --input build/face.mkv --output build/face-fixed.mov --source 640x360 --rate 10/1 --cpu 1 --report build/face-report.txt
           if ($LASTEXITCODE -ne 0) { throw 'Eye contact failed' }
           Get-Content build/face-report.txt -Tail 2
+          # Voice and music apart with the real model on the CPU: Piper speech over a chord; the
+          # voice part must match the speech closely.
+          'Guten Tag. Das ist ein Test der Trennung von Stimme und Musik.' | & "$env:PIPER_DIR/piper.exe" --quiet --model "$env:MODELS_DIR/de_DE-thorsten-medium.onnx" --output_file build/sep-speech.wav
+          ffmpeg -v error -y -i build/sep-speech.wav -af "aresample=44100,apad=whole_dur=8" -ac 2 -t 8 build/sep-voice.wav
+          ffmpeg -v error -y -f lavfi -i "aevalsrc='0.12*sin(2*PI*220*t)+0.1*sin(2*PI*277.2*t)+0.08*sin(2*PI*329.6*t)+0.2*sin(2*PI*55*t)*exp(-mod(t,0.5)*8)':s=44100:d=8" -ac 2 build/sep-music.wav
+          ffmpeg -v error -y -i build/sep-voice.wav -i build/sep-music.wav -filter_complex amix=inputs=2:normalize=0 build/sep-mix.wav
+          build/bin/Release/cutlery-ai.exe separate --ffmpeg $ff --model "$env:MODELS_DIR/UVR-MDX-NET-Inst_HQ_3.onnx" --input build/sep-mix.wav --output build/sep.flac --cpu 1 | Select-Object -Last 1
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error::Voice and music separation failed"; throw 'Separation failed' }
+          ffmpeg -v info -i build/sep.flac -i build/sep-voice.wav -filter_complex "[0]pan=stereo|c0=c2|c1=c3[v];[1]volume=-1[s];[v][s]amix=inputs=2:normalize=0,astats=measure_perchannel=none" -f null - 2> build/sep-error.txt
+          ffmpeg -v info -i build/sep-voice.wav -af astats=measure_perchannel=none -f null - 2> build/sep-speech.txt
+          $rms = { param($file) [double]([regex]::Match((Get-Content $file -Raw), 'RMS level dB:\s+(-?[0-9.]+)').Groups[1].Value) }
+          $speechDb = & $rms build/sep-speech.txt
+          $errorDb = & $rms build/sep-error.txt
+          Write-Output "Speech $speechDb dB, voice part off by $errorDb dB"
+          if ($speechDb - $errorDb -lt 12) { Write-Output "::error::Voice separation too weak: speech $speechDb dB, error $errorDb dB"; throw 'Voice separation too weak' }
       - name: Check speech recognition on synthesized speech
         timeout-minutes: 20
         run: |

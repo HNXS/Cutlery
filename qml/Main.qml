@@ -4913,6 +4913,79 @@ ApplicationWindow {
                                         currentIndex = 0;
                                     }
                                 }
+                                // Voice and music apart (AI): the clip plays the voice alone or
+                                // everything but the voice, once the sound is separated.
+                                ColumnLayout {
+                                    id: stemsBox
+                                    objectName: "stemsBox"
+                                    visible: win.audioPage("cleanup") && win.selection.stemsInfo !== undefined
+                                    Layout.fillWidth: true
+                                    spacing: 4
+                                    readonly property var info: win.selection.stemsInfo || ({})
+                                    readonly property bool working: info.status === "running" || info.status === "queued"
+                                    readonly property string missing: (win.s.aiMissing || {}).separate || ""
+                                    readonly property bool on: (win.selection.stems || "") !== ""
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Label {
+                                            text: "Voice and music"
+                                            color: stemsBox.on ? win.mint : win.muted
+                                            Layout.preferredWidth: 105
+                                        }
+                                        ComboBox {
+                                            objectName: "stems"
+                                            Accessible.name: "Voice and music"
+                                            Layout.fillWidth: true
+                                            enabled: win.selection.locked !== true && (stemsBox.missing === "" || stemsBox.on)
+                                            readonly property var kinds: ["", "voice", "music"]
+                                            model: ["As recorded", "Voice only (AI)", "Without the voice (AI)"]
+                                            currentIndex: Math.max(0, kinds.indexOf(win.selection.stems || ""))
+                                            onActivated: index => {
+                                                editor.setClip("stems", kinds[index]);
+                                                if (kinds[index] !== "" && stemsBox.info.covered !== true && !stemsBox.working)
+                                                    editor.runAi("separate");
+                                            }
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: stemsBox.missing !== "" ? stemsBox.missing : "Separates the voice from music and background on this computer: keep only the speech or singing, or only the music (karaoke)"
+                                        }
+                                    }
+                                    ProgressBar {
+                                        Layout.fillWidth: true
+                                        visible: stemsBox.working
+                                        value: stemsBox.info.progress || 0
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        visible: stemsBox.on || stemsBox.working
+                                        Label {
+                                            objectName: "stemsStatus"
+                                            Layout.fillWidth: true
+                                            wrapMode: Text.Wrap
+                                            font.pixelSize: 11
+                                            color: stemsBox.info.status === "failed" ? "#ec6f5a" : win.muted
+                                            text: stemsBox.info.status === "queued" ? "Waiting for another AI job…"
+                                                : stemsBox.working ? "Separating voice and music… " + Math.round((stemsBox.info.progress || 0) * 100) + "%"
+                                                    + (stemsBox.info.device === "gpu" ? " · GPU" : stemsBox.info.device === "cpu" ? " · CPU (slow)" : "")
+                                                : stemsBox.info.status === "failed" ? "Failed: " + (stemsBox.info.error || "")
+                                                : stemsBox.info.covered === true ? "Separated ✓"
+                                                : stemsBox.missing === "" ? "Not separated for this range yet; it plays as recorded"
+                                                : stemsBox.missing
+                                        }
+                                        Action {
+                                            objectName: "stemsRun"
+                                            visible: !stemsBox.working && stemsBox.on && stemsBox.info.covered !== true && stemsBox.missing === ""
+                                            text: "Run"
+                                            padding: 6
+                                            onClicked: editor.runAi("separate")
+                                        }
+                                        Action {
+                                            visible: stemsBox.working
+                                            text: "Stop"
+                                            padding: 6
+                                            onClicked: editor.cancelAi()
+                                        }
+                                    }
+                                }
                                 ValueGroup {
                                     objectName: "cleanupSection"
                                     title: "Clean-up"

@@ -1151,6 +1151,64 @@ class UiTest : public QObject {
         QCOMPARE(editor.project().clips.last().name, QString("Speech: Hallo zusammen"));
         QCOMPARE(editor.project().clips.last().start, qint64(0));
     }
+    void stemsControls() {
+        // Voice and music apart on Audio › Clean-up; with the AI worker and a stand-in model the
+        // separation runs and the status says so.
+        QTemporaryDir dir;
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY(!ffmpeg.isEmpty());
+        const auto tone = dir.filePath("tone.wav");
+        QProcess make;
+        make.start(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "sine=f=300:d=3:sample_rate=44100",
+                            "-ac", "2", tone});
+        QVERIFY(make.waitForFinished(30000) && make.exitCode() == 0);
+#ifdef CUTLERY_AI_WORKER
+        QTemporaryDir models;
+        QVERIFY(QFile::copy(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/tests/fixtures/half-spectrum.onnx",
+                            models.filePath("UVR-MDX-NET-Inst_HQ_3.onnx")));
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+        qputenv("CUTLERY_AI_MODELS", models.path().toUtf8());
+#else
+        qputenv("CUTLERY_AI_MODELS", dir.path().toUtf8());
+#endif
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        editor.configure(640, 360, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(tone)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        editor.select(editor.project().clips.first().id);
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        QTest::qWait(100);
+        page(window, "audio", "cleanup");
+        auto *stems = findItem(window->contentItem(), "stems");
+        QTRY_VERIFY(stems && stems->isVisible());
+        QCOMPARE(stems->property("currentIndex").toInt(), 0);
+#ifdef CUTLERY_AI_WORKER
+        QVERIFY(stems->isEnabled());
+        stems->setProperty("currentIndex", 1);
+        QVERIFY(QMetaObject::invokeMethod(stems, "activated", Q_ARG(int, 1)));
+        QCOMPARE(editor.project().clips.first().stems, QString("voice"));
+        auto *status = findItem(window->contentItem(), "stemsStatus");
+        QTRY_VERIFY_WITH_TIMEOUT(status && status->property("text").toString().contains("Separated"), 60000);
+        stems->setProperty("currentIndex", 0);
+        QVERIFY(QMetaObject::invokeMethod(stems, "activated", Q_ARG(int, 0)));
+        QCOMPARE(editor.project().clips.first().stems, QString());
+#else
+        // Without the AI pack the choice is off and says why.
+        QVERIFY(!stems->isEnabled());
+#endif
+    }
     void presenterControls() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;
