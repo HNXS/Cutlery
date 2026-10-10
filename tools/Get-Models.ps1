@@ -7,7 +7,6 @@ function Get-Pinned($url, $file, $sha256) {
         Invoke-WebRequest -Uri $url -OutFile $file
     }
     $actual = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
-    if (!$sha256) { Write-Host "::warning::UNPINNED $file sha256 $actual"; return }
     if ($actual -ne $sha256) { throw "Checksum mismatch: $file is $actual" }
 }
 # Person segmentation for AI background removal: U²-Net trained on human segmentation
@@ -53,17 +52,17 @@ Get-Pinned $stemsUrl "$Destination/UVR-MDX-NET-Inst_HQ_3.onnx" $stemsSha
 # with the original SentencePiece model, vocabulary and settings from Helsinki-NLP.
 $translation = @(
     @{ pair='de-en'; files=@(
-        @{ url='https://huggingface.co/Xenova/opus-mt-de-en/resolve/main/onnx/encoder_model_quantized.onnx'; name='encoder_model.onnx'; sha='' },
-        @{ url='https://huggingface.co/Xenova/opus-mt-de-en/resolve/main/onnx/decoder_model_quantized.onnx'; name='decoder_model.onnx'; sha='' },
-        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-de-en/resolve/main/source.spm'; name='source.spm'; sha='' },
-        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-de-en/resolve/main/vocab.json'; name='vocab.json'; sha='' },
-        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-de-en/resolve/main/config.json'; name='config.json'; sha='' }) },
+        @{ url='https://huggingface.co/Xenova/opus-mt-de-en/resolve/main/onnx/encoder_model_quantized.onnx'; name='encoder_model.onnx'; sha='4cedda8f8c89b72a42b3c6cd1e7a27f2de24457093e3bf80cb3e46829641fcd8' },
+        @{ url='https://huggingface.co/Xenova/opus-mt-de-en/resolve/main/onnx/decoder_model_quantized.onnx'; name='decoder_model.onnx'; sha='e44c1c4b50e8f51e49d4d5e54a9af1550dc74763d4023644a38af62611e6efc9' },
+        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-de-en/resolve/main/source.spm'; name='source.spm'; sha='bbd1f495eea99c8e21ae086d9146e0fa7b096c3dfdd9ba07ab8b631889df5c9b' },
+        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-de-en/resolve/main/vocab.json'; name='vocab.json'; sha='0d70d89fee4a8b4ef99a56d712163baadcabd5600a597f71515547ee70306329' },
+        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-de-en/resolve/main/config.json'; name='config.json'; sha='89368ef76ea89581025cdf605caac75b8a22af2c1a90ec57c8a5001f10537eeb' }) },
     @{ pair='en-de'; files=@(
-        @{ url='https://huggingface.co/Xenova/opus-mt-en-de/resolve/main/onnx/encoder_model_quantized.onnx'; name='encoder_model.onnx'; sha='' },
-        @{ url='https://huggingface.co/Xenova/opus-mt-en-de/resolve/main/onnx/decoder_model_quantized.onnx'; name='decoder_model.onnx'; sha='' },
-        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-en-de/resolve/main/source.spm'; name='source.spm'; sha='' },
-        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-en-de/resolve/main/vocab.json'; name='vocab.json'; sha='' },
-        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-en-de/resolve/main/config.json'; name='config.json'; sha='' }) }
+        @{ url='https://huggingface.co/Xenova/opus-mt-en-de/resolve/main/onnx/encoder_model_quantized.onnx'; name='encoder_model.onnx'; sha='15834b45fabd2dfb8c6c029b3ca3e7289aeefd90ece798ce42bcf548d1bd3b8d' },
+        @{ url='https://huggingface.co/Xenova/opus-mt-en-de/resolve/main/onnx/decoder_model_quantized.onnx'; name='decoder_model.onnx'; sha='75ef79aa9bde9e3dce9ca584c29507be5f464973f6c600c89ff419bc8de29ebc' },
+        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-en-de/resolve/main/source.spm'; name='source.spm'; sha='678f2a1177d8389f67b66299762dcc4fc567e89b07e212ba91b0c56daecf47ce' },
+        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-en-de/resolve/main/vocab.json'; name='vocab.json'; sha='0d70d89fee4a8b4ef99a56d712163baadcabd5600a597f71515547ee70306329' },
+        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-en-de/resolve/main/config.json'; name='config.json'; sha='41c7890e6f6c1f72c5c626569cfe739a8362080940edbb1747f25173f541653b' }) }
 )
 foreach ($t in $translation) {
     New-Item -ItemType Directory -Force "$Destination/opus-mt-$($t.pair)" | Out-Null
