@@ -13,6 +13,7 @@ Projects are saved as schema 11; 0.5 cannot open them.
 - **Edit history and automatic proxies:** Edit → History… lists every step with what changed and jumps to any of them; Preferences can make editing proxies for videos over 1080p as they are imported.
 - **Lens correction:** Video › Enhance › Lens straightens the bent lines of wide-angle and action cameras (or pincushion distortion, zoomed in to hide the corners).
 - **5.1 surround export:** Export → Sound → 5.1 mixes to six channels; each track's ⋯ menu places its sound front, centre (dialogue) or rear.
+- **Screen readers and keyboard:** every control on the main pages has a name for screen readers, and keyboard focus (Tab) shows as a light frame. Also fixed: a rare crash when switching from the Audio tab to another tab of the left panel.
 - **Timeline tools:** a row of tools above the timeline (split, cut away before or after the playhead, delete, marker, freeze, reverse, mirror, turn, snap and zoom), track headers with lock, eye, speaker, solo, magnet and snap icons, clips coloured by kind, and a slimmer top bar with a prominent Export button.
 - **Asset panel in tabs:** Media, Audio, Text, Stickers, Effects, Transitions, Filters and Layouts, each with its own tools; style effects, transitions, looks and LUTs are tiles that apply to the selected clip with one click.
 - **Clearer settings:** values have number boxes with units and arrows, a keyframe diamond and a slider; sections can be folded and reset in one step, and switches like Stabilize sit in the section title.

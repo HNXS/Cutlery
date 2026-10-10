@@ -23,6 +23,42 @@ class UiTest : public QObject {
                 return found;
         return nullptr;
     }
+    // Visible controls (buttons, sliders, fields, lists) without a name for screen readers,
+    // described by object name or class.
+    static QStringList unnamedControls(QQuickItem *root) {
+        QStringList missing;
+        std::function<void(QQuickItem *)> visit = [&](QQuickItem *item) {
+            if (!item->isVisible() || item->opacity() == 0)
+                return;
+            const bool control = item->inherits("QQuickAbstractButton") || item->inherits("QQuickSlider") ||
+                                 item->inherits("QQuickTextField") || item->inherits("QQuickComboBox") ||
+                                 item->inherits("QQuickSpinBox") || item->inherits("QQuickTextArea");
+            if (control && item->width() > 0 && item->height() > 0) {
+                // What a screen reader announces: Accessible.name, or else a button's text or a
+                // field's placeholder. Symbols alone (↺, ▾, ◇) do not count as a name.
+                QString name;
+                for (auto *child : item->children())
+                    if (child->inherits("QQuickAccessibleAttached"))
+                        name = child->property("name").toString();
+                if (name.trimmed().isEmpty() && item->inherits("QQuickAbstractButton"))
+                    name = item->property("text").toString();
+                if (name.trimmed().isEmpty() && item->inherits("QQuickTextField"))
+                    name = item->property("placeholderText").toString();
+                if (!std::any_of(name.begin(), name.end(), [](QChar c) { return c.isLetterOrNumber(); }))
+                    missing << (item->objectName().isEmpty() ? QString(item->metaObject()->className()) +
+                                                                   "@" + QString::number(int(item->mapToScene({}).x())) +
+                                                                   "," + QString::number(int(item->mapToScene({}).y()))
+                                                             : item->objectName());
+            }
+            // The text field inside a list or number box belongs to it.
+            if (item->inherits("QQuickComboBox") || item->inherits("QQuickSpinBox"))
+                return;
+            for (auto *child : item->childItems())
+                visit(child);
+        };
+        visit(root);
+        return missing;
+    }
     static void drag(QQuickWindow *window, QPoint from, QPoint to) {
         QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, from);
         QTest::mouseMove(window, from + QPoint(12, 0), 20);
@@ -399,6 +435,30 @@ class UiTest : public QObject {
             QTRY_VERIFY(!list->isVisible());
             editor.select(id); // the step back went to before the title existed
         }
+        // A title's pages, the top bar and the timeline: every control has a name.
+        {
+            QStringList missing;
+            for (const auto &tab : {"text", "basic", "animation", "more"}) {
+                page(window, tab);
+                QTest::qWait(30);
+                missing << unnamedControls(window->contentItem());
+            }
+            missing.removeDuplicates();
+            QVERIFY2(missing.isEmpty(), qPrintable("Without a name: " + missing.join(", ")));
+        }
+        // Tab moves the keyboard focus from control to control; each one it reaches has a name.
+        {
+            window->requestActivate();
+            QStringList reached;
+            for (int i = 0; i < 12; ++i) {
+                QTest::keyClick(window, Qt::Key_Tab);
+                auto *focus = window->activeFocusItem();
+                QVERIFY(focus);
+                reached << (focus->objectName().isEmpty() ? QString(focus->metaObject()->className()) : focus->objectName());
+            }
+            reached.removeDuplicates();
+            QVERIFY2(reached.size() >= 6, qPrintable(reached.join(", ")));
+        }
         editor.seek(0);
         page(window, "video", "basic");
         auto *diamond = findItem(window->contentItem(), "keyframe-scale");
@@ -538,6 +598,10 @@ class UiTest : public QObject {
         QTRY_VERIFY(findItem(window->contentItem(), "startTemplate-0"));
         if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS"))
             window->grabWindow().save(qEnvironmentVariable("CUTLERY_UI_SHOTS") + "/start.png");
+        {
+            const auto missing = unnamedControls(start);
+            QVERIFY2(missing.isEmpty(), qPrintable("Without a name: " + missing.join(", ")));
+        }
         editor.removeTemplate("UI intro");
         QVERIFY(findItem(window->contentItem(), "startFormat-5"));
         // Choosing "Vertical 9:16" starts a project in that shape and closes the screen.
@@ -1632,6 +1696,28 @@ class UiTest : public QObject {
         QVERIFY(editor.state()["error"].toString().contains("small enough"));
         editor.clearError();
         QVERIFY(!findItem(window->contentItem(), "toggleProxies")->isVisible());
+        // Every visible control has a name for screen readers, on every left tab and inspector
+        // page of a selected video.
+        {
+            QStringList missing;
+            for (const auto &tab : {"media", "audio", "text", "stickers", "effects", "transitions", "filters", "layouts"}) {
+                window->setProperty("leftTab", tab);
+                QTest::qWait(30);
+                missing << unnamedControls(window->contentItem());
+            }
+            window->setProperty("leftTab", "media");
+            for (const auto &[tab, sub] : std::initializer_list<std::pair<const char *, const char *>>{
+                     {"video", "basic"}, {"video", "cutout"}, {"video", "mask"}, {"video", "canvas"},
+                     {"video", "enhance"}, {"speed", ""}, {"animation", ""}, {"adjust", "basic"},
+                     {"adjust", "hsl"}, {"adjust", "curves"}, {"adjust", "wheels"}, {"adjust", "lut"},
+                     {"effects", ""}, {"more", ""}}) {
+                page(window, tab, sub);
+                QTest::qWait(30);
+                missing << unnamedControls(window->contentItem());
+            }
+            missing.removeDuplicates();
+            QVERIFY2(missing.isEmpty(), qPrintable("Without a name: " + missing.join(", ")));
+        }
         if (qEnvironmentVariableIsSet("CUTLERY_UI_SHOTS"))
             for (const auto &tab : {"media", "audio", "text", "stickers", "effects", "transitions", "filters", "layouts"}) {
                 window->setProperty("leftTab", tab);

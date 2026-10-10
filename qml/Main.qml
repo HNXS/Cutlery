@@ -41,20 +41,21 @@ ApplicationWindow {
     // The asset panel's tabs (left): media, sound, text, stickers, effects, transitions, filters
     // and layouts.
     property string leftTab: "media"
-    // The categories of the left tab, for its category column; "top" scrolls to the start.
-    readonly property var leftCategories: {
-        switch (leftTab) {
-        case "audio":
-            return [{ name: "Sounds", target: "top" }].concat([...new Set(editor.sounds().map(x => x.category))].map(c => ({ name: c, target: "cat-sound-" + c })));
-        case "stickers":
-            return [{ name: "Shapes", target: "top" }, { name: "Icons", target: "catIcons" }, { name: "Brand kit", target: "catBrand" }];
-        case "effects":
-            return [{ name: "Areas", target: "top" }, { name: "Style effects", target: "catStyle" }];
-        case "filters":
-            return (s.lutLibrary || []).length > 0 ? [{ name: "Looks", target: "top" }, { name: "LUTs", target: "catLuts" }] : [];
-        }
-        return [];
-    }
+    // The categories of every left tab, for the category column; "top" scrolls to the start.
+    // The column keeps all of them and shows those of the tab on show, so switching tabs does
+    // not destroy its buttons while the panel is laid out again.
+    readonly property var allCategories: [
+        { tab: "audio", name: "Sounds", target: "top" }
+    ].concat([...new Set(editor.sounds().map(x => x.category))].map(c => ({ tab: "audio", name: c, target: "cat-sound-" + c }))).concat([
+        { tab: "stickers", name: "Shapes", target: "top" },
+        { tab: "stickers", name: "Icons", target: "catIcons" },
+        { tab: "stickers", name: "Brand kit", target: "catBrand" },
+        { tab: "effects", name: "Areas", target: "top" },
+        { tab: "effects", name: "Style effects", target: "catStyle" },
+        { tab: "filters", name: "Looks", target: "top" },
+        { tab: "filters", name: "LUTs", target: "catLuts" }
+    ])
+    readonly property var leftCategories: allCategories.filter(c => c.tab === leftTab && (leftTab !== "filters" || (s.lutLibrary || []).length > 0))
     // The first item under `root` with this objectName.
     function findByName(root, name) {
         if (!root)
@@ -414,7 +415,9 @@ ApplicationWindow {
         background: Rectangle {
             color: parent.down ? "#34434d" : parent.hovered ? "#2b3742" : "#202831"
             radius: 6
-            border.color: parent.highlighted ? "#64d8bc" : "#35404b"
+            // Keyboard focus shows as a light frame.
+            border.width: parent.visualFocus ? 2 : 1
+            border.color: parent.visualFocus ? "#e7edf2" : parent.highlighted ? "#64d8bc" : "#35404b"
             opacity: parent.enabled ? 1 : .4
         }
         contentItem: Text {
@@ -515,6 +518,7 @@ ApplicationWindow {
             spacing: 4
             CheckBox {
                 objectName: section.objectName ? section.objectName + "-on" : ""
+                Accessible.name: section.title
                 visible: section.checkable
                 checked: section.checked
                 padding: 0
@@ -538,6 +542,7 @@ ApplicationWindow {
             }
             ToolButton {
                 objectName: section.objectName ? section.objectName + "-reset" : ""
+                Accessible.name: "Reset " + section.title.toLowerCase()
                 visible: section.resettable
                 enabled: win.selection.locked !== true
                 text: "↺"
@@ -549,6 +554,7 @@ ApplicationWindow {
             }
             ToolButton {
                 text: section.expanded ? "▾" : "▸"
+                Accessible.name: (section.expanded ? "Fold " : "Unfold ") + section.title.toLowerCase()
                 implicitWidth: 22
                 implicitHeight: 22
                 onClicked: section.expanded = !section.expanded
@@ -603,6 +609,7 @@ ApplicationWindow {
             }
             TextField {
                 objectName: valueRow.sliderName ? valueRow.sliderName + "-box" : ""
+                Accessible.name: valueRow.label
                 implicitWidth: 62
                 implicitHeight: 24
                 padding: 4
@@ -630,6 +637,7 @@ ApplicationWindow {
                     ToolButton {
                         required property int modelData
                         text: modelData > 0 ? "▴" : "▾"
+                        Accessible.name: (modelData > 0 ? "Increase " : "Decrease ") + valueRow.label.toLowerCase()
                         implicitWidth: 16
                         implicitHeight: 12
                         padding: 0
@@ -641,6 +649,7 @@ ApplicationWindow {
             }
             ToolButton {
                 objectName: "keyframe-" + valueRow.key
+                Accessible.name: (valueRow.keyed ? "Remove keyframe of " : "Add keyframe of ") + valueRow.label.toLowerCase()
                 visible: valueRow.animatable
                 enabled: win.selection.playheadInside === true && win.selection.locked !== true
                 implicitWidth: 24
@@ -666,6 +675,7 @@ ApplicationWindow {
         }
         Slider {
             objectName: valueRow.sliderName
+            Accessible.name: valueRow.label
             Layout.fillWidth: true
             from: valueRow.from
             to: valueRow.to
@@ -732,8 +742,8 @@ ApplicationWindow {
                 Layout.preferredHeight: 44
                 radius: 6
                 color: tile.swatch
-                border.width: tile.checked ? 2 : 1
-                border.color: tile.checked ? win.mint : tile.hovered && tile.enabled ? "#6c8796" : "#35404b"
+                border.width: tile.checked || tile.visualFocus ? 2 : 1
+                border.color: tile.visualFocus ? "#e7edf2" : tile.checked ? win.mint : tile.hovered && tile.enabled ? "#6c8796" : "#35404b"
                 Label {
                     anchors.centerIn: parent
                     text: tile.glyph
@@ -1416,6 +1426,7 @@ ApplicationWindow {
                             AbstractButton {
                                 required property var modelData
                                 objectName: "leftTab-" + modelData.id
+                                Accessible.name: modelData.label
                                 Layout.fillWidth: true
                                 implicitHeight: 44
                                 readonly property bool active: win.leftTab === modelData.id
@@ -1478,6 +1489,7 @@ ApplicationWindow {
                                 ComboBox {
                                     id: libraryView
                                     objectName: "libraryView"
+                                    Accessible.name: "Show in the library"
                                     Layout.fillWidth: true
                                     readonly property var kinds: [
                                         { key: "", label: "All media" },
@@ -1572,6 +1584,7 @@ ApplicationWindow {
                                     color: win.muted
                                 }
                                 ComboBox {
+                                    Accessible.name: "Append imported media to"
                                     model: editor.trackList
                                     textRole: "name"
                                     currentIndex: Math.min(win.targetTrack, win.s.tracks - 1)
@@ -1878,13 +1891,15 @@ ApplicationWindow {
                                     }
                                 }
                                 Repeater {
-                                    model: win.leftCategories
+                                    model: win.allCategories
                                     AbstractButton {
                                         id: categoryButton
                                         required property var modelData
                                         required property int index
-                                        readonly property bool active: categoryColumn.current === modelData.target || (categoryColumn.current === "" && index === 0)
-                                        objectName: "category-" + modelData.target
+                                        readonly property bool active: categoryColumn.current === modelData.target || (categoryColumn.current === "" && modelData.target === "top")
+                                        visible: modelData.tab === win.leftTab
+                                        objectName: visible ? "category-" + modelData.target : ""
+                                        Accessible.name: modelData.name
                                         Layout.fillWidth: true
                                         implicitHeight: 28
                                         hoverEnabled: true
@@ -2114,6 +2129,7 @@ ApplicationWindow {
                                         ComboBox {
                                             id: layoutChoice
                                             objectName: "layoutChoice"
+                                            Accessible.name: "Layout"
                                             Layout.fillWidth: true
                                             readonly property var layouts: win.s.layouts || []
                                             model: [layouts.length ? "My layouts…" : "No saved layouts"].concat(layouts.map(l => l.name + " (" + l.count + ")"))
@@ -2185,6 +2201,7 @@ ApplicationWindow {
                                             ToolButton {
                                                 required property var modelData
                                                 objectName: "addIcon-" + modelData.kind
+                                                Accessible.name: "Add icon: " + modelData.name
                                                 Layout.fillWidth: true
                                                 text: modelData.glyph
                                                 font.pixelSize: 18
@@ -2350,11 +2367,11 @@ ApplicationWindow {
                                         font.pixelSize: 11
                                         text: "Record a voice-over with ● Voice-over under the player; it lands at the playhead."
                                     }
-                                    // Sound effects by category: a click adds one at the playhead.
+                                    // Sound effects by category: a click adds one at the playhead. Made
+                                    // once and hidden on other tabs: destroying the tiles while the panel
+                                    // is laid out again for another tab can crash Qt's layouts.
                                     Repeater {
                                         model: {
-                                            if (win.leftTab !== "audio")
-                                                return [];
                                             const groups = [];
                                             for (const sound of editor.sounds()) {
                                                 let g = groups.find(x => x.category === sound.category);
@@ -2369,6 +2386,7 @@ ApplicationWindow {
                                         ColumnLayout {
                                             id: soundGroup
                                             required property var modelData
+                                            visible: win.leftTab === "audio"
                                             Layout.fillWidth: true
                                             spacing: 6
                                             Caption {
@@ -2845,6 +2863,7 @@ ApplicationWindow {
                                 AbstractButton {
                                     required property var modelData
                                     objectName: "player-" + modelData.id
+                                    Accessible.name: modelData.id === "play" ? (editor.playing ? "Pause" : "Play") : modelData.tip
                                     implicitWidth: modelData.id === "play" ? 40 : 30
                                     implicitHeight: modelData.id === "play" ? 34 : 28
                                     hoverEnabled: true
@@ -2950,6 +2969,7 @@ ApplicationWindow {
                             delegate: AbstractButton {
                                 required property var modelData
                                 objectName: "inspectorTab-" + modelData.id
+                                Accessible.name: modelData.label
                                 height: inspectorTabRow.height
                                 implicitWidth: tabLabel.implicitWidth + 16
                                 readonly property bool active: win.inspectorTab === modelData.id
@@ -2996,6 +3016,7 @@ ApplicationWindow {
                                 AbstractButton {
                                     required property var modelData
                                     objectName: "inspectorSub-" + modelData.id
+                                    Accessible.name: modelData.label
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
                                     readonly property bool active: win.inspectorSub === modelData.id
@@ -3131,6 +3152,7 @@ ApplicationWindow {
                                         color: win.muted
                                     }
                                     TextField {
+                                        Accessible.name: modelData.name
                                         Layout.preferredWidth: 85
                                         text: String(win.selection[modelData.key] ?? 0)
                                         selectByMouse: true
@@ -3163,6 +3185,7 @@ ApplicationWindow {
                             // Speed ramps: the clip cut into parts that speed up and slow down.
                             ComboBox {
                                 objectName: "speedRamp"
+                                Accessible.name: "Speed ramp"
                                 Layout.fillWidth: true
                                 visible: (win.selection.video === true || (!!win.selection.assetId && win.selection.picture !== true)) && (win.onTab("speed"))
                                 enabled: win.selection.locked !== true
@@ -3178,6 +3201,7 @@ ApplicationWindow {
                             }
                             ComboBox {
                                 visible: win.onTab("more")
+                                Accessible.name: "Track of the clip"
                                 Layout.fillWidth: true
                                 model: editor.trackList
                                 textRole: "name"
@@ -3197,6 +3221,7 @@ ApplicationWindow {
                                 }
                                 Action {
                                     objectName: "previousKeyframe"
+                                    Accessible.name: "Previous keyframe"
                                     text: "◀◆"
                                     padding: 6
                                     onClicked: win.goTo(editor.adjacentKeyframe(false))
@@ -3205,6 +3230,7 @@ ApplicationWindow {
                                 }
                                 Action {
                                     objectName: "nextKeyframe"
+                                    Accessible.name: "Next keyframe"
                                     text: "◆▶"
                                     padding: 6
                                     onClicked: win.goTo(editor.adjacentKeyframe(true))
@@ -3533,6 +3559,7 @@ ApplicationWindow {
                                 TextArea {
                                     id: titleText
                                     objectName: "titleText"
+                                    Accessible.name: "Text"
                                     property string editId: ""
                                     function sync() {
                                         if (editId !== win.s.selectedId || !activeFocus) {
@@ -3574,6 +3601,7 @@ ApplicationWindow {
                                     // next lines the role or subtitle.
                                     ComboBox {
                                         objectName: "titleStyle"
+                                        Accessible.name: "Title style"
                                         Layout.fillWidth: true
                                         visible: (win.selection.captionStyle || "") === ""
                                         readonly property var styles: ["", "lowerThird", "lowerThirdLine", "lowerThirdRight", "titleCard", "banner", "quote"]
@@ -3587,6 +3615,7 @@ ApplicationWindow {
                                         visible: (win.selection.titleStyle || "") === "" && (win.selection.captionStyle || "") === "" && !win.selection.graphic
                                         ComboBox {
                                             objectName: "textAnimation"
+                                            Accessible.name: "Text animation"
                                             Layout.fillWidth: true
                                             readonly property var kinds: ["", "typewriter", "words", "rise", "pop", "fly", "drop", "spin", "fade"]
                                             model: ["Appears at once", "Typewriter", "Word by word", "Letters rise", "Letters pop up", "Letters fly in", "Letters drop and bounce", "Letters spin in", "Letters fade in"]
@@ -3707,6 +3736,7 @@ ApplicationWindow {
                                         ComboBox {
                                             id: fontBox
                                             objectName: "fontFamily"
+                                            Accessible.name: "Font"
                                             Layout.fillWidth: true
                                             editable: true
                                             // Read again when the favourites change, which reorders the list.
@@ -3732,6 +3762,7 @@ ApplicationWindow {
                                         }
                                         ToolButton {
                                             objectName: "favoriteFont"
+                                            Accessible.name: starred ? "Remove font from favourites" : "Add font to favourites"
                                             readonly property bool starred: (win.s.fontFavorites || []).indexOf(win.selection.fontFamily || "") >= 0
                                             text: starred ? "★" : "☆"
                                             onClicked: editor.toggleFontFavorite(win.selection.fontFamily || "")
@@ -3884,6 +3915,7 @@ ApplicationWindow {
                                         ComboBox {
                                             id: styleChoice
                                             objectName: "textStyle"
+                                            Accessible.name: "Saved text style"
                                             Layout.fillWidth: true
                                             readonly property var styles: win.s.textStyles || []
                                             model: [styles.length ? "Apply a style…" : "No saved styles"].concat(styles.map(st => st.name))
@@ -4001,6 +4033,7 @@ ApplicationWindow {
                                         Action {
                                             required property var modelData
                                             objectName: "place-" + modelData.id
+                                            Accessible.name: modelData.id === "full" ? "Full frame" : "Picture-in-picture " + ({ topLeft: "top left", topRight: "top right", bottomLeft: "bottom left", bottomRight: "bottom right" })[modelData.id]
                                             text: modelData.label
                                             padding: 6
                                             Layout.fillWidth: true
@@ -4097,6 +4130,7 @@ ApplicationWindow {
                                     ComboBox {
                                         id: canvasFill
                                         objectName: "canvasFill"
+                                        Accessible.name: "Background"
                                         Layout.fillWidth: true
                                         enabled: win.selection.locked !== true
                                         readonly property var fills: ["", "blur", "#000000", "#ffffff"].concat((win.s.brandColors || []).filter(c => c !== "#000000" && c !== "#ffffff"))
@@ -4166,6 +4200,7 @@ ApplicationWindow {
                                     ComboBox {
                                         id: overlayShape
                                         objectName: "overlayShape"
+                                        Accessible.name: "Shape"
                                         Layout.fillWidth: true
                                         readonly property var shapes: ["rect", "rounded", "circle"]
                                         model: ["Rectangle", "Rounded corners", "Circle"]
@@ -4361,6 +4396,7 @@ ApplicationWindow {
                                         }
                                         ComboBox {
                                             objectName: "lumaKey"
+                                            Accessible.name: "Remove by brightness"
                                             model: [{ id: "", label: "Off" }, { id: "dark", label: "Black" }, { id: "light", label: "White" }]
                                             textRole: "label"
                                             valueRole: "id"
@@ -4398,6 +4434,7 @@ ApplicationWindow {
                                     }
                                     ComboBox {
                                         objectName: "blendMode"
+                                        Accessible.name: "Blend mode"
                                         model: editor.blendModes()
                                         textRole: "label"
                                         valueRole: "id"
@@ -4620,6 +4657,7 @@ ApplicationWindow {
                                 SpinBox {
                                     id: freezeSeconds
                                     objectName: "freezeSeconds"
+                                    Accessible.name: "Freeze frame length"
                                     from: 1
                                     to: 600
                                     value: 20
@@ -4664,6 +4702,7 @@ ApplicationWindow {
                             // Ready-made motions: keyframes for the selected clips in one step.
                             ComboBox {
                                 objectName: "motionPreset"
+                                Accessible.name: "Motion"
                                 Layout.fillWidth: true
                                 visible: (win.selection.audioOnly !== true && ((win.selection.assetId || "") === "" || win.selection.picture === true)) && (win.onTab("animation"))
                                 enabled: win.selection.locked !== true
@@ -4821,6 +4860,7 @@ ApplicationWindow {
                                     visible: win.adjustPage("basic")
                                     id: lookPreset
                                     objectName: "lookPreset"
+                                    Accessible.name: "Look"
                                     Layout.fillWidth: true
                                     enabled: win.selection.locked !== true
                                     model: win.looks.map(l => l.label)
@@ -4903,6 +4943,7 @@ ApplicationWindow {
                                     }
                                     ToolButton {
                                         text: "↺"
+                                        Accessible.name: "Reset curve"
                                         enabled: !!win.selection[curveEditor.key] && win.selection.locked !== true
                                         onClicked: editor.setClip(curveEditor.key, "")
                                         ToolTip.visible: hovered
@@ -5072,6 +5113,7 @@ ApplicationWindow {
                                         }
                                         Slider {
                                             objectName: "look-" + hslRow.modelData.key
+                                            Accessible.name: hslRow.modelData.name
                                             Layout.fillWidth: true
                                             from: hslRow.modelData.lo
                                             to: hslRow.modelData.hi
@@ -5219,6 +5261,7 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                     ComboBox {
                                         objectName: "lutLibrary"
+                                        Accessible.name: "LUT"
                                         Layout.fillWidth: true
                                         readonly property var luts: win.s.lutLibrary || []
                                         model: [luts.length ? "LUT library…" : "LUT library is empty"].concat(luts.map(l => l.name))
@@ -5269,6 +5312,7 @@ ApplicationWindow {
                                     ComboBox {
                                         id: fxChoice
                                         objectName: "fxChoice"
+                                        Accessible.name: "Style effect"
                                         Layout.fillWidth: true
                                         enabled: win.selection.locked !== true
                                         readonly property var keys: ["", "shake", "glitch", "vhs", "film", "sketch", "poster", "fisheye", "mirror"]
@@ -5378,6 +5422,7 @@ ApplicationWindow {
                                     }
                                     ComboBox {
                                         objectName: "colorRange"
+                                        Accessible.name: "Colour range of the source"
                                         Layout.preferredWidth: 110
                                         enabled: win.selection.locked !== true
                                         readonly property var modes: ["", "tv", "pc"]
@@ -5389,6 +5434,7 @@ ApplicationWindow {
                                     }
                                     ComboBox {
                                         objectName: "colorMatrix"
+                                        Accessible.name: "Colour matrix of the source"
                                         Layout.preferredWidth: 110
                                         enabled: win.selection.locked !== true
                                         readonly property var modes: ["", "bt601", "bt709", "bt2020"]
@@ -5833,6 +5879,7 @@ ApplicationWindow {
                             required property var modelData
                             required property int index
                             objectName: "startRecent-" + index
+                            Accessible.name: "Open " + modelData.name + (modelData.exists ? "" : " (missing)")
                             width: 168
                             height: 112
                             padding: 8

@@ -107,9 +107,12 @@ FocusScope {
         background: Rectangle {
             radius: 5
             color: iconTool.down ? "#36444d" : iconTool.hovered && iconTool.enabled ? "#26313a" : "transparent"
+            border.width: iconTool.visualFocus ? 1 : 0
+            border.color: "#e7edf2"
         }
         ToolTip.visible: hovered && tip !== ""
         ToolTip.text: tip
+        Accessible.name: tip
     }
     // A switch in a track header, drawn as a small picture: lock, eye, speaker, solo, magnet or
     // snap. "Off" states of the eye and speaker are crossed out.
@@ -117,6 +120,7 @@ FocusScope {
         id: trackIcon
         property string kind
         property string tip
+        Accessible.name: tip
         checkable: true
         implicitWidth: 22
         implicitHeight: 22
@@ -130,6 +134,8 @@ FocusScope {
         background: Rectangle {
             radius: 4
             color: trackIcon.checked && !trackIcon.inverted ? "#24463f" : trackIcon.hovered ? "#2b3742" : "transparent"
+            border.width: trackIcon.visualFocus ? 1 : 0
+            border.color: "#e7edf2"
         }
         contentItem: Canvas {
             id: icon
@@ -371,6 +377,7 @@ FocusScope {
                 }
                 Slider {
                     objectName: "timelineZoom"
+                    Accessible.name: "Timeline zoom"
                     from: Math.log(.25)
                     to: Math.log(240)
                     value: Math.log(root.pixelsPerSecond)
@@ -536,6 +543,7 @@ FocusScope {
                                     }
                                     ToolButton {
                                         text: "⋯"
+                                        Accessible.name: "Menu of " + track.name
                                         implicitHeight: 22
                                         implicitWidth: 25
                                         onClicked: trackMenu.open()
