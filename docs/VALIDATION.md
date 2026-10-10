@@ -1,5 +1,24 @@
 # Validation record
 
+## Windows portable build — 2026-10-10, smaller additions (0.6 development)
+
+[GitHub Actions run 38090497146](https://github.com/HNXS/Cutlery/actions/runs/38090497146) on commit `2ebfcb79ccc9b5b674fc620ed13c3dbfb8d98f64` passed every step on its first attempt.
+
+The previous commit (`ea1bc6a`, run 38089410677) failed once in the first ctest run: in the interface test `speechControls`, Piper's speech reported "failed". The reason was not recorded. Running the interface tests again in the same job passed all 22. This commit therefore makes such a failure name its cause: Piper's exit code is in the error, the error is in the editor's speech state, and the test prints it.
+
+New coverage:
+
+- **Engine test `proxies`:**
+  - A proxy height other than 540 or 720 is refused.
+  - At 720 lines, the 720p video gets no proxy, and the tall 640×1200 video gets a 720-line proxy (`*-720.mov`).
+  - Deleting proxies removes it.
+- **Engine test `textToSpeech`:** "Read all captions aloud" speaks a caption on the "AI captions" track with the real Thorsten voice, placing it at the caption's start as "Speech: Guten Tag".
+- **Engine test `speechWithoutPiper`:** reading captions aloud with no captions names the missing captions.
+- **UI tests:**
+  - The Preferences dialog saves the 720-line proxy size.
+  - The scene-sensitivity slider shows, starting at 50 %.
+  - "Read all captions aloud" shows in the speech panel.
+
 ## Windows portable build — 2026-10-10, caption translation (0.6 development)
 
 [GitHub Actions run 38076952079](https://github.com/HNXS/Cutlery/actions/runs/38076952079) on commit `586b5e46bc63073b412b667b24036ff5d439a77c` passed every step on its first attempt.
