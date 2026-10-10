@@ -4553,7 +4553,7 @@ void Editor::spoken(const Speech::Result &result) {
         return;
     if (!result.error.isEmpty()) {
         m_speaking.clear();
-        m_speechState = {{"status", "failed"}};
+        m_speechState = {{"status", "failed"}, {"error", result.error}};
         return fail(result.error);
     }
     m_speaking[result.request]["path"] = result.path;
@@ -4577,7 +4577,7 @@ void Editor::spoken(const Speech::Result &result) {
                 placed += placeSound(p, s, item.value("frame").toLongLong());
             }
         })) {
-        m_speechState = {{"status", "failed"}};
+        m_speechState = {{"status", "failed"}, {"error", m_error}};
         return;
     }
     m_speechState = {{"status", "done"}, {"count", placed}};

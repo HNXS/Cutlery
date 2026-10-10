@@ -1144,8 +1144,10 @@ class UiTest : public QObject {
             window->grabWindow().save(qEnvironmentVariable("CUTLERY_UI_SHOTS") + "/speech.png");
         editor.seek(50);
         QVERIFY(QMetaObject::invokeMethod(speak, "clicked"));
-        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["speech"].toMap()["status"].toString(),
-                                  QString("done"), 60000);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.state()["speech"].toMap()["status"].toString() != "speaking",
+                                 60000);
+        QVERIFY2(editor.state()["speech"].toMap()["status"].toString() == "done",
+                 qPrintable(editor.state()["speech"].toMap()["error"].toString()));
         QCOMPARE(editor.project().clips.size(), 2);
         QCOMPARE(editor.project().clips.last().start, qint64(50));
         // The title is read aloud from its settings.
