@@ -1,5 +1,18 @@
 # Validation record
 
+## Windows portable build — 2026-10-10, lens distortion correction (0.6 development)
+
+[GitHub Actions run 38030909824](https://github.com/HNXS/Cutlery/actions/runs/38030909824) on commit `d5b8b0017851963a0169559427ad308981671795` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `lensCorrection`:** checked on a left-to-right ramp.
+  - The centre stays where it is.
+  - Straightening barrel distortion takes the edge from nearer the centre of the source.
+  - Straightening pincushion distortion zooms in.
+  - Values outside −1..1 are refused.
+- **UI test `aiCutoutControls`:** the Lens row is on Video › Enhance. Typing 40 sets 0.4, and it is one undo step.
+
 ## Windows portable build — 2026-10-10, edit history list and editing proxies on import (0.6 development)
 
 [GitHub Actions run 38026400187](https://github.com/HNXS/Cutlery/actions/runs/38026400187) on commit `207d33a57f41f5114c46c3b14f37083316fb9870` passed every step on its first attempt.
