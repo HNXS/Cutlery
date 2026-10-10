@@ -177,8 +177,8 @@ void Speech::next() {
     };
     connect(p, &QProcess::finished, this, [p, err, done](int code, QProcess::ExitStatus status) {
         if (status != QProcess::NormalExit || code != 0) {
-            const auto lines = QString::fromUtf8(*err).trimmed().split('\n');
-            done("Piper failed: " + (lines.isEmpty() ? QString::number(code) : lines.last()));
+            const auto last = QString::fromUtf8(*err).trimmed().split('\n').last().trimmed();
+            done(QString("Piper failed (exit code %1)").arg(code) + (last.isEmpty() ? "" : ": " + last));
         } else {
             done({});
         }
