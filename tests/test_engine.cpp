@@ -4234,6 +4234,78 @@ class EngineTest : public QObject {
         QVERIFY(!editor.state()["error"].toString().isEmpty());
         editor.clearError();
     }
+    void surroundExport() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // Three tones, one per track: front (the default), centre and rear.
+        QStringList files;
+        for (const auto &[name, hz] : {std::pair{"front", 440}, {"centre", 880}, {"rear", 220}}) {
+            files << dir.filePath(QString(name) + ".wav");
+            run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", QString("sine=f=%1:d=2").arg(hz), "-ac", "2",
+                         files.last()});
+        }
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(files[0]), QUrl::fromLocalFile(files[1]),
+                            QUrl::fromLocalFile(files[2])});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 3, 15000);
+        for (int i = 0; i < 3; ++i)
+            for (const auto &a : editor.project().assets)
+                if (a.path == files[i])
+                    editor.addAsset(a.id, i);
+        editor.setTrack(1, "surround", "centre");
+        editor.setTrack(2, "surround", "rear");
+        QCOMPARE(editor.project().trackSettings[1].surround, QString("centre"));
+        QCOMPARE(editor.trackList()[2].toMap()["surround"].toString(), QString("rear"));
+        // Kept in the project file; an unknown place is refused.
+        QCOMPARE(Project::fromJson(editor.project().json(), {}).trackSettings[2].surround, QString("rear"));
+        editor.setTrack(0, "surround", "ceiling");
+        QVERIFY(!editor.state()["error"].toString().isEmpty());
+        editor.clearError();
+        // MP3 cannot hold 5.1.
+        editor.exportWith(QUrl::fromLocalFile(dir.filePath("x.mp3")), {{"format", "mp3"}, {"channels", 6}});
+        QVERIFY(editor.state()["error"].toString().contains("MP3"));
+        editor.clearError();
+        const auto out = dir.filePath("room.wav");
+        editor.exportWith(QUrl::fromLocalFile(out), {{"format", "wav"}, {"channels", 6}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QVERIFY2(QFileInfo::exists(out), qPrintable(editor.state()["error"].toString()));
+        const auto probe = QString::fromUtf8(run(Editor::executable("ffprobe"),
+                                                 {"-v", "error", "-show_entries", "stream=channels",
+                                                  "-of", "csv=p=0", out}))
+                               .trimmed();
+        QCOMPARE(probe, QString("6"));
+        // The strongest frequency of each channel: FL and FR 440 Hz, FC 880, LFE silent, BL and
+        // BR 220.
+        auto level = [&](int channel, const QString &band) {
+            QProcess p;
+            p.start(ffmpeg, {"-v", "info", "-i", out, "-af",
+                             QString("pan=mono|c0=c%1,%2,astats=measure_perchannel=none").arg(channel).arg(band),
+                             "-f", "null", "-"});
+            p.waitForFinished(30000);
+            const auto m = QRegularExpression("RMS level dB:\\s+(-?[0-9.]+|-inf)")
+                               .match(QString::fromUtf8(p.readAllStandardError()));
+            return m.captured(1) == "-inf" ? -150. : m.captured(1).toDouble();
+        };
+        auto at = [](int hz) { return QString("bandpass=f=%1:width_type=q:w=8").arg(hz); };
+        for (int channel : {0, 1})
+            QVERIFY2(level(channel, at(440)) > level(channel, at(880)) + 20, qPrintable(QString::number(channel)));
+        QVERIFY(level(2, at(880)) > level(2, at(440)) + 20);
+        QVERIFY(level(3, "anull") < -100);
+        for (int channel : {4, 5})
+            QVERIFY2(level(channel, at(220)) > level(channel, at(440)) + 20, qPrintable(QString::number(channel)));
+        // AAC carries 5.1 as well.
+        const auto aac = dir.filePath("room.m4a");
+        editor.exportWith(QUrl::fromLocalFile(aac), {{"format", "m4a"}, {"channels", 6}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        QCOMPARE(QString::fromUtf8(run(Editor::executable("ffprobe"),
+                                       {"-v", "error", "-show_entries", "stream=channels", "-of",
+                                        "csv=p=0", aac}))
+                     .trimmed(),
+                 QString("6"));
+    }
     void lensCorrection() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

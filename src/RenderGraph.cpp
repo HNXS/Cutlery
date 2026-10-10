@@ -898,7 +898,8 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
                      .arg(r.frames)
                      .arg(o.transparent ? "black@0.0" : "black");
     if (audio) {
-        nodes << QString("anullsrc=r=48000:cl=stereo,atrim=end_sample=%1[asilence]")
+        nodes << QString("anullsrc=r=48000:cl=%1,atrim=end_sample=%2[asilence]")
+                     .arg(o.channels == 6 ? "5.1" : "stereo")
                      .arg(qRound64(r.duration * 48000));
         audioLabels << "[asilence]";
     }
@@ -2176,6 +2177,13 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
             const qint64 before = n.outLength - n.aPost;
             a += ",afade=t=out:st=" + num(k + d - secs(before)) +
                  ":d=" + num(secs(n.outLength)) + ":curve=qsin";
+        }
+        if (o.channels == 6) {
+            // 5.1: the track's place in the room.
+            const auto place = c.track < p.trackSettings.size() ? p.trackSettings[c.track].surround : QString();
+            a += place == "centre" ? ",pan=5.1|FC=0.5*c0+0.5*c1"
+                 : place == "rear" ? ",pan=5.1|BL=c0|BR=c1"
+                                   : ",pan=5.1|FL=c0|FR=c1";
         }
         const auto id = QString::number(serial++);
         a += QString(",asetpts=PTS-STARTPTS,apad,atrim=duration=%1,adelay=%2S:all=1[a%3]")

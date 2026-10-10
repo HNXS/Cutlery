@@ -330,15 +330,14 @@ static qint64 integer(QJsonValue v) {
 }
 QJsonObject Project::json(const QString &base) const {
     QJsonArray aa, cc, tt;
-    for (const auto &t : trackSettings)
-        tt.append(QJsonObject{{"name", t.name},
-                              {"locked", t.locked},
-                              {"muted", t.muted},
-                              {"hidden", t.hidden},
-                              {"solo", t.solo},
-                              {"snapping", t.snapping},
-                              {"magnetic", t.magnetic},
-                              {"id", t.id}});
+    for (const auto &t : trackSettings) {
+        QJsonObject track{{"name", t.name},     {"locked", t.locked},     {"muted", t.muted},
+                          {"hidden", t.hidden}, {"solo", t.solo},         {"snapping", t.snapping},
+                          {"magnetic", t.magnetic}, {"id", t.id}};
+        if (!t.surround.isEmpty())
+            track["surround"] = t.surround;
+        tt.append(track);
+    }
     for (const auto &a : assets) {
         auto path = a.path;
         if (!base.isEmpty())
@@ -631,6 +630,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
                 track.snapping = t["snapping"].toBool();
                 track.magnetic = t["magnetic"].toBool();
                 track.id = t["id"].toString();
+                track.surround = t["surround"].toString();
             }
         }
     }
@@ -865,6 +865,7 @@ void Project::validate() const {
     require(trackSettings.size() == tracks, "Track settings do not match track count");
     QSet<QString> trackIds;
     for (const auto &t : trackSettings) {
+        require(QStringList{"", "centre", "rear"}.contains(t.surround), "Invalid 5.1 position");
         require(!t.name.trimmed().isEmpty() && t.name.size() <= 80,
                 "Track names must be 1–80 characters");
         require(!t.id.isEmpty() && !trackIds.contains(t.id), "Invalid or duplicate track ID");

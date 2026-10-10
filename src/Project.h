@@ -14,6 +14,9 @@ struct Track {
     bool locked = false, muted = false, hidden = false, solo = false;
     bool snapping = true, magnetic = false;
     QString id = newId();
+    // Where the track's sound goes in a 5.1 export: "" front left and right, "centre" (e.g.
+    // dialogue, as mono), "rear" (surround left and right). Stereo and mono exports ignore it.
+    QString surround;
 };
 struct Asset {
     QString id, path, name, kind; // video, audio, image

@@ -22,7 +22,8 @@ struct ExportSettings {
     // dropped to reach it. Video bitrate in kbit/s (0: by quality), for encoders that take one.
     double fps = 0;
     int bitrate = 0;
-    // Sound: 2 (stereo) or 1 (mono) channels, at 48000 or 44100 Hz.
+    // Sound: 2 (stereo), 1 (mono) or 6 (5.1, tracks placed by Track::surround) channels, at
+    // 48000 or 44100 Hz. MP3 holds at most two.
     int channels = 2, sampleRate = 48000;
     // Picture: "" (8-bit SDR as before), "10bit" (10-bit BT.709 SDR), "pq" (HDR10: BT.2020 with
     // the PQ curve) or "hlg" (BT.2020 hybrid log-gamma). 10-bit and HDR need HEVC, AV1, VP9 or
@@ -45,6 +46,7 @@ struct Encoder {
     bool probe = false;
     bool audioOnly = false; // no video stream; videoArguments and pixelFormat are unused
     bool noAudio = false;   // picture only (GIF)
+    int channels = 2;       // of the render graph's mix: 2 or 6 (5.1)
     // Filters after the picture's pixel format, before the encoder (e.g. GIF palette steps);
     // labels inside must not clash with the render graph's.
     QString videoTail;
