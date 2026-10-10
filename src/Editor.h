@@ -98,7 +98,8 @@ class Editor final : public QObject {
     Q_INVOKABLE bool newFromTemplate(const QString &name);
     Q_INVOKABLE void removeTemplate(const QString &name);
     // App-wide settings (state "preferences"): width, height, fpsN, fpsD of new projects,
-    // stillSeconds of imported pictures, backups kept per project, startScreen, cacheGB (the
+    // stillSeconds of imported pictures, backups kept per project, startScreen, proxiesOnImport
+    // (editing proxies for imported videos over 1080p), cacheGB (the
     // cache limit). Saved at once.
     Q_INVOKABLE void setPreferences(const QVariantMap &values);
     // Size of the waveform, thumbnail and nested-sequence caches: bytes, files.
@@ -295,6 +296,12 @@ class Editor final : public QObject {
     Q_INVOKABLE void stopVoiceOver();
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
+    // The edit history of the shown timeline, oldest first: every state with what changed to
+    // reach it ("Added Title", "Moved clip.mp4", …) and its distance from the current one
+    // (negative: undone by that many steps; positive: redone). Entries: {label, offset}.
+    Q_INVOKABLE QVariantList history() const;
+    // Undoes (steps < 0) or redoes (steps > 0) that many steps at once.
+    Q_INVOKABLE void goToHistory(int steps);
     Q_INVOKABLE void configure(int width, int height, int fpsN, int fpsD);
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();

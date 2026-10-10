@@ -1253,7 +1253,7 @@ bool Editor::save(const QUrl &url) {
 static QVariantMap defaultPreferences() {
     return {{"width", 1920},     {"height", 1080},  {"fpsN", 30},
             {"fpsD", 1},         {"stillSeconds", 5.}, {"backups", 20},
-            {"startScreen", true}, {"cacheGB", 20}, {"undoSteps", 60}};
+            {"startScreen", true}, {"cacheGB", 20}, {"undoSteps", 60}, {"proxiesOnImport", false}};
 }
 // The valid preferences in `values`, over `base`; throws on an invalid value.
 static QVariantMap checkedPreferences(const QVariantMap &base, const QVariantMap &values) {
@@ -1289,7 +1289,8 @@ static QVariantMap checkedPreferences(const QVariantMap &base, const QVariantMap
             {"backups", backups},
             {"startScreen", p["startScreen"].toBool()},
             {"cacheGB", cache},
-            {"undoSteps", undo}};
+            {"undoSteps", undo},
+            {"proxiesOnImport", p["proxiesOnImport"].toBool()}};
 }
 void Editor::loadPreferences() {
     m_prefs = defaultPreferences();
@@ -1661,6 +1662,104 @@ void Editor::redo() {
     m_project = m_redo.takeLast();
     edited();
 }
+// What changed from one state of a timeline to the next, in a few words.
+static QString describeChange(const Project &before, const Project &after) {
+    // A new frame rate moves every clip; that is one change of the settings.
+    if (before.width != after.width || before.height != after.height || before.fpsN != after.fpsN ||
+        before.fpsD != after.fpsD)
+        return "Project settings";
+    auto byId = [](const Project &p) {
+        QHash<QString, QJsonObject> clips;
+        for (const auto &v : p.json()["clips"].toArray())
+            clips.insert(v.toObject()["id"].toString(), v.toObject());
+        return clips;
+    };
+    const auto a = byId(before), b = byId(after);
+    auto name = [](const QJsonObject &c) {
+        const auto n = c["name"].toString();
+        return n.isEmpty() ? QString("a clip") : n.left(40);
+    };
+    QStringList added, removed, changed;
+    for (auto it = b.begin(); it != b.end(); ++it)
+        if (!a.contains(it.key()))
+            added << it.key();
+        else if (a[it.key()] != it.value())
+            changed << it.key();
+    for (auto it = a.begin(); it != a.end(); ++it)
+        if (!b.contains(it.key()))
+            removed << it.key();
+    if (added.size() == 1 && removed.isEmpty() && changed.size() == 1 &&
+        name(b[added.first()]) == name(b[changed.first()]))
+        return "Split " + name(b[changed.first()]);
+    if (!added.isEmpty() && removed.isEmpty())
+        return added.size() == 1 ? "Added " + name(b[added.first()])
+                                 : QString("Added %1 clips").arg(added.size());
+    if (!removed.isEmpty() && added.isEmpty())
+        return removed.size() == 1 ? "Removed " + name(a[removed.first()])
+                                   : QString("Removed %1 clips").arg(removed.size());
+    if (!added.isEmpty())
+        return added.size() + removed.size() > 2 ? QString("Changed %1 clips").arg(added.size() + removed.size())
+                                                 : "Split or replaced " + name(a[removed.first()]);
+    if (changed.size() == 1) {
+        const auto &x = a[changed.first()], &y = b[changed.first()];
+        QStringList keys;
+        for (auto it = y.begin(); it != y.end(); ++it)
+            if (x.value(it.key()) != it.value())
+                keys << it.key();
+        for (auto it = x.begin(); it != x.end(); ++it)
+            if (!y.contains(it.key()) && !keys.contains(it.key()))
+                keys << it.key();
+        const QSet<QString> moving{"start", "track"}, trimming{"start", "duration", "sourceIn"};
+        const QSet<QString> set(keys.begin(), keys.end());
+        if (set.size() && moving.contains(set))
+            return "Moved " + name(y);
+        if (set.size() && trimming.contains(set))
+            return "Trimmed " + name(y);
+        if (set.contains("keyframes"))
+            return "Keyframes of " + name(y);
+        return QString("%1 of %2").arg(keys.isEmpty() ? QString("Changed") : keys.first(), name(y));
+    }
+    if (changed.size() > 1)
+        return QString("Changed %1 clips").arg(changed.size());
+    if (before.markers != after.markers)
+        return "Markers";
+    if (before.tracks != after.tracks || before.json()["trackSettings"] != after.json()["trackSettings"])
+        return "Tracks";
+    if (before.json()["assets"] != after.json()["assets"] || before.folders != after.folders)
+        return "Media library";
+    return "Edit";
+}
+QVariantList Editor::history() const {
+    QVector<const Project *> states;
+    for (const auto &p : m_undo)
+        states << &p;
+    states << &m_project;
+    for (int i = int(m_redo.size()) - 1; i >= 0; --i)
+        states << &m_redo[i];
+    const int current = int(m_undo.size());
+    QVariantList list;
+    for (int i = 0; i < states.size(); ++i)
+        list << QVariantMap{{"label", i == 0 ? QString("Start") : describeChange(*states[i - 1], *states[i])},
+                            {"offset", i - current}};
+    return list;
+}
+void Editor::goToHistory(int steps) {
+    if (steps == 0)
+        return;
+    if (steps < 0 && -steps > m_undo.size())
+        return fail("There are not that many steps to undo");
+    if (steps > 0 && steps > m_redo.size())
+        return fail("There are not that many steps to redo");
+    for (; steps < 0; ++steps) {
+        m_redo.push_back(m_project);
+        m_project = m_undo.takeLast();
+    }
+    for (; steps > 0; --steps) {
+        m_undo.push_back(m_project);
+        m_project = m_redo.takeLast();
+    }
+    edited();
+}
 QList<Editor::ImportRequest> Editor::importRequests(const QList<QUrl> &urls,
                                                    std::shared_ptr<DropBatch> drop) const {
     static const QStringList media{
@@ -2019,6 +2118,13 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                     m_importErrors << a.name + ": " + m_error;
                 else {
                     m_status = replaceId.isEmpty() ? "Imported " + a.name : "Media relinked";
+                    // Large videos get an editing proxy when that is chosen in Preferences.
+                    if (m_prefs.value("proxiesOnImport").toBool() && a.kind == "video" &&
+                        a.height > 1080 && !QFileInfo::exists(proxyPath(a)) &&
+                        !m_proxyQueue.contains(a.id) && m_proxyMaking != a.id) {
+                        m_proxyQueue << a.id;
+                        makeNextProxy();
+                    }
                     if (!dropWarning.isEmpty())
                         m_importErrors << dropWarning;
                     if (!addedClip.isEmpty()) {

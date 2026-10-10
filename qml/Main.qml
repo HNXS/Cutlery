@@ -966,6 +966,12 @@ ApplicationWindow {
                 onTriggered: editor.redo()
             }
             MenuItem {
+                objectName: "historyItem"
+                text: "History…"
+                enabled: win.s.canUndo || win.s.canRedo
+                onTriggered: historyDialog.open()
+            }
+            MenuItem {
                 text: "Select all clips"
                 onTriggered: editor.selectAll()
             }
@@ -6142,6 +6148,7 @@ ApplicationWindow {
             prefStill.value = Math.round((prefs.stillSeconds || 5) * 10);
             prefBackups.value = prefs.backups ?? 20;
             prefStart.checked = prefs.startScreen !== false;
+            prefProxies.checked = prefs.proxiesOnImport === true;
             prefCache.value = prefs.cacheGB ?? 20;
             prefUndo.value = prefs.undoSteps ?? 60;
             cacheUsage = editor.cacheUsage();
@@ -6193,6 +6200,14 @@ ApplicationWindow {
                 Layout.columnSpan: 2
                 text: "Show the start screen when Cutlery opens"
             }
+            CheckBox {
+                id: prefProxies
+                objectName: "prefProxies"
+                Layout.columnSpan: 2
+                text: "Make editing proxies for imported videos over 1080p"
+                ToolTip.visible: hovered
+                ToolTip.text: "Small copies the preview plays instead, made in the background; exports use the originals"
+            }
             Label { text: "Undo steps" }
             SpinBox {
                 id: prefUndo
@@ -6238,7 +6253,7 @@ ApplicationWindow {
         }
         onAccepted: {
             const f = win.projectFormats[prefFormat.currentIndex], r = win.frameRates[prefRate.currentIndex];
-            editor.setPreferences({ width: f.w, height: f.h, fpsN: r.n, fpsD: r.d, stillSeconds: prefStill.value / 10, backups: prefBackups.value, startScreen: prefStart.checked, cacheGB: prefCache.value, undoSteps: prefUndo.value });
+            editor.setPreferences({ width: f.w, height: f.h, fpsN: r.n, fpsD: r.d, stillSeconds: prefStill.value / 10, backups: prefBackups.value, startScreen: prefStart.checked, proxiesOnImport: prefProxies.checked, cacheGB: prefCache.value, undoSteps: prefUndo.value });
         }
     }
     // Names a template made from the current project.
@@ -6721,6 +6736,65 @@ ApplicationWindow {
                 text: captionDialog.missing !== "" ? captionDialog.missing
                     : captionDialog.state.running === true ? "Recognising speech… " + Math.round((captionDialog.state.progress || 0) * 100) + "%"
                     : win.s.status
+            }
+        }
+    }
+    // The edit history: every step of the shown timeline; a click goes back or forward to it.
+    Dialog {
+        id: historyDialog
+        objectName: "historyDialog"
+        anchors.centerIn: parent
+        title: "History"
+        modal: true
+        width: 380
+        standardButtons: Dialog.Close
+        property var steps: []
+        function refresh() {
+            steps = editor.history();
+        }
+        onAboutToShow: refresh()
+        Connections {
+            target: editor
+            enabled: historyDialog.visible
+            function onProjectChanged() {
+                historyDialog.refresh();
+            }
+        }
+        ListView {
+            id: historyList
+            objectName: "historyList"
+            implicitHeight: Math.min(420, contentHeight)
+            width: parent.width
+            clip: true
+            model: historyDialog.steps
+            ScrollBar.vertical: ScrollBar {}
+            onCountChanged: positionViewAtIndex(historyDialog.steps.findIndex(x => x.offset === 0), ListView.Contain)
+            delegate: ItemDelegate {
+                id: step
+                required property var modelData
+                required property int index
+                objectName: "historyStep-" + index
+                width: ListView.view.width
+                height: 30
+                onClicked: editor.goToHistory(modelData.offset)
+                background: Rectangle {
+                    radius: 4
+                    color: step.modelData.offset === 0 ? "#26313b" : step.hovered ? "#1c242c" : "transparent"
+                }
+                contentItem: RowLayout {
+                    Label {
+                        Layout.fillWidth: true
+                        text: step.modelData.label
+                        elide: Text.ElideRight
+                        color: step.modelData.offset > 0 ? win.muted : "#e7edf2"
+                        font.italic: step.modelData.offset > 0
+                    }
+                    Label {
+                        text: step.modelData.offset === 0 ? "now" : step.modelData.offset > 0 ? "undone" : ""
+                        color: step.modelData.offset === 0 ? win.mint : win.muted
+                        font.pixelSize: 10
+                    }
+                }
             }
         }
     }

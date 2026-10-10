@@ -3124,6 +3124,48 @@ class EngineTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
         QCOMPARE(editor.project().assets.last().frameRate, 0.);
     }
+    void historyList() {
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.addTitle();
+        const auto id = editor.project().clips.first().id;
+        editor.select(id);
+        editor.setClip("opacity", 0.5);
+        editor.seek(10);
+        editor.split();
+        editor.toggleMarker();
+        auto labels = [&] {
+            QStringList list;
+            for (const auto &e : editor.history())
+                list << e.toMap()["label"].toString();
+            return list;
+        };
+        auto offsets = [&] {
+            QList<int> list;
+            for (const auto &e : editor.history())
+                list << e.toMap()["offset"].toInt();
+            return list;
+        };
+        // configure() is a step too ("Project settings").
+        QCOMPARE(labels(), (QStringList{"Start", "Project settings", "Added Title", "opacity of Title",
+                                        "Split Title", "Markers"}));
+        QCOMPARE(offsets(), (QList<int>{-5, -4, -3, -2, -1, 0}));
+        // Back three steps at once, then forward two.
+        editor.goToHistory(-3);
+        QCOMPARE(editor.project().clips.size(), size_t(1));
+        QCOMPARE(editor.project().clips.first().opacity, 1.);
+        QCOMPARE(offsets(), (QList<int>{-2, -1, 0, 1, 2, 3}));
+        QCOMPARE(labels().size(), 6);
+        editor.goToHistory(2);
+        QCOMPARE(editor.project().clips.size(), size_t(2));
+        QVERIFY(editor.project().markers.isEmpty());
+        editor.goToHistory(5);
+        QVERIFY(editor.state()["error"].toString().contains("redo"));
+        editor.clearError();
+        editor.goToHistory(1);
+        QCOMPARE(editor.project().markers.size(), 1);
+    }
     void openProjects() {
         QTemporaryDir dir;
         FrameProvider frames;
@@ -3337,6 +3379,17 @@ class EngineTest : public QObject {
         editor.deleteProxies();
         QCOMPARE(proxy(), QString());
         QCOMPARE(editor.state()["status"].toString(), QString("Removed 1 proxy"));
+        // With "proxiesOnImport", videos taller than 1080 lines get one when imported.
+        editor.setPreferences({{"proxiesOnImport", true}});
+        const auto tall = dir.filePath("tall.mov");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=green:s=640x1200:r=30:d=1", "-c:v",
+                     "mpeg4", tall});
+        editor.importMedia({QUrl::fromLocalFile(tall)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.assets().size() == 2, 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(editor.assets().last().toMap()["proxy"].toString(), QString("ready"), 60000);
+        QCOMPARE(proxy(), QString()); // the 720p one is not tall enough
+        editor.setPreferences({{"proxiesOnImport", false}});
+        editor.deleteProxies();
     }
     void imageSequences() {
         const auto ffmpeg = Editor::executable("ffmpeg");
