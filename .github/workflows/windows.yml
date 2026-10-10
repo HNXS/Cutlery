@@ -115,6 +115,9 @@ jobs:
             }
             throw 'Tests failed'
           }
+          # Text to speech ran with the real Piper and voice, not skipped.
+          $speech = build/bin/Release/cutlery_tests.exe textToSpeech 2>&1 | Out-String
+          if ($speech -notmatch 'PASS   : EngineTest::textToSpeech\(\)') { Write-Output $speech; throw 'Text to speech was not tested with Piper' }
           $p = Start-Process build/bin/Release/Cutlery.exe -ArgumentList '--smoke-test' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw 'QML startup failed' }
       - name: Check the real models on a test video

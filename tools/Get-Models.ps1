@@ -7,7 +7,6 @@ function Get-Pinned($url, $file, $sha256) {
         Invoke-WebRequest -Uri $url -OutFile $file
     }
     $actual = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
-    if (!$sha256) { Write-Host "::warning::UNPINNED $file sha256 $actual"; return }
     if ($actual -ne $sha256) { throw "Checksum mismatch: $file is $actual" }
 }
 # Person segmentation for AI background removal: U²-Net trained on human segmentation
@@ -36,13 +35,13 @@ $speechSha = (Get-FileHash $speech -Algorithm SHA256).Hash.ToLowerInvariant()
 # dataset (CC0, https://github.com/thorstenMueller/Thorsten-Voice), from the pinned v1.0.0 release
 # of the piper-voices repository. Piper reads the .onnx.json next to the model.
 $voiceBase = 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/de/de_DE/thorsten/medium'
-$voiceSha = ''
-$voiceJsonSha = ''
-$voiceCardSha = ''
+$voiceSha = '7e64762d8e5118bb578f2eea6207e1a35a8e0c30595010b666f983fc87bb7819'
+$voiceJsonSha = '974adee790533adb273a1ac88f49027d2a1b8f0f2cf4905954a4791e79264e85'
+$voiceCardSha = '5196b5ab0794e6056263a1f37c18bec407b61ac187529bee29d1c366871e5c9e'
 Get-Pinned "$voiceBase/de_DE-thorsten-medium.onnx" "$Destination/de_DE-thorsten-medium.onnx" $voiceSha
 Get-Pinned "$voiceBase/de_DE-thorsten-medium.onnx.json" "$Destination/de_DE-thorsten-medium.onnx.json" $voiceJsonSha
 Get-Pinned "$voiceBase/MODEL_CARD" "$Destination/de_DE-thorsten-medium.MODEL_CARD.txt" $voiceCardSha
-Get-Content "$Destination/de_DE-thorsten-medium.MODEL_CARD.txt" | ForEach-Object { Write-Host "MODEL_CARD: $_" }
+Get-Content "$Destination/de_DE-thorsten-medium.MODEL_CARD.txt" | Where-Object { $_.Trim() } | ForEach-Object { Write-Host "::notice::Thorsten model card: $_" }
 python -m pip install --quiet onnx==1.17.0
 if ($LASTEXITCODE -ne 0) { throw 'Installing the onnx package failed' }
 python "$PSScriptRoot/convert-realesrgan.py" $weights "$Destination/realesr-general-x4v3.onnx"
