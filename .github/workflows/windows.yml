@@ -95,6 +95,18 @@ jobs:
             # then passes again in the runs below.
             Select-String -Path build/ctest.log -Pattern 'FAIL!|Loc: \[|\*\*\*Failed|\*\*\*Timeout|\*\*\*Exception|Actual|Expected' |
               Select-Object -First 12 | ForEach-Object { Write-Output "::error::ctest: $($_.Line.Trim())" }
+            # The first run's own results (fresh AI cache), which the runs below may not repeat.
+            foreach ($file in 'build/ctest-engine.txt', 'build/ctest-interface.txt') {
+              if (!(Test-Path $file)) { continue }
+              $lines = @(Get-Content $file)
+              for ($i = 0; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -match '^FAIL!') {
+                  $detail = ($lines[($i + 1)..([Math]::Min($i + 3, $lines.Count - 1))] -join ' ').Trim()
+                  Write-Output "::error::first run: $($lines[$i]) $detail"
+                }
+              }
+              if ($lines.Count -gt 0 -and ($lines -join "`n") -notmatch 'Totals:') { Write-Output "::error::first run of $file ended early after: $($lines[-1])" }
+            }
             # Show the failing checks directly; CTest's captured output can be empty here.
             $env:QT_QPA_FONTDIR = "$env:WINDIR/Fonts"
             build/bin/Release/cutlery_tests.exe -o build/engine.txt,txt -o -,txt | Out-Null
