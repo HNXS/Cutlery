@@ -94,6 +94,7 @@ const QVector<QPair<QString, double Clip::*>> &lookFields() {
         {"gate", &Clip::gate},               {"denoise", &Clip::denoise},
         {"noiseFloor", &Clip::noiseFloor},   {"dereverb", &Clip::dereverb},
         {"videoDenoise", &Clip::videoDenoise}, {"deflicker", &Clip::deflicker},
+        {"lensCorrection", &Clip::lensCorrection},
         {"deess", &Clip::deess},             {"motionBlur", &Clip::motionBlur},
         {"reverb", &Clip::reverb},           {"echo", &Clip::echo},
         {"pan", &Clip::pan},                 {"hslHue", &Clip::hslHue},
@@ -1012,7 +1013,7 @@ void Project::validate() const {
                         .contains(c.fx) &&
                     bounded(c.fxStrength, 0, 1) && bounded(c.motionBlur, 0, 1) &&
                     bounded(c.stabilizeStrength, 0, 1) && bounded(c.videoDenoise, 0, 1) &&
-                    bounded(c.deflicker, 0, 1) &&
+                    bounded(c.deflicker, 0, 1) && bounded(c.lensCorrection, -1, 1) &&
                     QStringList{"", "tv", "pc"}.contains(c.colorRange) &&
                     QStringList{"", "bt601", "bt709", "bt2020"}.contains(c.colorMatrix) &&
                     QStringList{"", "bright", "off"}.contains(c.toneMap) &&

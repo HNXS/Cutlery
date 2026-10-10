@@ -1233,6 +1233,15 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         if (c.deflicker > 0 && !n.image)
             f += QString(",deflicker=size=%1:mode=pm")
                      .arg(3 + 2 * int(std::lround(6 * c.deflicker)));
+        // Lens distortion, corrected on the source picture: a negative k1 pulls the bent edges
+        // of barrel distortion back out; a positive one, for pincushion, leaves the corners
+        // empty, so the picture is zoomed in by as much.
+        if (c.lensCorrection != 0) {
+            const double k1 = -0.35 * c.lensCorrection, k2 = 0.5 * k1;
+            f += QString(",lenscorrection=k1=%1:k2=%2:i=bilinear").arg(num(k1), num(k2));
+            if (k1 > 0)
+                f += QString(",crop=w='trunc(iw/%1/2)*2':h='trunc(ih/%1/2)*2'").arg(num(1 + k1 + k2));
+        }
         // Camera shake is measured on the source picture, before scaling.
         if (c.stabilize && !n.image) {
             // The search range in source pixels (FFmpeg allows up to 64); zooming in by it on

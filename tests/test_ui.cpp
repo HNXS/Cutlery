@@ -1673,7 +1673,7 @@ class UiTest : public QObject {
         }
         // Video noise, flicker and source colours for a video; the HDR choice only for HDR.
         page(window, "video", "enhance");
-        for (const char *name : {"videoDenoise", "deflicker", "colorRange", "colorMatrix"})
+        for (const char *name : {"videoDenoise", "deflicker", "colorRange", "colorMatrix", "lensCorrection"})
             QVERIFY2(findItem(window->contentItem(), name) &&
                          findItem(window->contentItem(), name)->isVisible(),
                      name);
@@ -1684,6 +1684,14 @@ class UiTest : public QObject {
         QTRY_COMPARE(findItem(window->contentItem(), "colorRange")->property("currentIndex").toInt(), 2);
         editor.undo();
         QVERIFY(editor.project().clips.first().colorRange.isEmpty());
+        // Lens distortion: typed into its box, one undo step.
+        auto *lens = findItem(window->contentItem(), "lensCorrection-box");
+        QVERIFY(lens);
+        lens->setProperty("text", "40");
+        QVERIFY(QMetaObject::invokeMethod(lens, "editingFinished"));
+        QCOMPARE(editor.project().clips.first().lensCorrection, 0.4);
+        editor.undo();
+        QCOMPARE(editor.project().clips.first().lensCorrection, 0.);
         // Free mask: "Draw mask" lets clicks on the preview add points.
         page(window, "video", "mask");
         auto *drawMask = findItem(window->contentItem(), "drawMask");

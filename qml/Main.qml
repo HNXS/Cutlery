@@ -5340,6 +5340,14 @@ ApplicationWindow {
                                         { key: "deflicker", obj: "deflicker", name: "Flicker", lo: 0, hi: 1, step: .05, dec: 0, unit: "%", shown: 100, tip: "Evens out brightness that pulses from frame to frame (lamps, time-lapses); stronger compares more frames" }
                                     ]
                                 }
+                                ValueGroup {
+                                    objectName: "lensSection"
+                                    title: "Lens"
+                                    visible: !!win.selection.assetId && win.selection.picture === true && win.picPage("enhance")
+                                    rows: [
+                                        { key: "lensCorrection", obj: "lensCorrection", name: "Lens distortion", lo: -1, hi: 1, step: .05, dec: 0, unit: "%", shown: 100, tip: "Above 0 straightens lines that a wide-angle or action camera bends outwards; below 0 straightens lines bent inwards" }
+                                    ]
+                                }
                                 RowLayout {
                                     Layout.fillWidth: true
                                     visible: (win.selection.video === true && !!win.selection.hdr) && (win.picPage("enhance"))

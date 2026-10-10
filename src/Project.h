@@ -183,6 +183,10 @@ struct Clip {
     // Video noise reduction over neighbouring frames (0 off, up to 1), and flicker removal that
     // evens out the brightness of successive frames (0 off, up to 1: 3 to 15 frames compared).
     double videoDenoise = 0, deflicker = 0;
+    // Lens distortion, −1..1: above 0 straightens barrel distortion (wide-angle and action
+    // cameras bend straight lines outwards), below 0 straightens pincushion distortion (lines
+    // bent inwards; the picture is zoomed in to hide the corners). 0 unchanged.
+    double lensCorrection = 0;
     // How the source's colours are read when its file says it wrongly: colour range "" (as the
     // file says), "tv" (limited, 16–235) or "pc" (full, 0–255), and the YUV matrix "" (as the
     // file says), "bt601", "bt709" or "bt2020".

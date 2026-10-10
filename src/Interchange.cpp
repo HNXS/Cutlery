@@ -40,7 +40,7 @@ void noteLosses(const Clip &c, QMap<QString, int> &what) {
     if (!c.transition.isEmpty())
         what["transitions (as straight cuts)"]++;
     if (!c.fx.isEmpty() || c.blur > 0 || c.sharpen > 0 || c.glow > 0 || c.vignette > 0 ||
-        c.grain > 0 || c.stabilize || c.videoDenoise > 0 || c.deflicker > 0 || c.chromaKey || c.aiCutout ||
+        c.grain > 0 || c.stabilize || c.videoDenoise > 0 || c.deflicker > 0 || c.lensCorrection != 0 || c.chromaKey || c.aiCutout ||
         !c.lumaKey.isEmpty() || !c.blendMode.isEmpty() || c.pitch != 0 || !c.voice.isEmpty() || c.dereverb > 0 ||
         !c.canvasFill.isEmpty())
         what["effects"]++;
