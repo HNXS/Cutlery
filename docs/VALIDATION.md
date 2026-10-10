@@ -1,5 +1,17 @@
 # Validation record
 
+## Windows portable build — 2026-10-10, track motion (0.6 development)
+
+[GitHub Actions run 38042716860](https://github.com/HNXS/Cutlery/actions/runs/38042716860) on commit `4b1302796880441bb19262676d7dd7fae0cd9e05` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `trackMotion`:** an 80 × 80 badge with detail moves over a grey 640 × 360 video for 3 s; a mosaic area is placed on it at 1 s, slightly off its centre.
+  - On the plain background the area is refused for too little detail.
+  - Tracked forwards and backwards over the whole clip, the area stays within 2.5 pixels of the badge's path, offset included, at five frames from start to end, with fewer than 20 keyframes.
+  - One undo step removes the keyframes; Cancel leaves the clip unchanged; a clip without a video below is refused.
+- **UI test `presenterControls`:** the area's Track motion button is shown (and the overlay one hidden for areas); over titles it says a video clip is needed.
+
 ## Windows portable build — 2026-10-10, screen reader names, keyboard focus, left-panel crash fix (0.6 development)
 
 [GitHub Actions run 38035874124](https://github.com/HNXS/Cutlery/actions/runs/38035874124) on commit `77b57192c8d666c3de2aa3a7582fd5692dafec75` passed every step on its first attempt.
