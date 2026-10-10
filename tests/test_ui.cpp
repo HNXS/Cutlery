@@ -1924,6 +1924,15 @@ class UiTest : public QObject {
         QTRY_COMPARE(maskPoints(editor.project().clips.first().mask).size(), 3);
         QTRY_VERIFY(findItem(window->contentItem(), "maskSmooth")->isVisible());
         QVERIFY(drawMask->property("text").toString().contains("3 points"));
+        // The mask can be moved by its position values and tracked in the video.
+        QTRY_VERIFY(findItem(window->contentItem(), "maskPosition")->isVisible());
+        auto *moveX = findItem(window->contentItem(), "mask-maskX-box");
+        QVERIFY(moveX && moveX->isVisible());
+        moveX->setProperty("text", "10");
+        QVERIFY(QMetaObject::invokeMethod(moveX, "editingFinished"));
+        QCOMPARE(editor.project().clips.first().maskX, 0.1);
+        auto *trackMask = findItem(window->contentItem(), "mask-trackMotion");
+        QVERIFY(trackMask && trackMask->isVisible() && trackMask->property("text").toString() == "Track the mask");
         QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "clearMask"), "clicked"));
         QVERIFY(editor.project().clips.first().mask.isEmpty());
         QTRY_VERIFY(!drawer->isVisible());

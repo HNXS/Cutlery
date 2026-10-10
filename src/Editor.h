@@ -280,6 +280,10 @@ class Editor final : public QObject {
     // clip tracked), whole}.
     Q_INVOKABLE void trackMotion();
     Q_INVOKABLE void cancelTracking();
+    // Makes the selected video clip's free mask follow what it surrounds at the playhead:
+    // tracked like trackMotion() in the clip's own video and keyframed as maskX/maskY (state
+    // "track" with kind "mask").
+    Q_INVOKABLE void trackMask();
     // Text to speech (Piper and its voices in the AI pack): speaks `text` with a voice (an id
     // from state "speech".voices) at `speed` (0.5–2) and adds it at the playhead on a free
     // track; speakSelection() speaks every selected title at its start. One undo step once all
@@ -552,6 +556,8 @@ class Editor final : public QObject {
     void spoken(const Speech::Result &result);
     Tracker *m_tracker = nullptr;
     void applyTracking(const QVector<Tracker::Point> &points, const QString &error);
+    static QPointF pictureToSource(const Clip &, QPointF);
+    static QPointF sourceToPicture(const Clip &, QPointF);
     QString m_importFolder;
     QVariantMap m_reframe;
     QVariantMap m_autoColour;

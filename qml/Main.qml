@@ -194,6 +194,8 @@ ApplicationWindow {
             return adjustPage("basic");
         if (key === "blur")
             return onTab("effects");
+        if (key === "maskX" || key === "maskY")
+            return picPage("mask");
         return picPage("basic");
     }
     function soundPage(key) {
@@ -445,9 +447,10 @@ ApplicationWindow {
     component TrackMotion: ColumnLayout {
         id: tm
         property string prefix: ""  // of the object names
+        property string mode: "clip" // "mask": the selected clip's free mask follows its video
         spacing: 4
         readonly property var track: win.s.track || ({})
-        readonly property bool mine: track.clipId === win.s.selectedId
+        readonly property bool mine: track.clipId === win.s.selectedId && (track.kind || "clip") === mode
         readonly property bool busy: track.status === "tracking"
         RowLayout {
             Layout.fillWidth: true
@@ -455,11 +458,11 @@ ApplicationWindow {
                 objectName: tm.prefix + "trackMotion"
                 Layout.fillWidth: true
                 enabled: !tm.busy && win.selection.locked !== true
-                text: tm.busy && tm.mine ? "Tracking… " + Math.round((tm.track.progress || 0) * 100) + "%" : "Track motion"
-                Accessible.name: "Track motion"
-                onClicked: editor.trackMotion()
+                text: tm.busy && tm.mine ? "Tracking… " + Math.round((tm.track.progress || 0) * 100) + "%" : tm.mode === "mask" ? "Track the mask" : "Track motion"
+                Accessible.name: tm.mode === "mask" ? "Track the mask" : "Track motion"
+                onClicked: tm.mode === "mask" ? editor.trackMask() : editor.trackMotion()
                 ToolTip.visible: hovered
-                ToolTip.text: "Place it over something in the video below at the playhead, then track: it follows that through the clip, forwards and backwards, as position keyframes"
+                ToolTip.text: tm.mode === "mask" ? "Draw the mask around something at the playhead, then track: the mask follows it through the clip, forwards and backwards, as Move X/Y keyframes" : "Place it over something in the video below at the playhead, then track: it follows that through the clip, forwards and backwards, as position keyframes"
             }
             Action {
                 objectName: tm.prefix + "cancelTracking"
@@ -4414,6 +4417,24 @@ ApplicationWindow {
                                             ToolTip.visible: hovered
                                             ToolTip.text: "Hides what is inside the mask instead"
                                         }
+                                    }
+                                }
+                                // Where the free mask sits; keyframed, or tracked to follow
+                                // something in the video.
+                                ValueGroup {
+                                    objectName: "maskPosition"
+                                    title: "Mask position"
+                                    visible: win.picPage("mask") && !!win.selection.mask
+                                    prefix: "mask-"
+                                    rows: [
+                                        { key: "maskX", name: "Move X", lo: -1, hi: 1, step: .01, dec: 0, unit: "%", shown: 100, anim: true, tip: "Left (−) or right (+), in picture widths" },
+                                        { key: "maskY", name: "Move Y", lo: -1, hi: 1, step: .01, dec: 0, unit: "%", shown: 100, anim: true, tip: "Up (−) or down (+), in picture heights" }
+                                    ]
+                                    TrackMotion {
+                                        prefix: "mask-"
+                                        mode: "mask"
+                                        Layout.fillWidth: true
+                                        visible: win.selection.video === true
                                     }
                                 }
                                 ValueGroup {

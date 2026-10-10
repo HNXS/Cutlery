@@ -246,6 +246,9 @@ struct Clip {
     // curve through them instead of straight lines.
     QString mask;
     bool maskSmooth = false, maskInvert = false;
+    // Where the mask's shape is moved to, as fractions of the picture (−1..1, animatable as
+    // "maskX"/"maskY"), e.g. to follow something tracked in the video.
+    double maskX = 0, maskY = 0;
     // Corner pin (perspective): where the picture's top-left, top-right, bottom-left and
     // bottom-right corners go, as x, y fractions of its own box (0..1); 8 values, or empty for
     // none. The picture is warped into that four-sided shape; outside it is transparent.

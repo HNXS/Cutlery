@@ -4,6 +4,7 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Masks that move:** a free mask has a position (Video › Mask › Mask position) that can be keyframed, and **Track the mask** makes it follow what it surrounds in the video, e.g. to keep one moving person or object visible (or hidden with Invert).
 - **Voice and music apart:** Audio › Clean-up › Voice and music plays a clip's voice alone (speech without background music) or everything but the voice (karaoke, music without speech). An AI model from the AI pack separates the sound on this computer, faster with a graphics card.
 - **German text to speech:** type a text under Audio › Text to speech (or press Read aloud on a title) and a German voice (Thorsten, from the AI pack) speaks it on this computer; it lands as an audio clip at the playhead. Speed adjustable; other Piper voices can be added to the models folder.
 - **Track motion:** a blur or mosaic area, a title, sticker or picture placed over something in a video follows it through the clip: put it in place at any moment and press Track motion (Video › Basic, or the area's settings). The path is tracked forwards and backwards in the background and becomes position keyframes you can adjust; where it gets lost, track again from there.
