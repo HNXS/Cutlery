@@ -1097,6 +1097,10 @@ ApplicationWindow {
                 onTriggered: captionDialog.open()
             }
             MenuItem {
+                text: "Translate captions (AI)…"
+                onTriggered: translateDialog.open()
+            }
+            MenuItem {
                 text: "Import captions (SRT, VTT, ASS, TXT)…"
                 onTriggered: srtOpen.open()
             }
@@ -6928,6 +6932,65 @@ ApplicationWindow {
                     : pauseDialog.state.status === "stale" ? "The clip changed. Find pauses again."
                     : pauseDialog.state.status === "ready" ? (pauseDialog.state.count > 0 ? pauseDialog.state.count + (pauseDialog.state.count === 1 ? " pause, " : " pauses, ") + Number(pauseDialog.state.seconds).toFixed(1) + " s in total. A short gap is kept around speech." : "No pauses found. Try a higher threshold or shorter pauses.")
                     : "Raise the threshold if background noise hides the pauses."
+            }
+        }
+    }
+    // Caption translation: German to English or English to German, on this computer.
+    Dialog {
+        id: translateDialog
+        objectName: "translateDialog"
+        anchors.centerIn: parent
+        title: "Translate captions"
+        modal: true
+        width: 420
+        readonly property var state: win.s.translation || ({})
+        readonly property string target: translateTarget.currentIndex === 0 ? "en" : "de"
+        readonly property string missing: (state.missing || {})[target] || ""
+        readonly property bool busy: state.status === "translating"
+        footer: DialogButtonBox {
+            Button {
+                objectName: "translateStart"
+                text: "Translate"
+                enabled: translateDialog.missing === "" && !translateDialog.busy
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+                onClicked: editor.translateCaptions(translateDialog.target)
+            }
+            Button {
+                text: translateDialog.busy ? "Stop" : "Close"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                onClicked: translateDialog.busy ? editor.cancelTranslation() : translateDialog.close()
+            }
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 8
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: "Translates the selected titles, or else every caption on the “AI captions” track, and replaces their text (one undo step). Everything stays on this computer."
+            }
+            ComboBox {
+                id: translateTarget
+                objectName: "translateTarget"
+                Accessible.name: "Translate into"
+                Layout.fillWidth: true
+                model: ["German → English", "English → German"]
+            }
+            ProgressBar {
+                Layout.fillWidth: true
+                visible: translateDialog.busy
+                value: translateDialog.state.progress || 0
+            }
+            Label {
+                objectName: "translateStatus"
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                font.pixelSize: 11
+                color: translateDialog.state.status === "failed" || translateDialog.missing !== "" ? "#ec6f5a" : win.muted
+                text: translateDialog.missing !== "" ? translateDialog.missing + " Download the AI pack next to Cutlery.exe."
+                    : translateDialog.busy ? "Translating… " + Math.round((translateDialog.state.progress || 0) * 100) + "%"
+                    : translateDialog.state.status === "done" ? "Translated " + translateDialog.state.count + " captions ✓"
+                    : translateDialog.state.status === "failed" ? "Translation failed" : ""
             }
         }
     }

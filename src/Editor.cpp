@@ -190,6 +190,8 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
         whisper += ".exe";
 #endif
     }
+    m_aiWorker = worker;
+    m_aiModels = models;
     m_ai = new AiJobs(m_data + "/ai", executable("ffmpeg"), executable("ffprobe"), worker,
                       {{"matte", models + "/u2net_human_seg.onnx"},
                        {"upscale", models + "/realesr-general-x4v3.onnx"},
@@ -891,6 +893,12 @@ QVariantMap Editor::state() const {
             {"collect", m_collect},
             {"follow", m_follow},
             {"track", trackState()},
+            {"translation", [&] {
+                 auto state = m_translation;
+                 state["missing"] = QVariantMap{{"en", translationMissing("en")},
+                                                {"de", translationMissing("de")}};
+                 return state;
+             }()},
             {"speech", [&] {
                  auto state = m_speechState;
                  state["missing"] = m_speech->missing();
@@ -4544,6 +4552,138 @@ void Editor::spoken(const Speech::Result &result) {
     }
     m_speechState = {{"status", "done"}, {"count", placed}};
     m_status = placed == 1 ? QString("Added the speech") : QString("Added %1 speeches").arg(placed);
+    emit changed();
+}
+QString Editor::translationModel(const QString &language) const {
+    return m_aiModels + (language == "en" ? "/opus-mt-de-en" : "/opus-mt-en-de");
+}
+QString Editor::translationMissing(const QString &language) const {
+    if (language != "en" && language != "de")
+        return "Captions can be translated into English or German";
+    if (m_aiWorker.isEmpty() || !QFileInfo(m_aiWorker).isExecutable())
+        return "The AI worker (cutlery-ai) is missing from this build.";
+    const auto dir = translationModel(language);
+    for (const auto *file : {"encoder_model.onnx", "decoder_model.onnx", "source.spm",
+                             "vocab.json", "config.json"})
+        if (!QFileInfo(dir + "/" + file).isFile())
+            return QString("The AI pack is not installed: models/%1/%2 is missing.")
+                .arg(QFileInfo(dir).fileName(), file);
+    return {};
+}
+void Editor::translateCaptions(const QString &language) {
+    if (const auto why = translationMissing(language); !why.isEmpty())
+        return fail(why);
+    if (m_translator)
+        return fail("Captions are being translated already");
+    // The selected titles, or else every caption.
+    QStringList ids;
+    for (const auto &id : selection())
+        if (const auto *c = m_project.clip(id); c && c->assetId.isEmpty() && !c->text.trimmed().isEmpty())
+            ids << id;
+    if (ids.isEmpty())
+        for (const auto &c : m_project.clips)
+            if (c.assetId.isEmpty() && !c.text.trimmed().isEmpty() &&
+                m_project.trackSettings.value(c.track).name == captionTrackName)
+                ids << c.id;
+    if (ids.isEmpty())
+        return fail("There are no captions to translate: select titles or make captions first");
+    QStringList lines;
+    for (const auto &id : ids)
+        lines << m_project.clip(id)->text.simplified();
+    const auto work = m_data + "/cache/translate";
+    QDir().mkpath(work);
+    const auto input = work + "/input.txt", output = work + "/output.txt";
+    QFile file(input);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+        file.write((lines.join('\n') + '\n').toUtf8()) < 0)
+        return fail("Cannot write the captions for translation");
+    file.close();
+    QFile::remove(output);
+    auto *p = new QProcess(this);
+    m_translator = p;
+    m_translation = {{"status", "translating"}, {"progress", 0.}, {"language", language}};
+    auto log = std::make_shared<QByteArray>();
+    connect(p, &QProcess::readyReadStandardOutput, this, [this, p] {
+        while (p->canReadLine()) {
+            const auto parts = QString::fromUtf8(p->readLine()).trimmed().split(' ');
+            if (parts.size() == 3 && parts[0] == "progress" && parts[2].toDouble() > 0) {
+                m_translation["progress"] = parts[1].toDouble() / parts[2].toDouble();
+                emit changed();
+            }
+        }
+    });
+    connect(p, &QProcess::readyReadStandardError, this, [p, log] {
+        *log += p->readAllStandardError();
+        if (log->size() > 8192)
+            *log = log->right(4096);
+    });
+    auto done = [this, p, log, ids, lines, output, language](bool ok) {
+        if (m_translator != p)
+            return;
+        m_translator = nullptr;
+        p->deleteLater();
+        QFile result(output);
+        QStringList translated;
+        if (ok && result.open(QIODevice::ReadOnly)) {
+            auto text = QString::fromUtf8(result.readAll());
+            if (text.endsWith('\n'))
+                text.chop(1);
+            translated = text.split('\n');
+        }
+        if (!ok || translated.size() != lines.size()) {
+            m_translation = {{"status", "failed"}};
+            const auto messages = QString::fromUtf8(*log).trimmed().split('\n');
+            return fail("Translation failed" +
+                        (messages.isEmpty() || messages.last().isEmpty() ? QString()
+                                                                         : ": " + messages.last()));
+        }
+        int count = 0;
+        if (!mutate([&](Project &project) {
+                for (int i = 0; i < ids.size(); ++i) {
+                    auto *c = project.clip(ids[i]);
+                    if (!c || translated[i].trimmed().isEmpty())
+                        continue;
+                    if (project.trackSettings.value(c->track).locked)
+                        continue;
+                    // As many lines as before, broken where they are most even.
+                    const int rows = std::clamp(int(c->text.count('\n')) + 1, 1, 2);
+                    c->text = layoutCaption(translated[i].trimmed(), rows, 42);
+                    c->wordStarts.clear();
+                    ++count;
+                }
+                if (!count)
+                    throw std::runtime_error("Nothing could be translated");
+            })) {
+            m_translation = {{"status", "failed"}};
+            return;
+        }
+        m_translation = {{"status", "done"}, {"count", count}, {"language", language}};
+        m_status = QString("Translated %1 captions").arg(count);
+        emit changed();
+    };
+    connect(p, &QProcess::finished, this, [done](int code, QProcess::ExitStatus status) {
+        done(code == 0 && status == QProcess::NormalExit);
+    });
+    connect(p, &QProcess::errorOccurred, this, [done](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart)
+            done(false);
+    });
+    p->start(m_aiWorker, {"translate", "--model", translationModel(language), "--input", input,
+                          "--output", output});
+    m_status = "Translating captions…";
+    emit changed();
+}
+void Editor::cancelTranslation() {
+    if (!m_translator)
+        return;
+    auto *p = m_translator.data();
+    m_translator = nullptr;
+    p->disconnect(this);
+    p->kill();
+    p->waitForFinished(2000);
+    p->deleteLater();
+    m_translation = {};
+    m_status = "Translation cancelled";
     emit changed();
 }
 // The source seconds a clip shows, for face analysis.

@@ -1,5 +1,24 @@
 # Validation record
 
+## Windows portable build — 2026-10-10, caption translation (0.6 development)
+
+[GitHub Actions run 38076952079](https://github.com/HNXS/Cutlery/actions/runs/38076952079) on commit `586b5e46bc63073b412b667b24036ff5d439a77c` passed every step on its first attempt.
+
+New coverage:
+
+- **Model downloads:** `tools/Get-Models.ps1` fetched both Opus-MT model pairs, German–English and English–German. For each pair it fetched Xenova's int8 encoder and decoder plus Helsinki-NLP's `source.spm`, `vocab.json` and `config.json`. Every file matched its pinned SHA-256; the hashes come from the previous run, 38076269232.
+- **Engine test `translateWithRealModels`:** ran with the real models on Windows. A separate CI check fails the build if it is skipped.
+  - "Guten Morgen, wie geht es dir?" translates to English containing "morning" and "how".
+  - "Vielen Dank fürs Zuschauen." translates to English containing "thank".
+  - The English test sentences translate to German containing "Dank" and "Musik".
+- **Engine test `translateCaptions`:**
+  - The worker's SentencePiece tokenizer gives the same pieces as SentencePiece's own Python package for three fixture lines. The cases include NFKC normalisation and a run of unknown characters.
+  - With the stand-in copy translator:
+    - captions on the "AI captions" track are translated and laid out again, in one undo step;
+    - when a title is selected, only that title is translated;
+    - captions with no text and unsupported languages are refused.
+- **UI test `translateControls`:** the Translate captions dialog translates German → English. English → German is disabled and names the missing model folder.
+
 ## Windows portable build — 2026-10-10, masks that move (0.6 development)
 
 [GitHub Actions run 38058854231](https://github.com/HNXS/Cutlery/actions/runs/38058854231) on commit `fb9e97fd73f6458d72f5ab75be3fb4e59baef6bf` passed every step.

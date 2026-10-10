@@ -5,6 +5,7 @@
 #include "Thumbnails.h"
 #include "Tracker.h"
 #include "Speech.h"
+#include <QPointer>
 #include "AiJobs.h"
 #include "Captions.h"
 #include "Project.h"
@@ -291,6 +292,12 @@ class Editor final : public QObject {
     // speaking|done|failed, count}.
     Q_INVOKABLE void speak(const QString &text, const QString &voice, double speed = 1);
     Q_INVOKABLE void speakSelection(const QString &voice, double speed = 1);
+    // Translates captions into `language` ("en" from German, "de" from English) with the AI
+    // pack's Opus-MT models: the selected titles, or else every clip on the caption track. Their
+    // text is replaced in one undo step (word timing is dropped). State "translation": {status:
+    // translating|done|failed, progress, count, missing {en, de}}.
+    Q_INVOKABLE void translateCaptions(const QString &language);
+    Q_INVOKABLE void cancelTranslation();
     // Changes the canvas to width × height (e.g. 9:16 for Shorts) and zooms every full-frame
     // video and image to fill it; with the AI pack, videos then pan to keep the main face in
     // the picture.
@@ -548,6 +555,11 @@ class Editor final : public QObject {
     QVariantMap m_follow;
     QVariantMap m_track;
     Speech *m_speech = nullptr;
+    QString m_aiWorker, m_aiModels;
+    QPointer<QProcess> m_translator;
+    QVariantMap m_translation;
+    QString translationMissing(const QString &language) const;
+    QString translationModel(const QString &language) const;
     // Requests of the speech being made: request id → {frame, name, path, seconds}.
     QHash<QString, QVariantMap> m_speaking;
     QVariantMap m_speechState;

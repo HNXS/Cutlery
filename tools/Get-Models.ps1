@@ -47,6 +47,27 @@ Get-Content "$Destination/de_DE-thorsten-medium.MODEL_CARD.txt" | Where-Object {
 $stemsUrl = 'https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_HQ_3.onnx'
 $stemsSha = '317554b07fe1ea5279a77f2b1520a41ea4b93432560c4ffd08792c30fddf9adc'
 Get-Pinned $stemsUrl "$Destination/UVR-MDX-NET-Inst_HQ_3.onnx" $stemsSha
+# Caption translation: Opus-MT German-English and English-German (Marian models by the Helsinki
+# NLP group, CC-BY 4.0): the int8 ONNX encoder and decoder exported by Xenova (transformers.js),
+# with the original SentencePiece model, vocabulary and settings from Helsinki-NLP.
+$translation = @(
+    @{ pair='de-en'; files=@(
+        @{ url='https://huggingface.co/Xenova/opus-mt-de-en/resolve/main/onnx/encoder_model_quantized.onnx'; name='encoder_model.onnx'; sha='4cedda8f8c89b72a42b3c6cd1e7a27f2de24457093e3bf80cb3e46829641fcd8' },
+        @{ url='https://huggingface.co/Xenova/opus-mt-de-en/resolve/main/onnx/decoder_model_quantized.onnx'; name='decoder_model.onnx'; sha='e44c1c4b50e8f51e49d4d5e54a9af1550dc74763d4023644a38af62611e6efc9' },
+        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-de-en/resolve/main/source.spm'; name='source.spm'; sha='bbd1f495eea99c8e21ae086d9146e0fa7b096c3dfdd9ba07ab8b631889df5c9b' },
+        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-de-en/resolve/main/vocab.json'; name='vocab.json'; sha='0d70d89fee4a8b4ef99a56d712163baadcabd5600a597f71515547ee70306329' },
+        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-de-en/resolve/main/config.json'; name='config.json'; sha='89368ef76ea89581025cdf605caac75b8a22af2c1a90ec57c8a5001f10537eeb' }) },
+    @{ pair='en-de'; files=@(
+        @{ url='https://huggingface.co/Xenova/opus-mt-en-de/resolve/main/onnx/encoder_model_quantized.onnx'; name='encoder_model.onnx'; sha='15834b45fabd2dfb8c6c029b3ca3e7289aeefd90ece798ce42bcf548d1bd3b8d' },
+        @{ url='https://huggingface.co/Xenova/opus-mt-en-de/resolve/main/onnx/decoder_model_quantized.onnx'; name='decoder_model.onnx'; sha='75ef79aa9bde9e3dce9ca584c29507be5f464973f6c600c89ff419bc8de29ebc' },
+        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-en-de/resolve/main/source.spm'; name='source.spm'; sha='678f2a1177d8389f67b66299762dcc4fc567e89b07e212ba91b0c56daecf47ce' },
+        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-en-de/resolve/main/vocab.json'; name='vocab.json'; sha='0d70d89fee4a8b4ef99a56d712163baadcabd5600a597f71515547ee70306329' },
+        @{ url='https://huggingface.co/Helsinki-NLP/opus-mt-en-de/resolve/main/config.json'; name='config.json'; sha='41c7890e6f6c1f72c5c626569cfe739a8362080940edbb1747f25173f541653b' }) }
+)
+foreach ($t in $translation) {
+    New-Item -ItemType Directory -Force "$Destination/opus-mt-$($t.pair)" | Out-Null
+    foreach ($f in $t.files) { Get-Pinned $f.url "$Destination/opus-mt-$($t.pair)/$($f.name)" $f.sha }
+}
 python -m pip install --quiet onnx==1.17.0
 if ($LASTEXITCODE -ne 0) { throw 'Installing the onnx package failed' }
 python "$PSScriptRoot/convert-realesrgan.py" $weights "$Destination/realesr-general-x4v3.onnx"
@@ -92,5 +113,5 @@ foreach ($m in $faceModels) {
     @{ file='realesr-general-x4v3.onnx'; converted_from=$srUrl; source_sha256=$srSha; sha256=$srOnnx; license='BSD-3-Clause'; source='https://github.com/xinntao/Real-ESRGAN'; purpose='4x super-resolution for AI upscale' },
     @{ file='de_DE-thorsten-medium.onnx'; url="$voiceBase/de_DE-thorsten-medium.onnx"; sha256=$voiceSha; settings_sha256=$voiceJsonSha; license='Dataset CC0-1.0 (Thorsten-Voice); fine-tuned from the lessac voice per the model card'; source='https://github.com/thorstenMueller/Thorsten-Voice'; purpose='German voice for text to speech (Piper)' },
     @{ file='UVR-MDX-NET-Inst_HQ_3.onnx'; url=$stemsUrl; sha256=$stemsSha; license='MIT (credit Ultimate Vocal Remover and its developers)'; source='https://github.com/Anjok07/ultimatevocalremovergui'; purpose='voice and music separation' }
-) + @($faceModels | ForEach-Object { @{ file="$($_.name).onnx"; converted_from="mediapipe==0.10.18:$($_.entry)"; source_sha256=$_.sha256; sha256=$_.onnx; license='Apache-2.0'; source='https://github.com/google-ai-edge/mediapipe'; purpose='face, eye and iris landmarks for eye contact' } }) } | ConvertTo-Json -Depth 4 | Set-Content "$Destination/manifest.json" -Encoding utf8
+) + @($translation | ForEach-Object { @{ folder="opus-mt-$($_.pair)"; files=@($_.files | ForEach-Object { @{ file=$_.name; url=$_.url; sha256=$_.sha } }); license='CC-BY-4.0'; source='https://github.com/Helsinki-NLP/Opus-MT'; purpose='caption translation' } }) + @($faceModels | ForEach-Object { @{ file="$($_.name).onnx"; converted_from="mediapipe==0.10.18:$($_.entry)"; source_sha256=$_.sha256; sha256=$_.onnx; license='Apache-2.0'; source='https://github.com/google-ai-edge/mediapipe'; purpose='face, eye and iris landmarks for eye contact' } }) } | ConvertTo-Json -Depth 4 | Set-Content "$Destination/manifest.json" -Encoding utf8
 Write-Output (Resolve-Path $Destination).Path

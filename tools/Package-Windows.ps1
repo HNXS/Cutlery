@@ -64,6 +64,8 @@ if ($Models) {
     Copy-Item "$Models/u2net_human_seg.onnx","$Models/realesr-general-x4v3.onnx","$Models/ggml-large-v3-turbo-q5_0.bin" "$AiPackDir/models"
     Copy-Item "$Models/face_detection_short_range.onnx","$Models/face_landmark.onnx","$Models/iris_landmark.onnx" "$AiPackDir/models"
     Copy-Item "$Models/UVR-MDX-NET-Inst_HQ_3.onnx" "$AiPackDir/models"
+    Copy-Item "$Models/opus-mt-de-en","$Models/opus-mt-en-de" "$AiPackDir/models" -Recurse -Force
+    Copy-Item "$root/licenses/OPUS-MT-CC-BY-4.0.txt" "$AiPackDir/licenses"
     Copy-Item "$root/licenses/UVR-MDX-Net-MIT.txt" "$AiPackDir/licenses"
     Copy-Item "$root/licenses/Apache-2.0.txt" "$AiPackDir/licenses/MediaPipe-Apache-2.0.txt"
     if ($Whisper) { Copy-Item "$Whisper/ggml-silero-v6.2.0.bin" "$AiPackDir/models" }

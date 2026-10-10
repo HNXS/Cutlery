@@ -4538,6 +4538,120 @@ class EngineTest : public QObject {
         QVERIFY(!editor.state()["error"].toString().isEmpty());
         editor.clearError();
     }
+    void translateCaptions() {
+#ifdef CUTLERY_AI_WORKER
+        // The pieces match SentencePiece's own (from its Python package) for the fixture model,
+        // NFKC normalisation and runs of unknown characters included.
+        QTemporaryDir work;
+        QFile lines(work.filePath("lines.txt"));
+        QVERIFY(lines.open(QIODevice::WriteOnly));
+        lines.write("Guten Morgen, wie geht es dir?\n  Gr\xc3\xbc\xc3\x9f" "e   aus K\xc3\xb6ln == \xc2\xbc \xef\xac\x81x  \n"
+                    "Cutlery separates voice and music.\n");
+        lines.close();
+        run(CUTLERY_AI_WORKER, {"tokenize", "--model", CUTLERY_SOURCE_DIR "/tests/fixtures/translate-copy/source.spm",
+                                "--input", work.filePath("lines.txt"), "--output", work.filePath("pieces.txt")});
+        QFile pieces(work.filePath("pieces.txt"));
+        QVERIFY(pieces.open(QIODevice::ReadOnly));
+        QCOMPARE(QString::fromUtf8(pieces.readAll()).split('\n'),
+                 (QStringList{QString::fromUtf16(u"\u2581 G u t en \u2581 M or g en , \u2581 w i e \u2581 g e h t \u2581 es \u2581di r ?"),
+                              QString::fromUtf16(u"\u2581 G r \u00fc \u00df e \u2581a u s \u2581 K \u00f6 l n \u2581 == \u2581 1 \u2044 4 \u2581 f i x"),
+                              QString::fromUtf16(u"\u2581 Cutlery \u2581separate s \u2581voice \u2581and \u2581music ."),
+                              QString()}));
+        // The stand-in translator gives the text back as its pieces: unknown characters ("!")
+        // drop out, so a changed text shows the translation went through.
+        QTemporaryDir models;
+        QDir().mkpath(models.filePath("opus-mt-de-en"));
+        for (const auto *file : {"encoder_model.onnx", "decoder_model.onnx", "source.spm",
+                                 "vocab.json", "config.json"})
+            QVERIFY(QFile::copy(QString(CUTLERY_SOURCE_DIR "/tests/fixtures/translate-copy/") + file,
+                                models.filePath(QString("opus-mt-de-en/") + file)));
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+        qputenv("CUTLERY_AI_MODELS", models.path().toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        editor.configure(640, 360, 25, 1);
+        auto state = [&] { return editor.state()["translation"].toMap(); };
+        QCOMPARE(state()["missing"].toMap()["en"].toString(), QString());
+        QVERIFY(state()["missing"].toMap()["de"].toString().contains("opus-mt-en-de"));
+        editor.translateCaptions("en");
+        QVERIFY(editor.state()["error"].toString().contains("no captions"));
+        editor.clearError();
+        // Two captions on the caption track.
+        editor.addCaption();
+        const auto title = editor.state()["selectedId"].toString();
+        editor.setClip("text", "Kein Untertitel!");
+        const int top = editor.project().clip(title)->track;
+        editor.moveClip(title, 100, top);
+        editor.setTrack(top, "name", QString("AI captions"));
+        QCOMPARE(editor.project().trackSettings[top].name, QString("AI captions"));
+        editor.seek(0);
+        editor.addCaption();
+        const auto first = editor.state()["selectedId"].toString();
+        QVERIFY(first != title);
+        editor.setClip("text", "Grüße   aus Köln!\nDas Video beginnt.");
+        editor.select(QString());
+        editor.translateCaptions("en");
+        QCOMPARE(state()["status"].toString(), QString("translating"));
+        QTRY_COMPARE_WITH_TIMEOUT(state()["status"].toString(), QString("done"), 60000);
+        QCOMPARE(state()["count"].toInt(), 2);
+        QCOMPARE(editor.project().clip(first)->text, QString("Grüße aus Köln Das Video beginnt."));
+        QCOMPARE(editor.project().clip(title)->text, QString("Kein Untertitel"));
+        // One undo step.
+        editor.undo();
+        QCOMPARE(editor.project().clip(first)->text, QString("Grüße   aus Köln!\nDas Video beginnt."));
+        // Selected titles only.
+        editor.select(first);
+        editor.translateCaptions("en");
+        QTRY_COMPARE_WITH_TIMEOUT(state()["status"].toString(), QString("done"), 60000);
+        QCOMPARE(state()["count"].toInt(), 1);
+        QCOMPARE(editor.project().clip(title)->text, QString("Kein Untertitel!"));
+        editor.translateCaptions("fr");
+        QVERIFY(editor.state()["error"].toString().contains("English or German"));
+#else
+        QSKIP("Needs the AI worker");
+#endif
+    }
+    void translateWithRealModels() {
+#if defined(CUTLERY_AI_WORKER) && defined(CUTLERY_TEST_MODELS)
+        const QString models = CUTLERY_TEST_MODELS;
+        if (!QFileInfo::exists(models + "/opus-mt-de-en/encoder_model.onnx"))
+            QSKIP("The translation models are not in the test models folder");
+        QTemporaryDir dir;
+        auto translate = [&](const QString &model, const QStringList &lines) {
+            QFile in(dir.filePath("in.txt"));
+            if (!in.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                return QStringList();
+            in.write((lines.join('\n') + '\n').toUtf8());
+            in.close();
+            run(CUTLERY_AI_WORKER, {"translate", "--model", models + "/" + model, "--input",
+                                    dir.filePath("in.txt"), "--output", dir.filePath("out.txt")});
+            QFile out(dir.filePath("out.txt"));
+            if (!out.open(QIODevice::ReadOnly))
+                return QStringList();
+            return QString::fromUtf8(out.readAll()).trimmed().split('\n');
+        };
+        const auto english = translate("opus-mt-de-en", {"Guten Morgen, wie geht es dir?",
+                                                         "Vielen Dank fürs Zuschauen."});
+        qDebug() << english;
+        QCOMPARE(english.size(), 2);
+        QVERIFY2(english[0].contains("morning", Qt::CaseInsensitive) &&
+                     english[0].contains("how", Qt::CaseInsensitive),
+                 qPrintable(english[0]));
+        QVERIFY2(english[1].contains("thank", Qt::CaseInsensitive), qPrintable(english[1]));
+        const auto german = translate("opus-mt-en-de", {"Thank you very much for watching.",
+                                                        "The music plays quietly in the background."});
+        qDebug() << german;
+        QCOMPARE(german.size(), 2);
+        QVERIFY2(german[0].contains("Danke", Qt::CaseInsensitive) ||
+                     german[0].contains("Dank", Qt::CaseInsensitive),
+                 qPrintable(german[0]));
+        QVERIFY2(german[1].contains("Musik"), qPrintable(german[1]));
+#else
+        QSKIP("Needs the AI worker and the AI pack's models (CUTLERY_TEST_MODELS)");
+#endif
+    }
     void separateVoiceAndMusic() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

@@ -1,0 +1,14 @@
+Opus-MT translation models (AI pack: models/opus-mt-de-en, models/opus-mt-en-de)
+
+German-English and English-German Marian NMT models trained by the Language Technology Research
+Group at the University of Helsinki on OPUS data:
+  Jörg Tiedemann and Santhosh Thottingal. 2020. OPUS-MT — Building open translation services for
+  the World. Proceedings of the 22nd Annual Conference of the European Association for Machine
+  Translation (EAMT), Lisbon, Portugal.
+Source: https://github.com/Helsinki-NLP/Opus-MT
+Models: https://huggingface.co/Helsinki-NLP/opus-mt-de-en, https://huggingface.co/Helsinki-NLP/opus-mt-en-de
+ONNX export (int8): https://huggingface.co/Xenova/opus-mt-de-en, https://huggingface.co/Xenova/opus-mt-en-de
+
+Licensed under the Creative Commons Attribution 4.0 International licence (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/legalcode
+The ONNX files are the models converted to ONNX and quantised to 8 bits; no other changes.
