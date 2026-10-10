@@ -4,6 +4,7 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **Translate captions:** Captions › Translate captions (AI) turns German captions into English or English ones into German, on this computer, with the open Opus-MT models from the AI pack; one undo step puts the original back.
 - **Masks that move:** a free mask has a position (Video › Mask › Mask position) that can be keyframed, and **Track the mask** makes it follow what it surrounds in the video, e.g. to keep one moving person or object visible (or hidden with Invert).
 - **Voice and music apart:** Audio › Clean-up › Voice and music plays a clip's voice alone (speech without background music) or everything but the voice (karaoke, music without speech). An AI model from the AI pack separates the sound on this computer, faster with a graphics card.
 - **German text to speech:** type a text under Audio › Text to speech (or press Read aloud on a title) and a German voice (Thorsten, from the AI pack) speaks it on this computer; it lands as an audio clip at the playhead. Speed adjustable; other Piper voices can be added to the models folder.

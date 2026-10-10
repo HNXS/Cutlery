@@ -130,6 +130,11 @@ jobs:
           # Text to speech ran with the real Piper and voice, not skipped.
           build/bin/Release/cutlery_tests.exe textToSpeech -o build/tts.txt,txt | Out-Null
           $speech = Get-Content build/tts.txt -Raw
+          # Caption translation ran with the real Opus-MT models, not skipped.
+          build/bin/Release/cutlery_tests.exe translateWithRealModels -o build/translate.txt,txt | Out-Null
+          $translation = Get-Content build/translate.txt -Raw
+          Write-Output $translation
+          if ($translation -notmatch 'PASS   : EngineTest::translateWithRealModels\(\)') { Write-Output "::error::Caption translation was not tested with the real models"; throw 'Caption translation was not tested with the real models' }
           if ($speech -notmatch 'PASS   : EngineTest::textToSpeech\(\)') { Write-Output $speech; Write-Output "::error::Text to speech was not tested with Piper"; throw 'Text to speech was not tested with Piper' }
           $p = Start-Process build/bin/Release/Cutlery.exe -ArgumentList '--smoke-test' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw 'QML startup failed' }

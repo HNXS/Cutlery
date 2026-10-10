@@ -1209,6 +1209,60 @@ class UiTest : public QObject {
         QVERIFY(!stems->isEnabled());
 #endif
     }
+    void translateControls() {
+        // Captions › Translate captions: with the stand-in translator for German → English the
+        // dialog translates; English → German has no model here and says so.
+        QTemporaryDir dir;
+#ifdef CUTLERY_AI_WORKER
+        QTemporaryDir models;
+        QDir().mkpath(models.filePath("opus-mt-de-en"));
+        for (const auto *file : {"encoder_model.onnx", "decoder_model.onnx", "source.spm",
+                                 "vocab.json", "config.json"})
+            QVERIFY(QFile::copy(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/tests/fixtures/translate-copy/" + file,
+                                models.filePath(QString("opus-mt-de-en/") + file)));
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+        qputenv("CUTLERY_AI_MODELS", models.path().toUtf8());
+#else
+        qputenv("CUTLERY_AI_MODELS", dir.path().toUtf8());
+#endif
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        editor.configure(640, 360, 25, 1);
+        editor.addCaption();
+        const auto caption = editor.state()["selectedId"].toString();
+        editor.setClip("text", "Grüße aus Köln!");
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        auto *dialog = window->findChild<QObject *>("translateDialog");
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        auto *start = findItem(window->contentItem(), "translateStart");
+        QTRY_VERIFY(start && start->isVisible());
+        auto *target = findItem(window->contentItem(), "translateTarget");
+        auto *status = findItem(window->contentItem(), "translateStatus");
+        QVERIFY(target && status);
+        target->setProperty("currentIndex", 1);
+        QTRY_VERIFY(!start->isEnabled());
+        QVERIFY(status->property("text").toString().contains("opus-mt-en-de"));
+        target->setProperty("currentIndex", 0);
+#ifdef CUTLERY_AI_WORKER
+        QTRY_VERIFY(start->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(start, "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(status->property("text").toString().contains("Translated 1"), 60000);
+        QCOMPARE(editor.project().clip(caption)->text, QString("Grüße aus Köln"));
+#else
+        QTRY_VERIFY(!start->isEnabled());
+#endif
+    }
     void presenterControls() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;

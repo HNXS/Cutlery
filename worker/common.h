@@ -107,4 +107,6 @@ int transcribe(const QHash<QString, QString> &);
 int eyecontact(const QHash<QString, QString> &);
 int faces(const QHash<QString, QString> &);
 int separate(const QHash<QString, QString> &);
+int translate(const QHash<QString, QString> &);
+int tokenize(const QHash<QString, QString> &);
 } // namespace worker
