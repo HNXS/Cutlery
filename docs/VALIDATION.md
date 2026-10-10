@@ -1,5 +1,21 @@
 # Validation record
 
+## Windows portable build — 2026-10-10, several open projects (0.6 development)
+
+[GitHub Actions run 38024566775](https://github.com/HNXS/Cutlery/actions/runs/38024566775) on commit `0ee885121a49a5cfc74163c3b5f60c12f6390068` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `openProjects`:**
+  - An untouched project is replaced, not kept.
+  - A second project has its own timeline and history.
+  - Switching back restores the clips, selection, playhead and undo.
+  - Opening a project that is open switches to it.
+  - Closing another project, or the shown one.
+  - At most 8 projects are open, and closing the last one leaves a new empty one.
+- **Engine test `keyPickerMarkersStabilizeAndSound`:** opening the file of the shown, changed project is refused until that project is closed.
+- **UI test `keyframeControls`:** the tabs appear for a second project. A click switches projects and × closes one.
+
 ## Windows portable build — 2026-10-09, frame rate of a project with clips (0.6 development)
 
 [GitHub Actions run 37993929900](https://github.com/HNXS/Cutlery/actions/runs/37993929900) on commit `99f40dfa6999872eb618ac022d7333ace5dbaa86` passed every step on its first attempt.

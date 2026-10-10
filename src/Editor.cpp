@@ -775,6 +775,24 @@ QVariantMap Editor::state() const {
     return {{"name", m_project.name},
             {"path", m_path},
             {"dirty", m_dirty},
+            {"projects", [this] {
+                 QVariantList list;
+                 for (int i = 0; i < m_open.size(); ++i) {
+                     const bool current = i == m_current;
+                     const auto &o = m_open[i];
+                     const auto &nest = current ? m_nest : o.nest;
+                     const auto &project = current ? m_project : o.project;
+                     list << QVariantMap{
+                         {"name", nest.isEmpty() ? project.name : nest.first().parent.name},
+                         {"path", current ? m_path : o.path},
+                         {"dirty", current ? m_dirty : o.dirty},
+                         {"current", current}};
+                 }
+                 return list;
+             }()},
+            {"anyDirty", m_dirty || std::any_of(m_open.begin(), m_open.end(), [&](const OpenProject &o) {
+                             return &o != &m_open[m_current] && o.dirty;
+                         })},
             {"selected", selected},
             {"selectedId", m_selected},
             {"selectedIds", selection()},
@@ -1007,11 +1025,108 @@ void Editor::removeTemplate(const QString &name) {
     listTemplates();
     emit changed();
 }
+bool Editor::blankProject() const {
+    // Nothing to lose but its settings.
+    return m_path.isEmpty() && m_nest.isEmpty() && m_project.clips.empty() &&
+           m_project.assets.empty();
+}
+void Editor::stashProject() {
+    auto &o = m_open[m_current];
+    o.project = m_project;
+    o.path = m_path;
+    o.selected = m_selected;
+    o.also = m_also;
+    o.importFolder = m_importFolder;
+    o.undo = m_undo;
+    o.redo = m_redo;
+    o.nest = m_nest;
+    o.playhead = m_playhead;
+    o.dirty = m_dirty;
+}
+void Editor::showProject(int index) {
+    m_current = index;
+    auto o = m_open[index];
+    m_project = std::move(o.project);
+    m_path = o.path;
+    m_selected = o.selected;
+    m_also = o.also;
+    m_importFolder = o.importFolder;
+    m_undo = std::move(o.undo);
+    m_redo = std::move(o.redo);
+    m_nest = std::move(o.nest);
+    m_playhead = o.playhead;
+    m_dirty = o.dirty;
+    m_maskDraft = {};
+    m_saveTimer.stop();
+    m_resumeTimer.stop();
+    stopPlayback();
+    m_previewUrl.clear();
+    ++m_revision; // results found for the other project's clips are stale
+    m_status = "Showing " + (m_nest.isEmpty() ? m_project.name : m_nest.first().parent.name);
+    m_previewTimer.start();
+    renderNested();
+    m_analysis->setAssets(m_project.assets);
+    m_thumbnails->setAssets(m_project.assets);
+    emit projectChanged();
+    emit changed();
+}
+bool Editor::addProjectSlot() {
+    if (blankProject())
+        return true;
+    if (m_busy) {
+        fail("Wait for the export or conversion to finish");
+        return false;
+    }
+    if (m_open.size() >= 8) {
+        fail("Close a project first: 8 can be open at once");
+        return false;
+    }
+    stashProject();
+    m_open.append(OpenProject{});
+    m_current = int(m_open.size()) - 1;
+    return true;
+}
+void Editor::switchProject(int index) {
+    if (index < 0 || index >= m_open.size() || index == m_current)
+        return;
+    if (m_busy || m_importing)
+        return fail(m_busy ? "Wait for the export or conversion to finish"
+                           : "Wait for media import to finish");
+    stashProject();
+    showProject(index);
+}
+void Editor::closeProject(int index) {
+    if (index < 0 || index >= m_open.size())
+        return;
+    if (index == m_current && (m_busy || m_importing))
+        return fail(m_busy ? "Wait for the export or conversion to finish"
+                           : "Wait for media import to finish");
+    if (m_open.size() == 1) {
+        // The last one: a new empty project takes its place.
+        m_open[0] = OpenProject{};
+        applyPreferences(m_open[0].project);
+        showProject(0);
+        m_status = "New project";
+        emit changed();
+        return;
+    }
+    if (index != m_current) {
+        m_open.removeAt(index);
+        if (index < m_current)
+            --m_current;
+        emit changed();
+        return;
+    }
+    m_open.removeAt(index);
+    showProject(std::min(index, int(m_open.size()) - 1));
+}
 void Editor::newProject() {
     if (m_importing) {
         fail("Wait for media import to finish");
         return;
     }
+    if (!addProjectSlot())
+        return;
     cancelJob();
     m_saveTimer.stop();
     m_project = Project{};
@@ -1034,13 +1149,42 @@ void Editor::newProject() {
     emit changed();
 }
 bool Editor::openProject(const QUrl &url) {
+    try {
+        return openProjectFile(localPath(url), false);
+    } catch (const std::exception &e) {
+        fail(QString::fromUtf8(e.what()));
+        return false;
+    }
+}
+bool Editor::openProjectFile(const QString &path, bool replaceCurrent) {
     if (m_importing) {
         fail("Wait for media import to finish");
         return false;
     }
     try {
-        const auto path = localPath(url);
+        if (!replaceCurrent) {
+            // A project that is open already is shown, not opened twice; the shown one is read
+            // again from its file unless that would lose unsaved changes.
+            const auto wanted = QFileInfo(path).absoluteFilePath();
+            for (int i = 0; i < m_open.size(); ++i) {
+                const auto &open = i == m_current ? m_path : m_open[i].path;
+                if (open.isEmpty() || QFileInfo(open).absoluteFilePath() != wanted)
+                    continue;
+                if (i == m_current && m_dirty) {
+                    fail(QFileInfo(path).fileName() + " is open with unsaved changes: save or close it first");
+                    return false;
+                }
+                if (i == m_current) {
+                    replaceCurrent = true;
+                    break;
+                }
+                switchProject(i);
+                return i == m_current;
+            }
+        }
         auto p = loadProject(path);
+        if (!replaceCurrent && !addProjectSlot())
+            return false;
         cancelJob();
         m_saveTimer.stop();
         m_project = std::move(p);
@@ -1344,7 +1488,7 @@ bool Editor::restoreBackup(const QString &file) {
         QFile::remove(path);
         if (!QFile::rename(path + ".restoring", path))
             throw std::runtime_error("Cannot replace the project file");
-        if (!openProject(QUrl::fromLocalFile(path)))
+        if (!openProjectFile(path, true))
             return false;
         m_status = "Restored the version from " + QFileInfo(file).completeBaseName().left(15);
         emit changed();
