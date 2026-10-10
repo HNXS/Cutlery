@@ -1,5 +1,22 @@
 # Validation record
 
+## Windows portable build — 2026-10-10, masks that move (0.6 development)
+
+[GitHub Actions run 38058854231](https://github.com/HNXS/Cutlery/actions/runs/38058854231) on commit `fb9e97fd73f6458d72f5ab75be3fb4e59baef6bf` passed every step.
+
+The previous commit (`6bd1c07`, run 38057815771) failed once in the first ctest run of the interface tests. That run reported no failing check. Running the interface tests again in the same job passed all 21, and this commit only adds diagnostics for that case: the results of the first run are now kept and reported.
+
+New coverage:
+
+- **Engine test `trackedMask`:**
+  - A square free mask on a white picture moves by its static Move X.
+  - Keyframes from 0 to 20 % move it between frames 0 and 20, and the inverted mask's hole moves with them.
+  - The keyframes survive saving.
+  - Tracking a badge moving over a video keeps the mask within 3 pixels of the badge's path, from 0 to 2.96 s.
+  - A rendered frame shows the badge through the moved mask and black where the mask started.
+  - One undo removes the keyframes; without a mask, tracking is refused.
+- **UI test `aiCutoutControls`:** once a mask is drawn, "Mask position" appears and Move X can be typed. "Track the mask" is shown for the video.
+
 ## Windows portable build — 2026-10-10, voice and music apart (0.6 development)
 
 [GitHub Actions run 38053369589](https://github.com/HNXS/Cutlery/actions/runs/38053369589) on commit `e148a4e96f7a71d253c2fbb56dcb91b3df0ad499` passed every step on its first attempt.
