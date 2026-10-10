@@ -1311,7 +1311,8 @@ bool Editor::save(const QUrl &url) {
 static QVariantMap defaultPreferences() {
     return {{"width", 1920},     {"height", 1080},  {"fpsN", 30},
             {"fpsD", 1},         {"stillSeconds", 5.}, {"backups", 20},
-            {"startScreen", true}, {"cacheGB", 20}, {"undoSteps", 60}, {"proxiesOnImport", false}};
+            {"startScreen", true}, {"cacheGB", 20}, {"undoSteps", 60}, {"proxiesOnImport", false},
+            {"proxyHeight", 540}};
 }
 // The valid preferences in `values`, over `base`; throws on an invalid value.
 static QVariantMap checkedPreferences(const QVariantMap &base, const QVariantMap &values) {
@@ -1339,6 +1340,9 @@ static QVariantMap checkedPreferences(const QVariantMap &base, const QVariantMap
     const int cache = p["cacheGB"].toInt();
     if (cache < 1 || cache > 2000)
         throw std::runtime_error("The cache limit must be 1–2000 GB");
+    const int proxy = p["proxyHeight"].toInt();
+    if (proxy != 540 && proxy != 720)
+        throw std::runtime_error("Editing proxies are 540 or 720 lines high");
     return {{"width", w},
             {"height", h},
             {"fpsN", n},
@@ -1348,7 +1352,8 @@ static QVariantMap checkedPreferences(const QVariantMap &base, const QVariantMap
             {"startScreen", p["startScreen"].toBool()},
             {"cacheGB", cache},
             {"undoSteps", undo},
-            {"proxiesOnImport", p["proxiesOnImport"].toBool()}};
+            {"proxiesOnImport", p["proxiesOnImport"].toBool()},
+            {"proxyHeight", proxy}};
 }
 void Editor::loadPreferences() {
     m_prefs = defaultPreferences();
@@ -3837,14 +3842,18 @@ QVariantMap Editor::imageSequence(const QString &file) {
 // Proxies are named after the original's fingerprint, so an edited or replaced file gets a new
 // one; they belong to this computer and are not part of the project.
 QString Editor::proxyPath(const Asset &a) const {
-    return m_data + "/proxies/" + MediaAnalysis::fingerprint(a).left(24) + "-540.mov";
+    return m_data + "/proxies/" + MediaAnalysis::fingerprint(a).left(24) +
+           QString("-%1.mov").arg(proxyHeight());
+}
+int Editor::proxyHeight() const {
+    return m_prefs.value("proxyHeight").toInt() == 720 ? 720 : 540;
 }
 void Editor::makeProxies(const QStringList &assetIds) {
     int added = 0;
     for (const auto &a : m_project.assets) {
         if (!assetIds.isEmpty() ? !assetIds.contains(a.id) : a.height <= 1080)
             continue;
-        if (a.isNested() || a.kind != "video" || a.height <= 540 || !QFileInfo(a.path).isFile() ||
+        if (a.isNested() || a.kind != "video" || a.height <= proxyHeight() || !QFileInfo(a.path).isFile() ||
             QFileInfo::exists(proxyPath(a)) || m_proxyQueue.contains(a.id) || m_proxyMaking == a.id)
             continue;
         m_proxyQueue << a.id;
@@ -3920,11 +3929,12 @@ void Editor::makeNextProxy() {
                 complete(false);
         });
         QFile::remove(temp);
-        // 540 lines, the original's frame times and sound; ProRes Proxy decodes quickly.
+        // 540 (or 720) lines, the original's frame times and sound; ProRes Proxy decodes quickly.
         process->start(executable("ffmpeg"),
                        {"-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-progress", "pipe:1",
                         "-i", a->path, "-map", "0:v:0", "-map", "0:a:0?", "-vf",
-                        "scale=-2:540:flags=bicubic,format=yuv422p10le", "-fps_mode", "passthrough",
+                        QString("scale=-2:%1:flags=bicubic,format=yuv422p10le").arg(proxyHeight()),
+                        "-fps_mode", "passthrough",
                         "-c:v", "prores_ks", "-profile:v", "0", "-c:a", "pcm_s16le", "-ar", "48000",
                         temp});
         return;
@@ -3944,9 +3954,12 @@ void Editor::deleteProxies() {
     if (m_proxyProcess)
         m_proxyProcess->waitForFinished(3000);
     int removed = 0;
+    // Both sizes, so a proxy made before the size preference changed goes too.
     for (const auto &a : m_project.assets)
-        if (!a.isNested() && a.kind == "video" && QFile::remove(proxyPath(a)))
-            ++removed;
+        if (!a.isNested() && a.kind == "video")
+            for (const auto *size : {"-540.mov", "-720.mov"})
+                removed += QFile::remove(m_data + "/proxies/" +
+                                         MediaAnalysis::fingerprint(a).left(24) + size);
     m_status = removed ? QString("Removed %1 prox%2").arg(removed).arg(removed == 1 ? "y" : "ies")
                        : QString("No proxies to remove");
     m_previewTimer.start();
@@ -4500,6 +4513,23 @@ void Editor::speakSelection(const QString &voice, double speed) {
         return fail("Select a title to read aloud");
     startSpeech(items, voice, speed);
 }
+QStringList Editor::captionIds() const {
+    QStringList ids;
+    for (const auto &c : m_project.clips)
+        if (c.assetId.isEmpty() && !c.text.trimmed().isEmpty() &&
+            m_project.trackSettings.value(c.track).name == captionTrackName)
+            ids << c.id;
+    return ids;
+}
+void Editor::speakCaptions(const QString &voice, double speed) {
+    QVector<std::pair<qint64, QString>> items;
+    for (const auto &id : captionIds())
+        if (const auto *c = m_project.clip(id); c && !Speech::spokenText(c->text).isEmpty())
+            items.push_back({c->start, c->text});
+    if (items.isEmpty())
+        return fail("There are no captions to read aloud: make captions first");
+    startSpeech(items, voice, speed);
+}
 void Editor::startSpeech(const QVector<std::pair<qint64, QString>> &items, const QString &voice,
                          double speed) {
     if (!m_speaking.isEmpty())
@@ -4581,10 +4611,7 @@ void Editor::translateCaptions(const QString &language) {
         if (const auto *c = m_project.clip(id); c && c->assetId.isEmpty() && !c->text.trimmed().isEmpty())
             ids << id;
     if (ids.isEmpty())
-        for (const auto &c : m_project.clips)
-            if (c.assetId.isEmpty() && !c.text.trimmed().isEmpty() &&
-                m_project.trackSettings.value(c.track).name == captionTrackName)
-                ids << c.id;
+        ids = captionIds();
     if (ids.isEmpty())
         return fail("There are no captions to translate: select titles or make captions first");
     QStringList lines;

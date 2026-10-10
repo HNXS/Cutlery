@@ -2507,6 +2507,15 @@ ApplicationWindow {
                                             ToolTip.visible: hovered
                                             ToolTip.text: "Speaks the text with the chosen voice on this computer and adds it at the playhead on a free track"
                                         }
+                                        Action {
+                                            objectName: "speakCaptions"
+                                            Layout.fillWidth: true
+                                            enabled: speechPanel.ready && !speechPanel.busy
+                                            text: "Read all captions aloud"
+                                            onClicked: editor.speakCaptions(win.currentVoice, win.speechSpeed)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Speaks every caption on the “AI captions” track at its start, e.g. as a German voice-over after translating them"
+                                        }
                                     }
                                     // Sound effects by category: a click adds one at the playhead. Made
                                     // once and hidden on other tabs: destroying the tiles while the panel
@@ -4847,6 +4856,32 @@ ApplicationWindow {
                                     ToolTip.text: "How long the frozen picture lasts (0.1–60 s)"
                                 }
                             }
+                            // How subtle a change counts as a new shot.
+                            RowLayout {
+                                Layout.fillWidth: true
+                                visible: (win.selection.video === true && win.selection.reverse !== true) && (win.onTab("more"))
+                                Label {
+                                    text: "Sensitivity"
+                                    color: win.muted
+                                }
+                                Slider {
+                                    id: sceneSensitivity
+                                    objectName: "sceneSensitivity"
+                                    Accessible.name: "Scene change sensitivity"
+                                    Layout.fillWidth: true
+                                    from: 0
+                                    to: 1
+                                    stepSize: .05
+                                    value: .5
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Higher finds subtler cuts (e.g. between similar shots); lower only clear changes"
+                                }
+                                Label {
+                                    text: Math.round(sceneSensitivity.value * 100) + "%"
+                                    font.pixelSize: 11
+                                    Layout.preferredWidth: 36
+                                }
+                            }
                             Action {
                                 objectName: "splitScenes"
                                 Layout.fillWidth: true
@@ -4854,7 +4889,7 @@ ApplicationWindow {
                                 readonly property bool finding: (win.s.scenes || {}).status === "finding"
                                 enabled: win.selection.locked !== true && !finding
                                 text: finding ? "Finding scene changes…" : "Split at scene changes"
-                                onClicked: editor.splitAtScenes(0.5)
+                                onClicked: editor.splitAtScenes(sceneSensitivity.value)
                                 ToolTip.visible: hovered
                                 ToolTip.text: "Cuts the clip into its shots, e.g. a long recording or a downloaded video. Undo restores it."
                             }
@@ -6455,6 +6490,7 @@ ApplicationWindow {
             prefBackups.value = prefs.backups ?? 20;
             prefStart.checked = prefs.startScreen !== false;
             prefProxies.checked = prefs.proxiesOnImport === true;
+            prefProxySize.currentIndex = prefs.proxyHeight === 720 ? 1 : 0;
             prefCache.value = prefs.cacheGB ?? 20;
             prefUndo.value = prefs.undoSteps ?? 60;
             cacheUsage = editor.cacheUsage();
@@ -6514,6 +6550,16 @@ ApplicationWindow {
                 ToolTip.visible: hovered
                 ToolTip.text: "Small copies the preview plays instead, made in the background; exports use the originals"
             }
+            Label { text: "Proxy size" }
+            ComboBox {
+                id: prefProxySize
+                objectName: "prefProxySize"
+                Accessible.name: "Proxy size"
+                Layout.fillWidth: true
+                model: ["540 lines (smallest, fastest)", "720 lines (sharper)"]
+                ToolTip.visible: hovered
+                ToolTip.text: "Height of editing proxies made from now on"
+            }
             Label { text: "Undo steps" }
             SpinBox {
                 id: prefUndo
@@ -6559,7 +6605,7 @@ ApplicationWindow {
         }
         onAccepted: {
             const f = win.projectFormats[prefFormat.currentIndex], r = win.frameRates[prefRate.currentIndex];
-            editor.setPreferences({ width: f.w, height: f.h, fpsN: r.n, fpsD: r.d, stillSeconds: prefStill.value / 10, backups: prefBackups.value, startScreen: prefStart.checked, proxiesOnImport: prefProxies.checked, cacheGB: prefCache.value, undoSteps: prefUndo.value });
+            editor.setPreferences({ width: f.w, height: f.h, fpsN: r.n, fpsD: r.d, stillSeconds: prefStill.value / 10, backups: prefBackups.value, startScreen: prefStart.checked, proxiesOnImport: prefProxies.checked, proxyHeight: prefProxySize.currentIndex === 1 ? 720 : 540, cacheGB: prefCache.value, undoSteps: prefUndo.value });
         }
     }
     // Names a template made from the current project.

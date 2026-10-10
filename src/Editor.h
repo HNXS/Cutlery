@@ -102,8 +102,8 @@ class Editor final : public QObject {
     Q_INVOKABLE void removeTemplate(const QString &name);
     // App-wide settings (state "preferences"): width, height, fpsN, fpsD of new projects,
     // stillSeconds of imported pictures, backups kept per project, startScreen, proxiesOnImport
-    // (editing proxies for imported videos over 1080p), cacheGB (the
-    // cache limit). Saved at once.
+    // (editing proxies for imported videos over 1080p), proxyHeight (540 or 720 lines), cacheGB
+    // (the cache limit). Saved at once.
     Q_INVOKABLE void setPreferences(const QVariantMap &values);
     // Size of the waveform, thumbnail and nested-sequence caches: bytes, files.
     Q_INVOKABLE QVariantMap cacheUsage() const;
@@ -292,6 +292,8 @@ class Editor final : public QObject {
     // speaking|done|failed, count}.
     Q_INVOKABLE void speak(const QString &text, const QString &voice, double speed = 1);
     Q_INVOKABLE void speakSelection(const QString &voice, double speed = 1);
+    // Every caption on the caption track, each spoken at its start (e.g. after translating them).
+    Q_INVOKABLE void speakCaptions(const QString &voice, double speed = 1);
     // Translates captions into `language` ("en" from German, "de" from English) with the AI
     // pack's Opus-MT models: the selected titles, or else every clip on the caption track. Their
     // text is replaced in one undo step (word timing is dropped). State "translation": {status:
@@ -559,6 +561,8 @@ class Editor final : public QObject {
     QPointer<QProcess> m_translator;
     QVariantMap m_translation;
     QString translationMissing(const QString &language) const;
+    // Text clips on the caption track ("AI captions").
+    QStringList captionIds() const;
     QString translationModel(const QString &language) const;
     // Requests of the speech being made: request id → {frame, name, path, seconds}.
     QHash<QString, QVariantMap> m_speaking;
@@ -656,6 +660,7 @@ class Editor final : public QObject {
     double m_proxyProgress = 0;
     bool m_useProxies = true;
     QString proxyPath(const Asset &a) const;
+    int proxyHeight() const; // preference "proxyHeight": 540 or 720
     void makeNextProxy();
     QStringList m_nestedFailed; // cache files that could not be rendered this session
     QString nestedPath(const QJsonObject &content) const;

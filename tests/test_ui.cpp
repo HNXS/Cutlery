@@ -628,12 +628,14 @@ class UiTest : public QObject {
         QCOMPARE(format->property("currentIndex").toInt(), 0); // Full HD
         format->setProperty("currentIndex", 4);                 // square
         findItem(window->contentItem(), "prefBackups")->setProperty("value", 5);
+        findItem(window->contentItem(), "prefProxySize")->setProperty("currentIndex", 1);
         QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
         auto prefs = editor.state()["preferences"].toMap();
         QCOMPARE(prefs["width"].toInt(), 1080);
         QCOMPARE(prefs["height"].toInt(), 1080);
         QCOMPARE(prefs["backups"].toInt(), 5);
-        editor.setPreferences({{"width", 1920}, {"height", 1080}, {"backups", 20}});
+        QCOMPARE(prefs["proxyHeight"].toInt(), 720);
+        editor.setPreferences({{"width", 1920}, {"height", 1080}, {"backups", 20}, {"proxyHeight", 540}});
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void nestedSequenceUi() {
@@ -731,6 +733,10 @@ class UiTest : public QObject {
         page(window, "more");
         auto *language = findItem(window->contentItem(), "wordLanguage");
         QTRY_VERIFY(language && language->isVisible());
+        // Scene changes are split with an adjustable sensitivity, 50 % to start with.
+        auto *sensitivity = findItem(window->contentItem(), "sceneSensitivity");
+        QVERIFY(sensitivity && sensitivity->isVisible());
+        QCOMPARE(sensitivity->property("value").toDouble(), .5);
         language->setProperty("currentIndex", 1);
         QVERIFY(QMetaObject::invokeMethod(findItem(window->contentItem(), "transcribeClip"), "clicked"));
         QQuickItem *word = nullptr;
@@ -1130,6 +1136,7 @@ class UiTest : public QObject {
         }
         QVERIFY(!findItem(window->contentItem(), "speechMissing")->isVisible());
         QVERIFY(findItem(window->contentItem(), "speechVoice")->isVisible());
+        QVERIFY(findItem(window->contentItem(), "speakCaptions")->isVisible());
         QVERIFY(!speak->isEnabled());
         text->setProperty("text", "Willkommen bei Cutlery.");
         QTRY_VERIFY(speak->isEnabled());

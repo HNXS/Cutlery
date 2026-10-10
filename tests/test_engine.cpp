@@ -2046,6 +2046,20 @@ class EngineTest : public QObject {
         QCOMPARE(spoken, titles);
         editor.undo();
         QCOMPARE(editor.project().clips.size(), 2);
+        // Every caption on the caption track, each at its start.
+        editor.newProject();
+        editor.addCaption();
+        const auto c1 = editor.state()["selectedId"].toString();
+        QVERIFY(editor.project().clip(c1));
+        editor.setClip("text", "Guten Tag");
+        const int captionTrack = editor.project().clip(c1)->track;
+        editor.setTrack(captionTrack, "name", QString("AI captions"));
+        editor.moveClip(c1, 200, captionTrack);
+        editor.speakCaptions(german);
+        QTRY_COMPARE_WITH_TIMEOUT(speech()["status"].toString(), QString("done"), 60000);
+        QCOMPARE(int(editor.project().clips.size()), 2);
+        QCOMPARE(editor.project().clips.back().start, qint64(200));
+        QCOMPARE(editor.project().clips.back().name, QString("Speech: Guten Tag"));
         // Nothing to say.
         editor.speak("  ", german);
         QVERIFY(editor.state()["error"].toString().contains("text"));
@@ -2058,6 +2072,9 @@ class EngineTest : public QObject {
         QVERIFY(editor.state()["speech"].toMap()["missing"].toString().contains("AI pack"));
         editor.speak("Hallo", "de_DE-thorsten-medium");
         QVERIFY(editor.state()["error"].toString().contains("AI pack"));
+        editor.clearError();
+        editor.speakCaptions("de_DE-thorsten-medium");
+        QVERIFY(editor.state()["error"].toString().contains("no captions"));
         // WAV lengths and the spoken form of titles.
         QCOMPARE(Speech::spokenText(" Ein *wichtiges*\n  Wort "), QString("Ein wichtiges Wort"));
         QTemporaryDir dir;
@@ -3583,6 +3600,27 @@ class EngineTest : public QObject {
         QCOMPARE(proxy(), QString()); // the 720p one is not tall enough
         editor.setPreferences({{"proxiesOnImport", false}});
         editor.deleteProxies();
+        // 720-line proxies when chosen; the 720p video is then too small for one, the tall one
+        // gets one 720 lines high. Other sizes are refused.
+        editor.setPreferences({{"proxyHeight", 600}});
+        QVERIFY(editor.state()["error"].toString().contains("540 or 720"));
+        editor.clearError();
+        editor.setPreferences({{"proxyHeight", 720}});
+        QCOMPARE(editor.state()["preferences"].toMap()["proxyHeight"].toInt(), 720);
+        editor.makeProxies({id});
+        QCOMPARE(proxy(), QString());
+        editor.clearError();
+        editor.makeProxies({editor.assets().last().toMap()["id"].toString()});
+        QTRY_COMPARE_WITH_TIMEOUT(editor.assets().last().toMap()["proxy"].toString(), QString("ready"), 60000);
+        const auto sharper = QDir(folder).entryInfoList({"*-720.mov"}, QDir::Files);
+        QCOMPARE(sharper.size(), 1);
+        QVERIFY(QString::fromUtf8(run(Editor::executable("ffprobe"),
+                                      {"-v", "error", "-show_entries", "stream=height", "-of", "csv=p=0",
+                                       sharper.first().absoluteFilePath()}))
+                    .contains("720"));
+        editor.setPreferences({{"proxyHeight", 540}});
+        editor.deleteProxies(); // both sizes
+        QVERIFY(QDir(folder).entryInfoList({"*-720.mov"}, QDir::Files).isEmpty());
     }
     void imageSequences() {
         const auto ffmpeg = Editor::executable("ffmpeg");
