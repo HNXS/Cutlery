@@ -8,6 +8,8 @@ param(
     [string]$Models = '',
     # Optional whisper.cpp build folder from Get-Whisper.ps1.
     [string]$Whisper = '',
+    # Optional Piper folder from Get-Piper.ps1 (text to speech, AI pack).
+    [string]$Piper = '',
     # Optional recorded sound effects from Get-Sounds.ps1.
     [string]$Sounds = '',
     [string]$AiPackDir = "$PSScriptRoot/../dist/Cutlery-0.5.0-AI-pack"
@@ -63,6 +65,14 @@ if ($Models) {
     Copy-Item "$Models/face_detection_short_range.onnx","$Models/face_landmark.onnx","$Models/iris_landmark.onnx" "$AiPackDir/models"
     Copy-Item "$root/licenses/Apache-2.0.txt" "$AiPackDir/licenses/MediaPipe-Apache-2.0.txt"
     if ($Whisper) { Copy-Item "$Whisper/ggml-silero-v6.2.0.bin" "$AiPackDir/models" }
+    # Text to speech: Piper in tts/ (its own ONNX Runtime and eSpeak NG data), voices in models/.
+    Copy-Item "$Models/de_DE-thorsten-medium.onnx","$Models/de_DE-thorsten-medium.onnx.json","$Models/de_DE-thorsten-medium.MODEL_CARD.txt" "$AiPackDir/models"
+    if ($Piper) {
+        New-Item -ItemType Directory -Force "$AiPackDir/tts" | Out-Null
+        Copy-Item "$Piper/*" "$AiPackDir/tts" -Recurse -Force
+        Copy-Item "$root/licenses/Piper-MIT.txt" "$AiPackDir/licenses"
+        Copy-Item "$root/licenses/GPL-3.0-only.txt" "$AiPackDir/licenses/eSpeak-NG-GPL-3.0-or-later.txt"
+    }
     Copy-Item "$Models/manifest.json" "$AiPackDir/models/manifest.json"
     Copy-Item "$root/licenses/Apache-2.0.txt" "$AiPackDir/licenses/U-2-Net-Apache-2.0.txt"
     Copy-Item "$root/licenses/Real-ESRGAN-BSD-3-Clause.txt","$root/licenses/Whisper-MIT.txt","$root/licenses/Silero-VAD-MIT.txt" "$AiPackDir/licenses"

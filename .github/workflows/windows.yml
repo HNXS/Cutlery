@@ -49,6 +49,8 @@ jobs:
           "ONNXRUNTIME_DIR=$ort" | Out-File $env:GITHUB_ENV -Append
           $models = ./tools/Get-Models.ps1
           "MODELS_DIR=$models" | Out-File $env:GITHUB_ENV -Append
+          $piper = ./tools/Get-Piper.ps1
+          "PIPER_DIR=$piper" | Out-File $env:GITHUB_ENV -Append
       - name: Fetch and verify recorded sound effects
         run: |
           $sounds = ./tools/Get-Sounds.ps1
@@ -85,6 +87,8 @@ jobs:
           QT_QUICK_BACKEND: software
         run: |
           $env:CUTLERY_TEST_SOUNDS = $env:SOUNDS_DIR
+          $env:CUTLERY_TEST_PIPER = "$env:PIPER_DIR/piper.exe"
+          $env:CUTLERY_TEST_VOICES = $env:MODELS_DIR
           ctest --test-dir build -C Release --output-on-failure 2>&1 | Tee-Object -FilePath build/ctest.log
           if ($LASTEXITCODE -ne 0) {
             # What failed in this first run, as annotations: a check that fails only now and
@@ -111,6 +115,10 @@ jobs:
             }
             throw 'Tests failed'
           }
+          # Text to speech ran with the real Piper and voice, not skipped.
+          build/bin/Release/cutlery_tests.exe textToSpeech -o build/tts.txt,txt | Out-Null
+          $speech = Get-Content build/tts.txt -Raw
+          if ($speech -notmatch 'PASS   : EngineTest::textToSpeech\(\)') { Write-Output $speech; Write-Output "::error::Text to speech was not tested with Piper"; throw 'Text to speech was not tested with Piper' }
           $p = Start-Process build/bin/Release/Cutlery.exe -ArgumentList '--smoke-test' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw 'QML startup failed' }
       - name: Check the real models on a test video
@@ -159,7 +167,7 @@ jobs:
           if ($long) { throw "Expected one word per cue: $long" }
       - name: Package portable application
         run: |
-          ./tools/Package-Windows.ps1 -QtRoot $env:QT_ROOT_DIR -FFmpegBin $env:FFMPEG_BIN -OnnxRuntime $env:ONNXRUNTIME_DIR -Models $env:MODELS_DIR -Whisper $env:WHISPER_DIR -Sounds $env:SOUNDS_DIR
+          ./tools/Package-Windows.ps1 -QtRoot $env:QT_ROOT_DIR -FFmpegBin $env:FFMPEG_BIN -OnnxRuntime $env:ONNXRUNTIME_DIR -Models $env:MODELS_DIR -Whisper $env:WHISPER_DIR -Sounds $env:SOUNDS_DIR -Piper $env:PIPER_DIR
       - name: Smoke-test deployed executable
         env:
           QT_QUICK_BACKEND: software
@@ -181,6 +189,13 @@ jobs:
           & "$dist/whisper-cli.exe" -np -m tests/fixtures/whisper-for-tests-tiny.bin -f build/tone.wav
           if ($LASTEXITCODE -ne 0) { throw 'Deployed whisper-cli failed' }
           foreach ($dll in 'ggml-vulkan.dll', 'ggml-cpu-x64.dll', 'ggml-cpu-haswell.dll', 'vcomp140.dll') { if (!(Test-Path "$dist/$dll")) { throw "$dll missing from the package" } }
+          # Piper from the AI pack speaks German with the packaged voice.
+          $pack = Resolve-Path dist/Cutlery-0.5.0-AI-pack
+          Push-Location "$pack/models"
+          'Grüße aus dem Schnittprogramm.' | & "$pack/tts/piper.exe" --quiet --model de_DE-thorsten-medium.onnx --output_file "$PWD/../../tts-check.wav"
+          $code = $LASTEXITCODE
+          Pop-Location
+          if ($code -ne 0 -or (Get-Item dist/tts-check.wav).Length -lt 20000) { throw 'Packaged Piper failed' }
       # The one-command local build (README/BUILDING) must keep working; the downloads and the
       # build folder from the steps above are reused, so this mostly checks the script itself.
       - name: Check the local build script

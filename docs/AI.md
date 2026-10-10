@@ -109,6 +109,17 @@ Select a blur or mosaic area that lies over a video clip and click **Follow a fa
   - A face that disappears behind something or leaves the picture is not picked up again if another face is closer.
   - Rotated or cropped videos below are only approximated.
 
+## Text to speech (German voice)
+
+Under **Audio › Text to speech**, type what should be said, choose the voice and speed, and click **Add speech at the playhead**. For a title, **Read aloud** in its Text settings speaks it (several selected titles each at their own start).
+
+- **On this computer:** speech is made by Piper with the Thorsten voice (German, from the AI pack), a few seconds of work for a paragraph. Nothing is sent anywhere.
+- **The result:** an ordinary audio clip on a free track, named after its first words. One undo step removes it. The same text, voice and speed are spoken only once and kept in the cache.
+- **Other voices:** a Piper voice (`.onnx` with its `.onnx.json`) copied into the `models` folder appears in the voice list.
+- **Limits:**
+  - German pronunciation comes from eSpeak NG rules; unusual names and abbreviations may need writing out ("Doktor" for "Dr.").
+  - There is no emphasis or emotion control, and one voice per text.
+
 ## Model and licences
 
 | File | Model | Licence |
@@ -118,8 +129,10 @@ Select a blur or mosaic area that lies over a video clip and click **Follow a fa
 | `models/ggml-large-v3-turbo-q5_0.bin` | OpenAI Whisper large-v3-turbo, 5-bit, in whisper.cpp's format | MIT, [source](https://github.com/openai/whisper) |
 | `models/ggml-silero-v6.2.0.bin` | Silero VAD 6.2.0 voice detector, converted by whisper.cpp | MIT, [source](https://github.com/snakers4/silero-vad) |
 | `models/face_detection_short_range.onnx`, `models/face_landmark.onnx`, `models/iris_landmark.onnx` | Google MediaPipe face detection (BlazeFace), Face Mesh and Iris Landmark, taken from the pinned mediapipe 0.10.18 wheel and converted from TFLite with tf2onnx | Apache-2.0, [source](https://github.com/google-ai-edge/mediapipe) |
+| `models/de_DE-thorsten-medium.onnx` (with `.onnx.json` and its model card) | Piper voice Thorsten (medium), German, from the pinned piper-voices v1.0.0 release | Dataset CC0 ([Thorsten-Voice](https://github.com/thorstenMueller/Thorsten-Voice)); per its model card fine-tuned from Piper's U.S. English lessac voice, whose training data has its own terms |
+| `tts/piper.exe` with its DLLs and `espeak-ng-data` | Piper 2023.11.14-2 (text to speech) with piper-phonemize, eSpeak NG and ONNX Runtime 1.14.1, the pinned Windows release | Piper MIT ([source](https://github.com/rhasspy/piper/tree/2023.11.14-2)); eSpeak NG GPL-3.0-or-later ([source](https://github.com/rhasspy/espeak-ng)), a separate program |
 | `whisper-cli.exe` (application package) | whisper.cpp v1.9.4, built from the pinned commit | MIT, [source](https://github.com/ggml-org/whisper.cpp/tree/v1.9.4) |
 | `onnxruntime.dll` (application package) | ONNX Runtime 1.22.0 with the DirectML provider | MIT, [source](https://github.com/microsoft/onnxruntime/tree/v1.22.0) |
 | `DirectML.dll` (application package) | DirectML 1.15.4 redistributable | Microsoft DirectML licence (in `licenses/onnxruntime`) |
 
-`tools/Get-OnnxRuntime.ps1`, `tools/Get-Whisper.ps1` and `tools/Get-Models.ps1` download everything from pinned NuGet packages, GitHub releases and PyPI and verify SHA-256 hashes. The face models' TFLite originals are pinned; the ONNX conversion is not byte-reproducible, so its hashes are recorded in `models/manifest.json`.
+`tools/Get-OnnxRuntime.ps1`, `tools/Get-Whisper.ps1`, `tools/Get-Piper.ps1` and `tools/Get-Models.ps1` download everything from pinned NuGet packages, GitHub releases, Hugging Face and PyPI and verify SHA-256 hashes. The face models' TFLite originals are pinned; the ONNX conversion is not byte-reproducible, so its hashes are recorded in `models/manifest.json`.

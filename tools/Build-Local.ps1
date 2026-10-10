@@ -76,7 +76,8 @@ if (!$SkipAi) {
     }
     $whisper = & "$PSScriptRoot/Get-Whisper.ps1" | Select-Object -Last 1
     $configure += "-DCUTLERY_ONNXRUNTIME_DIR=$ort", "-DCUTLERY_WHISPER_CLI=$whisper/whisper-cli.exe", "-DCUTLERY_TEST_MODELS=$models"
-    $package += @{ OnnxRuntime = $ort; Models = $models; Whisper = $whisper }
+    $piper = & "$PSScriptRoot/Get-Piper.ps1" | Select-Object -Last 1
+    $package += @{ OnnxRuntime = $ort; Models = $models; Whisper = $whisper; Piper = $piper }
 }
 
 Step 'Compiling'

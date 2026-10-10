@@ -1,5 +1,21 @@
 # Validation record
 
+## Windows portable build — 2026-10-10, German text to speech (0.6 development)
+
+[GitHub Actions run 38050315819](https://github.com/HNXS/Cutlery/actions/runs/38050315819) on commit `f6b75045cc954888940d0a378cc10daf1a1e1ecb` passed every step on its first attempt.
+
+New coverage:
+
+- **Downloads:** `tools/Get-Piper.ps1` fetched the pinned Piper 2023.11.14-2 Windows release, and `tools/Get-Models.ps1` fetched the Thorsten (medium) voice, its settings and its model card from piper-voices v1.0.0. Every file matched its SHA-256.
+- **Engine test `textToSpeech`:** ran with the real Piper and the Thorsten voice on Windows. A separate CI check fails the build if this test was skipped.
+  - German text with umlauts is spoken at the playhead on a free track. The clip length matches the WAV, and more than half of the clip is loud enough to be speech.
+  - The same text at 1.5× speed is shorter.
+  - A repeated request comes from the cache in under 2 s.
+  - Two selected titles are each spoken at their start, and one undo removes both.
+- **Engine test `speechWithoutPiper`:** without Piper, the panel and `speak` say the AI pack is missing. Also covers the spoken form of titles and WAV lengths.
+- **UI test `speechControls`:** text typed in Audio › Text to speech and "Add speech at the playhead" places a clip at the playhead. "Read aloud" on the title speaks it at the title's start.
+- **Packaged AI pack:** `tts/piper.exe` speaks a German sentence with `models/de_DE-thorsten-medium.onnx` using only the packaged files.
+
 ## Windows portable build — 2026-10-10, track motion (0.6 development)
 
 [GitHub Actions run 38042716860](https://github.com/HNXS/Cutlery/actions/runs/38042716860) on commit `4b1302796880441bb19262676d7dd7fae0cd9e05` passed every step on its first attempt.

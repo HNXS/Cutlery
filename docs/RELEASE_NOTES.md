@@ -4,6 +4,7 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
+- **German text to speech:** type a text under Audio › Text to speech (or press Read aloud on a title) and a German voice (Thorsten, from the AI pack) speaks it on this computer; it lands as an audio clip at the playhead. Speed adjustable; other Piper voices can be added to the models folder.
 - **Track motion:** a blur or mosaic area, a title, sticker or picture placed over something in a video follows it through the clip: put it in place at any moment and press Track motion (Video › Basic, or the area's settings). The path is tracked forwards and backwards in the background and becomes position keyframes you can adjust; where it gets lost, track again from there.
 - **Player and start screen:** a calmer player bar (time, play, frame steps, voice-over, scopes, frame shape) and a start screen with a "New project" banner, project tiles and a side column.
 - **Sounds, media and the remaining controls:** sound effects as tiles in the Audio tab (one click adds them at the playhead), an "Added" mark on media used in the timeline, and sections with number boxes for perspective, 3D tilt, green screen, brightness keys, the mask page and every title setting (style, font, colour, saved styles, spacing, effects).

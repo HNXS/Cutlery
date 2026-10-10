@@ -50,6 +50,8 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - **Eye contact** (AI pack): presenters reading beside the lens look into the camera; only the eyes are redrawn, by small amounts.
 - **JKL shuttle:** L plays forward at 1×/2×/4×, J scrubs backward, K stops.
 - **Follow a face** (AI pack): blur or mosaic areas keyframe themselves onto a moving face.
+- **Track motion:** blur areas, titles and stickers follow whatever they cover in the video below.
+- **German text to speech** (AI pack): typed text or a title is spoken by a German voice (Piper, Thorsten) and added as an audio clip.
 - **Sound tools** (inspector): EQ, low cut, noise reduction, gate, de-esser, compressor, reverb and echo per clip, with voice presets.
 - **Colour and look** (inspector): temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with adjustable strength; one-click looks (Warm, Cool, Cinematic, Vintage, Black & white, Punchy, Dreamy).
 - **Effects** (inspector): camera shake, glitch, VHS and old film with a strength; motion blur; stabilizing for shaky footage.

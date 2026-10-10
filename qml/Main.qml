@@ -41,11 +41,23 @@ ApplicationWindow {
     // The asset panel's tabs (left): media, sound, text, stickers, effects, transitions, filters
     // and layouts.
     property string leftTab: "media"
+    // Text to speech: the chosen voice (an id; the first German one, else the first, by default)
+    // and speed.
+    property string speechVoice: ""
+    property real speechSpeed: 1
+    readonly property string currentVoice: {
+        const voices = (s.speech || {}).voices || [];
+        if (voices.some(v => v.id === speechVoice))
+            return speechVoice;
+        const german = voices.find(v => v.language === "German");
+        return german ? german.id : voices.length ? voices[0].id : "";
+    }
     // The categories of every left tab, for the category column; "top" scrolls to the start.
     // The column keeps all of them and shows those of the tab on show, so switching tabs does
     // not destroy its buttons while the panel is laid out again.
     readonly property var allCategories: [
-        { tab: "audio", name: "Sounds", target: "top" }
+        { tab: "audio", name: "Sounds", target: "top" },
+        { tab: "audio", name: "Speech", target: "cat-speech" }
     ].concat([...new Set(editor.sounds().map(x => x.category))].map(c => ({ tab: "audio", name: c, target: "cat-sound-" + c }))).concat([
         { tab: "stickers", name: "Shapes", target: "top" },
         { tab: "stickers", name: "Icons", target: "catIcons" },
@@ -2407,6 +2419,88 @@ ApplicationWindow {
                                         font.pixelSize: 11
                                         text: "Record a voice-over with ● Voice-over under the player; it lands at the playhead."
                                     }
+                                    // Text to speech (AI pack): typed text, spoken at the playhead.
+                                    ColumnLayout {
+                                        id: speechPanel
+                                        objectName: "speechPanel"
+                                        visible: win.leftTab === "audio"
+                                        Layout.fillWidth: true
+                                        spacing: 6
+                                        readonly property var speech: win.s.speech || ({})
+                                        readonly property bool ready: (speech.missing || "") === ""
+                                        readonly property bool busy: speech.status === "speaking"
+                                        Caption {
+                                            objectName: "cat-speech"
+                                            text: "TEXT TO SPEECH"
+                                        }
+                                        Label {
+                                            objectName: "speechMissing"
+                                            visible: !speechPanel.ready
+                                            Layout.fillWidth: true
+                                            wrapMode: Text.Wrap
+                                            color: win.muted
+                                            font.pixelSize: 11
+                                            text: (speechPanel.speech.missing || "") + " Download it next to Cutlery.exe."
+                                        }
+                                        TextArea {
+                                            id: speechText
+                                            objectName: "speechText"
+                                            Accessible.name: "Text to speak"
+                                            enabled: speechPanel.ready
+                                            placeholderText: "Type what should be said…"
+                                            wrapMode: TextEdit.Wrap
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: 70
+                                            selectByMouse: true
+                                            background: Rectangle {
+                                                color: "#10161c"
+                                                radius: 5
+                                                border.color: speechText.activeFocus ? "#64d8bc" : "#35404b"
+                                            }
+                                        }
+                                        ComboBox {
+                                            objectName: "speechVoice"
+                                            Accessible.name: "Voice"
+                                            visible: speechPanel.ready
+                                            Layout.fillWidth: true
+                                            readonly property var voices: speechPanel.speech.voices || []
+                                            model: voices.map(v => v.name + " · " + v.language)
+                                            currentIndex: Math.max(0, voices.findIndex(v => v.id === win.currentVoice))
+                                            onActivated: win.speechVoice = voices[currentIndex].id
+                                        }
+                                        RowLayout {
+                                            visible: speechPanel.ready
+                                            Layout.fillWidth: true
+                                            Label {
+                                                text: "Speed"
+                                                color: win.muted
+                                            }
+                                            Slider {
+                                                objectName: "speechSpeed"
+                                                Accessible.name: "Speaking speed"
+                                                Layout.fillWidth: true
+                                                from: .5
+                                                to: 2
+                                                stepSize: .05
+                                                value: win.speechSpeed
+                                                onMoved: win.speechSpeed = value
+                                            }
+                                            Label {
+                                                text: Math.round(win.speechSpeed * 100) + "%"
+                                                font.pixelSize: 11
+                                                Layout.preferredWidth: 36
+                                            }
+                                        }
+                                        Action {
+                                            objectName: "speakText"
+                                            Layout.fillWidth: true
+                                            enabled: speechPanel.ready && !speechPanel.busy && speechText.text.trim() !== ""
+                                            text: speechPanel.busy ? "Speaking…" : "Add speech at the playhead"
+                                            onClicked: editor.speak(speechText.text, win.currentVoice, win.speechSpeed)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Speaks the text with the chosen voice on this computer and adds it at the playhead on a free track"
+                                        }
+                                    }
                                     // Sound effects by category: a click adds one at the playhead. Made
                                     // once and hidden on other tabs: destroying the tiles while the panel
                                     // is laid out again for another tab can crash Qt's layouts.
@@ -3641,6 +3735,16 @@ ApplicationWindow {
                                     text: "Apply text"
                                     Layout.fillWidth: true
                                     onClicked: editor.setClip("text", titleText.text)
+                                }
+                                Action {
+                                    objectName: "readAloud"
+                                    Layout.fillWidth: true
+                                    readonly property var speech: win.s.speech || ({})
+                                    enabled: (speech.missing || "") === "" && speech.status !== "speaking" && win.currentVoice !== ""
+                                    text: speech.status === "speaking" ? "Speaking…" : "Read aloud"
+                                    onClicked: editor.speakSelection(win.currentVoice, win.speechSpeed)
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: (speech.missing || "") !== "" ? speech.missing : "Speaks the selected titles at their starts with the voice and speed chosen under Audio › Text to speech"
                                 }
                                 Section {
                                     objectName: "titleLayout"

@@ -4,6 +4,7 @@
 #include "Playback.h"
 #include "Thumbnails.h"
 #include "Tracker.h"
+#include "Speech.h"
 #include "AiJobs.h"
 #include "Captions.h"
 #include "Project.h"
@@ -279,6 +280,13 @@ class Editor final : public QObject {
     // clip tracked), whole}.
     Q_INVOKABLE void trackMotion();
     Q_INVOKABLE void cancelTracking();
+    // Text to speech (Piper and its voices in the AI pack): speaks `text` with a voice (an id
+    // from state "speech".voices) at `speed` (0.5–2) and adds it at the playhead on a free
+    // track; speakSelection() speaks every selected title at its start. One undo step once all
+    // are spoken. State "speech": {missing, voices [{id, name, language}], status:
+    // speaking|done|failed, count}.
+    Q_INVOKABLE void speak(const QString &text, const QString &voice, double speed = 1);
+    Q_INVOKABLE void speakSelection(const QString &voice, double speed = 1);
     // Changes the canvas to width × height (e.g. 9:16 for Shorts) and zooms every full-frame
     // video and image to fill it; with the AI pack, videos then pan to keep the main face in
     // the picture.
@@ -534,6 +542,13 @@ class Editor final : public QObject {
     QVariantMap m_conform;
     QVariantMap m_follow;
     QVariantMap m_track;
+    Speech *m_speech = nullptr;
+    // Requests of the speech being made: request id → {frame, name, path, seconds}.
+    QHash<QString, QVariantMap> m_speaking;
+    QVariantMap m_speechState;
+    void startSpeech(const QVector<std::pair<qint64, QString>> &items, const QString &voice,
+                     double speed);
+    void spoken(const Speech::Result &result);
     Tracker *m_tracker = nullptr;
     void applyTracking(const QVector<Tracker::Point> &points, const QString &error);
     QString m_importFolder;
