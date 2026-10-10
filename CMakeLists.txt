@@ -10,7 +10,7 @@ set(CUTLERY_ONNXRUNTIME_DIR "$ENV{CUTLERY_ONNXRUNTIME_DIR}" CACHE PATH "ONNX Run
 set(CUTLERY_WHISPER_CLI "$ENV{CUTLERY_WHISPER_CLI}" CACHE FILEPATH "whisper-cli executable for tests")
 # The AI pack's models folder, for tests of the real face models (eye contact).
 set(CUTLERY_TEST_MODELS "$ENV{CUTLERY_TEST_MODELS}" CACHE PATH "AI pack models folder for tests")
-add_library(cutlery_engine STATIC src/ExportProfiles.cpp src/ExportProfiles.h src/Playback.cpp src/Playback.h src/Thumbnails.cpp src/Thumbnails.h src/AiJobs.cpp src/AiJobs.h src/Captions.cpp src/Captions.h src/KeyboardShortcuts.cpp src/KeyboardShortcuts.h src/MediaAnalysis.cpp src/MediaAnalysis.h src/Scopes.cpp src/Scopes.h src/SoundLibrary.cpp src/SoundLibrary.h src/Interchange.cpp src/Interchange.h src/Project.cpp src/RenderGraph.cpp src/Editor.cpp src/Project.h src/RenderGraph.h src/Editor.h src/RationalTime.h)
+add_library(cutlery_engine STATIC src/ExportProfiles.cpp src/ExportProfiles.h src/Playback.cpp src/Playback.h src/Thumbnails.cpp src/Thumbnails.h src/Tracker.cpp src/Tracker.h src/AiJobs.cpp src/AiJobs.h src/Captions.cpp src/Captions.h src/KeyboardShortcuts.cpp src/KeyboardShortcuts.h src/MediaAnalysis.cpp src/MediaAnalysis.h src/Scopes.cpp src/Scopes.h src/SoundLibrary.cpp src/SoundLibrary.h src/Interchange.cpp src/Interchange.h src/Project.cpp src/RenderGraph.cpp src/Editor.cpp src/Project.h src/RenderGraph.h src/Editor.h src/RationalTime.h)
 target_include_directories(cutlery_engine PUBLIC src)
 target_link_libraries(cutlery_engine PUBLIC Qt6::Core Qt6::Gui Qt6::Quick Qt6::Multimedia Qt6::Svg)
 qt_add_executable(Cutlery src/main.cpp)

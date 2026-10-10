@@ -428,6 +428,46 @@ ApplicationWindow {
             verticalAlignment: Text.AlignVCenter
         }
     }
+    // Track motion for the selected clip: the button (Cancel while tracking), progress and the
+    // result.
+    component TrackMotion: ColumnLayout {
+        id: tm
+        property string prefix: ""  // of the object names
+        spacing: 4
+        readonly property var track: win.s.track || ({})
+        readonly property bool mine: track.clipId === win.s.selectedId
+        readonly property bool busy: track.status === "tracking"
+        RowLayout {
+            Layout.fillWidth: true
+            Action {
+                objectName: tm.prefix + "trackMotion"
+                Layout.fillWidth: true
+                enabled: !tm.busy && win.selection.locked !== true
+                text: tm.busy && tm.mine ? "Tracking… " + Math.round((tm.track.progress || 0) * 100) + "%" : "Track motion"
+                Accessible.name: "Track motion"
+                onClicked: editor.trackMotion()
+                ToolTip.visible: hovered
+                ToolTip.text: "Place it over something in the video below at the playhead, then track: it follows that through the clip, forwards and backwards, as position keyframes"
+            }
+            Action {
+                objectName: tm.prefix + "cancelTracking"
+                visible: tm.busy && tm.mine
+                text: "Cancel"
+                onClicked: editor.cancelTracking()
+            }
+        }
+        Label {
+            objectName: tm.prefix + "trackStatus"
+            Layout.fillWidth: true
+            visible: tm.mine && (tm.track.status === "done" || tm.track.status === "failed")
+            wrapMode: Text.Wrap
+            font.pixelSize: 11
+            color: tm.track.status === "failed" ? "#ec6f5a" : win.muted
+            text: tm.track.status === "failed" ? "Could not follow it there; place it over something with detail"
+                : tm.track.whole ? "Tracked ✓ · " + tm.track.keyframes + " keyframes; adjust them on the timeline if needed"
+                : "Tracked from " + Number(tm.track.from).toFixed(1) + " s to " + Number(tm.track.to).toFixed(1) + " s of the clip, then lost; move the playhead there, place it again and track"
+        }
+    }
     // An AI processing option of a video clip: checkbox, progress, status and Run/Stop. The
     // task runs in the background once per media file and is cached.
     component AiOption: ColumnLayout {
@@ -3250,6 +3290,11 @@ ApplicationWindow {
                                     { key: "rotation", name: "Rotation", lo: -180, hi: 180, step: 1, dec: 0, unit: "°", anim: true }
                                 ]
                             }
+                            // Overlays on a video follow something in it.
+                            TrackMotion {
+                                Layout.fillWidth: true
+                                visible: win.picPage("basic") && win.selectionKind !== "area" && win.s.selectionTrackable === true
+                            }
                             ValueGroup {
                                 objectName: "opacitySection"
                                 title: "Opacity"
@@ -3460,7 +3505,7 @@ ApplicationWindow {
                                     wrapMode: Text.Wrap
                                     font.pixelSize: 11
                                     color: win.muted
-                                    text: "Drag the frame in the preview to place it and its corners to resize. Keyframe X/Y below to follow something moving, or let it follow a face. The area affects all tracks below it."
+                                    text: "Drag the frame in the preview to place it and its corners to resize. Track motion makes it follow whatever it covers, or let it follow a face. The area affects all tracks below it."
                                 }
                                 Action {
                                     objectName: "followFace"
@@ -3480,6 +3525,10 @@ ApplicationWindow {
                                     font.pixelSize: 11
                                     color: (win.s.follow || {}).status === "failed" ? "#ec6f5a" : win.muted
                                     text: (win.s.follow || {}).status === "done" ? "Following a face ✓ · move the playhead to check, adjust keyframes if needed" : "No face found under this area"
+                                }
+                                TrackMotion {
+                                    prefix: "area-"
+                                    Layout.fillWidth: true
                                 }
                                 Rule {}
                             }

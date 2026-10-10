@@ -1211,6 +1211,11 @@ class UiTest : public QObject {
         QVERIFY(QMetaObject::invokeMethod(areaShape, "activated", Q_ARG(int, 1)));
         QCOMPARE(editor.project().clip(area.id)->effectShape, QString("ellipse"));
         QVERIFY(findItem(window->contentItem(), "effectFeather")->isVisible());
+        // Track motion follows what the area covers in a video below; over titles it says so.
+        QVERIFY(findItem(window->contentItem(), "area-trackMotion"));
+        QVERIFY(!findItem(window->contentItem(), "trackMotion")->isVisible());
+        press("area-trackMotion");
+        QVERIFY(editor.state()["error"].toString().contains("video clip"));
         // Brand kit in the Add tab: colours appear as swatches; the logo needs choosing first.
         for (const auto &c : editor.state()["brandColors"].toStringList())
             editor.removeBrandColor(c);

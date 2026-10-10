@@ -200,6 +200,9 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
                        {"whisper", whisper}},
                       this);
     connect(m_ai, &AiJobs::changed, this, &Editor::changed);
+    m_tracker = new Tracker(executable("ffmpeg"), this);
+    connect(m_tracker, &Tracker::progressChanged, this, &Editor::changed);
+    connect(m_tracker, &Tracker::finished, this, &Editor::applyTracking);
     // A finished result changes the picture.
     connect(m_ai, &AiJobs::finished, this, [this] {
         m_previewTimer.start();
@@ -799,6 +802,13 @@ QVariantMap Editor::state() const {
                          })},
             {"selected", selected},
             {"selectedId", m_selected},
+            // The selected clip is over a video it can follow (Track motion).
+            {"selectionTrackable", [&] {
+                 const auto *c = m_project.clip(m_selected);
+                 const auto *v = c ? videoBelow(*c) : nullptr;
+                 const auto *a = v ? m_project.asset(v->assetId) : nullptr;
+                 return a && a->kind == "video" && !v->reverse;
+             }()},
             {"selectedIds", selection()},
             {"exportQueue", [this] {
                  QVariantList list;
@@ -858,6 +868,7 @@ QVariantMap Editor::state() const {
             {"beats", m_beats},
             {"collect", m_collect},
             {"follow", m_follow},
+            {"track", trackState()},
             {"transcript", transcriptState()},
             {"autoColour", m_autoColour},
             {"soundMeasure", m_soundMeasure},
@@ -1048,6 +1059,10 @@ void Editor::stashProject() {
     o.dirty = m_dirty;
 }
 void Editor::showProject(int index) {
+    // Tracking belongs to the timeline it started on.
+    if (m_tracker && m_tracker->busy())
+        m_tracker->cancel();
+    m_track = {};
     m_current = index;
     auto o = m_open[index];
     m_project = std::move(o.project);
@@ -4119,6 +4134,228 @@ void Editor::applyFollowFace() {
     });
     m_follow = {{"status", "done"}, {"clipId", areaId}, {"keyframes", count}};
     m_status = QString("Following a face with %1 keyframes").arg(count);
+    emit changed();
+}
+namespace {
+// Where a point of a video clip's source picture (fractions u, v) shows on the canvas
+// (fractions) at a timeline frame, and back. Crop, flips, keyframed position and scale count;
+// rotation and the anchor point are left out.
+struct PictureMapping {
+    double cx, cy, ex, ey; // centre and extent on the canvas
+    double left, top, visibleW, visibleH;
+    bool flip, flipVertical;
+    PictureMapping(const Project &p, const Clip &v, qint64 frame) {
+        const double local = frame - v.start, scale = v.valueAt("scale", local);
+        const auto size = p.pictureSize(v, p.width * scale, p.height * scale);
+        cx = 0.5 + v.valueAt("x", local);
+        cy = 0.5 + v.valueAt("y", local);
+        ex = size.width() / p.width;
+        ey = size.height() / p.height;
+        left = v.cropLeft;
+        top = v.cropTop;
+        visibleW = 1 - v.cropLeft - v.cropRight;
+        visibleH = 1 - v.cropTop - v.cropBottom;
+        flip = v.flip;
+        flipVertical = v.flipVertical;
+    }
+    QPointF toCanvas(double u, double v) const {
+        double a = (u - left) / visibleW, b = (v - top) / visibleH;
+        if (flip)
+            a = 1 - a;
+        if (flipVertical)
+            b = 1 - b;
+        return {cx + (a - 0.5) * ex, cy + (b - 0.5) * ey};
+    }
+    QPointF toSource(double x, double y) const {
+        double a = (x - cx) / ex + 0.5, b = (y - cy) / ey + 0.5;
+        if (flip)
+            a = 1 - a;
+        if (flipVertical)
+            b = 1 - b;
+        return {left + a * visibleW, top + b * visibleH};
+    }
+};
+// Keyframes the straight line between neighbours reproduces within `tolerance` are dropped
+// (Ramer–Douglas–Peucker on x and y together).
+QVector<int> thinPath(const QVector<qint64> &frames, const QVector<double> &xs,
+                      const QVector<double> &ys, double tolerance) {
+    const int n = frames.size();
+    QVector<bool> keep(n, false);
+    if (n)
+        keep[0] = keep[n - 1] = true;
+    QVector<std::pair<int, int>> stack;
+    if (n > 2)
+        stack << std::pair{0, n - 1};
+    while (!stack.isEmpty()) {
+        const auto [a, b] = stack.takeLast();
+        double worst = 0;
+        int at = -1;
+        for (int i = a + 1; i < b; ++i) {
+            const double t = double(frames[i] - frames[a]) / (frames[b] - frames[a]);
+            const double d = std::max(std::abs(xs[a] + (xs[b] - xs[a]) * t - xs[i]),
+                                      std::abs(ys[a] + (ys[b] - ys[a]) * t - ys[i]));
+            if (d > worst) {
+                worst = d;
+                at = i;
+            }
+        }
+        if (at >= 0 && worst > tolerance) {
+            keep[at] = true;
+            stack << std::pair{a, at} << std::pair{at, b};
+        }
+    }
+    QVector<int> out;
+    for (int i = 0; i < n; ++i)
+        if (keep[i])
+            out << i;
+    return out;
+}
+} // namespace
+void Editor::trackMotion() {
+    const auto *c = m_project.clip(m_selected);
+    if (!c)
+        return fail("Select a blur or mosaic area or an overlay to track");
+    const auto *v = videoBelow(*c);
+    const auto *a = v ? m_project.asset(v->assetId) : nullptr;
+    if (!v || !a || a->kind != "video")
+        return fail("Place it over a video clip on a lower track");
+    if (v->reverse)
+        return fail("Reversed clips cannot be tracked");
+    if (m_project.trackSettings.value(c->track).locked)
+        return fail("The track is locked");
+    const double fps = double(m_project.fpsN) / m_project.fpsD, s = v->speed.seconds();
+    const qint64 f0 = std::max(c->start, v->start),
+                 f1 = std::min(c->start + c->duration, v->start + v->duration);
+    if (f1 - f0 < 2)
+        return fail("The clip hardly overlaps the video below");
+    // From the playhead when it is on both clips, else from where they start to overlap.
+    const qint64 at = m_playhead >= f0 && m_playhead < f1 ? m_playhead : f0;
+    const auto source = [&](qint64 frame) {
+        return v->sourceIn.seconds() + (frame - v->start) / fps * s;
+    };
+    // The patch the clip covers, in fractions of the source picture.
+    const double local = at - c->start, scale = c->valueAt("scale", local);
+    const auto size = m_project.pictureSize(*c, m_project.width * scale, m_project.height * scale);
+    const PictureMapping map(m_project, *v, at);
+    const auto centre = map.toSource(0.5 + c->valueAt("x", local), 0.5 + c->valueAt("y", local));
+    const double w = size.width() / m_project.width / map.ex * map.visibleW,
+                 h = size.height() / m_project.height / map.ey * map.visibleH;
+    if (centre.x() < 0 || centre.x() > 1 || centre.y() < 0 || centre.y() > 1)
+        return fail("Place it over the part of the video to follow");
+    // Overlays (titles, logos) follow the detail around their centre.
+    const bool area = !c->effect.isEmpty();
+    const double pw = std::clamp(area ? w : 0.08, 0.02, 0.5),
+                 ph = std::clamp(area ? h : 0.08 * a->width / std::max(1, a->height), 0.02, 0.5);
+    // Up to 30 analysed frames a second of timeline.
+    const qint64 step = std::max<qint64>(1, qint64(std::ceil(fps / 30 - 1e-9)));
+    Tracker::Request r;
+    r.path = a->path;
+    r.width = a->width;
+    r.height = a->height;
+    r.from = source(f0);
+    r.start = source(at);
+    r.to = source(f1 - 1);
+    r.rate = fps / (step * s);
+    r.patch = {centre.x() - pw / 2, centre.y() - ph / 2, pw, ph};
+    m_track = {{"status", "tracking"}, {"clipId", c->id}, {"videoId", v->id},
+               {"step", step}};
+    m_tracker->start(r);
+    m_status = "Tracking motion…";
+    emit changed();
+}
+void Editor::cancelTracking() {
+    if (!m_tracker->busy())
+        return;
+    m_tracker->cancel();
+    m_track = {};
+    m_status = "Tracking cancelled";
+    emit changed();
+}
+QVariantMap Editor::trackState() const {
+    auto state = m_track;
+    if (m_tracker->busy())
+        state["progress"] = m_tracker->progress();
+    return state;
+}
+void Editor::applyTracking(const QVector<Tracker::Point> &points, const QString &error) {
+    const auto clipId = m_track.value("clipId").toString(),
+               videoId = m_track.value("videoId").toString();
+    const auto *c = m_project.clip(clipId);
+    const auto *v = m_project.clip(videoId);
+    if (!c || !v || !error.isEmpty() || points.size() < 2) {
+        m_track = {{"status", "failed"}, {"clipId", clipId}};
+        fail(!error.isEmpty() ? error
+             : c && v     ? QString("Nothing could be followed there")
+                          : QString("The clip was removed while tracking"));
+        return;
+    }
+    const double fps = double(m_project.fpsN) / m_project.fpsD, s = v->speed.seconds();
+    // Back to timeline frames and canvas positions.
+    QVector<qint64> frames;
+    QVector<double> xs, ys;
+    for (const auto &p : points) {
+        const qint64 frame = v->start + qRound64((p.time - v->sourceIn.seconds()) / s * fps);
+        if (frame < c->start || frame >= c->start + c->duration ||
+            (!frames.isEmpty() && frame <= frames.last()))
+            continue;
+        const auto at = PictureMapping(m_project, *v, frame).toCanvas(p.x, p.y);
+        frames << frame;
+        xs << std::clamp(at.x() - 0.5, -2., 2.);
+        ys << std::clamp(at.y() - 0.5, -2., 2.);
+    }
+    if (frames.size() < 2) {
+        m_track = {{"status", "failed"}, {"clipId", clipId}};
+        return fail("Nothing could be followed there");
+    }
+    // Steady sub-pixel jitter, then keep the keyframes where the path bends by more than about
+    // a third of an analysed pixel.
+    auto steady = [](QVector<double> v) {
+        auto out = v;
+        for (int i = 1; i + 1 < v.size(); ++i)
+            out[i] = (v[i - 1] + 2 * v[i] + v[i + 1]) / 4;
+        return out;
+    };
+    xs = steady(xs);
+    ys = steady(ys);
+    const auto kept = thinPath(frames, xs, ys, 0.001);
+    QVector<Keyframe> kx, ky;
+    for (int i : kept) {
+        kx << Keyframe{frames[i] - c->start, xs[i], false};
+        ky << Keyframe{frames[i] - c->start, ys[i], false};
+    }
+    const double from = (frames.first() - c->start) / fps, to = (frames.last() - c->start) / fps;
+    const qint64 slack = 2 * m_track.value("step").toLongLong();
+    const bool whole = frames.first() <= std::max(c->start, v->start) + slack &&
+                       frames.last() >= std::min(c->start + c->duration, v->start + v->duration) -
+                                            1 - slack;
+    if (!mutate([&](Project &p) {
+            auto *clip = p.clip(clipId);
+            if (!clip)
+                return;
+            p.requireEditable(clip->track);
+            // Keyframes outside the tracked stretch stay, so a part tracked from another
+            // moment is kept.
+            const qint64 first = kx.first().frame, last = kx.last().frame;
+            for (const auto &[key, added] : {std::pair{QString("x"), kx}, std::pair{QString("y"), ky}}) {
+                QVector<Keyframe> merged;
+                for (const auto &k : clip->keyframes.value(key))
+                    if (k.frame < first || k.frame > last)
+                        merged << k;
+                merged += added;
+                std::sort(merged.begin(), merged.end(),
+                          [](const Keyframe &a, const Keyframe &b) { return a.frame < b.frame; });
+                clip->keyframes[key] = merged;
+            }
+        })) {
+        m_track = {{"status", "failed"}, {"clipId", clipId}};
+        return;
+    }
+    m_track = {{"status", "done"}, {"clipId", clipId}, {"keyframes", kx.size()},
+               {"from", from}, {"to", to}, {"whole", whole}};
+    m_status = whole ? QString("Tracked with %1 keyframes").arg(kx.size())
+                     : QString("Tracked from %1 s to %2 s of the clip; lost outside that")
+                           .arg(from, 0, 'f', 1)
+                           .arg(to, 0, 'f', 1);
     emit changed();
 }
 // The source seconds a clip shows, for face analysis.

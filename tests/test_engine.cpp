@@ -1876,6 +1876,83 @@ class EngineTest : public QObject {
         QSKIP("Needs the AI worker and the AI pack's models (CUTLERY_TEST_MODELS)");
 #endif
     }
+    void trackMotion() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        // An 80 × 80 badge with detail moving right and down over a grey 640 × 360 frame for
+        // 3 s: its centre is at (140 + 125 t, 240 − 50 t) pixels, whole pixels each frame.
+        QImage badge(80, 80, QImage::Format_RGB32);
+        badge.fill(Qt::white);
+        {
+            QPainter painter(&badge);
+            painter.fillRect(0, 0, 40, 40, Qt::black);
+            painter.fillRect(40, 40, 40, 40, QColor("#c03020"));
+            painter.setBrush(QColor("#2050d0"));
+            painter.drawEllipse(QRectF(20, 20, 40, 40));
+        }
+        QVERIFY(badge.save(dir.filePath("badge.png")));
+        const auto source = dir.filePath("moving.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=640x360:r=25:d=3", "-loop",
+                     "1", "-i", dir.filePath("badge.png"), "-filter_complex",
+                     "[0][1]overlay=x='100+t*125':y='200-t*50':shortest=1", "-c:v", "ffv1",
+                     source});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(640, 360, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        editor.seek(0);
+        editor.addEffect("pixelate");
+        const auto area = editor.state()["selectedId"].toString();
+        editor.setClip("duration", 75);
+        // Nothing to follow on the plain background.
+        editor.seek(25);
+        editor.setClipValues({{"x", 0.4}, {"y", -0.4}, {"effectWidth", 0.1}, {"effectHeight", 0.15}});
+        editor.trackMotion();
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["track"].toMap()["status"].toString(),
+                                  QString("failed"), 30000);
+        QVERIFY(editor.state()["error"].toString().contains("detail"));
+        // Over the badge at 1 s, a little off its centre (265, 190).
+        editor.setClipValues({{"x", 270 / 640. - 0.5}, {"y", 187 / 360. - 0.5}});
+        editor.trackMotion();
+        QCOMPARE(editor.state()["track"].toMap()["status"].toString(), QString("tracking"));
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["track"].toMap()["status"].toString(),
+                                  QString("done"), 60000);
+        const auto track = editor.state()["track"].toMap();
+        QVERIFY2(track["whole"].toBool(), qPrintable(editor.state()["status"].toString()));
+        const auto *c = editor.project().clip(area);
+        // The motion is straight, so few keyframes remain; the offset from the badge's centre
+        // is kept.
+        QVERIFY2(c->keyframes.value("x").size() >= 2 && c->keyframes.value("x").size() < 20,
+                 qPrintable(QString::number(c->keyframes.value("x").size())));
+        for (int frame : {0, 12, 25, 50, 74}) {
+            const double t = frame / 25.;
+            const double x = (145 + 125 * t) / 640 - 0.5, y = (237 - 50 * t) / 360 - 0.5;
+            QVERIFY2(std::abs(c->valueAt("x", frame) - x) < 2.5 / 640 &&
+                         std::abs(c->valueAt("y", frame) - y) < 2.5 / 360,
+                     qPrintable(QString("frame %1: %2, %3 for %4, %5")
+                                    .arg(frame)
+                                    .arg(c->valueAt("x", frame) * 640)
+                                    .arg(c->valueAt("y", frame) * 360)
+                                    .arg(x * 640)
+                                    .arg(y * 360)));
+        }
+        // One undo step.
+        editor.undo();
+        QVERIFY(editor.project().clip(area)->keyframes.value("x").isEmpty());
+        // Cancelling leaves the clip alone.
+        editor.trackMotion();
+        editor.cancelTracking();
+        QVERIFY(editor.state()["track"].toMap().isEmpty());
+        QVERIFY(editor.project().clip(area)->keyframes.value("x").isEmpty());
+        // Nothing to track without a video below.
+        editor.newProject();
+        editor.addTitle();
+        editor.trackMotion();
+        QVERIFY(editor.state()["error"].toString().contains("video clip"));
+    }
     void reframeToVertical() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");

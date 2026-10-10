@@ -3,6 +3,7 @@
 #include "MediaAnalysis.h"
 #include "Playback.h"
 #include "Thumbnails.h"
+#include "Tracker.h"
 #include "AiJobs.h"
 #include "Captions.h"
 #include "Project.h"
@@ -269,6 +270,15 @@ class Editor final : public QObject {
     // Analyses the faces first when needed (AI pack). State "follow": {status:
     // analysing|done|failed, keyframes, clipId}.
     Q_INVOKABLE void followFace();
+    // Makes the selected clip (a blur or mosaic area, or any overlay) follow whatever it covers
+    // in the video below at the playhead: that patch of the picture is tracked forwards and
+    // backwards through the clip and the clip's position keyframed along its path (one undo
+    // step; keyframes thinned to where the path bends; its keyframes outside the tracked stretch
+    // stay, so tracking again from where it was lost continues the path). State "track":
+    // {status: tracking|done|failed, clipId, progress, keyframes, from, to (seconds into the
+    // clip tracked), whole}.
+    Q_INVOKABLE void trackMotion();
+    Q_INVOKABLE void cancelTracking();
     // Changes the canvas to width × height (e.g. 9:16 for Shorts) and zooms every full-frame
     // video and image to fill it; with the AI pack, videos then pan to keep the main face in
     // the picture.
@@ -523,6 +533,9 @@ class Editor final : public QObject {
     QVariantMap m_collect;
     QVariantMap m_conform;
     QVariantMap m_follow;
+    QVariantMap m_track;
+    Tracker *m_tracker = nullptr;
+    void applyTracking(const QVector<Tracker::Point> &points, const QString &error);
     QString m_importFolder;
     QVariantMap m_reframe;
     QVariantMap m_autoColour;
@@ -715,6 +728,7 @@ class Editor final : public QObject {
     QStringList speakingAssets() const;
     void placeCaptions();
     QVariantMap captionState() const;
+    QVariantMap trackState() const;
     QString m_captionLanguage = "auto", m_captionStyle;
     int m_captionChars = 42, m_captionLines = 1;
     QStringList m_captionAssets; // media of a running caption request
