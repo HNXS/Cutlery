@@ -7,7 +7,6 @@ function Get-Pinned($url, $file, $sha256) {
         Invoke-WebRequest -Uri $url -OutFile $file
     }
     $actual = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
-    if (!$sha256) { Write-Host "::warning::UNPINNED $file sha256 $actual"; return }
     if ($actual -ne $sha256) { throw "Checksum mismatch: $file is $actual" }
 }
 # Person segmentation for AI background removal: U²-Net trained on human segmentation
@@ -42,17 +41,18 @@ $voiceCardSha = '5196b5ab0794e6056263a1f37c18bec407b61ac187529bee29d1c366871e5c9
 Get-Pinned "$voiceBase/de_DE-thorsten-medium.onnx" "$Destination/de_DE-thorsten-medium.onnx" $voiceSha
 Get-Pinned "$voiceBase/de_DE-thorsten-medium.onnx.json" "$Destination/de_DE-thorsten-medium.onnx.json" $voiceJsonSha
 Get-Pinned "$voiceBase/MODEL_CARD" "$Destination/de_DE-thorsten-medium.MODEL_CARD.txt" $voiceCardSha
-Get-Content "$Destination/de_DE-thorsten-medium.MODEL_CARD.txt" | Where-Object { $_.Trim() } | ForEach-Object { Write-Host "::notice::Thorsten model card: $_" }
+# Each model card as one annotation on the run, its lines joined.
+Write-Host "::notice::Thorsten model card: $((Get-Content "$Destination/de_DE-thorsten-medium.MODEL_CARD.txt" | Where-Object { $_.Trim() }) -join ' | ')"
 # English voice for dubbing into English: Piper's LJSpeech (medium), trained on the LJ Speech
 # dataset (public domain, https://keithito.com/LJ-Speech-Dataset/), from the same release.
 $englishBase = 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ljspeech/medium'
-$englishSha = ''
-$englishJsonSha = ''
-$englishCardSha = ''
+$englishSha = '6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22'
+$englishJsonSha = '141d612cc0a95ed7efc1ca936b845c2364967f2e9217c5dbfcf69fc4d6c65860'
+$englishCardSha = 'fbee1529c89d36b3fe76d7e9f3f832dce17f44900a52d76a9bda735654766b4d'
 Get-Pinned "$englishBase/en_US-ljspeech-medium.onnx" "$Destination/en_US-ljspeech-medium.onnx" $englishSha
 Get-Pinned "$englishBase/en_US-ljspeech-medium.onnx.json" "$Destination/en_US-ljspeech-medium.onnx.json" $englishJsonSha
 Get-Pinned "$englishBase/MODEL_CARD" "$Destination/en_US-ljspeech-medium.MODEL_CARD.txt" $englishCardSha
-Get-Content "$Destination/en_US-ljspeech-medium.MODEL_CARD.txt" | Where-Object { $_.Trim() } | ForEach-Object { Write-Host "::notice::LJSpeech model card: $_" }
+Write-Host "::notice::LJSpeech model card: $((Get-Content "$Destination/en_US-ljspeech-medium.MODEL_CARD.txt" | Where-Object { $_.Trim() }) -join ' | ')"
 # Voice and music separation: UVR-MDX-NET-Inst_HQ_3 (MDX-Net, trained by the Ultimate Vocal
 # Remover developers; MIT with credit per the UVR README), from the pinned public model release.
 $stemsUrl = 'https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_HQ_3.onnx'
