@@ -153,10 +153,16 @@ void Speech::next() {
         *out += p->readAllStandardOutput();
         Result r{job.request, {}, failure, 0};
         if (r.error.isEmpty()) {
+            // The sound, also when a message came before it on standard output.
+            const auto at = out->indexOf("RIFF");
             QFile file(job.path + ".part");
-            if (!out->startsWith("RIFF") || !file.open(QIODevice::WriteOnly) ||
-                file.write(*out) != out->size()) {
-                r.error = "Piper gave no sound";
+            if (at < 0 || !file.open(QIODevice::WriteOnly) ||
+                file.write(out->mid(at)) != out->size() - at) {
+                const auto last = QString::fromUtf8(*err).trimmed().split('\n').last().trimmed();
+                r.error = QString("Piper gave no sound (%1 bytes: \"%2\"%3)")
+                              .arg(out->size())
+                              .arg(QString::fromLatin1(out->left(24).toPercentEncoding(" ")))
+                              .arg(last.isEmpty() ? QString() : "; " + last);
             } else {
                 file.close();
                 QFile::remove(job.path);

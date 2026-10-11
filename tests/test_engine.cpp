@@ -2157,8 +2157,19 @@ class EngineTest : public QObject {
         QCOMPARE(lines[2]->start, qint64(100));
         QCOMPARE(lines[2]->speed.seconds(), 1.5);
         QCOMPARE(lines[2]->duration, qint64(70));
-        // The original sound under the captions is quieter.
-        QCOMPARE(editor.project().clip(original)->volume, .25);
+        // The original sound is a quarter as loud while a line is spoken, easing over a quarter
+        // second (6 frames); the last two lines touch, so it stays down between them.
+        const auto *o = editor.project().clip(original);
+        QCOMPARE(o->volume, 1.);
+        QCOMPARE(o->valueAt("volume", 0), .25);
+        QCOMPARE(o->valueAt("volume", 15), .25);
+        QCOMPARE(o->valueAt("volume", 18), .625);
+        QCOMPARE(o->valueAt("volume", 30), 1.);
+        QCOMPARE(o->valueAt("volume", 47), .625);
+        QCOMPARE(o->valueAt("volume", 100), .25);
+        QCOMPARE(o->valueAt("volume", 170), .25);
+        QCOMPARE(o->valueAt("volume", 200), 1.);
+        QCOMPARE(o->valueAt("volume", 249), 1.);
         QVERIFY(editor.state()["status"].toString().contains("1 run past"));
         // Heard in the export: the stand-in's 1000 Hz tone over the quieter 300 Hz original
         // while the first line is spoken, and the original alone after it.
@@ -2182,6 +2193,23 @@ class EngineTest : public QObject {
         // One undo step.
         editor.undo();
         QCOMPARE(editor.project().clips.size(), 4);
+        QVERIFY(editor.project().clip(original)->keyframes.value("volume").isEmpty());
+        // Volume keyframes already there are kept and lowered with it: half as loud from 8 s.
+        editor.select(original);
+        editor.setClip("volume", 0.5);
+        editor.seek(200);
+        editor.toggleKeyframe("volume");
+        editor.dubCaptions("de_DE-test-low", "quieter");
+        QTRY_COMPARE_WITH_TIMEOUT(speech()["status"].toString(), QString("done"), 30000);
+        o = editor.project().clip(original);
+        QCOMPARE(o->valueAt("volume", 5), .125);
+        QCOMPARE(o->valueAt("volume", 30), .5);
+        QCOMPARE(o->valueAt("volume", 230), .5);
+        editor.undo();
+        editor.undo();
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), 4);
+        QVERIFY(editor.project().clip(original)->keyframes.value("volume").isEmpty());
         QCOMPARE(editor.project().clip(original)->volume, 1.);
         // Muted instead; the speech comes from the cache.
         editor.dubCaptions("de_DE-test-low", "mute");

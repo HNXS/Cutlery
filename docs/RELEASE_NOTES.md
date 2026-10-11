@@ -4,7 +4,7 @@
 
 Projects are saved as schema 11; 0.5 cannot open them.
 
-- **Dub captions:** Captions › Dub captions (AI) speaks every caption in its time with a German or English voice from the AI pack, after translating them if wished, speeds lines up to 1.5× so they end before the next caption, and turns the original sound down, mutes it or keeps only its music. The AI pack adds an English Piper voice (LJSpeech).
+- **Dub captions:** Captions › Dub captions (AI) speaks every caption in its time with a German or English voice from the AI pack, after translating them if wished, speeds lines up to 1.5× so they end before the next caption, and turns the original sound down while each line is spoken (volume keyframes), mutes it or keeps only its music. The AI pack adds an English Piper voice (LJSpeech).
 - **Smaller additions:** "Read all captions aloud" (Audio › Text to speech) turns captions into speech at their times, e.g. a German voice-over after translating them; a sensitivity slider for "Split at scene changes"; editing proxies can be 720 lines high (Preferences → Proxy size).
 - **Translate captions:** Captions › Translate captions (AI) turns German captions into English or English ones into German, on this computer, with the open Opus-MT models from the AI pack; one undo step puts the original back.
 - **Masks that move:** a free mask has a position (Video › Mask › Mask position) that can be keyframed, and **Track the mask** makes it follow what it surrounds in the video, e.g. to keep one moving person or object visible (or hidden with Invert).

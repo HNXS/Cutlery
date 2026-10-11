@@ -7131,7 +7131,7 @@ ApplicationWindow {
                     objectName: "dubOriginal"
                     Accessible.name: "Original sound"
                     Layout.fillWidth: true
-                    model: ["Quieter", "Music only (AI)", "Keep as it is", "Mute"]
+                    model: ["Quieter while speaking", "Music only (AI)", "Keep as it is", "Mute"]
                 }
             }
             CheckBox {

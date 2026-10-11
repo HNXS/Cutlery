@@ -296,7 +296,8 @@ class Editor final : public QObject {
     Q_INVOKABLE void speakCaptions(const QString &voice, double speed = 1);
     // Dubbing: every caption spoken at its start with `voice`, each line sped up as far as
     // `maxSpeed` (1–2, sound pitch kept) to end before the next caption begins, and the original
-    // sound of the clips under the captions "keep" as it is, made "quieter" (a quarter),
+    // sound of the clips under the captions "keep" as it is, made "quieter" while each line is
+    // spoken (a quarter, by volume keyframes that ease over a quarter second),
     // reduced to its "music" (AI voice separation, which then runs) or "mute". With
     // `translateTo` ("en" or "de") every caption is translated first. One undo step for the
     // speech and the original sound. State "speech" as above, with {dub: true, translating,

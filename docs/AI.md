@@ -148,11 +148,11 @@ Under **Audio › Text to speech**, type what should be said, choose the voice a
 1. **Translate first** (optional): German → English or English → German, as Translate captions does.
 2. **Voice:** each caption is spoken at its start with the chosen voice; choose the English voice for English captions.
 3. **Fitting:** a line that would run into the next caption is sped up, up to 1.5× (the pitch stays). Untick the box to keep every line at its spoken speed. The dialog says how many lines were sped up and how many are still too long; shorten those captions' text or move the next caption.
-4. **Original sound:** the clips with sound under the captions are made **quieter** (a quarter of their volume), keep only their **music** (AI voice separation, which then runs in the background), are **muted**, or **kept** as they are.
+4. **Original sound:** the clips with sound under the captions are made **quieter while speaking**: a quarter of their volume while a line is spoken, easing down and up over a quarter second, as volume keyframes you can adjust afterwards. Or they keep only their **music** (AI voice separation, which then runs in the background), are **muted**, or **kept** as they are.
 
 The speech clips and the change to the original sound are one undo step. The speech clips are ordinary audio clips: move, trim or change their volume like any other.
 
-- **Limits:** the voices are not the speaker's own voice, mouths are not re-synced, and a whole clip's original sound is turned down, not only while a line is spoken.
+- **Limits:** the voices are not the speaker's own voice, mouths are not re-synced, and "music only" and "mute" apply to the whole clip, not only while a line is spoken.
 
 ## Model and licences
 
