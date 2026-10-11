@@ -71,6 +71,7 @@ if ($Models) {
     if ($Whisper) { Copy-Item "$Whisper/ggml-silero-v6.2.0.bin" "$AiPackDir/models" }
     # Text to speech: Piper in tts/ (its own ONNX Runtime and eSpeak NG data), voices in models/.
     Copy-Item "$Models/de_DE-thorsten-medium.onnx","$Models/de_DE-thorsten-medium.onnx.json","$Models/de_DE-thorsten-medium.MODEL_CARD.txt" "$AiPackDir/models"
+    Copy-Item "$Models/en_US-ljspeech-medium.onnx","$Models/en_US-ljspeech-medium.onnx.json","$Models/en_US-ljspeech-medium.MODEL_CARD.txt" "$AiPackDir/models"
     if ($Piper) {
         New-Item -ItemType Directory -Force "$AiPackDir/tts" | Out-Null
         Copy-Item "$Piper/*" "$AiPackDir/tts" -Recurse -Force

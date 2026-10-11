@@ -2064,6 +2064,171 @@ class EngineTest : public QObject {
         editor.speak("  ", german);
         QVERIFY(editor.state()["error"].toString().contains("text"));
     }
+    void dubbing() {
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        // The stand-in Piper speaks a tenth of a second per character; any voice files will do.
+        QTemporaryDir dir, models;
+        QFile voice(models.filePath("de_DE-test-low.onnx"));
+        QVERIFY(voice.open(QIODevice::WriteOnly));
+        voice.write("stand-in");
+        voice.close();
+        QFile settings(models.filePath("de_DE-test-low.onnx.json"));
+        QVERIFY(settings.open(QIODevice::WriteOnly));
+        settings.write(R"({"phoneme_id_map": {}, "audio": {"sample_rate": 16000},
+                          "language": {"name_english": "German"}})");
+        settings.close();
+#ifdef CUTLERY_AI_WORKER
+        // The stand-in translator (see translateCaptions) for dubbing after translating.
+        QDir().mkpath(models.filePath("opus-mt-de-en"));
+        for (const auto *file : {"encoder_model.onnx", "decoder_model.onnx", "source.spm",
+                                 "vocab.json", "config.json"})
+            QVERIFY(QFile::copy(QString(CUTLERY_SOURCE_DIR "/tests/fixtures/translate-copy/") + file,
+                                models.filePath(QString("opus-mt-de-en/") + file)));
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+#endif
+        QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) +
+             "/cache/speech")
+            .removeRecursively();
+        // The original recording, 10 s with sound.
+        const auto source = dir.filePath("talk.wav");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "sine=f=300:d=10", "-ac", "2", source});
+        qputenv("CUTLERY_PIPER", CUTLERY_FAKE_PIPER);
+        qputenv("CUTLERY_AI_MODELS", models.path().toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        qunsetenv("CUTLERY_PIPER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        qunsetenv("CUTLERY_AI_WORKER");
+        editor.configure(640, 360, 25, 1);
+        auto speech = [&] { return editor.state()["speech"].toMap(); };
+        QCOMPARE(speech()["missing"].toString(), QString());
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto original = editor.project().clips.first().id;
+        editor.dubCaptions("de_DE-test-low");
+        QVERIFY(editor.state()["error"].toString().contains("no captions"));
+        editor.clearError();
+        // Three captions: room to spare, a line that fits when 1.25× faster, and one too long
+        // even at 1.5×.
+        auto caption = [&](qint64 at, const QString &text, qint64 frames) {
+            editor.seek(at);
+            editor.addCaption();
+            const auto id = editor.state()["selectedId"].toString();
+            editor.setClip("text", text);
+            editor.setClip("duration", frames);
+            return id;
+        };
+        const auto c1 = caption(0, "Hallo!", 50);
+        const int captionTrack = editor.project().clip(c1)->track;
+        editor.setTrack(captionTrack, "name", QString("AI captions"));
+        caption(50, "Ein sehr langer Satz hier", 40);
+        caption(100, "Das ist viel zu lang fuer diese kurze Zeit", 25);
+        QCOMPARE(editor.project().clips.size(), 4);
+        auto dubbed = [&] {
+            QVector<const Clip *> list;
+            for (const auto &c : editor.project().clips)
+                if (c.name.startsWith("Speech: "))
+                    list << &c;
+            std::sort(list.begin(), list.end(), [](auto *a, auto *b) { return a->start < b->start; });
+            return list;
+        };
+        editor.dubCaptions("de_DE-test-low", "quieter");
+        QCOMPARE(speech()["status"].toString(), QString("speaking"));
+        QVERIFY(speech()["dub"].toBool());
+        QTRY_COMPARE_WITH_TIMEOUT(speech()["status"].toString(), QString("done"), 30000);
+        QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+        QCOMPARE(speech()["count"].toInt(), 3);
+        QCOMPARE(speech()["faster"].toInt(), 2);
+        QCOMPARE(speech()["tooLong"].toInt(), 1);
+        auto lines = dubbed();
+        QCOMPARE(lines.size(), 3);
+        // 0.6 s at its caption, as spoken.
+        QCOMPARE(lines[0]->start, qint64(0));
+        QCOMPARE(lines[0]->speed.seconds(), 1.);
+        QCOMPARE(lines[0]->duration, qint64(15));
+        QCOMPARE(lines[0]->name, QString("Speech: Hallo!"));
+        // 2.5 s into the 2 s until the next caption.
+        QCOMPARE(lines[1]->start, qint64(50));
+        QCOMPARE(lines[1]->speed.seconds(), 1.25);
+        QCOMPARE(lines[1]->duration, qint64(50));
+        // 4.2 s for 1 s: as fast as allowed, and still longer.
+        QCOMPARE(lines[2]->start, qint64(100));
+        QCOMPARE(lines[2]->speed.seconds(), 1.5);
+        QCOMPARE(lines[2]->duration, qint64(70));
+        // The original sound under the captions is quieter.
+        QCOMPARE(editor.project().clip(original)->volume, .25);
+        QVERIFY(editor.state()["status"].toString().contains("1 run past"));
+        // Heard in the export: the stand-in's 1000 Hz tone over the quieter 300 Hz original
+        // while the first line is spoken, and the original alone after it.
+        const auto mix = dir.filePath("dubbed.wav");
+        editor.exportWith(QUrl::fromLocalFile(mix), {{"format", "wav"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.state()["busy"].toBool(), 60000);
+        auto level = [&](double from, int hz) {
+            QProcess p;
+            p.start(ffmpeg, {"-v", "info", "-ss", QString::number(from), "-t", "0.4", "-i", mix,
+                             "-af", QString("bandpass=f=%1:width_type=q:w=8,astats=measure_perchannel=none").arg(hz),
+                             "-f", "null", "-"});
+            p.waitForFinished(30000);
+            const auto m = QRegularExpression("RMS level dB:\\s+(-?[0-9.]+|-inf)")
+                               .match(QString::fromUtf8(p.readAllStandardError()));
+            return m.captured(1) == "-inf" ? -150. : m.captured(1).toDouble();
+        };
+        QVERIFY2(level(0.1, 1000) > level(0.1, 300) + 6,
+                 qPrintable(QString("%1 %2").arg(level(0.1, 1000)).arg(level(0.1, 300))));
+        QVERIFY2(level(1.2, 300) > level(1.2, 1000) + 6,
+                 qPrintable(QString("%1 %2").arg(level(1.2, 300)).arg(level(1.2, 1000))));
+        // One undo step.
+        editor.undo();
+        QCOMPARE(editor.project().clips.size(), 4);
+        QCOMPARE(editor.project().clip(original)->volume, 1.);
+        // Muted instead; the speech comes from the cache.
+        editor.dubCaptions("de_DE-test-low", "mute");
+        QTRY_COMPARE_WITH_TIMEOUT(speech()["status"].toString(), QString("done"), 30000);
+        QVERIFY(editor.project().clip(original)->muted);
+        editor.undo();
+        QVERIFY(!editor.project().clip(original)->muted);
+        // Not sped up at all: every line as spoken, two of them too long; the original kept.
+        editor.dubCaptions("de_DE-test-low", "keep", {}, 1);
+        QTRY_COMPARE_WITH_TIMEOUT(speech()["status"].toString(), QString("done"), 30000);
+        QCOMPARE(speech()["faster"].toInt(), 0);
+        QCOMPARE(speech()["tooLong"].toInt(), 2);
+        lines = dubbed();
+        QCOMPARE(lines.size(), 3);
+        QCOMPARE(lines[1]->speed.seconds(), 1.);
+        QCOMPARE(lines[1]->duration, qint64(62));
+        QCOMPARE(editor.project().clip(original)->volume, 1.);
+        editor.undo();
+        QCOMPARE(dubbed().size(), 0);
+        // Refused: unknown choices, too fast, music without the separation model, an unknown
+        // voice.
+        editor.dubCaptions("de_DE-test-low", "loud");
+        QVERIFY(editor.state()["error"].toString().contains("original sound"));
+        editor.dubCaptions("de_DE-test-low", "keep", {}, 3);
+        QVERIFY(editor.state()["error"].toString().contains("1–2"));
+        editor.dubCaptions("de_DE-test-low", "music");
+        QVERIFY(editor.state()["error"].toString().contains("AI pack"));
+        editor.clearError();
+        editor.dubCaptions("xx_XX-nobody", "keep");
+        QTRY_COMPARE_WITH_TIMEOUT(speech()["status"].toString(), QString("failed"), 10000);
+        QVERIFY(editor.state()["error"].toString().contains("No such voice"));
+        QCOMPARE(dubbed().size(), 0);
+        editor.dubCaptions("de_DE-test-low", "keep", "de");
+        QVERIFY(editor.state()["error"].toString().contains("opus-mt-en-de"));
+#ifdef CUTLERY_AI_WORKER
+        // Translated first, then spoken from the translated text.
+        editor.clearError();
+        editor.dubCaptions("de_DE-test-low", "keep", "en");
+        QVERIFY(speech()["translating"].toBool());
+        QTRY_COMPARE_WITH_TIMEOUT(speech()["status"].toString(), QString("done"), 60000);
+        QCOMPARE(editor.project().clip(c1)->text, QString("Hallo"));
+        lines = dubbed();
+        QCOMPARE(lines.size(), 3);
+        QCOMPARE(lines[0]->name, QString("Speech: Hallo"));
+        QCOMPARE(lines[0]->duration, qint64(12));
+#endif
+    }
     void speechWithoutPiper() {
         qputenv("CUTLERY_PIPER", "/nonexistent/piper");
         FrameProvider frames;

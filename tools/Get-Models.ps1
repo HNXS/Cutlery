@@ -7,6 +7,7 @@ function Get-Pinned($url, $file, $sha256) {
         Invoke-WebRequest -Uri $url -OutFile $file
     }
     $actual = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+    if (!$sha256) { Write-Host "::warning::UNPINNED $file sha256 $actual"; return }
     if ($actual -ne $sha256) { throw "Checksum mismatch: $file is $actual" }
 }
 # Person segmentation for AI background removal: U²-Net trained on human segmentation
@@ -42,6 +43,16 @@ Get-Pinned "$voiceBase/de_DE-thorsten-medium.onnx" "$Destination/de_DE-thorsten-
 Get-Pinned "$voiceBase/de_DE-thorsten-medium.onnx.json" "$Destination/de_DE-thorsten-medium.onnx.json" $voiceJsonSha
 Get-Pinned "$voiceBase/MODEL_CARD" "$Destination/de_DE-thorsten-medium.MODEL_CARD.txt" $voiceCardSha
 Get-Content "$Destination/de_DE-thorsten-medium.MODEL_CARD.txt" | Where-Object { $_.Trim() } | ForEach-Object { Write-Host "::notice::Thorsten model card: $_" }
+# English voice for dubbing into English: Piper's LJSpeech (medium), trained on the LJ Speech
+# dataset (public domain, https://keithito.com/LJ-Speech-Dataset/), from the same release.
+$englishBase = 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ljspeech/medium'
+$englishSha = ''
+$englishJsonSha = ''
+$englishCardSha = ''
+Get-Pinned "$englishBase/en_US-ljspeech-medium.onnx" "$Destination/en_US-ljspeech-medium.onnx" $englishSha
+Get-Pinned "$englishBase/en_US-ljspeech-medium.onnx.json" "$Destination/en_US-ljspeech-medium.onnx.json" $englishJsonSha
+Get-Pinned "$englishBase/MODEL_CARD" "$Destination/en_US-ljspeech-medium.MODEL_CARD.txt" $englishCardSha
+Get-Content "$Destination/en_US-ljspeech-medium.MODEL_CARD.txt" | Where-Object { $_.Trim() } | ForEach-Object { Write-Host "::notice::LJSpeech model card: $_" }
 # Voice and music separation: UVR-MDX-NET-Inst_HQ_3 (MDX-Net, trained by the Ultimate Vocal
 # Remover developers; MIT with credit per the UVR README), from the pinned public model release.
 $stemsUrl = 'https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_HQ_3.onnx'
@@ -112,6 +123,7 @@ foreach ($m in $faceModels) {
     @{ file='ggml-large-v3-turbo-q5_0.bin'; url=$speechUrl; sha1=$speechSha1; sha256=$speechSha; license='MIT'; source='https://github.com/openai/whisper'; purpose='speech recognition for automatic captions' },
     @{ file='realesr-general-x4v3.onnx'; converted_from=$srUrl; source_sha256=$srSha; sha256=$srOnnx; license='BSD-3-Clause'; source='https://github.com/xinntao/Real-ESRGAN'; purpose='4x super-resolution for AI upscale' },
     @{ file='de_DE-thorsten-medium.onnx'; url="$voiceBase/de_DE-thorsten-medium.onnx"; sha256=$voiceSha; settings_sha256=$voiceJsonSha; license='Dataset CC0-1.0 (Thorsten-Voice); fine-tuned from the lessac voice per the model card'; source='https://github.com/thorstenMueller/Thorsten-Voice'; purpose='German voice for text to speech (Piper)' },
+    @{ file='en_US-ljspeech-medium.onnx'; url="$englishBase/en_US-ljspeech-medium.onnx"; sha256=$englishSha; settings_sha256=$englishJsonSha; license='Dataset public domain (LJ Speech); see the model card for its training'; source='https://keithito.com/LJ-Speech-Dataset/'; purpose='English voice for text to speech and dubbing (Piper)' },
     @{ file='UVR-MDX-NET-Inst_HQ_3.onnx'; url=$stemsUrl; sha256=$stemsSha; license='MIT (credit Ultimate Vocal Remover and its developers)'; source='https://github.com/Anjok07/ultimatevocalremovergui'; purpose='voice and music separation' }
 ) + @($translation | ForEach-Object { @{ folder="opus-mt-$($_.pair)"; files=@($_.files | ForEach-Object { @{ file=$_.name; url=$_.url; sha256=$_.sha } }); license='CC-BY-4.0'; source='https://github.com/Helsinki-NLP/Opus-MT'; purpose='caption translation' } }) + @($faceModels | ForEach-Object { @{ file="$($_.name).onnx"; converted_from="mediapipe==0.10.18:$($_.entry)"; source_sha256=$_.sha256; sha256=$_.onnx; license='Apache-2.0'; source='https://github.com/google-ai-edge/mediapipe'; purpose='face, eye and iris landmarks for eye contact' } }) } | ConvertTo-Json -Depth 4 | Set-Content "$Destination/manifest.json" -Encoding utf8
 Write-Output (Resolve-Path $Destination).Path

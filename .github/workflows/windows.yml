@@ -228,6 +228,12 @@ jobs:
           $code = $LASTEXITCODE
           Pop-Location
           if ($code -ne 0 -or (Get-Item dist/tts-check.wav).Length -lt 20000) { throw 'Packaged Piper failed' }
+          # And English with the packaged English voice, for dubbing into English.
+          Push-Location "$pack/models"
+          'Greetings from the video editor.' | & "$pack/tts/piper.exe" --quiet --model en_US-ljspeech-medium.onnx --output_file "$PWD/../../tts-check-en.wav"
+          $code = $LASTEXITCODE
+          Pop-Location
+          if ($code -ne 0 -or (Get-Item dist/tts-check-en.wav).Length -lt 20000) { throw 'Packaged English voice failed' }
       # The one-command local build (README/BUILDING) must keep working; the downloads and the
       # build folder from the steps above are reused, so this mostly checks the script itself.
       - name: Check the local build script
