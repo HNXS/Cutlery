@@ -5,6 +5,7 @@
 #include "KeyboardShortcuts.h"
 #include "MediaAnalysis.h"
 #include "People.h"
+#include <QtEndian>
 #include "Project.h"
 #include "RenderGraph.h"
 #include "Scopes.h"
@@ -1996,6 +1997,14 @@ class EngineTest : public QObject {
         const double seconds = asset->duration;
         QVERIFY2(seconds > 2 && seconds < 8, qPrintable(QString::number(seconds)));
         QCOMPARE(clip.duration, qint64(std::floor(seconds * 25 + 1e-6)));
+        // Exactly as long as its header says: Piper's output is not garbled on the way (on
+        // Windows its standard output is in text mode).
+        {
+            QFile spokenFile(asset->path);
+            QVERIFY(spokenFile.open(QIODevice::ReadOnly));
+            const auto head = spokenFile.read(8);
+            QCOMPARE(qint64(qFromLittleEndian<quint32>(head.constData() + 4)) + 8, spokenFile.size());
+        }
         // It is speech: loud enough over most of its length.
         const auto pcm = run(Editor::executable("ffmpeg"),
                              {"-v", "error", "-i", asset->path, "-f", "s16le", "-ac", "1", "-ar",
@@ -2279,6 +2288,26 @@ class EngineTest : public QObject {
         wav.close();
         QCOMPARE(Speech::wavSeconds(wav.fileName()), 1.);
         QCOMPARE(Speech::wavSeconds(dir.filePath("none.wav")), 0.);
+        // Piper's output in Windows text mode (LF written as CR LF) is put back; samples that
+        // were CR LF already keep it, and a correct file is left alone.
+        QByteArray samples;
+        for (int i = 0; i < 4066; ++i)
+            samples += char(i % 256);
+        samples += "\r\n\n\r";
+        QByteArray original("RIFF\0\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x80\x3e\0\0\0\x7d\0\0\x02\0\x10\0data", 40);
+        original += QByteArray(4, 0) + samples;
+        qToLittleEndian<quint32>(quint32(original.size() - 8), original.data() + 4);
+        qToLittleEndian<quint32>(quint32(samples.size()), original.data() + 40);
+        // A length whose low byte is LF, so the header itself is changed too (as when the
+        // interface test's speech failed on Windows).
+        QCOMPARE(uchar(original[4]), uchar('\n'));
+        QCOMPARE(Speech::wavSeconds(dir.filePath("none.wav")), 0.);
+        auto textMode = original;
+        textMode.replace("\n", "\r\n");
+        QVERIFY(textMode.size() > original.size());
+        QCOMPARE(Speech::repairedWav(textMode), original);
+        QCOMPARE(Speech::repairedWav(original), original);
+        QCOMPARE(Speech::repairedWav("not a wav"), QByteArray("not a wav"));
     }
     void reframeToVertical() {
         const auto ffmpeg = Editor::executable("ffmpeg");
