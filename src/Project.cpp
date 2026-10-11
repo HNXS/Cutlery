@@ -565,6 +565,8 @@ QJsonObject Project::json(const QString &base) const {
             o["eyeContact"] = true;
         if (!c.stems.isEmpty())
             o["stems"] = c.stems;
+        if (!c.removeArea.isEmpty())
+            o["removeArea"] = c.removeArea;
         o["transition"] = c.transition;
         o["transitionFrames"] = QString::number(c.transitionFrames);
         cc.append(o);
@@ -814,6 +816,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.aiUpscale = j["aiUpscale"].toBool();
         c.eyeContact = j["eyeContact"].toBool(false);
         c.stems = j["stems"].toString();
+        c.removeArea = j["removeArea"].toString();
         c.transition = j["transition"].toString();
         if (j.contains("transitionFrames"))
             c.transitionFrames = integer(j["transitionFrames"]);
@@ -931,6 +934,7 @@ void Project::validate() const {
                     bounded(c.radius, 0, 0.5) && bounded(c.border, 0, 0.1) &&
                     bounded(c.feather, 0, 0.5) &&
                     (c.mask.isEmpty() || !maskPoints(c.mask).isEmpty()) &&
+                    (c.removeArea.isEmpty() || !maskPoints(c.removeArea).isEmpty()) &&
                     bounded(c.tiltX, -70, 70) && bounded(c.tiltY, -70, 70) &&
                     (c.cornerPin.isEmpty() ||
                      (c.cornerPin.size() == 8 &&

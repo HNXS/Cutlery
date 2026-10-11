@@ -131,6 +131,11 @@ jobs:
           build/bin/Release/cutlery_tests.exe textToSpeech -o build/tts.txt,txt | Out-Null
           $speech = Get-Content build/tts.txt -Raw
           # Caption translation ran with the real Opus-MT models, not skipped.
+          # Object removal ran with the real LaMa model, not skipped.
+          build/bin/Release/cutlery_tests.exe removeObjectWithRealModel -o build/inpaint.txt,txt | Out-Null
+          $inpaint = Get-Content build/inpaint.txt -Raw
+          Write-Output $inpaint
+          if ($inpaint -notmatch 'PASS   : EngineTest::removeObjectWithRealModel\(\)') { Write-Output "::error::Object removal was not tested with LaMa"; throw 'Object removal was not tested with LaMa' }
           build/bin/Release/cutlery_tests.exe translateWithRealModels -o build/translate.txt,txt | Out-Null
           $translation = Get-Content build/translate.txt -Raw
           Write-Output $translation

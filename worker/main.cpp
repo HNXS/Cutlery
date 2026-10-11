@@ -8,6 +8,7 @@
 //   cutlery-ai faces ... where the faces are, for areas that follow one (see faces.cpp)
 //   cutlery-ai separate ... voice and music apart (see separate.cpp)
 //   cutlery-ai translate ... text lines into another language (see translate.cpp)
+//   cutlery-ai inpaint ... an area of a video painted over (see inpaint.cpp)
 //
 // Common options: --ffmpeg F --model M --input IN --output OUT [--cpu 1]. Prints
 // "device gpu|cpu" and "progress <done> <total>" lines; exits non-zero on failure.
@@ -33,9 +34,11 @@ int main(int argc, char **argv) {
             return worker::translate(o);
         if (task == "tokenize")
             return worker::tokenize(o);
+        if (task == "inpaint")
+            return worker::inpaint(o);
     } catch (const Ort::Exception &e) {
         return worker::fail(QString("ONNX Runtime: ") + e.what());
     }
-    return worker::fail("usage: cutlery-ai matte|upscale|transcribe|eyecontact|faces|separate|translate --ffmpeg F --model M --input IN "
+    return worker::fail("usage: cutlery-ai matte|upscale|transcribe|eyecontact|faces|separate|translate|inpaint --ffmpeg F --model M --input IN "
                         "--output OUT ...");
 }

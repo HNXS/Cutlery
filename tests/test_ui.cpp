@@ -1339,6 +1339,84 @@ class UiTest : public QObject {
         QCOMPARE(editor.project().clips.last().name, QString("Speech: Guten Tag"));
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void removeObjectControls() {
+        // Video › Enhance › Remove an object: an outline clicked on the preview, then the area
+        // is painted over (here by the stand-in model, which fills it with grey).
+        QTemporaryDir dir, models;
+        const auto video = dir.filePath("box.mkv");
+        QProcess generate;
+        generate.start(Editor::executable("ffmpeg"),
+                       {"-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=320x180:r=30:d=1",
+                        "-vf", "drawbox=x=140:y=70:w=40:h=40:c=red:t=fill", "-c:v", "ffv1", video});
+        QVERIFY(generate.waitForFinished(15000));
+        QCOMPARE(generate.exitCode(), 0);
+#ifdef CUTLERY_AI_WORKER
+        QVERIFY(QFile::copy(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/tests/fixtures/grey-inpaint.onnx",
+                            models.filePath("lama.onnx")));
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+#endif
+        qputenv("CUTLERY_AI_MODELS", models.path().toUtf8());
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        editor.configure(320, 180, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(video)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto clip = editor.project().clips.first().id;
+        editor.select(clip);
+        editor.seek(10);
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        page(window, "video", "enhance");
+        auto *panel = findItem(window->contentItem(), "removeObjectPanel");
+        QTRY_VERIFY(panel && panel->isVisible());
+        auto *draw = findItem(window->contentItem(), "drawRemoveArea");
+        auto *status = findItem(window->contentItem(), "removeObjectStatus");
+        QVERIFY(draw && status);
+#ifndef CUTLERY_AI_WORKER
+        // Without the AI pack: nothing to draw, and it says why.
+        QVERIFY(!draw->isEnabled());
+        QVERIFY(status->property("text").toString().contains("AI"));
+#else
+        QTRY_VERIFY(draw->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(draw, "clicked"));
+        auto *drawer = findItem(window->contentItem(), "maskDrawer");
+        QTRY_VERIFY(drawer && drawer->isVisible());
+        for (const auto &at : {QPointF(0.4, 0.3), QPointF(0.6, 0.3), QPointF(0.6, 0.7), QPointF(0.4, 0.7)})
+            QTest::mouseClick(window, Qt::LeftButton, {},
+                              drawer->mapToScene(QPointF(at.x() * drawer->width(), at.y() * drawer->height()))
+                                  .toPoint());
+        QTRY_COMPARE(maskPoints(editor.project().clip(clip)->removeArea).size(), 4);
+        QTRY_VERIFY(draw->property("text").toString().contains("4 points"));
+        // The free mask is untouched.
+        QVERIFY(editor.project().clip(clip)->mask.isEmpty());
+        auto *run = findItem(window->contentItem(), "removeObjectRun");
+        QTRY_VERIFY(run && run->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(run, "clicked"));
+        QVERIFY(!drawer->isVisible());
+        QTRY_VERIFY_WITH_TIMEOUT(status->property("text").toString().contains("Removed"), 60000);
+        auto *clear = findItem(window->contentItem(), "clearRemoveArea");
+        QVERIFY(clear && clear->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(clear, "clicked"));
+        QVERIFY(editor.project().clip(clip)->removeArea.isEmpty());
+#endif
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void presenterControls() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;

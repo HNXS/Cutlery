@@ -54,6 +54,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - **Translate captions** (AI pack): German ↔ English, offline.
 - **Voice and music apart** (AI pack): keep only the voice of a clip, or only its music.
 - **Text to speech** (AI pack): typed text or a title is spoken by a German or English voice (Piper: Thorsten, LJSpeech) and added as an audio clip.
+- **Remove an object** (AI pack): draw around a logo or sign, and it is painted over in every frame.
 - **Dubbing** (AI pack): captions, translated first if wished, are spoken in their times over the original sound, which is turned down or reduced to its music.
 - **Sound tools** (inspector): EQ, low cut, noise reduction, gate, de-esser, compressor, reverb and echo per clip, with voice presets.
 - **Colour and look** (inspector): temperature, tint, vibrance, shadows and highlights; sharpen, glow, vignette and film grain; .cube/.3dl LUTs with adjustable strength; one-click looks (Warm, Cool, Cinematic, Vintage, Black & white, Punchy, Dreamy).

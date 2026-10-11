@@ -198,6 +198,7 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
                        {"eyecontact", models + "/face_landmark.onnx"},
                        {"faces", models + "/face_detection_short_range.onnx"},
                        {"separate", models + "/UVR-MDX-NET-Inst_HQ_3.onnx"},
+                       {"inpaint", models + "/lama.onnx"},
                        {"transcribe", models + "/ggml-large-v3-turbo-q5_0.bin"},
                        {"vad", models + "/ggml-silero-v6.2.0.bin"},
                        {"whisper", whisper}},
@@ -598,6 +599,25 @@ QVariantMap Editor::state() const {
                              }
                              return outline;
                          }()},
+                        {"removeArea", c.removeArea},
+                        {"removeOutline",
+                         [&] {
+                             // The area object removal paints over (or its points drawn so
+                             // far), on the canvas.
+                             QVariantList outline;
+                             const auto bounds = clipBounds(c.id);
+                             if (bounds.isEmpty())
+                                 return outline;
+                             const auto points = m_maskDraft.first == c.id + "#removeArea"
+                                                     ? m_maskDraft.second
+                                                     : maskPoints(c.removeArea);
+                             for (const auto &point : points) {
+                                 const auto at = pictureToCanvas(bounds, sourceToPicture(c, point),
+                                                                 QSizeF(m_project.width, m_project.height));
+                                 outline << QVariantMap{{"x", at.x()}, {"y", at.y()}};
+                             }
+                             return outline;
+                         }()},
                         {"hdr", m_project.asset(c.assetId) && !c.audioOnly
                                     ? m_project.asset(c.assetId)->hdr
                                     : QString()},
@@ -788,8 +808,8 @@ QVariantMap Editor::state() const {
 #undef PROP
             if (const auto *a = m_project.asset(c.assetId); a && a->kind == "video") {
                 for (const auto &[task, name] : {std::pair{"matte", "cutout"}, {"upscale", "upscale"},
-                                                 {"eyecontact", "eyeContactInfo"}}) {
-                    auto info = m_ai->status(task, *a, aiVariant(task, *a));
+                                                 {"eyecontact", "eyeContactInfo"}, {"inpaint", "inpaintInfo"}}) {
+                    auto info = m_ai->status(task, *a, aiVariant(task, *a, &c));
                     info["covered"] = aiCovered(task, *a, &c);
                     selected[name] = info;
                 }
@@ -885,6 +905,7 @@ QVariantMap Editor::state() const {
                                       {"eyecontact", m_ai->missing("eyecontact")},
                                       {"faces", m_ai->missing("faces")},
                                       {"separate", m_ai->missing("separate")},
+                                      {"inpaint", m_ai->missing("inpaint")},
                                       {"transcribe", m_ai->missing("transcribe")}}},
             {"captions", captionState()},
             {"pauses", pauseState()},
@@ -3107,6 +3128,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(eyeContact, toBool);
         FIELD(shape, toString);
         FIELD(mask, toString);
+        FIELD(removeArea, toString);
         FIELD(maskSmooth, toBool);
         FIELD(maskInvert, toBool);
         FIELD(borderColor, toString);
@@ -3150,9 +3172,32 @@ QVariantMap Editor::clipBounds(const QString &id) const {
             {"rotation", c->valueAt("rotation", local)},
             {"inside", local >= 0 && local < c->duration}};
 }
-void Editor::addMaskPoint(double x, double y) {
+void Editor::addMaskPoint(double x, double y, const QString &target) {
     const auto *c = m_project.clip(m_selected);
     const auto bounds = c ? clipBounds(c->id) : QVariantMap{};
+    if (target == "removeArea") {
+        // The area to paint over, kept in source fractions.
+        const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+        if (!a || a->kind != "video" || c->audioOnly || bounds.isEmpty())
+            return fail("Select a video clip to remove something from");
+        const auto picture = canvasToPicture(bounds, {x, y}, QSizeF(m_project.width, m_project.height));
+        auto point = pictureToSource(*c, {std::clamp(picture.x(), 0., 1.), std::clamp(picture.y(), 0., 1.)});
+        point = {std::clamp(point.x(), 0., 1.), std::clamp(point.y(), 0., 1.)};
+        const auto draft = c->id + "#removeArea";
+        auto points = m_maskDraft.first == draft ? m_maskDraft.second : maskPoints(c->removeArea);
+        if (points.size() >= 64)
+            return fail("An area has at most 64 points");
+        points << point;
+        if (points.size() < 3) {
+            m_maskDraft = {draft, points};
+            emit changed();
+            return;
+        }
+        m_maskDraft = {};
+        return setClip("removeArea", maskText(points));
+    }
+    if (target != "mask")
+        return fail("Unknown outline: " + target);
     if (!c || bounds.isEmpty() || !c->titleStyle.isEmpty() || !c->effect.isEmpty())
         return fail("Select a video, picture, title or shape to mask");
     const QSizeF frame(m_project.width, m_project.height);
@@ -3174,29 +3219,33 @@ void Editor::addMaskPoint(double x, double y) {
     m_maskDraft = {};
     setClip("mask", maskText(points));
 }
-void Editor::removeMaskPoint() {
+void Editor::removeMaskPoint(const QString &target) {
     const auto *c = m_project.clip(m_selected);
-    if (!c)
+    if (!c || (target != "mask" && target != "removeArea"))
         return;
-    auto points = m_maskDraft.first == c->id ? m_maskDraft.second : maskPoints(c->mask);
+    const bool area = target == "removeArea";
+    const auto draft = area ? c->id + "#removeArea" : c->id;
+    const auto &current = area ? c->removeArea : c->mask;
+    auto points = m_maskDraft.first == draft ? m_maskDraft.second : maskPoints(current);
     if (points.isEmpty())
         return;
     points.removeLast();
     if (points.size() < 3) {
-        m_maskDraft = {c->id, points};
-        if (!c->mask.isEmpty())
-            setClip("mask", QString());
+        m_maskDraft = {draft, points};
+        if (!current.isEmpty())
+            setClip(target, QString());
         else
             emit changed();
         return;
     }
-    setClip("mask", maskText(points));
+    setClip(target, maskText(points));
 }
-void Editor::clearMask() {
+void Editor::clearMask(const QString &target) {
     m_maskDraft = {};
     const auto *c = m_project.clip(m_selected);
-    if (c && !c->mask.isEmpty())
-        setClip("mask", QString());
+    const auto current = !c ? QString() : target == "removeArea" ? c->removeArea : target == "mask" ? c->mask : QString();
+    if (!current.isEmpty())
+        setClip(target, QString());
     else
         emit changed();
 }
@@ -5903,18 +5952,24 @@ bool Editor::usesAi(const Clip &c, const QString &task) const {
         return c.eyeContact;
     if (task == "separate")
         return !c.stems.isEmpty();
+    if (task == "inpaint")
+        return !c.removeArea.isEmpty();
     return task == "upscale" ? c.aiUpscale : c.aiCutout;
 }
-QString Editor::aiVariant(const QString &task, const Asset &a) const {
+QString Editor::aiVariant(const QString &task, const Asset &a, const Clip *clip) const {
     if (task == "upscale")
         return QString::number(upscaleHeight(a));
+    if (task == "inpaint")
+        return clip ? clip->removeArea : QString();
     return task == "transcribe" ? m_captionLanguage : QString();
 }
 std::pair<double, double> Editor::aiSpan(const QString &task, const Asset &a,
                                          const Clip *extra) const {
     double from = 1e300, to = -1e300;
     for (const auto &c : m_project.clips)
-        if (c.assetId == a.id && (usesAi(c, task) || (extra && c.id == extra->id))) {
+        if (c.assetId == a.id && (usesAi(c, task) || (extra && c.id == extra->id)) &&
+            // Each inpainted area is its own result.
+            (task != "inpaint" || !extra || c.removeArea == extra->removeArea)) {
             // Transition handles and held frames reach up to a second beyond the trim.
             const double in = c.sourceIn.seconds(),
                          length = frameTime(c.duration, m_project.fpsN, m_project.fpsD).seconds() *
@@ -5931,7 +5986,9 @@ int Editor::upscaleHeight(const Asset &a) {
     return a.height > 0 && a.height < 2160 ? std::min(4 * a.height, 2160) / 2 * 2 : 0;
 }
 bool Editor::aiCovered(const QString &task, const Asset &a, const Clip *c) const {
-    const auto r = m_ai->result(task, a, aiVariant(task, a));
+    if (task == "inpaint" && (!c || c->removeArea.isEmpty()))
+        return false;
+    const auto r = m_ai->result(task, a, aiVariant(task, a, c));
     const auto [from, to] = aiSpan(task, a, c);
     // A matte holds its last analysed frame, so its end may fall short by one.
     const double slack = task == "matte" ? 1 / AiJobs::matteRate : 0.05;
@@ -5948,6 +6005,10 @@ void Editor::addAiMedia(RenderOptions &options) const {
             if (c.aiCutout && !options.mattes.contains(a->id))
                 if (const auto m = m_ai->result("matte", *a); !m.path.isEmpty())
                     options.mattes.insert(a->id, m);
+            if (const auto key = a->id + "|" + c.removeArea;
+                !c.removeArea.isEmpty() && !options.inpainted.contains(key))
+                if (const auto r = m_ai->result("inpaint", *a, c.removeArea); !r.path.isEmpty())
+                    options.inpainted.insert(key, r);
             if (c.eyeContact && !options.eyeContact.contains(a->id))
                 if (const auto e = m_ai->result("eyecontact", *a); !e.path.isEmpty())
                     options.eyeContact.insert(a->id, e);
@@ -5962,12 +6023,12 @@ bool Editor::startAi(const QString &task, const Asset &a, const Clip *extra) {
         return false;
     auto [from, to] = aiSpan(task, a, extra);
     // Keep what an earlier result covered when it overlaps, so other clips keep it.
-    if (const auto r = m_ai->result(task, a, aiVariant(task, a));
+    if (const auto r = m_ai->result(task, a, aiVariant(task, a, extra));
         !r.path.isEmpty() && r.start <= to && r.end >= from) {
         from = std::min(from, r.start);
         to = std::max(to, r.end);
     }
-    m_ai->start(task, a, from, to, aiVariant(task, a));
+    m_ai->start(task, a, from, to, aiVariant(task, a, extra));
     return true;
 }
 void Editor::runAi(const QString &task) {
@@ -5979,6 +6040,8 @@ void Editor::runAi(const QString &task) {
         return fail(m_ai->missing(task) + " Download the AI pack next to Cutlery.exe.");
     if (task == "upscale" && upscaleHeight(*a) == 0)
         return fail("This video is already 4K or larger");
+    if (task == "inpaint" && c->removeArea.isEmpty())
+        return fail("Draw around what should be removed first");
     startAi(task, *a, c);
 }
 void Editor::cancelAi() {

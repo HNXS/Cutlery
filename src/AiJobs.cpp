@@ -1,5 +1,6 @@
 #include "AiJobs.h"
 #include "MediaAnalysis.h"
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -14,7 +15,7 @@
 namespace cutlery {
 namespace {
 QString extension(const QString &task) {
-    return task == "upscale" || task == "eyecontact" ? ".mov"
+    return task == "upscale" || task == "eyecontact" || task == "inpaint" ? ".mov"
            : task == "transcribe"                    ? ".srt"
            : task == "faces"                         ? ".txt"
            : task == "separate"                      ? ".flac"
@@ -42,7 +43,8 @@ QString AiJobs::missing(const QString &task) const {
         for (const auto *name : {"face_detection_short_range.onnx", "iris_landmark.onnx"})
             if (!QFileInfo(QFileInfo(model).dir().filePath(name)).isFile())
                 return QString("The AI pack is incomplete: models/%1 is missing.").arg(name);
-    if (m_ffmpeg.isEmpty() || ((task == "upscale" || task == "eyecontact") && m_ffprobe.isEmpty()))
+    if (m_ffmpeg.isEmpty() ||
+        ((task == "upscale" || task == "eyecontact" || task == "inpaint") && m_ffprobe.isEmpty()))
         return "FFmpeg is missing.";
     return {};
 }
@@ -51,9 +53,16 @@ QSize AiJobs::upscaleSize(const Asset &a, int height) {
     return {std::max(2, int(std::lround(height * aspect / 2)) * 2), std::max(2, height / 2 * 2)};
 }
 QString AiJobs::key(const QString &task, const Asset &a, const QString &variant) const {
-    // Version 2 transcripts have one cue per word.
+    // Version 2 transcripts have one cue per word. An inpainted area is named by a hash of its
+    // outline.
+    const auto tag = task == "inpaint" && !variant.isEmpty()
+                         ? QString::fromLatin1(QCryptographicHash::hash(variant.toUtf8(),
+                                                                        QCryptographicHash::Sha1)
+                                                   .toHex()
+                                                   .left(16))
+                         : variant;
     return MediaAnalysis::fingerprint(a) + "-" + task + (task == "transcribe" ? "-v2" : "-v1") +
-           (variant.isEmpty() ? QString() : "-" + variant);
+           (tag.isEmpty() ? QString() : "-" + tag);
 }
 MatteSource AiJobs::result(const QString &task, const Asset &a, const QString &variant) const {
     const auto base = QDir(m_dir).filePath(key(task, a, variant));
@@ -127,9 +136,10 @@ void AiJobs::next() {
     m_progress = 0;
     m_device.clear();
     QDir().mkpath(m_dir);
-    if (m_job.task != "upscale" && m_job.task != "eyecontact")
+    if (m_job.task != "upscale" && m_job.task != "eyecontact" && m_job.task != "inpaint")
         return run(m_job, {});
-    // Upscale and eye contact keep every source frame, so they need the source frame rate.
+    // Upscale, eye contact and inpainting keep every source frame, so they need the source
+    // frame rate.
     auto *probe = new QProcess(this);
     m_process = probe;
     connect(probe, &QProcess::finished, this, [this, probe](int code) {
@@ -172,7 +182,7 @@ void AiJobs::run(const Job &job, const QString &rate) {
              << rate;
         const auto parts = rate.split('/');
         resultRate = parts[0].toDouble() / parts[1].toDouble();
-    } else if (job.task == "eyecontact") {
+    } else if (job.task == "eyecontact" || job.task == "inpaint") {
         // Processed at the source size, at most 4K, so the rest of the picture keeps its detail.
         const double fit = std::min(1., std::min(3840. / a.width, 2160. / a.height));
         args << "--source"
@@ -180,6 +190,8 @@ void AiJobs::run(const Job &job, const QString &rate) {
                     .arg(std::max(2, int(std::lround(a.width * fit / 2)) * 2))
                     .arg(std::max(2, int(std::lround(a.height * fit / 2)) * 2))
              << "--rate" << rate;
+        if (job.task == "inpaint")
+            args << "--region" << job.variant;
         const auto parts = rate.split('/');
         resultRate = parts[0].toDouble() / parts[1].toDouble();
     } else if (job.task == "faces") {

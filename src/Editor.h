@@ -482,10 +482,12 @@ class Editor final : public QObject {
     // canvas (fractions of its width and height) at the playhead, and turns the colour key on.
     Q_INVOKABLE void pickKeyColor(double x, double y);
     // Free mask of the selected picture: a point added where the canvas was clicked (canvas
-    // fractions), the last one taken away, or the whole mask removed.
-    Q_INVOKABLE void addMaskPoint(double x, double y);
-    Q_INVOKABLE void removeMaskPoint();
-    Q_INVOKABLE void clearMask();
+    // fractions), the last one taken away, or the whole mask removed. With `target`
+    // "removeArea" the same is done to the area of a video that object removal paints over
+    // (Clip::removeArea, kept in source fractions).
+    Q_INVOKABLE void addMaskPoint(double x, double y, const QString &target = "mask");
+    Q_INVOKABLE void removeMaskPoint(const QString &target = "mask");
+    Q_INVOKABLE void clearMask(const QString &target = "mask");
     // Finds the beats in the selected clip's sound and puts a timeline marker on every
     // `every`-th one (1, 2 or 4), asynchronously (state "beats": status finding|done|failed,
     // count, bpm). Existing markers stay; one undo step.
@@ -778,7 +780,9 @@ class Editor final : public QObject {
                                      const Clip *extra = nullptr) const;
     bool aiCovered(const QString &task, const Asset &, const Clip *extra = nullptr) const;
     bool usesAi(const Clip &, const QString &task) const;
-    QString aiVariant(const QString &task, const Asset &) const;
+    // The variant of a task's result: the upscale height, the caption language, or for
+    // inpainting the clip's area.
+    QString aiVariant(const QString &task, const Asset &, const Clip *clip = nullptr) const;
     bool startAi(const QString &task, const Asset &, const Clip *extra = nullptr);
     QStringList speakingAssets() const;
     void placeCaptions();
