@@ -17,7 +17,7 @@ namespace {
 QString extension(const QString &task) {
     return task == "upscale" || task == "eyecontact" || task == "inpaint" ? ".mov"
            : task == "transcribe"                    ? ".srt"
-           : task == "faces"                         ? ".txt"
+           : task == "faces" || task == "people"     ? ".txt"
            : task == "separate"                      ? ".flac"
                                                      : ".mkv";
 }
@@ -38,7 +38,9 @@ QString AiJobs::missing(const QString &task) const {
     if (model.isEmpty() || !QFileInfo(model).isFile())
         return "The AI pack is not installed: models/" +
                QFileInfo(model.isEmpty() ? task : model).fileName() + " is missing.";
-    // Eye contact uses three face models side by side.
+    // Eye contact uses three face models side by side; person search the face detector.
+    if (task == "people" && !QFileInfo(QFileInfo(model).dir().filePath("face_detection_short_range.onnx")).isFile())
+        return "The AI pack is incomplete: models/face_detection_short_range.onnx is missing.";
     if (task == "eyecontact")
         for (const auto *name : {"face_detection_short_range.onnx", "iris_landmark.onnx"})
             if (!QFileInfo(QFileInfo(model).dir().filePath(name)).isFile())
@@ -108,14 +110,16 @@ void AiJobs::start(const QString &task, const Asset &a, double start, double end
                    const QString &variant) {
     if (!available(task))
         return;
+    // Person search also looks at pictures, as one frame.
+    const bool picture = task == "people" && a.kind == "image";
     if (task == "transcribe" || task == "separate" ? !a.hasAudio
-                             : a.kind != "video" || a.width <= 0 || a.height <= 0)
+        : (a.kind != "video" && !picture) || a.width <= 0 || a.height <= 0)
         return;
     Job job;
     job.task = task;
     job.asset = a;
-    job.start = std::clamp(start, 0., a.duration);
-    job.end = std::clamp(end, job.start, a.duration);
+    job.start = picture ? 0 : std::clamp(start, 0., a.duration);
+    job.end = picture ? 1 : std::clamp(end, job.start, a.duration);
     job.variant = variant;
     job.key = key(task, a, variant);
     if (job.end - job.start < 0.05)
@@ -206,6 +210,17 @@ void AiJobs::run(const Job &job, const QString &rate) {
                     .arg(std::max(2, int(std::lround(a.width * fit / 2)) * 2))
                     .arg(std::max(2, int(std::lround(a.height * fit / 2)) * 2))
              << "--rate" << QString::number(matteRate);
+    } else if (job.task == "people") {
+        // Faces twice a second, at most 1280 × 720; a picture is one frame.
+        const double fit = std::min(1., std::min(1280. / a.width, 720. / a.height));
+        args << "--source"
+             << QString("%1x%2")
+                    .arg(std::max(2, int(std::lround(a.width * fit / 2)) * 2))
+                    .arg(std::max(2, int(std::lround(a.height * fit / 2)) * 2))
+             << "--rate" << QString::number(peopleRate);
+        if (a.kind == "image")
+            args << "--still" << "1";
+        resultRate = peopleRate;
     } else if (job.task == "separate") {
         resultRate = 44100;
     } else if (job.task == "transcribe") {

@@ -1648,8 +1648,108 @@ ApplicationWindow {
                                 id: librarySearch
                                 objectName: "librarySearch"
                                 Layout.fillWidth: true
-                                placeholderText: "Search media, also by what is said"
+                                placeholderText: "Search media, also by what is said and who is in it"
                                 selectByMouse: true
+                            }
+                            // Person search (AI): the people in the media, to name and to filter by.
+                            ColumnLayout {
+                                id: peoplePanel
+                                objectName: "peoplePanel"
+                                Layout.fillWidth: true
+                                spacing: 4
+                                readonly property var info: win.s.people || ({})
+                                readonly property var people: (info.people || []).slice(0, 24)
+                                // The person whose media the library shows ("" for all).
+                                property string selected: ""
+                                readonly property var selectedMedia: {
+                                    const p = (info.people || []).find(x => x.id === selected);
+                                    return p ? p.media : null;
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Action {
+                                        objectName: "findPeople"
+                                        Layout.fillWidth: true
+                                        enabled: (peoplePanel.info.missing || "") === "" && peoplePanel.info.status !== "finding" && (peoplePanel.info.total || 0) > 0
+                                        text: peoplePanel.info.status === "finding" ? "Looking for people… " + peoplePanel.info.pending + " left" : "Find people (AI)"
+                                        onClicked: editor.findPeople()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: (peoplePanel.info.missing || "") !== "" ? peoplePanel.info.missing : "Looks for faces in every video and picture on this computer and groups them into people you can name and find again"
+                                    }
+                                    Action {
+                                        objectName: "showEveryone"
+                                        visible: peoplePanel.selected !== ""
+                                        text: "Show all"
+                                        onClicked: peoplePanel.selected = ""
+                                    }
+                                }
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    visible: peoplePanel.people.length > 0
+                                    Repeater {
+                                        model: peoplePanel.people
+                                        delegate: Rectangle {
+                                            id: personTile
+                                            required property var modelData
+                                            required property int index
+                                            objectName: "person-" + index
+                                            width: 64
+                                            height: 84
+                                            radius: 6
+                                            color: personMouse.containsMouse ? "#2a3640" : "#222b34"
+                                            border.color: peoplePanel.selected === modelData.id ? "#64d8bc" : "#34404c"
+                                            Accessible.role: Accessible.Button
+                                            Accessible.name: (modelData.name || "Unnamed person") + ", in " + modelData.media.length + " media"
+                                            Image {
+                                                x: 4
+                                                y: 4
+                                                width: 56
+                                                height: 56
+                                                source: personTile.modelData.thumbnail
+                                                fillMode: Image.PreserveAspectCrop
+                                                visible: personTile.modelData.thumbnail !== ""
+                                            }
+                                            Label {
+                                                x: 4
+                                                y: 4
+                                                width: 56
+                                                height: 56
+                                                visible: personTile.modelData.thumbnail === ""
+                                                text: "☺"
+                                                font.pixelSize: 28
+                                                horizontalAlignment: Text.AlignHCenter
+                                                verticalAlignment: Text.AlignVCenter
+                                                color: win.muted
+                                            }
+                                            Label {
+                                                x: 2
+                                                y: 62
+                                                width: 60
+                                                text: personTile.modelData.name || "Who?"
+                                                color: personTile.modelData.name ? "white" : win.muted
+                                                font.pixelSize: 11
+                                                elide: Text.ElideRight
+                                                horizontalAlignment: Text.AlignHCenter
+                                            }
+                                            MouseArea {
+                                                id: personMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                                onClicked: function (mouse) {
+                                                    if (mouse.button === Qt.RightButton)
+                                                        personDialog.ask(personTile.modelData);
+                                                    else
+                                                        peoplePanel.selected = peoplePanel.selected === personTile.modelData.id ? "" : personTile.modelData.id;
+                                                }
+                                                onDoubleClicked: personDialog.ask(personTile.modelData)
+                                            }
+                                            ToolTip.visible: personMouse.containsMouse
+                                            ToolTip.text: (personTile.modelData.name || "Unnamed") + " · in " + personTile.modelData.media.length + " media · click to show them, double-click to name"
+                                        }
+                                    }
+                                }
                             }
                             RowLayout {
                                 Label {
@@ -1679,7 +1779,8 @@ ApplicationWindow {
                                     const folder = libraryView.folder;
                                     // Names, files, folders, sizes, rights and what is said (cached transcripts).
                                     const found = librarySearch.text.trim().length > 0 ? editor.searchMedia(librarySearch.text) : null;
-                                    return editor.assets.filter(a => (folder === "" || a.folder === folder) && (kind === "" || a.kind === kind) && (!found || found[a.id] !== undefined))
+                                    const person = peoplePanel.selectedMedia;
+                                    return editor.assets.filter(a => (folder === "" || a.folder === folder) && (kind === "" || a.kind === kind) && (!found || found[a.id] !== undefined) && (!person || person.includes(a.id)))
                                         .map(a => Object.assign({ said: found ? found[a.id] : "" }, a));
                                 }
                                 delegate: Rectangle {
@@ -7098,6 +7199,76 @@ ApplicationWindow {
                     : pauseDialog.state.status === "stale" ? "The clip changed. Find pauses again."
                     : pauseDialog.state.status === "ready" ? (pauseDialog.state.count > 0 ? pauseDialog.state.count + (pauseDialog.state.count === 1 ? " pause, " : " pauses, ") + Number(pauseDialog.state.seconds).toFixed(1) + " s in total. A short gap is kept around speech." : "No pauses found. Try a higher threshold or shorter pauses.")
                     : "Raise the threshold if background noise hides the pauses."
+            }
+        }
+    }
+    // Naming a person found by person search.
+    Dialog {
+        id: personDialog
+        objectName: "personDialog"
+        anchors.centerIn: parent
+        title: "Who is this?"
+        modal: true
+        width: 340
+        property var person: ({})
+        function ask(p) {
+            person = p;
+            personName.text = p.name || "";
+            open();
+            personName.forceActiveFocus();
+        }
+        footer: DialogButtonBox {
+            Button {
+                objectName: "personSave"
+                text: "Save"
+                enabled: personName.text.trim() !== ""
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            }
+            Button {
+                objectName: "personForget"
+                text: "Forget the name"
+                visible: (personDialog.person.name || "") !== ""
+                DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole
+                onClicked: {
+                    editor.namePerson(personDialog.person.id, "");
+                    peoplePanel.selected = "";
+                    personDialog.close();
+                }
+            }
+            Button {
+                text: "Cancel"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+        }
+        onAccepted: {
+            editor.namePerson(person.id, personName.text);
+            peoplePanel.selected = "";
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 8
+            Image {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: 96
+                Layout.preferredHeight: 96
+                source: personDialog.person.thumbnail || ""
+                visible: (personDialog.person.thumbnail || "") !== ""
+            }
+            TextField {
+                id: personName
+                objectName: "personName"
+                Accessible.name: "Name"
+                Layout.fillWidth: true
+                placeholderText: "Name, e.g. Anna"
+                selectByMouse: true
+                onAccepted: personDialog.accept()
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                font.pixelSize: 11
+                color: win.muted
+                text: "The name is kept on this computer with a few of their faces, so they are recognised in other videos and projects too; search the media by it."
             }
         }
     }

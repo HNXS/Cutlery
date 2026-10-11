@@ -131,6 +131,11 @@ jobs:
           build/bin/Release/cutlery_tests.exe textToSpeech -o build/tts.txt,txt | Out-Null
           $speech = Get-Content build/tts.txt -Raw
           # Caption translation ran with the real Opus-MT models, not skipped.
+          # Person search ran with the real face models, not skipped.
+          build/bin/Release/cutlery_tests.exe peopleWithRealModels -o build/people.txt,txt | Out-Null
+          $peopleRun = Get-Content build/people.txt -Raw
+          Write-Output $peopleRun
+          if ($peopleRun -notmatch 'PASS   : EngineTest::peopleWithRealModels\(\)') { Write-Output "::error::Person search was not tested with the real models"; throw 'Person search was not tested with the real models' }
           # Object removal ran with the real LaMa model, not skipped.
           build/bin/Release/cutlery_tests.exe removeObjectWithRealModel -o build/inpaint.txt,txt | Out-Null
           $inpaint = Get-Content build/inpaint.txt -Raw

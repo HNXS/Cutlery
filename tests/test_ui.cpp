@@ -1428,6 +1428,75 @@ class UiTest : public QObject {
 #endif
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void peopleControls() {
+        // The people in the media (results as the AI worker leaves them, in the cache): a tile
+        // per person, a click shows their media, a name makes them searchable.
+        QTemporaryDir dir;
+        const auto data = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        QFile::remove(data + "/people.json");
+        const auto video = dir.filePath("talk.mkv"), picture = dir.filePath("view.png");
+        QProcess generate;
+        generate.start(Editor::executable("ffmpeg"), {"-v", "error", "-f", "lavfi", "-i", "testsrc=s=320x180:r=25:d=2", "-c:v", "ffv1", video});
+        QVERIFY(generate.waitForFinished(15000));
+        generate.start(Editor::executable("ffmpeg"), {"-v", "error", "-f", "lavfi", "-i", "testsrc=s=200x200:r=1:d=1", "-frames:v", "1", picture});
+        QVERIFY(generate.waitForFinished(15000));
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.importMedia({QUrl::fromLocalFile(video), QUrl::fromLocalFile(picture)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        const auto &assets = editor.project().assets;
+        const auto *talk = assets[0].kind == "video" ? &assets[0] : &assets[1];
+        const auto base = data + "/ai/" + MediaAnalysis::fingerprint(*talk) + "-people-v1";
+        QDir().mkpath(data + "/ai");
+        QStringList face{"0.5", "0.5", "0.5", "0.3", "0.5", "0.9"};
+        for (int i = 0; i < 128; ++i)
+            face << (i == 3 ? "1" : "0");
+        QFile t(base + ".txt"), j(base + ".json");
+        QVERIFY(t.open(QIODevice::WriteOnly) && j.open(QIODevice::WriteOnly));
+        t.write((face.join(' ') + "\n").toUtf8());
+        j.write(R"({"start": 0, "end": 2, "rate": 2})");
+        t.close();
+        j.close();
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        auto *list = findItem(window->contentItem(), "mediaLibrary");
+        QTRY_COMPARE(list->property("count").toInt(), 2);
+        QVERIFY(findItem(window->contentItem(), "findPeople")->isVisible());
+        QQuickItem *tile = nullptr;
+        QTRY_VERIFY_WITH_TIMEOUT((tile = findItem(window->contentItem(), "person-0")) && tile->isVisible(), 10000);
+        // A click shows only the media they are in, another all again.
+        QTest::mouseClick(window, Qt::LeftButton, {}, tile->mapToScene(QPointF(32, 30)).toPoint());
+        QTRY_COMPARE(list->property("count").toInt(), 1);
+        QVERIFY(findItem(window->contentItem(), "showEveryone")->isVisible());
+        QTest::mouseClick(window, Qt::LeftButton, {}, tile->mapToScene(QPointF(32, 30)).toPoint());
+        QTRY_COMPARE(list->property("count").toInt(), 2);
+        // Named in the dialog.
+        auto *dialog = window->findChild<QObject *>("personDialog");
+        QVERIFY(QMetaObject::invokeMethod(dialog, "ask", Q_ARG(QVariant, editor.state()["people"].toMap()["people"].toList()[0])));
+        auto *name = findItem(window->contentItem(), "personName");
+        QTRY_VERIFY(name && name->isVisible());
+        name->setProperty("text", "Anna");
+        QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
+        QCOMPARE(editor.state()["people"].toMap()["people"].toList()[0].toMap()["name"].toString(), QString("Anna"));
+        // Found by the search.
+        findItem(window->contentItem(), "librarySearch")->setProperty("text", "anna");
+        QTRY_COMPARE(list->property("count").toInt(), 1);
+        QFile::remove(data + "/people.json");
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void presenterControls() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;
