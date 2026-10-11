@@ -1405,6 +1405,17 @@ class UiTest : public QObject {
         QTRY_VERIFY(draw->property("text").toString().contains("4 points"));
         // The free mask is untouched.
         QVERIFY(editor.project().clip(clip)->mask.isEmpty());
+        // Done drawing; the area can be made to follow what it surrounds.
+        QVERIFY(QMetaObject::invokeMethod(draw, "clicked"));
+        auto *follow = findItem(window->contentItem(), "remove-trackMotion");
+        QTRY_VERIFY(follow && follow->isVisible());
+        QCOMPARE(follow->property("text").toString(), QString("Follow it (track)"));
+        QVERIFY(QMetaObject::invokeMethod(follow, "clicked"));
+        auto *tracked = findItem(window->contentItem(), "remove-trackStatus");
+        QTRY_VERIFY_WITH_TIMEOUT(tracked && tracked->isVisible() &&
+                                     tracked->property("text").toString().contains("Tracked"),
+                                 60000);
+        QVERIFY(!editor.project().clip(clip)->removePath.isEmpty());
         auto *run = findItem(window->contentItem(), "removeObjectRun");
         QTRY_VERIFY(run && run->isVisible());
         QVERIFY(QMetaObject::invokeMethod(run, "clicked"));

@@ -452,7 +452,8 @@ ApplicationWindow {
     component TrackMotion: ColumnLayout {
         id: tm
         property string prefix: ""  // of the object names
-        property string mode: "clip" // "mask": the selected clip's free mask follows its video
+        property string mode: "clip" // "mask": the selected clip's free mask follows its video;
+                                     // "remove": its object-removal area does
         spacing: 4
         readonly property var track: win.s.track || ({})
         readonly property bool mine: track.clipId === win.s.selectedId && (track.kind || "clip") === mode
@@ -463,11 +464,14 @@ ApplicationWindow {
                 objectName: tm.prefix + "trackMotion"
                 Layout.fillWidth: true
                 enabled: !tm.busy && win.selection.locked !== true
-                text: tm.busy && tm.mine ? "Tracking… " + Math.round((tm.track.progress || 0) * 100) + "%" : tm.mode === "mask" ? "Track the mask" : "Track motion"
-                Accessible.name: tm.mode === "mask" ? "Track the mask" : "Track motion"
-                onClicked: tm.mode === "mask" ? editor.trackMask() : editor.trackMotion()
+                readonly property string label: tm.mode === "mask" ? "Track the mask" : tm.mode === "remove" ? "Follow it (track)" : "Track motion"
+                text: tm.busy && tm.mine ? "Tracking… " + Math.round((tm.track.progress || 0) * 100) + "%" : label
+                Accessible.name: label
+                onClicked: tm.mode === "mask" ? editor.trackMask() : tm.mode === "remove" ? editor.trackRemoval() : editor.trackMotion()
                 ToolTip.visible: hovered
-                ToolTip.text: tm.mode === "mask" ? "Draw the mask around something at the playhead, then track: the mask follows it through the clip, forwards and backwards, as Move X/Y keyframes" : "Place it over something in the video below at the playhead, then track: it follows that through the clip, forwards and backwards, as position keyframes"
+                ToolTip.text: tm.mode === "mask" ? "Draw the mask around something at the playhead, then track: the mask follows it through the clip, forwards and backwards, as Move X/Y keyframes"
+                    : tm.mode === "remove" ? "For something that moves: draw around it at the playhead, then track; the area follows it through the clip, forwards and backwards, and Remove paints it over along the way"
+                    : "Place it over something in the video below at the playhead, then track: it follows that through the clip, forwards and backwards, as position keyframes"
             }
             Action {
                 objectName: tm.prefix + "cancelTracking"
@@ -484,6 +488,7 @@ ApplicationWindow {
             font.pixelSize: 11
             color: tm.track.status === "failed" ? "#ec6f5a" : win.muted
             text: tm.track.status === "failed" ? "Could not follow it there; place it over something with detail"
+                : tm.mode === "remove" && tm.track.whole ? "Tracked ✓ · the area follows it; click Remove to paint it over along the way"
                 : tm.track.whole ? "Tracked ✓ · " + tm.track.keyframes + " keyframes; adjust them on the timeline if needed"
                 : "Tracked from " + Number(tm.track.from).toFixed(1) + " s to " + Number(tm.track.to).toFixed(1) + " s of the clip, then lost; move the playhead there, place it again and track"
         }
@@ -4970,6 +4975,12 @@ ApplicationWindow {
                                             win.drawingMask = false;
                                         }
                                     }
+                                }
+                                TrackMotion {
+                                    prefix: "remove-"
+                                    mode: "remove"
+                                    Layout.fillWidth: true
+                                    visible: removal.hasArea && !win.drawingRemoveArea
                                 }
                                 ProgressBar {
                                     Layout.fillWidth: true

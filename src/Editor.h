@@ -285,6 +285,10 @@ class Editor final : public QObject {
     // tracked like trackMotion() in the clip's own video and keyframed as maskX/maskY (state
     // "track" with kind "mask").
     Q_INVOKABLE void trackMask();
+    // Makes the selected video clip's object-removal area follow what it surrounds at the
+    // playhead: tracked like trackMask() and kept as Clip::removePath (state "track" with kind
+    // "remove"). The area is painted over along the path once Remove is run again.
+    Q_INVOKABLE void trackRemoval();
     // Text to speech (Piper and its voices in the AI pack): speaks `text` with a voice (an id
     // from state "speech".voices) at `speed` (0.5–2) and adds it at the playhead on a free
     // track; speakSelection() speaks every selected title at its start. One undo step once all
@@ -590,6 +594,9 @@ class Editor final : public QObject {
     void spoken(const Speech::Result &result);
     Tracker *m_tracker = nullptr;
     void applyTracking(const QVector<Tracker::Point> &points, const QString &error);
+    void applyRemovalPath(const QVector<Tracker::Point> &points);
+    // The source time a clip shows at a timeline frame (not for reversed clips).
+    double sourceSeconds(const Clip &, qint64 frame) const;
     static QPointF pictureToSource(const Clip &, QPointF);
     static QPointF sourceToPicture(const Clip &, QPointF);
     QString m_importFolder;
