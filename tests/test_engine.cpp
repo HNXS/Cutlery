@@ -4975,8 +4975,8 @@ class EngineTest : public QObject {
         QVERIFY2(red / (n / 3) < 60, qPrintable(QString::number(red / (n / 3))));
         QVERIFY2(difference / n < 40, qPrintable(QString::number(difference / n)));
         // Elsewhere the picture is as decoded.
-        const QColor far = removed.pixelColor(800, 100), farOriginal = original.pixelColor(800, 100);
-        QVERIFY(std::abs(far.red() - farOriginal.red()) < 12 && std::abs(far.green() - farOriginal.green()) < 12);
+        const QColor distant = removed.pixelColor(800, 100), distantOriginal = original.pixelColor(800, 100);
+        QVERIFY(std::abs(distant.red() - distantOriginal.red()) < 12 && std::abs(distant.green() - distantOriginal.green()) < 12);
         qDebug() << "red excess" << red / (n / 3) << "difference" << difference / n;
 #else
         QSKIP("Needs the AI worker and the test models");

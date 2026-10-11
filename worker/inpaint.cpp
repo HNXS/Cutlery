@@ -24,7 +24,7 @@
 namespace {
 constexpr int kSide = 512;
 
-struct Polygon {
+struct Outline {
     std::vector<double> x, y;
     bool contains(double px, double py) const {
         bool inside = false;
@@ -81,7 +81,7 @@ int worker::inpaint(const QHash<QString, QString> &o) {
     double fps = 0;
     if (const auto parts = rate.split('/'); !parts.isEmpty() && parts[0].toDouble() > 0)
         fps = parts[0].toDouble() / (parts.size() == 2 ? parts[1].toDouble() : 1);
-    Polygon area;
+    Outline area;
     for (const auto &point : o.value("region").split(' ', Qt::SkipEmptyParts)) {
         const auto xy = point.split(',');
         if (xy.size() != 2)

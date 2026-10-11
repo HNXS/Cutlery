@@ -7,7 +7,6 @@ function Get-Pinned($url, $file, $sha256) {
         Invoke-WebRequest -Uri $url -OutFile $file
     }
     $actual = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
-    if (!$sha256) { Write-Host "::warning::UNPINNED $file sha256 $actual"; return }
     if ($actual -ne $sha256) { throw "Checksum mismatch: $file is $actual" }
 }
 # Person segmentation for AI background removal: U²-Net trained on human segmentation
@@ -62,7 +61,7 @@ Get-Pinned $stemsUrl "$Destination/UVR-MDX-NET-Inst_HQ_3.onnx" $stemsSha
 # Object removal: LaMa (big-lama, Suvorov et al. 2021; Apache-2.0,
 # https://github.com/advimman/lama), the 512 × 512 ONNX export published by Carve (Apache-2.0).
 $lamaUrl = 'https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx'
-$lamaSha = ''
+$lamaSha = '1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6'
 Get-Pinned $lamaUrl "$Destination/lama.onnx" $lamaSha
 # Caption translation: Opus-MT German-English and English-German (Marian models by the Helsinki
 # NLP group, CC-BY 4.0): the int8 ONNX encoder and decoder exported by Xenova (transformers.js),
