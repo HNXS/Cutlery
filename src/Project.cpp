@@ -267,6 +267,39 @@ QVector<QPointF> maskPoints(const QString &mask) {
     }
     return points;
 }
+QVector<std::array<double, 3>> removePathPoints(const QString &path) {
+    QVector<std::array<double, 3>> points;
+    const auto items = path.split(' ', Qt::SkipEmptyParts);
+    if (items.size() > 20000)
+        return {};
+    for (const auto &item : items) {
+        const auto parts = item.split(',');
+        bool ok[3] = {false, false, false};
+        if (parts.size() != 3)
+            return {};
+        const std::array<double, 3> p{parts[0].toDouble(&ok[0]), parts[1].toDouble(&ok[1]),
+                                      parts[2].toDouble(&ok[2])};
+        if (!ok[0] || !ok[1] || !ok[2] || !(p[0] >= 0) || !(std::abs(p[1]) <= 1) ||
+            !(std::abs(p[2]) <= 1) || (!points.isEmpty() && p[0] <= points.last()[0]))
+            return {};
+        points << p;
+    }
+    return points;
+}
+QPointF Clip::removeOffsetAt(double t) const {
+    const auto path = removePathPoints(removePath);
+    if (path.isEmpty())
+        return {};
+    if (t <= path.first()[0])
+        return {path.first()[1], path.first()[2]};
+    if (t >= path.last()[0])
+        return {path.last()[1], path.last()[2]};
+    int i = 0;
+    while (t >= path[i + 1][0])
+        ++i;
+    const double u = (t - path[i][0]) / (path[i + 1][0] - path[i][0]);
+    return {path[i][1] + (path[i + 1][1] - path[i][1]) * u, path[i][2] + (path[i + 1][2] - path[i][2]) * u};
+}
 QString maskText(const QVector<QPointF> &points) {
     QStringList pairs;
     for (const auto &p : points)
@@ -567,6 +600,8 @@ QJsonObject Project::json(const QString &base) const {
             o["stems"] = c.stems;
         if (!c.removeArea.isEmpty())
             o["removeArea"] = c.removeArea;
+        if (!c.removePath.isEmpty())
+            o["removePath"] = c.removePath;
         o["transition"] = c.transition;
         o["transitionFrames"] = QString::number(c.transitionFrames);
         cc.append(o);
@@ -817,6 +852,7 @@ Project Project::fromJson(const QJsonObject &o, const QString &base) {
         c.eyeContact = j["eyeContact"].toBool(false);
         c.stems = j["stems"].toString();
         c.removeArea = j["removeArea"].toString();
+        c.removePath = j["removePath"].toString();
         c.transition = j["transition"].toString();
         if (j.contains("transitionFrames"))
             c.transitionFrames = integer(j["transitionFrames"]);
@@ -935,6 +971,7 @@ void Project::validate() const {
                     bounded(c.feather, 0, 0.5) &&
                     (c.mask.isEmpty() || !maskPoints(c.mask).isEmpty()) &&
                     (c.removeArea.isEmpty() || !maskPoints(c.removeArea).isEmpty()) &&
+                    (c.removePath.isEmpty() || !removePathPoints(c.removePath).isEmpty()) &&
                     bounded(c.tiltX, -70, 70) && bounded(c.tiltY, -70, 70) &&
                     (c.cornerPin.isEmpty() ||
                      (c.cornerPin.size() == 8 &&

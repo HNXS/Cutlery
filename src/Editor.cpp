@@ -611,8 +611,10 @@ QVariantMap Editor::state() const {
                              const auto points = m_maskDraft.first == c.id + "#removeArea"
                                                      ? m_maskDraft.second
                                                      : maskPoints(c.removeArea);
+                             // Where it has moved to at the playhead, when it follows something.
+                             const auto offset = c.removeOffsetAt(sourceSeconds(c, m_playhead));
                              for (const auto &point : points) {
-                                 const auto at = pictureToCanvas(bounds, sourceToPicture(c, point),
+                                 const auto at = pictureToCanvas(bounds, sourceToPicture(c, point + offset),
                                                                  QSizeF(m_project.width, m_project.height));
                                  outline << QVariantMap{{"x", at.x()}, {"y", at.y()}};
                              }
@@ -3129,6 +3131,7 @@ void Editor::applyClipValue(Project &p, const QString &key, const QVariant &v) {
         FIELD(shape, toString);
         FIELD(mask, toString);
         FIELD(removeArea, toString);
+        FIELD(removePath, toString);
         FIELD(maskSmooth, toBool);
         FIELD(maskInvert, toBool);
         FIELD(borderColor, toString);
@@ -3181,7 +3184,9 @@ void Editor::addMaskPoint(double x, double y, const QString &target) {
         if (!a || a->kind != "video" || c->audioOnly || bounds.isEmpty())
             return fail("Select a video clip to remove something from");
         const auto picture = canvasToPicture(bounds, {x, y}, QSizeF(m_project.width, m_project.height));
-        auto point = pictureToSource(*c, {std::clamp(picture.x(), 0., 1.), std::clamp(picture.y(), 0., 1.)});
+        // Points are kept where the area is when not moved.
+        auto point = pictureToSource(*c, {std::clamp(picture.x(), 0., 1.), std::clamp(picture.y(), 0., 1.)}) -
+                     c->removeOffsetAt(sourceSeconds(*c, m_playhead));
         point = {std::clamp(point.x(), 0., 1.), std::clamp(point.y(), 0., 1.)};
         const auto draft = c->id + "#removeArea";
         auto points = m_maskDraft.first == draft ? m_maskDraft.second : maskPoints(c->removeArea);
@@ -3243,8 +3248,18 @@ void Editor::removeMaskPoint(const QString &target) {
 void Editor::clearMask(const QString &target) {
     m_maskDraft = {};
     const auto *c = m_project.clip(m_selected);
-    const auto current = !c ? QString() : target == "removeArea" ? c->removeArea : target == "mask" ? c->mask : QString();
-    if (!current.isEmpty())
+    if (c && target == "removeArea" && (!c->removeArea.isEmpty() || !c->removePath.isEmpty())) {
+        // The area and the path it followed, in one step.
+        const auto id = c->id;
+        mutate([&](Project &p) {
+            auto *clip = p.clip(id);
+            p.requireEditable(clip->track);
+            clip->removeArea.clear();
+            clip->removePath.clear();
+        });
+        return;
+    }
+    if (c && target == "mask" && !c->mask.isEmpty())
         setClip(target, QString());
     else
         emit changed();
@@ -4440,6 +4455,51 @@ void Editor::trackMask() {
     m_status = "Tracking the mask…";
     emit changed();
 }
+double Editor::sourceSeconds(const Clip &c, qint64 frame) const {
+    const double fps = double(m_project.fpsN) / m_project.fpsD;
+    return c.sourceIn.seconds() + (frame - c.start) / fps * c.speed.seconds();
+}
+void Editor::trackRemoval() {
+    const auto *c = m_project.clip(m_selected);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    const auto points = c ? maskPoints(c->removeArea) : QVector<QPointF>{};
+    if (!c || !a || a->kind != "video" || c->audioOnly)
+        return fail("Select a video clip to remove something from");
+    if (points.isEmpty())
+        return fail("Draw around what should be removed first");
+    if (c->reverse)
+        return fail("Reversed clips cannot be tracked");
+    if (m_project.trackSettings.value(c->track).locked)
+        return fail("The track is locked");
+    const double fps = double(m_project.fpsN) / m_project.fpsD, s = c->speed.seconds();
+    const qint64 at = m_playhead >= c->start && m_playhead < c->start + c->duration ? m_playhead
+                                                                                   : c->start;
+    // The area's bounds in the source where it is at the playhead: the patch to follow.
+    const auto offset = c->removeOffsetAt(sourceSeconds(*c, at));
+    QRectF box;
+    for (const auto &point : points)
+        box |= QRectF(point + offset, QSizeF(1e-6, 1e-6));
+    const auto centre = box.center();
+    QRectF patch = box;
+    patch.setSize({std::clamp(patch.width(), 0.03, 0.5), std::clamp(patch.height(), 0.03, 0.5)});
+    patch.moveCenter(centre);
+    const qint64 step = std::max<qint64>(1, qint64(std::ceil(fps / 30 - 1e-9)));
+    Tracker::Request r;
+    r.path = a->path;
+    r.width = a->width;
+    r.height = a->height;
+    r.from = sourceSeconds(*c, c->start);
+    r.start = sourceSeconds(*c, at);
+    r.to = sourceSeconds(*c, c->start + c->duration - 1);
+    r.rate = fps / (step * s);
+    r.patch = patch;
+    m_track = {{"status", "tracking"}, {"clipId", c->id}, {"videoId", c->id}, {"step", step},
+               {"kind", "remove"}, {"offsetX", offset.x()}, {"offsetY", offset.y()},
+               {"centreX", centre.x()}, {"centreY", centre.y()}};
+    m_tracker->start(r);
+    m_status = "Tracking what to remove…";
+    emit changed();
+}
 void Editor::cancelTracking() {
     if (!m_tracker->busy())
         return;
@@ -4467,6 +4527,8 @@ void Editor::applyTracking(const QVector<Tracker::Point> &points, const QString 
         return;
     }
     const double fps = double(m_project.fpsN) / m_project.fpsD, s = v->speed.seconds();
+    if (m_track.value("kind") == "remove")
+        return applyRemovalPath(points);
     const bool mask = m_track.value("kind") == "mask";
     const QString keyX = mask ? "maskX" : "x", keyY = mask ? "maskY" : "y";
     // Back to timeline frames and canvas positions (or mask offsets).
@@ -4546,6 +4608,72 @@ void Editor::applyTracking(const QVector<Tracker::Point> &points, const QString 
                      : QString("Tracked from %1 s to %2 s of the clip; lost outside that")
                            .arg(from, 0, 'f', 1)
                            .arg(to, 0, 'f', 1);
+    emit changed();
+}
+void Editor::applyRemovalPath(const QVector<Tracker::Point> &points) {
+    const auto clipId = m_track.value("clipId").toString();
+    const auto *c = m_project.clip(clipId);
+    const double fps = double(m_project.fpsN) / m_project.fpsD;
+    // Offsets in the source, from where the area was at the start; times in milliseconds for
+    // thinning.
+    QVector<qint64> times;
+    QVector<double> xs, ys;
+    const double from = c ? sourceSeconds(*c, c->start) : 0, to = c ? sourceSeconds(*c, c->start + c->duration) : 0;
+    for (const auto &p : points) {
+        const qint64 ms = qRound64(p.time * 1000);
+        if (!c || p.time < from - 1e-6 || p.time > to + 1e-6 || (!times.isEmpty() && ms <= times.last()))
+            continue;
+        times << ms;
+        xs << std::clamp(m_track.value("offsetX").toDouble() + p.x - m_track.value("centreX").toDouble(), -1., 1.);
+        ys << std::clamp(m_track.value("offsetY").toDouble() + p.y - m_track.value("centreY").toDouble(), -1., 1.);
+    }
+    if (times.size() < 2) {
+        m_track = {{"status", "failed"}, {"clipId", clipId}, {"kind", "remove"}};
+        return fail(c ? QString("Nothing could be followed there") : QString("The clip was removed while tracking"));
+    }
+    auto steady = [](QVector<double> v) {
+        auto out = v;
+        for (int i = 1; i + 1 < v.size(); ++i)
+            out[i] = (v[i - 1] + 2 * v[i] + v[i + 1]) / 4;
+        return out;
+    };
+    xs = steady(xs);
+    ys = steady(ys);
+    const auto kept = thinPath(times, xs, ys, 0.001);
+    QVector<std::array<double, 3>> path;
+    for (int i : kept)
+        path.push_back({times[i] / 1000., xs[i], ys[i]});
+    // Points outside the tracked stretch stay, so a part tracked from another moment is kept.
+    const double first = path.first()[0], last = path.last()[0];
+    for (const auto &p : removePathPoints(c->removePath))
+        if (p[0] < first - 1e-6 || p[0] > last + 1e-6)
+            path.push_back(p);
+    std::sort(path.begin(), path.end(), [](const auto &a, const auto &b) { return a[0] < b[0]; });
+    QStringList text;
+    for (const auto &p : path)
+        text << QString::number(p[0], 'f', 3) + "," + QString::number(p[1], 'f', 4) + "," +
+                    QString::number(p[2], 'f', 4);
+    const qint64 slack = 2 * m_track.value("step").toLongLong();
+    const double tolerance = slack / fps * c->speed.seconds();
+    const bool whole = first <= from + tolerance && last >= sourceSeconds(*c, c->start + c->duration - 1) - tolerance;
+    if (!mutate([&](Project &p) {
+            auto *clip = p.clip(clipId);
+            if (!clip)
+                return;
+            p.requireEditable(clip->track);
+            clip->removePath = text.join(' ');
+        })) {
+        m_track = {{"status", "failed"}, {"clipId", clipId}, {"kind", "remove"}};
+        return;
+    }
+    const double start = (first - c->sourceIn.seconds()) / c->speed.seconds(),
+                 end = (last - c->sourceIn.seconds()) / c->speed.seconds();
+    m_track = {{"status", "done"}, {"clipId", clipId}, {"keyframes", int(kept.size())},
+               {"from", start}, {"to", end}, {"whole", whole}, {"kind", "remove"}};
+    m_status = whole ? QString("Tracked: the area follows it through the clip")
+                     : QString("Tracked from %1 s to %2 s of the clip; lost outside that")
+                           .arg(start, 0, 'f', 1)
+                           .arg(end, 0, 'f', 1);
     emit changed();
 }
 void Editor::speak(const QString &text, const QString &voice, double speed) {
@@ -5960,7 +6088,7 @@ QString Editor::aiVariant(const QString &task, const Asset &a, const Clip *clip)
     if (task == "upscale")
         return QString::number(upscaleHeight(a));
     if (task == "inpaint")
-        return clip ? clip->removeArea : QString();
+        return clip ? clip->inpaintVariant() : QString();
     return task == "transcribe" ? m_captionLanguage : QString();
 }
 std::pair<double, double> Editor::aiSpan(const QString &task, const Asset &a,
@@ -5969,7 +6097,7 @@ std::pair<double, double> Editor::aiSpan(const QString &task, const Asset &a,
     for (const auto &c : m_project.clips)
         if (c.assetId == a.id && (usesAi(c, task) || (extra && c.id == extra->id)) &&
             // Each inpainted area is its own result.
-            (task != "inpaint" || !extra || c.removeArea == extra->removeArea)) {
+            (task != "inpaint" || !extra || c.inpaintVariant() == extra->inpaintVariant())) {
             // Transition handles and held frames reach up to a second beyond the trim.
             const double in = c.sourceIn.seconds(),
                          length = frameTime(c.duration, m_project.fpsN, m_project.fpsD).seconds() *
@@ -6005,9 +6133,9 @@ void Editor::addAiMedia(RenderOptions &options) const {
             if (c.aiCutout && !options.mattes.contains(a->id))
                 if (const auto m = m_ai->result("matte", *a); !m.path.isEmpty())
                     options.mattes.insert(a->id, m);
-            if (const auto key = a->id + "|" + c.removeArea;
+            if (const auto key = a->id + "#" + c.inpaintVariant();
                 !c.removeArea.isEmpty() && !options.inpainted.contains(key))
-                if (const auto r = m_ai->result("inpaint", *a, c.removeArea); !r.path.isEmpty())
+                if (const auto r = m_ai->result("inpaint", *a, c.inpaintVariant()); !r.path.isEmpty())
                     options.inpainted.insert(key, r);
             if (c.eyeContact && !options.eyeContact.contains(a->id))
                 if (const auto e = m_ai->result("eyecontact", *a); !e.path.isEmpty())

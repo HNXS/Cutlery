@@ -6,6 +6,7 @@
 #include <QSizeF>
 #include <QString>
 #include <QVector>
+#include <array>
 
 namespace cutlery {
 QString newId();
@@ -55,6 +56,8 @@ bool isVariableRate(double nominal, double average);
 // picture.
 QVector<QPointF> maskPoints(const QString &mask);
 QString maskText(const QVector<QPointF> &points);
+// The points of a Clip::removePath (time, dx, dy), or none when it is invalid.
+QVector<std::array<double, 3>> removePathPoints(const QString &path);
 // A standard frame rate close to `rate` (23.976 … 60), or `rate` itself when none is near.
 double standardRate(double rate);
 // A property value at a clip-local frame. Smooth keyframes ease in and out towards the next one;
@@ -282,6 +285,16 @@ struct Clip {
     // its surroundings. The picture comes from the inpainted copy of the asset (see AiJobs) once
     // that covers the clip; "" removes nothing.
     QString removeArea;
+    // Where the removed area moves to, to follow something (from tracking): "t,dx,dy ..." with
+    // t in source seconds (rising) and the offset in fractions of the source picture (−1..1);
+    // in between it moves straight, before and after it holds. "" keeps the area in place.
+    QString removePath;
+    // The area's offset at a source time.
+    QPointF removeOffsetAt(double sourceSeconds) const;
+    // The inpainting result this clip uses: the area, then after "|" its path when there is one.
+    QString inpaintVariant() const {
+        return removePath.isEmpty() ? removeArea : removeArea + "|" + removePath;
+    }
     bool styled() const {
         return shape != "rect" || border > 0 || shadow > 0 || aiCutout || feather > 0 ||
                !mask.isEmpty() ||

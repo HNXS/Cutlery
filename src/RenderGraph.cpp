@@ -1146,8 +1146,8 @@ RenderPlan compileRender(const Project &p, const QString &work, int width, int h
         // Smooth slow motion makes in-between frames from source neighbours, so it decodes a
         // little source before and after the range, even for a single preview frame.
         const auto up = n.image || !n.asset ? MatteSource{}
-                        : !c.removeArea.isEmpty() && o.inpainted.contains(n.asset->id + "|" + c.removeArea)
-                            ? o.inpainted.value(n.asset->id + "|" + c.removeArea)
+                        : !c.removeArea.isEmpty() && o.inpainted.contains(n.asset->id + "#" + c.inpaintVariant())
+                            ? o.inpainted.value(n.asset->id + "#" + c.inpaintVariant())
                         : c.eyeContact && o.eyeContact.contains(n.asset->id) ? o.eyeContact.value(n.asset->id)
                         : c.aiUpscale ? o.upscaled.value(n.asset->id)
                                       : MatteSource{};

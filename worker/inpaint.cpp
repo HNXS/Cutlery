@@ -1,8 +1,9 @@
 // Task "inpaint": removes something from a video by painting over an area of every frame with
 // LaMa (Suvorov et al. 2021, Apache-2.0), an image inpainting model, exported to ONNX.
 //
-// The area is a polygon in fractions of the source picture ("x,y x,y ..."), the same in every
-// frame. It is widened by a few pixels (edges of the object), a square around it with plenty of
+// The area is a polygon in fractions of the source picture ("x,y x,y ..."). It stays where it
+// was drawn, or moves along a path of offsets at source times ("t,dx,dy ...", from tracking) to
+// follow something that moves; frames where it has left the picture pass through. It is widened by a few pixels (edges of the object), a square around it with plenty of
 // surroundings is cut out and scaled to the model's 512 × 512 input, and the model fills the
 // area from what lies around it. The result is scaled back and blended in with a soft edge;
 // pixels outside the area stay as decoded. While the surroundings hardly change from one frame
@@ -13,7 +14,8 @@
 // source in the renderer.
 //
 //   cutlery-ai inpaint --ffmpeg F --model M --input IN --output OUT.mov --source WxH --rate R
-//                      --region "x,y x,y ..." [--start S] [--duration D] [--cpu 1]
+//                      --region "x,y x,y ..." [--path "t,dx,dy ..."] [--start S]
+//                      [--duration D] [--cpu 1]
 #include "common.h"
 #include <QFile>
 #include <array>
@@ -100,42 +102,93 @@ int worker::inpaint(const QHash<QString, QString> &o) {
     for (auto &y : area.y)
         y *= height;
     const int grow = std::max(2, int(std::lround(std::min(width, height) * 0.006)));
-    std::vector<float> full(size_t(width) * height, 0.f);
-    int x0 = width, y0 = height, x1 = -1, y1 = -1;
-    for (int y = 0; y < height; ++y)
-        for (int x = 0; x < width; ++x)
-            if (area.contains(x + 0.5, y + 0.5)) {
-                full[size_t(y) * width + x] = 1.f;
-                x0 = std::min(x0, x);
-                y0 = std::min(y0, y);
-                x1 = std::max(x1, x);
-                y1 = std::max(y1, y);
-            }
-    if (x1 < 0)
-        return fail("the region covers no pixels");
-    // The square cut out around it: the area with plenty of surroundings, at least 512 pixels
-    // where the picture allows, and inside the picture.
-    const int bw = x1 - x0 + 1 + 2 * grow, bh = y1 - y0 + 1 + 2 * grow;
-    const int least = std::min({kSide, width, height});
-    const int cw = std::min(width, std::max({int(std::max(bw, bh) * 2.5), least, bw})),
-              ch = std::min(height, std::max({int(std::max(bw, bh) * 2.5), least, bh}));
-    const int cx = std::clamp((x0 + x1) / 2 - cw / 2, 0, width - cw),
-              cy = std::clamp((y0 + y1) / 2 - ch / 2, 0, height - ch);
-    std::vector<float> cropMask(size_t(cw) * ch);
-    for (int y = 0; y < ch; ++y)
-        for (int x = 0; x < cw; ++x)
-            cropMask[size_t(y) * cw + x] = full[size_t(y + cy) * width + x + cx];
-    const auto grown = boxFilter(cropMask, cw, ch, grow, true);
-    // Blended in with a soft edge just outside the widened area.
-    auto alpha = boxFilter(boxFilter(grown, cw, ch, grow, true), cw, ch, grow, false);
-    // The model's mask at 512 × 512: 1 where it paints.
-    std::vector<float> maskIn(size_t(kSide) * kSide);
-    for (int y = 0; y < kSide; ++y)
-        for (int x = 0; x < kSide; ++x) {
-            const int sx = std::min(cw - 1, int((x + 0.5) * cw / kSide)),
-                      sy = std::min(ch - 1, int((y + 0.5) * ch / kSide));
-            maskIn[size_t(y) * kSide + x] = grown[size_t(sy) * cw + sx] > 0.5f ? 1.f : 0.f;
+    // Where the area is at each moment: offsets in fractions of the picture at source times,
+    // "t,dx,dy t,dx,dy ..." (from tracking); without them it stays where it was drawn.
+    std::vector<std::array<double, 3>> path;
+    for (const auto &point : o.value("path").split(' ', Qt::SkipEmptyParts)) {
+        const auto tx = point.split(',');
+        if (tx.size() != 3)
+            return fail("the path is \"t,dx,dy t,dx,dy ...\"");
+        path.push_back({tx[0].toDouble(), tx[1].toDouble(), tx[2].toDouble()});
+    }
+    auto offsetAt = [&](double t) -> std::array<double, 2> {
+        if (path.empty())
+            return {0, 0};
+        if (t <= path.front()[0])
+            return {path.front()[1], path.front()[2]};
+        if (t >= path.back()[0])
+            return {path.back()[1], path.back()[2]};
+        size_t i = 0;
+        while (t >= path[i + 1][0])
+            ++i;
+        const double u = (t - path[i][0]) / std::max(1e-9, path[i + 1][0] - path[i][0]);
+        return {path[i][1] + (path[i + 1][1] - path[i][1]) * u,
+                path[i][2] + (path[i + 1][2] - path[i][2]) * u};
+    };
+    // The cut-out around the area moved by (ox, oy) pixels: a square with plenty of
+    // surroundings, at least 512 pixels where the picture allows, inside the picture; the soft
+    // blend there, and the model's mask at 512 × 512 (1 where it paints).
+    struct Geometry {
+        int ox = 0, oy = 0, cx = 0, cy = 0, cw = 0, ch = 0;
+        std::vector<float> alpha, maskIn;
+        bool empty = true;
+    };
+    auto geometry = [&](int ox, int oy) {
+        Geometry g;
+        g.ox = ox;
+        g.oy = oy;
+        double minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+        for (size_t i = 0; i < area.x.size(); ++i) {
+            minX = std::min(minX, area.x[i] + ox);
+            maxX = std::max(maxX, area.x[i] + ox);
+            minY = std::min(minY, area.y[i] + oy);
+            maxY = std::max(maxY, area.y[i] + oy);
         }
+        const int bx0 = std::clamp(int(std::floor(minX)), 0, width - 1),
+                  bx1 = std::clamp(int(std::ceil(maxX)), 0, width - 1),
+                  by0 = std::clamp(int(std::floor(minY)), 0, height - 1),
+                  by1 = std::clamp(int(std::ceil(maxY)), 0, height - 1);
+        int x0 = width, y0 = height, x1 = -1, y1 = -1;
+        for (int y = by0; y <= by1; ++y)
+            for (int x = bx0; x <= bx1; ++x)
+                if (area.contains(x + 0.5 - ox, y + 0.5 - oy)) {
+                    x0 = std::min(x0, x);
+                    y0 = std::min(y0, y);
+                    x1 = std::max(x1, x);
+                    y1 = std::max(y1, y);
+                }
+        if (x1 < 0)
+            return g;
+        g.empty = false;
+        const int bw = x1 - x0 + 1 + 2 * grow, bh = y1 - y0 + 1 + 2 * grow;
+        const int least = std::min({kSide, width, height});
+        g.cw = std::min(width, std::max({int(std::max(bw, bh) * 2.5), least, bw}));
+        g.ch = std::min(height, std::max({int(std::max(bw, bh) * 2.5), least, bh}));
+        g.cx = std::clamp((x0 + x1) / 2 - g.cw / 2, 0, width - g.cw);
+        g.cy = std::clamp((y0 + y1) / 2 - g.ch / 2, 0, height - g.ch);
+        std::vector<float> cropMask(size_t(g.cw) * g.ch, 0.f);
+        for (int y = std::max(y0, g.cy); y <= std::min(y1, g.cy + g.ch - 1); ++y)
+            for (int x = std::max(x0, g.cx); x <= std::min(x1, g.cx + g.cw - 1); ++x)
+                if (area.contains(x + 0.5 - ox, y + 0.5 - oy))
+                    cropMask[size_t(y - g.cy) * g.cw + x - g.cx] = 1.f;
+        const auto grown = boxFilter(cropMask, g.cw, g.ch, grow, true);
+        // Blended in with a soft edge just outside the widened area.
+        g.alpha = boxFilter(boxFilter(grown, g.cw, g.ch, grow, true), g.cw, g.ch, grow, false);
+        g.maskIn.assign(size_t(kSide) * kSide, 0.f);
+        for (int y = 0; y < kSide; ++y)
+            for (int x = 0; x < kSide; ++x) {
+                const int sx = std::min(g.cw - 1, int((x + 0.5) * g.cw / kSide)),
+                          sy = std::min(g.ch - 1, int((y + 0.5) * g.ch / kSide));
+                g.maskIn[size_t(y) * kSide + x] = grown[size_t(sy) * g.cw + sx] > 0.5f ? 1.f : 0.f;
+            }
+        return g;
+    };
+    {
+        const auto first = offsetAt(start);
+        if (geometry(int(std::lround(first[0] * width)), int(std::lround(first[1] * height))).empty &&
+            path.empty())
+            return fail("the region covers no pixels");
+    }
 
     Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "cutlery-ai");
     auto session = openModel(env, model, o.value("cpu") == "1");
@@ -176,7 +229,27 @@ int worker::inpaint(const QHash<QString, QString> &o) {
     std::vector<float> image(size_t(3) * kSide * kSide), filled, previousFill;
     const std::array<int64_t, 4> imageShape{1, 3, kSide, kSide}, maskShape{1, 1, kSide, kSide};
     qint64 done = 0;
+    Geometry g;
+    bool have = false;
     while (readExactly(decoder, reinterpret_cast<char *>(frame.data()), qint64(frame.size()))) {
+        // Where the area is in this frame; worked out again when it moves by a pixel.
+        const auto offset = offsetAt(start + done / fps);
+        const int ox = int(std::lround(offset[0] * width)), oy = int(std::lround(offset[1] * height));
+        if (!have || ox != g.ox || oy != g.oy) {
+            g = geometry(ox, oy);
+            have = true;
+            previousCrop.clear();
+        }
+        if (g.empty) {
+            // Moved out of the picture: nothing to paint over.
+            if (!writeAll(encoder, reinterpret_cast<const char *>(frame.data()), qint64(frame.size())))
+                return fail("encoder stopped");
+            progress(++done, total);
+            continue;
+        }
+        const int cx = g.cx, cy = g.cy, cw = g.cw, ch = g.ch;
+        const auto &alpha = g.alpha;
+        auto &maskIn = g.maskIn;
         const unsigned char *crop = frame.data();
         // The cut-out at 512 × 512, 0..1, channels apart; the area itself is given as grey.
         for (int c = 0; c < 3; ++c)

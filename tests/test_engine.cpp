@@ -4935,6 +4935,81 @@ class EngineTest : public QObject {
         QSKIP("Needs the AI worker");
 #endif
     }
+    void removeMovingObject() {
+#ifdef CUTLERY_AI_WORKER
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        auto isBlue = [](QColor c) { return c.blue() > 200 && c.red() < 60 && c.green() < 60; };
+        // A patterned square crossing a blue picture, 100 pixels a second to the right; the
+        // stand-in model fills the area with grey.
+        QTemporaryDir dir, models;
+        QVERIFY(QFile::copy(CUTLERY_SOURCE_DIR "/tests/fixtures/grey-inpaint.onnx",
+                            models.filePath("lama.onnx")));
+        const auto source = dir.filePath("moving.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=320x180:r=30:d=2", "-f",
+                     "lavfi", "-i", "testsrc=s=40x40:r=30:d=2", "-filter_complex",
+                     "[0][1]overlay=x='40+100*t':y=70", "-c:v", "ffv1", source});
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+        qputenv("CUTLERY_AI_MODELS", models.path().toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        editor.configure(320, 180, 30, 1);
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto clip = editor.project().clips.first().id;
+        editor.select(clip);
+        editor.trackRemoval();
+        QVERIFY(editor.state()["error"].toString().contains("Draw around"));
+        editor.clearError();
+        // Around the square at the start.
+        editor.seek(0);
+        for (const auto &at : {QPointF(.11, .36), QPointF(.265, .36), QPointF(.265, .64), QPointF(.11, .64)})
+            editor.addMaskPoint(at.x(), at.y(), "removeArea");
+        QCOMPARE(maskPoints(editor.project().clip(clip)->removeArea).size(), 4);
+        editor.trackRemoval();
+        QCOMPARE(editor.state()["track"].toMap()["kind"].toString(), QString("remove"));
+        QTRY_COMPARE_WITH_TIMEOUT(editor.state()["track"].toMap()["status"].toString(), QString("done"), 60000);
+        QVERIFY(editor.state()["track"].toMap()["whole"].toBool());
+        const auto *c = editor.project().clip(clip);
+        QVERIFY(!c->removePath.isEmpty());
+        // A second later it has moved 100 pixels: about 0.31 of the width, and not up or down.
+        const auto moved = c->removeOffsetAt(1.0);
+        QVERIFY2(std::abs(moved.x() - 100. / 320) < 0.02 && std::abs(moved.y()) < 0.02,
+                 qPrintable(QString("%1 %2").arg(moved.x()).arg(moved.y())));
+        // The outline shown at the playhead moves with it.
+        editor.seek(30);
+        const auto outline = editor.state()["selected"].toMap()["removeOutline"].toList();
+        QVERIFY(std::abs(outline[0].toMap()["x"].toDouble() - (.11 + moved.x())) < 0.01);
+        // Painted over along the path: grey where the square is a second in, blue where it
+        // started.
+        auto selected = [&] { return editor.state()["selected"].toMap(); };
+        QCOMPARE(selected()["inpaintInfo"].toMap()["status"].toString(), QString("none"));
+        editor.runAi("inpaint");
+        QTRY_VERIFY_WITH_TIMEOUT(selected()["inpaintInfo"].toMap()["status"].toString() == "ready", 60000);
+        QVERIFY(selected()["inpaintInfo"].toMap()["covered"].toBool());
+        const auto picture = dir.filePath("moved.png");
+        editor.exportFrame(QUrl::fromLocalFile(picture));
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(picture), 30000);
+        const QImage frame(picture);
+        const auto inside = frame.pixelColor(160, 90);
+        QVERIFY2(std::abs(inside.red() - 128) < 24 && std::abs(inside.green() - 128) < 24 &&
+                     std::abs(inside.blue() - 128) < 24,
+                 qPrintable(inside.name()));
+        QVERIFY2(isBlue(frame.pixelColor(60, 90)), qPrintable(frame.pixelColor(60, 90).name()));
+        // Clearing removes the area and its path in one step.
+        editor.clearMask("removeArea");
+        QVERIFY(editor.project().clip(clip)->removeArea.isEmpty());
+        QVERIFY(editor.project().clip(clip)->removePath.isEmpty());
+        editor.undo();
+        QVERIFY(!editor.project().clip(clip)->removePath.isEmpty());
+        // Paths must rise in time and stay within the picture.
+        editor.setClip("removePath", QString("1,0,0 0.5,0.1,0"));
+        QVERIFY(!editor.state()["error"].toString().isEmpty());
+        QCOMPARE(Clip{}.removeOffsetAt(3), QPointF());
+#endif
+    }
     void removeObjectWithRealModel() {
 #if defined(CUTLERY_AI_WORKER) && defined(CUTLERY_TEST_MODELS)
         const QString model = QString(CUTLERY_TEST_MODELS) + "/lama.onnx";

@@ -190,8 +190,12 @@ void AiJobs::run(const Job &job, const QString &rate) {
                     .arg(std::max(2, int(std::lround(a.width * fit / 2)) * 2))
                     .arg(std::max(2, int(std::lround(a.height * fit / 2)) * 2))
              << "--rate" << rate;
-        if (job.task == "inpaint")
-            args << "--region" << job.variant;
+        // An inpainting variant is the area, then after "|" its path when it moves.
+        if (job.task == "inpaint") {
+            args << "--region" << job.variant.section('|', 0, 0);
+            if (const auto path = job.variant.section('|', 1); !path.isEmpty())
+                args << "--path" << path;
+        }
         const auto parts = rate.split('/');
         resultRate = parts[0].toDouble() / parts[1].toDouble();
     } else if (job.task == "faces") {

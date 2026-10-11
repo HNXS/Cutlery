@@ -55,8 +55,9 @@ struct RenderOptions {
     // Eye-contact pictures by asset id, used instead of the source (and of an upscale) by clips
     // with eye contact. Same timing as `upscaled`.
     QHash<QString, MatteSource> eyeContact;
-    // Inpainted pictures (AI object removal) by asset id and area, "<asset id>|<area>", used
-    // instead of the source (and of eye contact or an upscale) by clips with that removeArea.
+    // Inpainted pictures (AI object removal) by asset id and variant (Clip::inpaintVariant),
+    // "<asset id>#<variant>", used instead of the source (and of eye contact or an upscale) by
+    // clips with that area.
     // Same timing as `upscaled`.
     QHash<QString, MatteSource> inpainted;
     // Separated sound by asset id (AI): 4 channels, music left/right then voice left/right, from

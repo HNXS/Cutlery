@@ -159,12 +159,13 @@ The speech clips and the change to the original sound are one undo step. The spe
 Select a video clip and open **Video › Enhance › Remove an object (AI)**:
 
 1. **Draw around it:** click around what should disappear in the preview, point by point (at least 3); "↶ Point" takes the last one back. Then **Done**.
-2. **Remove:** the area is painted over in every frame of the part of the file your clips use. This runs in the background, on the graphics card when there is one. The result is kept per file and area, so it is made only once.
+2. **Something that moves?** Put the playhead where the area surrounds it and click **Follow it (track)**: the area follows it through the clip, forwards and backwards.
+3. **Remove:** the area is painted over in every frame of the part of the file your clips use. This runs in the background, on the graphics card when there is one. The result is kept per file and area, so it is made only once.
 
 - **The result:** the clip shows the painted-over copy in previews and exports. **Clear** shows the original again; drawing a different area makes a new copy.
-- **Best for** things that stay in place: a logo, a sign, a timestamp, a spot on the lens, an object in a shot from a tripod.
+- **Best for** things that stay in place or move steadily: a logo, a sign, a timestamp, a spot on the lens, a car driving past.
 - **Limits:**
-  - The area does not follow moving objects, so a person walking through stays visible outside it.
+  - The area keeps its shape while it follows: a person turning or waving may stick out of it; draw it a little larger.
   - Large areas and busy surroundings (text, patterns) may look smeared, and a moving camera may make the filled area flicker.
 
 ## Model and licences
