@@ -36,6 +36,11 @@ ApplicationWindow {
     property bool pickingKey: false
     // Drawing a free mask: clicks on the canvas add its points.
     property bool drawingMask: false
+    // What the clicks outline while drawing: the free mask ("mask") or the area object removal
+    // paints over ("removeArea").
+    property string maskTarget: "mask"
+    readonly property bool drawingFreeMask: drawingMask && maskTarget === "mask"
+    readonly property bool drawingRemoveArea: drawingMask && maskTarget === "removeArea"
     readonly property string maskClip: s ? s.selectedId : ""
     onMaskClipChanged: drawingMask = false
     // The asset panel's tabs (left): media, sound, text, stickers, effects, transitions, filters
@@ -2809,7 +2814,7 @@ ApplicationWindow {
                                 visible: win.drawingMask && win.s.selectedId.length > 0
                                 cursorShape: Qt.CrossCursor
                                 onClicked: function (mouse) {
-                                    editor.addMaskPoint(mouse.x / width, mouse.y / height);
+                                    editor.addMaskPoint(mouse.x / width, mouse.y / height, win.maskTarget);
                                 }
                             }
                             Canvas {
@@ -2818,7 +2823,7 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 z: 11
                                 visible: win.drawingMask && win.s.selectedId.length > 0
-                                readonly property var points: win.selection.maskOutline || []
+                                readonly property var points: (win.maskTarget === "removeArea" ? win.selection.removeOutline : win.selection.maskOutline) || []
                                 onPointsChanged: requestPaint()
                                 onVisibleChanged: requestPaint()
                                 onPaint: {
@@ -2827,7 +2832,7 @@ ApplicationWindow {
                                     if (points.length === 0)
                                         return;
                                     ctx.lineWidth = 2;
-                                    ctx.strokeStyle = "#64d8bc";
+                                    ctx.strokeStyle = win.maskTarget === "removeArea" ? "#ec6f5a" : "#64d8bc";
                                     ctx.beginPath();
                                     ctx.moveTo(points[0].x * width, points[0].y * height);
                                     for (let i = 1; i < points.length; ++i)
@@ -4403,21 +4408,24 @@ ApplicationWindow {
                                             objectName: "drawMask"
                                             Layout.fillWidth: true
                                             enabled: win.selection.locked !== true
-                                            text: win.drawingMask ? "Done (" + (win.selection.maskOutline || []).length + " points)" : (win.selection.mask ? "Edit mask" : "Draw mask")
-                                            onClicked: win.drawingMask = !win.drawingMask
+                                            text: win.drawingFreeMask ? "Done (" + (win.selection.maskOutline || []).length + " points)" : (win.selection.mask ? "Edit mask" : "Draw mask")
+                                            onClicked: {
+                                                win.drawingMask = !win.drawingFreeMask;
+                                                win.maskTarget = "mask";
+                                            }
                                             ToolTip.visible: hovered
                                             ToolTip.text: "Click around what should stay visible in the preview, point by point (at least 3); everything outside is hidden. Works with the soft edge."
                                         }
                                         Action {
                                             objectName: "removeMaskPoint"
-                                            visible: win.drawingMask
+                                            visible: win.drawingFreeMask
                                             text: "↶ Point"
                                             enabled: (win.selection.maskOutline || []).length > 0
                                             onClicked: editor.removeMaskPoint()
                                         }
                                         Action {
                                             objectName: "clearMask"
-                                            visible: !!win.selection.mask || win.drawingMask
+                                            visible: !!win.selection.mask || win.drawingFreeMask
                                             text: "Remove"
                                             onClicked: {
                                                 editor.clearMask();
@@ -4914,6 +4922,94 @@ ApplicationWindow {
                                 label: "Eye contact (AI): look into the camera"
                                 runningText: "Correcting the gaze…"
                                 doneText: "Eye contact ready ✓ · untick to compare"
+                            }
+                            // Object removal (AI): an outline drawn like a mask, then the
+                            // area is painted over in every frame.
+                            ColumnLayout {
+                                id: removal
+                                objectName: "removeObjectPanel"
+                                Layout.fillWidth: true
+                                spacing: 4
+                                visible: win.picPage("enhance") && win.selection.inpaintInfo !== undefined
+                                readonly property var info: win.selection.inpaintInfo || ({})
+                                readonly property bool working: info.status === "running" || info.status === "queued"
+                                readonly property string missing: (win.s.aiMissing || {}).inpaint || ""
+                                readonly property bool hasArea: (win.selection.removeArea || "") !== ""
+                                Label {
+                                    text: "Remove an object (AI)"
+                                    font.bold: true
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Action {
+                                        objectName: "drawRemoveArea"
+                                        Layout.fillWidth: true
+                                        enabled: win.selection.locked !== true && (removal.missing === "" || removal.hasArea)
+                                        text: win.drawingRemoveArea ? "Done (" + (win.selection.removeOutline || []).length + " points)"
+                                            : removal.hasArea ? "Edit the area" : "Draw around it"
+                                        onClicked: {
+                                            win.drawingMask = !win.drawingRemoveArea;
+                                            win.maskTarget = "removeArea";
+                                        }
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Click around what should disappear (a logo, a sign, a passer-by who stays put), point by point; it is painted over from its surroundings in every frame. Works best on things that do not move."
+                                    }
+                                    Action {
+                                        objectName: "removeAreaPoint"
+                                        visible: win.drawingRemoveArea
+                                        text: "↶ Point"
+                                        enabled: (win.selection.removeOutline || []).length > 0
+                                        onClicked: editor.removeMaskPoint("removeArea")
+                                    }
+                                    Action {
+                                        objectName: "clearRemoveArea"
+                                        visible: removal.hasArea || win.drawingRemoveArea
+                                        text: "Clear"
+                                        onClicked: {
+                                            editor.clearMask("removeArea");
+                                            win.drawingMask = false;
+                                        }
+                                    }
+                                }
+                                ProgressBar {
+                                    Layout.fillWidth: true
+                                    visible: removal.working
+                                    value: removal.info.progress || 0
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    visible: removal.hasArea || removal.working || removal.missing !== ""
+                                    Label {
+                                        objectName: "removeObjectStatus"
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.Wrap
+                                        font.pixelSize: 11
+                                        color: removal.info.status === "failed" || (removal.missing !== "" && !removal.hasArea) ? "#ec6f5a" : win.muted
+                                        text: removal.info.status === "queued" ? "Waiting for another AI job…"
+                                            : removal.working ? "Painting over… " + Math.round((removal.info.progress || 0) * 100) + "%"
+                                                + (removal.info.device === "gpu" ? " · GPU" : removal.info.device === "cpu" ? " · CPU (slow)" : "")
+                                            : removal.info.status === "failed" ? "Failed: " + (removal.info.error || "")
+                                            : removal.info.covered === true ? "Removed ✓ · Clear to compare"
+                                            : removal.missing !== "" ? removal.missing + " Download the AI pack next to Cutlery.exe."
+                                            : "Not removed yet: click Remove"
+                                    }
+                                    Action {
+                                        objectName: "removeObjectRun"
+                                        visible: !removal.working && removal.hasArea && removal.info.covered !== true && removal.missing === ""
+                                        text: "Remove"
+                                        padding: 6
+                                        onClicked: {
+                                            win.drawingMask = false;
+                                            editor.runAi("inpaint");
+                                        }
+                                    }
+                                    Action {
+                                        visible: removal.working
+                                        text: "Stop"
+                                        padding: 6
+                                        onClicked: editor.cancelAi()
+                                    }
+                                }
                             }
                             AiOption {
                                 shown: win.picPage("enhance")

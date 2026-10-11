@@ -1,5 +1,25 @@
 # Validation record
 
+## Windows portable build — 2026-10-11, remove an object (0.6 development)
+
+[GitHub Actions run 38148551253](https://github.com/HNXS/Cutlery/actions/runs/38148551253) on commit `efcf1bcacb12b75d7b482d5832b45b10c0cb8609` passed every step on its first attempt.
+
+The commit before it (`174c68c`, run 38148057356) did not compile on Windows. The worker's outline type was called `Polygon`, which clashes with the GDI function of that name from windows.h (pulled in by the DirectML header). That run did download LaMa, and its SHA-256 is now pinned.
+
+New coverage:
+
+- **Model downloads:** `tools/Get-Models.ps1` fetched Carve's LaMa ONNX export (`lama_fp32.onnx`, saved as `models/lama.onnx`), matching its pinned SHA-256.
+- **Engine test `removeObjectWithRealModel`:** a red 80 × 80 square on the astronaut photograph (960 × 540) is painted over by LaMa. Where the square was, the picture is no longer red and is close to the photograph underneath (thresholds in the test); away from it the picture is unchanged. A separate CI check fails the build if the test is skipped.
+- **Engine test `removeObject`:** runs through the editor with a stand-in model that fills the area with grey.
+  - Points clicked on the canvas become the area, in source coordinates; the free mask is left alone.
+  - Before processing, the export still shows the red box. Afterwards it shows grey where the box was and blue around it.
+  - Mirroring keeps the area on the box. Another area is another result. Undo, saving and clearing work.
+  - Titles and areas with fewer than three points are refused.
+- **UI test `removeObjectControls`:** Video › Enhance › Remove an object.
+  - Four clicks on the preview draw the area.
+  - Remove runs the job, and the status reads "Removed".
+  - Clear removes the area.
+
 ## Windows portable build — 2026-10-11, dubbing turns the original down only while speaking (0.6 development)
 
 [GitHub Actions run 38144901346](https://github.com/HNXS/Cutlery/actions/runs/38144901346) on commit `3aa3c58f3e512a3dcc8b58cab9e7d1f37578b945` passed every step on its first attempt.

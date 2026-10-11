@@ -7,6 +7,8 @@
 #  - nearest-x2.onnx: [1,3,H,W] -> [1,3,2H,2W], nearest-neighbour upscale.
 #  - half-spectrum.onnx: [B,4,3072,256] -> the same, halved: an MDX-Net stand-in whose "music"
 #    is half the mix.
+#  - grey-inpaint.onnx: image [1,3,H,W] and mask [1,1,H,W] -> [1,3,H,W]: a LaMa stand-in that
+#    fills the masked area with mid grey (0..1, like some LaMa exports).
 import onnx
 from onnx import helper, TensorProto
 
@@ -38,6 +40,17 @@ y = helper.make_tensor_value_info('output', TensorProto.FLOAT, ['batch_size', 4,
 half = helper.make_tensor('half', TensorProto.FLOAT, [], [0.5])
 node = helper.make_node('Mul', ['input', 'half'], ['output'])
 save(helper.make_graph([node], 'half-spectrum', [x], [y], [half]), 'half-spectrum.onnx')
+
+image = helper.make_tensor_value_info('image', TensorProto.FLOAT, [1, 3, 'h', 'w'])
+mask = helper.make_tensor_value_info('mask', TensorProto.FLOAT, [1, 1, 'h', 'w'])
+y = helper.make_tensor_value_info('output', TensorProto.FLOAT, [1, 3, 'h', 'w'])
+grey = [helper.make_tensor('one', TensorProto.FLOAT, [], [1.0]),
+        helper.make_tensor('grey', TensorProto.FLOAT, [], [0.5])]
+nodes = [helper.make_node('Sub', ['one', 'mask'], ['keep']),
+         helper.make_node('Mul', ['image', 'keep'], ['kept']),
+         helper.make_node('Mul', ['mask', 'grey'], ['fill']),
+         helper.make_node('Add', ['kept', 'fill'], ['output'])]
+save(helper.make_graph(nodes, 'grey-inpaint', [image, mask], [y], grey), 'grey-inpaint.onnx')
 
 # translate-copy/: a Marian-shaped stand-in "translator" whose decoder repeats the source pieces,
 # so a translation gives the input back (normalised). source.spm is a small SentencePiece unigram

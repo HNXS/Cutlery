@@ -2575,6 +2575,97 @@ class EngineTest : public QObject {
         QVERIFY(!none.missing("matte").isEmpty());
 #endif
     }
+    void removeObject() {
+#ifdef CUTLERY_AI_WORKER
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        auto isBlue = [](QColor c) { return c.blue() > 200 && c.red() < 60 && c.green() < 60; };
+        auto isRed = [](QColor c) { return c.red() > 200 && c.green() < 60 && c.blue() < 60; };
+        // A blue picture with a red box in the middle; the stand-in model fills the area with
+        // mid grey, so what it painted over shows.
+        QTemporaryDir dir, models;
+        QVERIFY(QFile::copy(CUTLERY_SOURCE_DIR "/tests/fixtures/grey-inpaint.onnx",
+                            models.filePath("lama.onnx")));
+        const auto source = dir.filePath("box.mkv");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=320x180:r=30:d=2", "-vf",
+                     "drawbox=x=140:y=70:w=40:h=40:c=red:t=fill", "-c:v", "ffv1", source});
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+        qputenv("CUTLERY_AI_MODELS", models.path().toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        editor.configure(320, 180, 30, 1);
+        QCOMPARE(editor.state()["aiMissing"].toMap()["inpaint"].toString(), QString());
+        editor.importMedia({QUrl::fromLocalFile(source)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 1, 15000);
+        editor.addAsset(editor.project().assets.first().id);
+        const auto clip = editor.project().clips.first().id;
+        editor.select(clip);
+        auto selected = [&] { return editor.state()["selected"].toMap(); };
+        QCOMPARE(selected()["inpaintInfo"].toMap()["status"].toString(), QString("none"));
+        editor.runAi("inpaint");
+        QVERIFY(editor.state()["error"].toString().contains("Draw around"));
+        editor.clearError();
+        // The outline around the box, clicked on the canvas; the third point makes the area.
+        editor.seek(15);
+        editor.addMaskPoint(.4, .3, "removeArea");
+        editor.addMaskPoint(.6, .3, "removeArea");
+        QCOMPARE(selected()["removeOutline"].toList().size(), 2);
+        QVERIFY(editor.project().clip(clip)->removeArea.isEmpty());
+        editor.addMaskPoint(.6, .7, "removeArea");
+        editor.addMaskPoint(.4, .7, "removeArea");
+        QCOMPARE(editor.project().clip(clip)->removeArea,
+                 QString("0.4000,0.3000 0.6000,0.3000 0.6000,0.7000 0.4000,0.7000"));
+        QCOMPARE(selected()["removeOutline"].toList().size(), 4);
+        QCOMPARE(selected()["removeOutline"].toList()[1].toMap()["x"].toDouble(), .6);
+        // The free mask is not touched.
+        QVERIFY(editor.project().clip(clip)->mask.isEmpty());
+        auto pixel = [&](const QString &name, int x, int y) {
+            const auto picture = dir.filePath(name);
+            editor.exportFrame(QUrl::fromLocalFile(picture));
+            [&] { QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(picture), 30000); }();
+            return QImage(picture).pixelColor(x, y);
+        };
+        // Until it is processed the box stays.
+        QVERIFY(isRed(pixel("before.png", 160, 90)));
+        editor.runAi("inpaint");
+        QTRY_VERIFY_WITH_TIMEOUT(selected()["inpaintInfo"].toMap()["status"].toString() == "ready", 60000);
+        QVERIFY(selected()["inpaintInfo"].toMap()["covered"].toBool());
+        // Painted over: grey where the box was, blue around it.
+        const auto inside = pixel("after.png", 160, 90);
+        QVERIFY2(std::abs(inside.red() - 128) < 24 && std::abs(inside.green() - 128) < 24 &&
+                     std::abs(inside.blue() - 128) < 24,
+                 qPrintable(inside.name()));
+        QVERIFY(isBlue(pixel("around.png", 40, 40)));
+        // Mirrored, the area stays on the box; the outline is shown mirrored.
+        editor.setClip("flip", true);
+        QCOMPARE(selected()["removeOutline"].toList()[1].toMap()["x"].toDouble(), .4);
+        editor.undo();
+        // Another area is another result, not yet made.
+        editor.removeMaskPoint("removeArea");
+        QCOMPARE(maskPoints(editor.project().clip(clip)->removeArea).size(), 3);
+        QCOMPARE(selected()["inpaintInfo"].toMap()["status"].toString(), QString("none"));
+        QVERIFY(!selected()["inpaintInfo"].toMap()["covered"].toBool());
+        QVERIFY(isRed(pixel("other.png", 160, 75)));
+        editor.undo();
+        QCOMPARE(selected()["inpaintInfo"].toMap()["status"].toString(), QString("ready"));
+        // Kept in the project; cleared, the source is shown again.
+        const auto saved = editor.project().json(dir.path());
+        QCOMPARE(Project::fromJson(saved, dir.path()).clip(clip)->removeArea,
+                 editor.project().clip(clip)->removeArea);
+        editor.clearMask("removeArea");
+        QVERIFY(editor.project().clip(clip)->removeArea.isEmpty());
+        QVERIFY(isRed(pixel("cleared.png", 160, 90)));
+        // Not on titles; invalid areas are refused.
+        editor.addTitle();
+        editor.addMaskPoint(.5, .5, "removeArea");
+        QVERIFY(editor.state()["error"].toString().contains("video"));
+        editor.select(clip);
+        editor.setClip("removeArea", QString("0.1,0.1 0.2,0.2"));
+        QVERIFY(editor.project().clip(clip)->removeArea.isEmpty());
+#endif
+    }
     void automaticCaptions() {
         // SRT parsing: CRLF, BOM, multi-line text.
         const auto cues = parseSrt(QString(QChar(0xfeff)) +
@@ -4842,6 +4933,53 @@ class EngineTest : public QObject {
         QVERIFY(editor.state()["error"].toString().contains("English or German"));
 #else
         QSKIP("Needs the AI worker");
+#endif
+    }
+    void removeObjectWithRealModel() {
+#if defined(CUTLERY_AI_WORKER) && defined(CUTLERY_TEST_MODELS)
+        const QString model = QString(CUTLERY_TEST_MODELS) + "/lama.onnx";
+        if (!QFileInfo::exists(model))
+            QSKIP("LaMa is not in the test models folder");
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QTemporaryDir dir;
+        // A photograph with a red square pasted on it, one second at 5 frames a second.
+        const auto photo = QString(CUTLERY_SOURCE_DIR) + "/tests/fixtures/face-straight.jpg";
+        const auto clip = dir.filePath("square.mkv");
+        run(ffmpeg, {"-v", "error", "-loop", "1", "-i", photo, "-t", "1", "-r", "5", "-vf",
+                     "drawbox=x=120:y=380:w=80:h=80:c=red:t=fill", "-c:v", "ffv1", clip});
+        const auto out = dir.filePath("removed.mov");
+        run(CUTLERY_AI_WORKER, {"inpaint", "--ffmpeg", ffmpeg, "--model", model, "--input", clip,
+                                "--output", out, "--source", "960x540", "--rate", "5", "--region",
+                                "0.12,0.69 0.21,0.69 0.21,0.86 0.12,0.86"});
+        auto pictureAt = [&](const QString &file) {
+            QImage image;
+            image.loadFromData(run(ffmpeg, {"-v", "error", "-i", file, "-frames:v", "1", "-f",
+                                            "image2pipe", "-c:v", "png", "-"}),
+                               "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        const auto original = QImage(photo).convertToFormat(QImage::Format_RGB32),
+                   removed = pictureAt(out);
+        QCOMPARE(removed.size(), QSize(960, 540));
+        // Where the square was: no longer red, and close to what the photograph has there.
+        double red = 0, difference = 0;
+        int n = 0;
+        for (int y = 390; y < 450; y += 2)
+            for (int x = 130; x < 190; x += 2) {
+                const QColor a = removed.pixelColor(x, y), b = original.pixelColor(x, y);
+                red += a.red() - (a.green() + a.blue()) / 2.;
+                difference += std::abs(a.red() - b.red()) + std::abs(a.green() - b.green()) +
+                              std::abs(a.blue() - b.blue());
+                n += 3;
+            }
+        QVERIFY2(red / (n / 3) < 60, qPrintable(QString::number(red / (n / 3))));
+        QVERIFY2(difference / n < 40, qPrintable(QString::number(difference / n)));
+        // Elsewhere the picture is as decoded.
+        const QColor distant = removed.pixelColor(800, 100), distantOriginal = original.pixelColor(800, 100);
+        QVERIFY(std::abs(distant.red() - distantOriginal.red()) < 12 && std::abs(distant.green() - distantOriginal.green()) < 12);
+        qDebug() << "red excess" << red / (n / 3) << "difference" << difference / n;
+#else
+        QSKIP("Needs the AI worker and the test models");
 #endif
     }
     void translateWithRealModels() {

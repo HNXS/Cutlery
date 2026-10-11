@@ -277,6 +277,11 @@ struct Clip {
     // "music" (everything but the voice); "" is the sound as recorded, also while the separation
     // does not cover the clip.
     QString stems;
+    // Object removal (AI inpainting): an area of the source picture, "x,y x,y ..." as fractions
+    // of the source before crop and mirroring (3 to 64 points), painted over in every frame from
+    // its surroundings. The picture comes from the inpainted copy of the asset (see AiJobs) once
+    // that covers the clip; "" removes nothing.
+    QString removeArea;
     bool styled() const {
         return shape != "rect" || border > 0 || shadow > 0 || aiCutout || feather > 0 ||
                !mask.isEmpty() ||

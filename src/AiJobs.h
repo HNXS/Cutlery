@@ -15,7 +15,9 @@ namespace cutlery {
 //  - "eyecontact": the video with the presenter's gaze turned toward the camera (ProRes 422 at
 //    the source size and frame rate);
 //  - "transcribe": speech as SRT subtitles (whisper.cpp);
-//  - "separate": the sound as music and voice apart (4-channel FLAC, see worker/separate.cpp).
+//  - "separate": the sound as music and voice apart (4-channel FLAC, see worker/separate.cpp);
+//  - "inpaint": the video with an area painted over (ProRes 422 at the source size and frame
+//    rate); the variant is the area's outline in fractions of the source picture.
 // Jobs run one at a time in request order; each result covers a range of source seconds.
 class AiJobs final : public QObject {
     Q_OBJECT

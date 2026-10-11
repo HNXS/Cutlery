@@ -58,6 +58,11 @@ Write-Host "::notice::LJSpeech model card: $((Get-Content "$Destination/en_US-lj
 $stemsUrl = 'https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_HQ_3.onnx'
 $stemsSha = '317554b07fe1ea5279a77f2b1520a41ea4b93432560c4ffd08792c30fddf9adc'
 Get-Pinned $stemsUrl "$Destination/UVR-MDX-NET-Inst_HQ_3.onnx" $stemsSha
+# Object removal: LaMa (big-lama, Suvorov et al. 2021; Apache-2.0,
+# https://github.com/advimman/lama), the 512 × 512 ONNX export published by Carve (Apache-2.0).
+$lamaUrl = 'https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx'
+$lamaSha = '1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6'
+Get-Pinned $lamaUrl "$Destination/lama.onnx" $lamaSha
 # Caption translation: Opus-MT German-English and English-German (Marian models by the Helsinki
 # NLP group, CC-BY 4.0): the int8 ONNX encoder and decoder exported by Xenova (transformers.js),
 # with the original SentencePiece model, vocabulary and settings from Helsinki-NLP.
@@ -124,6 +129,7 @@ foreach ($m in $faceModels) {
     @{ file='realesr-general-x4v3.onnx'; converted_from=$srUrl; source_sha256=$srSha; sha256=$srOnnx; license='BSD-3-Clause'; source='https://github.com/xinntao/Real-ESRGAN'; purpose='4x super-resolution for AI upscale' },
     @{ file='de_DE-thorsten-medium.onnx'; url="$voiceBase/de_DE-thorsten-medium.onnx"; sha256=$voiceSha; settings_sha256=$voiceJsonSha; license='Dataset CC0-1.0 (Thorsten-Voice); fine-tuned from the lessac voice per the model card'; source='https://github.com/thorstenMueller/Thorsten-Voice'; purpose='German voice for text to speech (Piper)' },
     @{ file='en_US-ljspeech-medium.onnx'; url="$englishBase/en_US-ljspeech-medium.onnx"; sha256=$englishSha; settings_sha256=$englishJsonSha; license='Dataset public domain (LJ Speech); trained from scratch on it per the model card'; source='https://keithito.com/LJ-Speech-Dataset/'; purpose='English voice for text to speech and dubbing (Piper)' },
+    @{ file='lama.onnx'; url=$lamaUrl; sha256=$lamaSha; license='Apache-2.0'; source='https://github.com/advimman/lama'; purpose='object removal (inpainting)' },
     @{ file='UVR-MDX-NET-Inst_HQ_3.onnx'; url=$stemsUrl; sha256=$stemsSha; license='MIT (credit Ultimate Vocal Remover and its developers)'; source='https://github.com/Anjok07/ultimatevocalremovergui'; purpose='voice and music separation' }
 ) + @($translation | ForEach-Object { @{ folder="opus-mt-$($_.pair)"; files=@($_.files | ForEach-Object { @{ file=$_.name; url=$_.url; sha256=$_.sha } }); license='CC-BY-4.0'; source='https://github.com/Helsinki-NLP/Opus-MT'; purpose='caption translation' } }) + @($faceModels | ForEach-Object { @{ file="$($_.name).onnx"; converted_from="mediapipe==0.10.18:$($_.entry)"; source_sha256=$_.sha256; sha256=$_.onnx; license='Apache-2.0'; source='https://github.com/google-ai-edge/mediapipe'; purpose='face, eye and iris landmarks for eye contact' } }) } | ConvertTo-Json -Depth 4 | Set-Content "$Destination/manifest.json" -Encoding utf8
 Write-Output (Resolve-Path $Destination).Path

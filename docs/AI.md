@@ -154,6 +154,19 @@ The speech clips and the change to the original sound are one undo step. The spe
 
 - **Limits:** the voices are not the speaker's own voice, mouths are not re-synced, and "music only" and "mute" apply to the whole clip, not only while a line is spoken.
 
+## Remove an object
+
+Select a video clip and open **Video › Enhance › Remove an object (AI)**:
+
+1. **Draw around it:** click around what should disappear in the preview, point by point (at least 3); "↶ Point" takes the last one back. Then **Done**.
+2. **Remove:** the area is painted over in every frame of the part of the file your clips use. This runs in the background, on the graphics card when there is one. The result is kept per file and area, so it is made only once.
+
+- **The result:** the clip shows the painted-over copy in previews and exports. **Clear** shows the original again; drawing a different area makes a new copy.
+- **Best for** things that stay in place: a logo, a sign, a timestamp, a spot on the lens, an object in a shot from a tripod.
+- **Limits:**
+  - The area does not follow moving objects, so a person walking through stays visible outside it.
+  - Large areas and busy surroundings (text, patterns) may look smeared, and a moving camera may make the filled area flicker.
+
 ## Model and licences
 
 | File | Model | Licence |
@@ -164,6 +177,7 @@ The speech clips and the change to the original sound are one undo step. The spe
 | `models/ggml-silero-v6.2.0.bin` | Silero VAD 6.2.0 voice detector, converted by whisper.cpp | MIT, [source](https://github.com/snakers4/silero-vad) |
 | `models/face_detection_short_range.onnx`, `models/face_landmark.onnx`, `models/iris_landmark.onnx` | Google MediaPipe face detection (BlazeFace), Face Mesh and Iris Landmark, taken from the pinned mediapipe 0.10.18 wheel and converted from TFLite with tf2onnx | Apache-2.0, [source](https://github.com/google-ai-edge/mediapipe) |
 | `models/opus-mt-de-en/`, `models/opus-mt-en-de/` | Opus-MT German–English and English–German (Marian) by the Helsinki NLP group: int8 ONNX encoder and decoder (Xenova's export) with the original SentencePiece model, vocabulary and settings | CC-BY 4.0, [source](https://github.com/Helsinki-NLP/Opus-MT) |
+| `models/lama.onnx` | LaMa (big-lama, Suvorov et al. 2021) image inpainting, the 512 × 512 ONNX export published by Carve | Apache-2.0, [source](https://github.com/advimman/lama) |
 | `models/UVR-MDX-NET-Inst_HQ_3.onnx` | MDX-Net model by the Ultimate Vocal Remover developers (Anjok07, aufr33), from the pinned public UVR model release | MIT with credit to UVR and its developers, [source](https://github.com/Anjok07/ultimatevocalremovergui) |
 | `models/de_DE-thorsten-medium.onnx` (with `.onnx.json` and its model card) | Piper voice Thorsten (medium), German, from the pinned piper-voices v1.0.0 release | Dataset CC0 ([Thorsten-Voice](https://github.com/thorstenMueller/Thorsten-Voice)); per its model card fine-tuned from Piper's U.S. English lessac voice, whose training data has its own terms |
 | `models/en_US-ljspeech-medium.onnx` (with `.onnx.json` and its model card) | Piper voice LJSpeech (medium), U.S. English, from the pinned piper-voices v1.0.0 release | Dataset public domain ([LJ Speech](https://keithito.com/LJ-Speech-Dataset/)); per its model card trained from scratch on that dataset alone |
