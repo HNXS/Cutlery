@@ -1272,6 +1272,73 @@ class UiTest : public QObject {
         QTRY_VERIFY(!start->isEnabled());
 #endif
     }
+    void dubControls() {
+        // Captions › Dub captions with the stand-in Piper: what is missing disables the dialog
+        // and says so; dubbing speaks the caption in its time and turns the original down.
+        QTemporaryDir dir, models;
+        QFile voice(models.filePath("de_DE-test-low.onnx"));
+        QVERIFY(voice.open(QIODevice::WriteOnly));
+        voice.write("stand-in");
+        voice.close();
+        QFile settings(models.filePath("de_DE-test-low.onnx.json"));
+        QVERIFY(settings.open(QIODevice::WriteOnly));
+        settings.write(R"({"phoneme_id_map": {}, "language": {"name_english": "German"}})");
+        settings.close();
+        qputenv("CUTLERY_PIPER", CUTLERY_FAKE_PIPER);
+        qputenv("CUTLERY_AI_MODELS", models.path().toUtf8());
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        qunsetenv("CUTLERY_PIPER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        editor.configure(640, 360, 25, 1);
+        editor.addCaption();
+        const auto caption = editor.state()["selectedId"].toString();
+        editor.setClip("text", "Guten Tag");
+        editor.setTrack(editor.project().clip(caption)->track, "name", QString("AI captions"));
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        window->setProperty("leftTab", "audio");
+        QTRY_VERIFY(findItem(window->contentItem(), "dubCaptionsButton") &&
+                    findItem(window->contentItem(), "dubCaptionsButton")->isVisible());
+        auto *dialog = window->findChild<QObject *>("dubDialog");
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        auto *start = findItem(window->contentItem(), "dubStart");
+        QTRY_VERIFY(start && start->isVisible());
+        auto *translate = findItem(window->contentItem(), "dubTranslate");
+        auto *original = findItem(window->contentItem(), "dubOriginal");
+        auto *status = findItem(window->contentItem(), "dubStatus");
+        QVERIFY(translate && original && status && findItem(window->contentItem(), "dubVoice"));
+        QTRY_VERIFY(start->isEnabled());
+        // No translation model and no separation model here.
+        translate->setProperty("currentIndex", 1);
+        QTRY_VERIFY(!start->isEnabled());
+        QVERIFY(status->property("text").toString().contains("opus-mt-de-en"));
+        translate->setProperty("currentIndex", 0);
+        original->setProperty("currentIndex", 1);
+        QTRY_VERIFY(!start->isEnabled());
+        QVERIFY(status->property("text").toString().contains("AI pack"));
+        original->setProperty("currentIndex", 0);
+        QTRY_VERIFY(start->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(start, "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(status->property("text").toString().contains("Dubbed 1 captions"), 30000);
+        QCOMPARE(editor.project().clips.size(), 2);
+        QCOMPARE(editor.project().clips.last().name, QString("Speech: Guten Tag"));
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void presenterControls() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;

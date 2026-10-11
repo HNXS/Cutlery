@@ -1,5 +1,21 @@
 # Validation record
 
+## Windows portable build — 2026-10-11, dubbing (0.6 development)
+
+[GitHub Actions run 38141755560](https://github.com/HNXS/Cutlery/actions/runs/38141755560) on commit `4af402aa9570565709a0d664ebff10c72cc45caa` passed every step on its first attempt, as did the commit before it (`b218b20`, run 38140917284).
+
+New coverage:
+
+- **Model downloads:** `tools/Get-Models.ps1` fetched Piper's English LJSpeech voice (medium): the model, its settings and its model card, each matching its pinned SHA-256. The hashes come from run 38140917284. Its model card, shown on the run, says the voice was trained from scratch on the public-domain LJ Speech dataset.
+- **Packaged AI pack:** `tts/piper.exe` speaks an English sentence with `models/en_US-ljspeech-medium.onnx`, using only the packaged files.
+- **Engine test `dubbing`:** runs with a stand-in Piper (`tests/fake_piper.cpp`) that speaks a 1000 Hz tone for 0.1 s per character.
+  - Three captions: one is placed as spoken, one is sped up 1.25× to end at the next caption, and one stays too long even at the 1.5× limit. Their clip lengths are checked to the frame.
+  - The original sound under the captions is a quarter as loud. An export has the tone over the quieter original while a line is spoken, and the original alone afterwards.
+  - Undo removes the speech and restores the volume in one step. "Mute" mutes the original; "keep" with no speeding up leaves every line as spoken.
+  - Refused: unknown choices for the original sound, speeds above 2×, music only without the separation model, a translation direction without its model. An unknown voice fails.
+  - Translate first: the captions are translated (stand-in translator) and then spoken from the translated text.
+- **UI test `dubControls`:** in the Dub captions dialog, a missing translation model or separation model disables Dub and names the missing model. Dubbing one caption reports "Dubbed 1 captions" and adds the speech clip.
+
 ## Windows portable build — 2026-10-10, smaller additions (0.6 development)
 
 [GitHub Actions run 38090497146](https://github.com/HNXS/Cutlery/actions/runs/38090497146) on commit `2ebfcb79ccc9b5b674fc620ed13c3dbfb8d98f64` passed every step on its first attempt.

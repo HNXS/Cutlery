@@ -294,6 +294,15 @@ class Editor final : public QObject {
     Q_INVOKABLE void speakSelection(const QString &voice, double speed = 1);
     // Every caption on the caption track, each spoken at its start (e.g. after translating them).
     Q_INVOKABLE void speakCaptions(const QString &voice, double speed = 1);
+    // Dubbing: every caption spoken at its start with `voice`, each line sped up as far as
+    // `maxSpeed` (1–2, sound pitch kept) to end before the next caption begins, and the original
+    // sound of the clips under the captions "keep" as it is, made "quieter" (a quarter),
+    // reduced to its "music" (AI voice separation, which then runs) or "mute". With
+    // `translateTo` ("en" or "de") every caption is translated first. One undo step for the
+    // speech and the original sound. State "speech" as above, with {dub: true, translating,
+    // faster (lines sped up), tooLong (lines longer than their time even at maxSpeed)}.
+    Q_INVOKABLE void dubCaptions(const QString &voice, const QString &original = "quieter",
+                                 const QString &translateTo = {}, double maxSpeed = 1.5);
     // Translates captions into `language` ("en" from German, "de" from English) with the AI
     // pack's Opus-MT models: the selected titles, or else every clip on the caption track. Their
     // text is replaced in one undo step (word timing is dropped). State "translation": {status:
@@ -567,8 +576,14 @@ class Editor final : public QObject {
     // Requests of the speech being made: request id → {frame, name, path, seconds}.
     QHash<QString, QVariantMap> m_speaking;
     QVariantMap m_speechState;
+    // `lengths`, when given, is how many frames each item may last (for dubbing).
     void startSpeech(const QVector<std::pair<qint64, QString>> &items, const QString &voice,
-                     double speed);
+                     double speed, const QVector<qint64> &lengths = {});
+    // The dubbing under way: {voice, original, maxSpeed}; waiting for its translation while
+    // m_translator runs, then held until the speech is placed.
+    QVariantMap m_dub;
+    void startDub();
+    void translateClips(const QStringList &ids, const QString &language);
     void spoken(const Speech::Result &result);
     Tracker *m_tracker = nullptr;
     void applyTracking(const QVector<Tracker::Point> &points, const QString &error);
@@ -703,7 +718,7 @@ class Editor final : public QObject {
     void backUp(const QString &projectPath);
     QVector<Sound> soundList() const;
     // Places the sound's clip with its start at `frame`; returns false when one is there already.
-    bool placeSound(Project &, const Sound &, qint64 frame);
+    bool placeSound(Project &, const Sound &, qint64 frame, double speed = 1);
     QMediaCaptureSession *m_voiceSession = nullptr;
     QAudioInput *m_voiceInput = nullptr;
     QMediaRecorder *m_voiceRecorder = nullptr;

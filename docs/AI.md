@@ -130,16 +130,29 @@ Select a clip with sound and choose **Audio › Clean-up › Voice and music**: 
   - Two parts only: drums, bass or single instruments cannot be picked out.
   - Backing vocals count as voice; very quiet speech under loud music may keep traces of the music.
 
-## Text to speech (German voice)
+## Text to speech (German and English voices)
 
 Under **Audio › Text to speech**, type what should be said, choose the voice and speed, and click **Add speech at the playhead**. For a title, **Read aloud** in its Text settings speaks it (several selected titles each at their own start).
 
-- **On this computer:** speech is made by Piper with the Thorsten voice (German, from the AI pack), a few seconds of work for a paragraph. Nothing is sent anywhere.
+- **On this computer:** speech is made by Piper with the Thorsten voice (German) or the LJSpeech voice (English), both from the AI pack, a few seconds of work for a paragraph. Nothing is sent anywhere.
 - **The result:** an ordinary audio clip on a free track, named after its first words. One undo step removes it. The same text, voice and speed are spoken only once and kept in the cache.
 - **Other voices:** a Piper voice (`.onnx` with its `.onnx.json`) copied into the `models` folder appears in the voice list.
 - **Limits:**
   - German pronunciation comes from eSpeak NG rules; unusual names and abbreviations may need writing out ("Doktor" for "Dr.").
   - There is no emphasis or emotion control, and one voice per text.
+
+## Dubbing
+
+**Captions › Dub captions (AI)** (or **Dub captions…** under Audio › Text to speech) turns the captions on the "AI captions" track into a spoken soundtrack:
+
+1. **Translate first** (optional): German → English or English → German, as Translate captions does.
+2. **Voice:** each caption is spoken at its start with the chosen voice; choose the English voice for English captions.
+3. **Fitting:** a line that would run into the next caption is sped up, up to 1.5× (the pitch stays). Untick the box to keep every line at its spoken speed. The dialog says how many lines were sped up and how many are still too long; shorten those captions' text or move the next caption.
+4. **Original sound:** the clips with sound under the captions are made **quieter** (a quarter of their volume), keep only their **music** (AI voice separation, which then runs in the background), are **muted**, or **kept** as they are.
+
+The speech clips and the change to the original sound are one undo step. The speech clips are ordinary audio clips: move, trim or change their volume like any other.
+
+- **Limits:** the voices are not the speaker's own voice, mouths are not re-synced, and a whole clip's original sound is turned down, not only while a line is spoken.
 
 ## Model and licences
 
@@ -153,6 +166,7 @@ Under **Audio › Text to speech**, type what should be said, choose the voice a
 | `models/opus-mt-de-en/`, `models/opus-mt-en-de/` | Opus-MT German–English and English–German (Marian) by the Helsinki NLP group: int8 ONNX encoder and decoder (Xenova's export) with the original SentencePiece model, vocabulary and settings | CC-BY 4.0, [source](https://github.com/Helsinki-NLP/Opus-MT) |
 | `models/UVR-MDX-NET-Inst_HQ_3.onnx` | MDX-Net model by the Ultimate Vocal Remover developers (Anjok07, aufr33), from the pinned public UVR model release | MIT with credit to UVR and its developers, [source](https://github.com/Anjok07/ultimatevocalremovergui) |
 | `models/de_DE-thorsten-medium.onnx` (with `.onnx.json` and its model card) | Piper voice Thorsten (medium), German, from the pinned piper-voices v1.0.0 release | Dataset CC0 ([Thorsten-Voice](https://github.com/thorstenMueller/Thorsten-Voice)); per its model card fine-tuned from Piper's U.S. English lessac voice, whose training data has its own terms |
+| `models/en_US-ljspeech-medium.onnx` (with `.onnx.json` and its model card) | Piper voice LJSpeech (medium), U.S. English, from the pinned piper-voices v1.0.0 release | Dataset public domain ([LJ Speech](https://keithito.com/LJ-Speech-Dataset/)); per its model card trained from scratch on that dataset alone |
 | `tts/piper.exe` with its DLLs and `espeak-ng-data` | Piper 2023.11.14-2 (text to speech) with piper-phonemize, eSpeak NG and ONNX Runtime 1.14.1, the pinned Windows release | Piper MIT ([source](https://github.com/rhasspy/piper/tree/2023.11.14-2)); eSpeak NG GPL-3.0-or-later ([source](https://github.com/rhasspy/espeak-ng)), a separate program |
 | `whisper-cli.exe` (application package) | whisper.cpp v1.9.4, built from the pinned commit | MIT, [source](https://github.com/ggml-org/whisper.cpp/tree/v1.9.4) |
 | `onnxruntime.dll` (application package) | ONNX Runtime 1.22.0 with the DirectML provider | MIT, [source](https://github.com/microsoft/onnxruntime/tree/v1.22.0) |

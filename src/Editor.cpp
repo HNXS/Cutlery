@@ -3454,7 +3454,7 @@ QUrl Editor::soundFile(const QString &id) {
         return {};
     }
 }
-bool Editor::placeSound(Project &p, const Sound &s, qint64 frame) {
+bool Editor::placeSound(Project &p, const Sound &s, qint64 frame, double speed) {
     const auto path = QDir::cleanPath(s.path);
     const Asset *asset = nullptr;
     for (const auto &a : p.assets)
@@ -3481,7 +3481,9 @@ bool Editor::placeSound(Project &p, const Sound &s, qint64 frame) {
     c.assetId = asset->id;
     c.name = s.name;
     c.start = frame;
-    c.duration = std::max<qint64>(1, qint64(std::floor(s.seconds * p.fpsN / p.fpsD + 1e-6)));
+    c.speed = Time(qRound64(speed * 1000), 1000);
+    c.duration = std::max<qint64>(
+        1, qint64(std::floor(s.seconds * p.fpsN / p.fpsD / c.speed.seconds() + 1e-6)));
     c.track = freeTrack(p, 0, c.start, c.duration);
     p.requireEditable(c.track);
     p.clips.push_back(c);
@@ -4530,21 +4532,87 @@ void Editor::speakCaptions(const QString &voice, double speed) {
         return fail("There are no captions to read aloud: make captions first");
     startSpeech(items, voice, speed);
 }
+void Editor::dubCaptions(const QString &voice, const QString &original,
+                         const QString &translateTo, double maxSpeed) {
+    if (!QStringList{"keep", "quieter", "music", "mute"}.contains(original))
+        return fail("Unknown choice for the original sound: " + original);
+    if (!std::isfinite(maxSpeed) || maxSpeed < 1 || maxSpeed > 2)
+        return fail("Dubbed lines can be sped up 1–2×");
+    if (!m_speaking.isEmpty() || !m_dub.isEmpty())
+        return fail("Still speaking the last text");
+    if (const auto why = m_speech->missing(); !why.isEmpty())
+        return fail(why);
+    if (original == "music" && !m_ai->available("separate"))
+        return fail(m_ai->missing("separate") + " Download the AI pack next to Cutlery.exe.");
+    if (captionIds().isEmpty())
+        return fail("There are no captions to dub: make captions first");
+    if (!translateTo.isEmpty()) {
+        if (const auto why = translationMissing(translateTo); !why.isEmpty())
+            return fail(why);
+        if (m_translator)
+            return fail("Captions are being translated already");
+    }
+    m_dub = {{"voice", voice}, {"original", original}, {"maxSpeed", maxSpeed}};
+    if (translateTo.isEmpty())
+        return startDub();
+    // Translated first; the speech follows when the translation is done.
+    translateClips(captionIds(), translateTo);
+    if (!m_translator) {
+        m_dub.clear();
+        return;
+    }
+    m_speechState = {{"status", "speaking"}, {"dub", true}, {"translating", true}};
+    emit changed();
+}
+void Editor::startDub() {
+    struct Line {
+        qint64 start, end;
+        QString text;
+    };
+    QVector<Line> lines;
+    for (const auto &id : captionIds())
+        if (const auto *c = m_project.clip(id); c && !Speech::spokenText(c->text).isEmpty())
+            lines.push_back({c->start, c->start + c->duration, c->text});
+    if (lines.isEmpty()) {
+        m_dub.clear();
+        m_speechState = {{"status", "failed"}, {"error", "There are no captions to dub"}};
+        return fail("There are no captions to dub: make captions first");
+    }
+    std::sort(lines.begin(), lines.end(), [](const Line &a, const Line &b) { return a.start < b.start; });
+    // Each line may last until the next caption begins, the last one as long as its caption.
+    QVector<std::pair<qint64, QString>> items;
+    QVector<qint64> lengths;
+    for (int i = 0; i < lines.size(); ++i) {
+        items.push_back({lines[i].start, lines[i].text});
+        const qint64 until = i + 1 < lines.size() ? lines[i + 1].start : lines[i].end;
+        lengths << std::max<qint64>(1, std::max(until, lines[i].end) - lines[i].start);
+    }
+    const auto voice = m_dub.value("voice").toString();
+    startSpeech(items, voice, 1, lengths);
+    if (m_speaking.isEmpty()) {
+        m_dub.clear();
+        m_speechState = {{"status", "failed"}, {"error", m_error}};
+        emit changed();
+    }
+}
 void Editor::startSpeech(const QVector<std::pair<qint64, QString>> &items, const QString &voice,
-                         double speed) {
+                         double speed, const QVector<qint64> &lengths) {
     if (!m_speaking.isEmpty())
         return fail("Still speaking the last text");
     if (const auto why = m_speech->missing(); !why.isEmpty())
         return fail(why);
-    for (const auto &[frame, text] : items) {
+    for (int i = 0; i < items.size(); ++i) {
+        const auto &[frame, text] = items[i];
         auto words = Speech::spokenText(text).split(' ', Qt::SkipEmptyParts);
         const bool more = words.size() > 5;
         words = words.mid(0, 5);
         const auto request = m_speech->speak(text, voice, speed);
         m_speaking[request] = {{"frame", frame},
                                {"name", "Speech: " + words.join(' ') + (more ? "…" : "")}};
+        if (i < lengths.size())
+            m_speaking[request]["slot"] = lengths[i];
     }
-    m_speechState = {{"status", "speaking"}, {"count", items.size()}};
+    m_speechState = {{"status", "speaking"}, {"count", items.size()}, {"dub", !m_dub.isEmpty()}};
     m_status = "Speaking…";
     emit changed();
 }
@@ -4553,6 +4621,7 @@ void Editor::spoken(const Speech::Result &result) {
         return;
     if (!result.error.isEmpty()) {
         m_speaking.clear();
+        m_dub.clear();
         m_speechState = {{"status", "failed"}, {"error", result.error}};
         return fail(result.error);
     }
@@ -4567,21 +4636,78 @@ void Editor::spoken(const Speech::Result &result) {
     std::sort(items.begin(), items.end(), [](const QVariantMap &a, const QVariantMap &b) {
         return a.value("frame").toLongLong() < b.value("frame").toLongLong();
     });
-    int placed = 0;
+    const auto dub = m_dub;
+    m_dub.clear();
+    const double maxSpeed = dub.value("maxSpeed", 1).toDouble();
+    const auto original = dub.value("original").toString();
+    int placed = 0, faster = 0, tooLong = 0;
+    QStringList separate;
     if (!mutate([&](Project &p) {
+            // The clips whose sound plays under the dubbed lines, before the speech is added.
+            QStringList originals;
+            if (!dub.isEmpty() && original != "keep") {
+                const auto speechDir = QDir::cleanPath(m_data + "/cache/speech") + "/";
+                qint64 from = std::numeric_limits<qint64>::max(), to = 0;
+                for (const auto &item : items) {
+                    from = std::min(from, item.value("frame").toLongLong());
+                    to = std::max(to, item.value("frame").toLongLong() + item.value("slot").toLongLong());
+                }
+                for (const auto &c : p.clips) {
+                    const auto *a = p.asset(c.assetId);
+                    if (a && a->hasAudio && !QDir::cleanPath(a->path).startsWith(speechDir) &&
+                        c.start < to && c.start + c.duration > from &&
+                        !p.trackSettings.value(c.track).locked)
+                        originals << c.id;
+                }
+            }
             for (const auto &item : items) {
                 Sound s;
                 s.name = item.value("name").toString();
                 s.path = item.value("path").toString();
                 s.seconds = item.value("seconds").toDouble();
-                placed += placeSound(p, s, item.value("frame").toLongLong());
+                double speed = 1;
+                // A dubbed line longer than its time is sped up, as far as allowed.
+                if (const qint64 slot = item.value("slot").toLongLong(); slot > 0) {
+                    const double frames = s.seconds * p.fpsN / p.fpsD;
+                    if (frames > slot + 0.5) {
+                        speed = std::min(maxSpeed, std::ceil(frames / slot * 1000) / 1000);
+                        faster += speed > 1;
+                        tooLong += frames / speed > slot + 0.5;
+                    }
+                }
+                placed += placeSound(p, s, item.value("frame").toLongLong(), speed);
+            }
+            for (const auto &id : originals) {
+                auto *c = p.clip(id);
+                if (original == "quieter") {
+                    c->volume *= .25;
+                    for (auto &k : c->keyframes["volume"])
+                        k.value *= .25;
+                    if (c->keyframes["volume"].isEmpty())
+                        c->keyframes.remove("volume");
+                } else if (original == "music") {
+                    c->stems = "music";
+                    if (!separate.contains(c->assetId))
+                        separate << c->assetId;
+                } else if (original == "mute") {
+                    c->muted = true;
+                }
             }
         })) {
         m_speechState = {{"status", "failed"}, {"error", m_error}};
         return;
     }
-    m_speechState = {{"status", "done"}, {"count", placed}};
-    m_status = placed == 1 ? QString("Added the speech") : QString("Added %1 speeches").arg(placed);
+    // The music of the original sound is separated in the background.
+    for (const auto &id : std::as_const(separate))
+        if (const auto *a = m_project.asset(id))
+            startAi("separate", *a);
+    m_speechState = {{"status", "done"}, {"count", placed}, {"dub", !dub.isEmpty()},
+                     {"faster", faster}, {"tooLong", tooLong}};
+    m_status = !dub.isEmpty() ? QString("Dubbed %1 captions").arg(placed)
+               : placed == 1  ? QString("Added the speech")
+                              : QString("Added %1 speeches").arg(placed);
+    if (tooLong)
+        m_status += QString("; %1 run past the next caption").arg(tooLong);
     emit changed();
 }
 QString Editor::translationModel(const QString &language) const {
@@ -4601,10 +4727,6 @@ QString Editor::translationMissing(const QString &language) const {
     return {};
 }
 void Editor::translateCaptions(const QString &language) {
-    if (const auto why = translationMissing(language); !why.isEmpty())
-        return fail(why);
-    if (m_translator)
-        return fail("Captions are being translated already");
     // The selected titles, or else every caption.
     QStringList ids;
     for (const auto &id : selection())
@@ -4612,6 +4734,13 @@ void Editor::translateCaptions(const QString &language) {
             ids << id;
     if (ids.isEmpty())
         ids = captionIds();
+    translateClips(ids, language);
+}
+void Editor::translateClips(const QStringList &ids, const QString &language) {
+    if (const auto why = translationMissing(language); !why.isEmpty())
+        return fail(why);
+    if (m_translator)
+        return fail("Captions are being translated already");
     if (ids.isEmpty())
         return fail("There are no captions to translate: select titles or make captions first");
     QStringList lines;
@@ -4657,12 +4786,20 @@ void Editor::translateCaptions(const QString &language) {
                 text.chop(1);
             translated = text.split('\n');
         }
+        // A dubbing waiting for this translation fails with it.
+        auto dubFailed = [this] {
+            if (!m_dub.isEmpty()) {
+                m_dub.clear();
+                m_speechState = {{"status", "failed"}, {"error", m_error}};
+            }
+        };
         if (!ok || translated.size() != lines.size()) {
             m_translation = {{"status", "failed"}};
             const auto messages = QString::fromUtf8(*log).trimmed().split('\n');
-            return fail("Translation failed" +
-                        (messages.isEmpty() || messages.last().isEmpty() ? QString()
-                                                                         : ": " + messages.last()));
+            fail("Translation failed" + (messages.isEmpty() || messages.last().isEmpty()
+                                             ? QString()
+                                             : ": " + messages.last()));
+            return dubFailed();
         }
         int count = 0;
         if (!mutate([&](Project &project) {
@@ -4682,10 +4819,12 @@ void Editor::translateCaptions(const QString &language) {
                     throw std::runtime_error("Nothing could be translated");
             })) {
             m_translation = {{"status", "failed"}};
-            return;
+            return dubFailed();
         }
         m_translation = {{"status", "done"}, {"count", count}, {"language", language}};
         m_status = QString("Translated %1 captions").arg(count);
+        if (!m_dub.isEmpty())
+            startDub();
         emit changed();
     };
     connect(p, &QProcess::finished, this, [done](int code, QProcess::ExitStatus status) {
@@ -4710,6 +4849,10 @@ void Editor::cancelTranslation() {
     p->waitForFinished(2000);
     p->deleteLater();
     m_translation = {};
+    if (!m_dub.isEmpty()) {
+        m_dub.clear();
+        m_speechState = {};
+    }
     m_status = "Translation cancelled";
     emit changed();
 }

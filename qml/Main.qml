@@ -1101,6 +1101,10 @@ ApplicationWindow {
                 onTriggered: translateDialog.open()
             }
             MenuItem {
+                text: "Dub captions (AI)…"
+                onTriggered: dubDialog.open()
+            }
+            MenuItem {
                 text: "Import captions (SRT, VTT, ASS, TXT)…"
                 onTriggered: srtOpen.open()
             }
@@ -2515,6 +2519,15 @@ ApplicationWindow {
                                             onClicked: editor.speakCaptions(win.currentVoice, win.speechSpeed)
                                             ToolTip.visible: hovered
                                             ToolTip.text: "Speaks every caption on the “AI captions” track at its start, e.g. as a German voice-over after translating them"
+                                        }
+                                        Action {
+                                            objectName: "dubCaptionsButton"
+                                            Layout.fillWidth: true
+                                            enabled: speechPanel.ready && !speechPanel.busy
+                                            text: "Dub captions…"
+                                            onClicked: dubDialog.open()
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Translates the captions if you like, speaks each one in its time and turns the original sound down"
                                         }
                                     }
                                     // Sound effects by category: a click adds one at the playhead. Made
@@ -7037,6 +7050,113 @@ ApplicationWindow {
                     : translateDialog.busy ? "Translating… " + Math.round((translateDialog.state.progress || 0) * 100) + "%"
                     : translateDialog.state.status === "done" ? "Translated " + translateDialog.state.count + " captions ✓"
                     : translateDialog.state.status === "failed" ? "Translation failed" : ""
+            }
+        }
+    }
+    // Dubbing: the captions (translated first if wished) spoken in their times over the
+    // original sound, which is turned down, reduced to its music or muted.
+    Dialog {
+        id: dubDialog
+        objectName: "dubDialog"
+        anchors.centerIn: parent
+        title: "Dub captions"
+        modal: true
+        width: 440
+        readonly property var speech: win.s.speech || ({})
+        readonly property var translation: win.s.translation || ({})
+        readonly property string missing: speech.missing || ""
+        readonly property string target: ["", "en", "de"][dubTranslate.currentIndex]
+        readonly property string translationMissing: target === "" ? "" : ((translation.missing || {})[target] || "")
+        readonly property string original: ["quieter", "music", "keep", "mute"][dubOriginal.currentIndex]
+        readonly property string musicMissing: original === "music" ? ((win.s.aiMissing || {}).separate || "") : ""
+        readonly property bool busy: speech.status === "speaking"
+        readonly property bool translating: busy && speech.translating === true
+        footer: DialogButtonBox {
+            Button {
+                objectName: "dubStart"
+                text: "Dub"
+                enabled: dubDialog.missing === "" && dubDialog.translationMissing === "" && dubDialog.musicMissing === "" && !dubDialog.busy
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+                onClicked: editor.dubCaptions(win.currentVoice, dubDialog.original, dubDialog.target, dubFit.checked ? 1.5 : 1)
+            }
+            Button {
+                text: dubDialog.translating ? "Stop" : "Close"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                onClicked: dubDialog.translating ? editor.cancelTranslation() : dubDialog.close()
+            }
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 8
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: "Speaks every caption on the “AI captions” track at its start with a voice, so the video can be heard in the captions' language. Everything stays on this computer; one undo step."
+            }
+            GridLayout {
+                columns: 2
+                columnSpacing: 10
+                rowSpacing: 6
+                Layout.fillWidth: true
+                Label {
+                    text: "Translate first"
+                    color: win.muted
+                }
+                ComboBox {
+                    id: dubTranslate
+                    objectName: "dubTranslate"
+                    Accessible.name: "Translate the captions first"
+                    Layout.fillWidth: true
+                    model: ["No, speak them as they are", "German → English", "English → German"]
+                }
+                Label {
+                    text: "Voice"
+                    color: win.muted
+                }
+                ComboBox {
+                    objectName: "dubVoice"
+                    Accessible.name: "Voice"
+                    Layout.fillWidth: true
+                    readonly property var voices: dubDialog.speech.voices || []
+                    model: voices.map(v => v.name + " · " + v.language)
+                    currentIndex: Math.max(0, voices.findIndex(v => v.id === win.currentVoice))
+                    onActivated: win.speechVoice = voices[currentIndex].id
+                }
+                Label {
+                    text: "Original sound"
+                    color: win.muted
+                }
+                ComboBox {
+                    id: dubOriginal
+                    objectName: "dubOriginal"
+                    Accessible.name: "Original sound"
+                    Layout.fillWidth: true
+                    model: ["Quieter", "Music only (AI)", "Keep as it is", "Mute"]
+                }
+            }
+            CheckBox {
+                id: dubFit
+                objectName: "dubFit"
+                checked: true
+                text: "Speed lines up to 1.5× to end before the next caption"
+            }
+            Label {
+                objectName: "dubStatus"
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                font.pixelSize: 11
+                readonly property string problem: dubDialog.missing !== "" ? dubDialog.missing
+                    : dubDialog.translationMissing !== "" ? dubDialog.translationMissing
+                    : dubDialog.musicMissing
+                color: problem !== "" || dubDialog.speech.status === "failed" ? "#ec6f5a" : win.muted
+                text: problem !== "" ? problem + " Download the AI pack next to Cutlery.exe."
+                    : dubDialog.translating ? "Translating… " + Math.round((dubDialog.translation.progress || 0) * 100) + "%"
+                    : dubDialog.busy ? "Speaking " + (dubDialog.speech.count || 0) + " captions…"
+                    : dubDialog.speech.status === "done" && dubDialog.speech.dub
+                        ? "Dubbed " + dubDialog.speech.count + " captions ✓" + (dubDialog.speech.faster ? " · " + dubDialog.speech.faster + " sped up" : "")
+                          + (dubDialog.speech.tooLong ? " · " + dubDialog.speech.tooLong + " still run past the next caption" : "")
+                    : dubDialog.speech.status === "failed" ? "Dubbing failed: " + (dubDialog.speech.error || "")
+                    : ""
             }
         }
     }
