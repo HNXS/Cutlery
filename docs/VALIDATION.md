@@ -1,5 +1,27 @@
 # Validation record
 
+## Windows portable build — 2026-10-11, dubbing turns the original down only while speaking (0.6 development)
+
+[GitHub Actions run 38144901346](https://github.com/HNXS/Cutlery/actions/runs/38144901346) on commit `3aa3c58f3e512a3dcc8b58cab9e7d1f37578b945` passed every step on its first attempt.
+
+The commit before it (`ff7adc6`, run 38143925595) failed in the interface test `speechControls`, in the first ctest run and again in the rerun. Piper ended normally, but its standard output did not start with a WAV file ("Piper gave no sound"). This commit makes two changes:
+
+- a WAV file that comes after other output is now used;
+- the error now gives the size and first bytes of the output, and Piper's last message.
+
+With this commit the test passed. It is not known whether the change fixed the cause or the failure simply did not occur. If it happens again, the error will say what Piper returned.
+
+New coverage:
+
+- **Engine test `dubbing`:** "Quieter while speaking" lowers the original sound with volume keyframes.
+  - At a quarter of its volume under each spoken line.
+  - Halfway down on the quarter-second ramps.
+  - Back to full volume between lines and after the last one.
+  - Still lowered between two lines that touch.
+- **Existing volume keyframes:** a keyframe already on the clip (half volume) is kept and lowered with it.
+- **Undo:** removes the keyframes again.
+- **Export:** the exported mix still has the speech over the lowered original, and the original alone between lines.
+
 ## Windows portable build — 2026-10-11, dubbing (0.6 development)
 
 [GitHub Actions run 38141755560](https://github.com/HNXS/Cutlery/actions/runs/38141755560) on commit `4af402aa9570565709a0d664ebff10c72cc45caa` passed every step on its first attempt, as did the commit before it (`b218b20`, run 38140917284).
