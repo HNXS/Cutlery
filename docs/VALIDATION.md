@@ -1,5 +1,23 @@
 # Validation record
 
+## Windows portable build — 2026-10-11, removing an object that moves (0.6 development)
+
+[GitHub Actions run 38158740535](https://github.com/HNXS/Cutlery/actions/runs/38158740535) on commit `16f59dc1bfe445b99b9e16570d2e3970364d9a68` passed every step on its first attempt.
+
+New coverage:
+
+- **Engine test `removeMovingObject`:** a patterned square crosses a blue picture at 100 pixels a second. The stand-in model fills the area with grey.
+  - "Follow it" tracks the area drawn around the square at the start through the whole clip. After one second the path has moved it about 0.31 of the width and not up or down.
+  - The outline shown at that moment has moved with it.
+  - After processing, the export at one second is grey where the square is and blue where it started.
+  - Clearing removes the area and its path in one step, and undo restores both.
+  - A path that does not rise in time is refused.
+- **UI test `removeObjectControls`:**
+  - After drawing, "Follow it (track)" shows.
+  - Clicking it reports "Tracked" and stores a path.
+  - Remove then paints the area over along it.
+- **Real model:** `removeObjectWithRealModel` still passes with LaMa, so the worker change keeps a still area working.
+
 ## Windows portable build — 2026-10-11, remove an object (0.6 development)
 
 [GitHub Actions run 38148551253](https://github.com/HNXS/Cutlery/actions/runs/38148551253) on commit `efcf1bcacb12b75d7b482d5832b45b10c0cb8609` passed every step on its first attempt.
