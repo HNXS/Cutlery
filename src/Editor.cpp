@@ -199,6 +199,7 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
                        {"faces", models + "/face_detection_short_range.onnx"},
                        {"separate", models + "/UVR-MDX-NET-Inst_HQ_3.onnx"},
                        {"inpaint", models + "/lama.onnx"},
+                       {"people", models + "/face_recognition_sface.onnx"},
                        {"transcribe", models + "/ggml-large-v3-turbo-q5_0.bin"},
                        {"vad", models + "/ggml-silero-v6.2.0.bin"},
                        {"whisper", whisper}},
@@ -224,7 +225,10 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
         if (m_reframe.value("status") == "analysing")
             applyReframe();
         placeCaptions(); // when every transcript of a caption request is ready
+        peopleChanged();
+        makeFaceCrops();
     });
+    m_labels = readLabels(m_data + "/people.json");
     connect(m_thumbnails, &Thumbnails::changed, this, [this] {
         emit thumbnailsChanged();
         emit changed();
@@ -908,8 +912,10 @@ QVariantMap Editor::state() const {
                                       {"faces", m_ai->missing("faces")},
                                       {"separate", m_ai->missing("separate")},
                                       {"inpaint", m_ai->missing("inpaint")},
+                                      {"people", m_ai->missing("people")},
                                       {"transcribe", m_ai->missing("transcribe")}}},
             {"captions", captionState()},
+            {"people", peopleState()},
             {"pauses", pauseState()},
             {"scenes", m_scenes},
             {"beats", m_beats},
@@ -5378,12 +5384,218 @@ bool Editor::exportCredits(const QUrl &file) {
     emit changed();
     return true;
 }
+const Editor::PeopleIndex &Editor::peopleIndex() const {
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (m_peopleCheckedAt >= 0 && now - m_peopleCheckedAt < 2000 && m_peopleAssets == m_project.assets.size())
+        return m_peopleIndex;
+    m_peopleCheckedAt = now;
+    m_peopleAssets = m_project.assets.size();
+    // The search counts for the interface.
+    int pending = 0, searched = 0, total = 0;
+    for (const auto &a : m_project.assets) {
+        if ((a.kind != "video" && a.kind != "image") || a.isNested())
+            continue;
+        ++total;
+        const auto status = m_ai->status("people", a).value("status").toString();
+        if (status == "queued" || status == "running")
+            ++pending;
+        else if (!m_ai->result("people", a).path.isEmpty())
+            ++searched;
+    }
+    m_peopleCounts = {{"pending", pending}, {"searched", searched}, {"total", total}};
+    // Results with their times, and the names: worked out again only when one changes.
+    QString signature = QString::number(m_labelsRevision);
+    QVector<std::pair<const Asset *, MatteSource>> results;
+    for (const auto &a : m_project.assets) {
+        if ((a.kind != "video" && a.kind != "image") || a.isNested())
+            continue;
+        const auto r = m_ai->result("people", a);
+        if (r.path.isEmpty())
+            continue;
+        signature += '|' + r.path + '@' + QString::number(QFileInfo(r.path).lastModified().toMSecsSinceEpoch());
+        results.push_back({&a, r});
+    }
+    if (signature == m_peopleIndex.signature)
+        return m_peopleIndex;
+    PeopleIndex index;
+    index.signature = signature;
+    for (const auto &[a, r] : results) {
+        QFile file(r.path);
+        if (file.open(QIODevice::ReadOnly))
+            index.faces += parsePeople(QString::fromUtf8(file.readAll()), a->id, a->kind == "image" ? 0 : r.start);
+    }
+    index.people = groupPeople(index.faces, m_labels);
+    m_peopleIndex = index;
+    return m_peopleIndex;
+}
+QString Editor::faceCropPath(const Face &f) const {
+    const auto *a = m_project.asset(f.assetId);
+    if (!a)
+        return {};
+    const auto key = QCryptographicHash::hash(
+        QString("%1|%2|%3|%4|%5|%6").arg(MediaAnalysis::fingerprint(*a)).arg(f.time, 0, 'f', 3).arg(f.x, 0, 'f', 4).arg(f.y, 0, 'f', 4).arg(f.w, 0, 'f', 4).arg(f.h, 0, 'f', 4).toUtf8(),
+        QCryptographicHash::Sha1);
+    return m_data + "/people/" + QString::fromLatin1(key.toHex().left(20)) + ".jpg";
+}
+void Editor::makeFaceCrops() {
+    const auto &index = peopleIndex();
+    QDir().mkpath(m_data + "/people");
+    for (const auto &person : index.people) {
+        if (person.best < 0)
+            continue;
+        const auto &f = index.faces[person.best];
+        const auto *a = m_project.asset(f.assetId);
+        const auto path = faceCropPath(f);
+        if (!a || path.isEmpty() || QFileInfo::exists(path) || m_faceCrops.contains(path))
+            continue;
+        // A square around the face with a little room, 96 pixels.
+        const double side = std::max(f.w * a->width, f.h * a->height) * 1.5;
+        const double x = std::clamp(f.x * a->width - side / 2, 0., std::max(0., a->width - side)),
+                     y = std::clamp(f.y * a->height - side / 2, 0., std::max(0., a->height - side));
+        QStringList args{"-v", "error", "-y"};
+        if (a->kind == "video")
+            args << "-ss" << QString::number(f.time, 'f', 3);
+        args << "-i" << a->path << "-frames:v" << "1" << "-vf"
+             << QString("crop=%1:%1:%2:%3,scale=96:96").arg(int(std::min<double>(side, std::min(a->width, a->height)))).arg(int(x)).arg(int(y))
+             << path + ".part.jpg";
+        auto *p = new QProcess(this);
+        m_faceCrops.insert(path, p);
+        connect(p, &QProcess::finished, this, [this, p, path](int code) {
+            if (code == 0)
+                QFile::rename(path + ".part.jpg", path);
+            QFile::remove(path + ".part.jpg");
+            m_faceCrops.remove(path);
+            p->deleteLater();
+            emit changed();
+        });
+        p->start(executable("ffmpeg"), args);
+    }
+}
+void Editor::findPeople() {
+    if (const auto why = m_ai->missing("people"); !why.isEmpty())
+        return fail(why + " Download the AI pack next to Cutlery.exe.");
+    int queued = 0;
+    for (const auto &a : m_project.assets) {
+        if ((a.kind != "video" && a.kind != "image") || a.isNested() || a.width <= 0 || !QFileInfo::exists(a.path))
+            continue;
+        const auto r = m_ai->result("people", a);
+        const auto status = m_ai->status("people", a).value("status").toString();
+        if (status == "queued" || status == "running")
+            continue;
+        // Searched already, all of it.
+        if (!r.path.isEmpty() && (a.kind == "image" || (r.start <= 0.01 && r.end >= a.duration - 0.05)))
+            continue;
+        m_ai->start("people", a, 0, a.kind == "image" ? 1 : a.duration);
+        ++queued;
+    }
+    peopleChanged();
+    if (!queued) {
+        makeFaceCrops();
+        m_status = "Every video and picture has been searched for people";
+    } else {
+        m_status = QString("Looking for people in %1 file%2…").arg(queued).arg(queued == 1 ? "" : "s");
+    }
+    emit changed();
+}
+QVariantMap Editor::peopleState() const {
+    QVariantMap state{{"missing", m_ai->missing("people")}};
+    const auto &index = peopleIndex();
+    const int pending = m_peopleCounts.value("pending").toInt(),
+              searched = m_peopleCounts.value("searched").toInt(),
+              total = m_peopleCounts.value("total").toInt();
+    QVariantList people;
+    for (const auto &p : index.people) {
+        if (p.best < 0)
+            continue;
+        const auto &f = index.faces[p.best];
+        const auto crop = faceCropPath(f);
+        people << QVariantMap{{"id", p.id},
+                              {"name", p.name},
+                              {"media", p.media},
+                              {"faces", int(p.faces.size())},
+                              {"assetId", f.assetId},
+                              {"time", f.time},
+                              {"thumbnail", QFileInfo::exists(crop) ? QUrl::fromLocalFile(crop).toString() : QString()}};
+    }
+    state["status"] = pending ? "finding" : searched ? "ready" : "none";
+    state["pending"] = pending;
+    state["searched"] = searched;
+    state["total"] = total;
+    state["people"] = people;
+    return state;
+}
+void Editor::namePerson(const QString &id, const QString &name) {
+    const auto clean = name.simplified();
+    const auto &index = peopleIndex();
+    const auto it = std::find_if(index.people.begin(), index.people.end(), [&](const Person &p) { return p.id == id; });
+    if (it == index.people.end())
+        return fail("No such person: " + id);
+    if (clean.size() > 80)
+        return fail("A name has at most 80 characters");
+    auto labels = m_labels;
+    auto same = [&](const Label &l) { return l.name.compare(clean, Qt::CaseInsensitive) == 0; };
+    const bool wasNamed = !it->name.isEmpty();
+    const auto old = std::find_if(labels.begin(), labels.end(), [&](const Label &l) { return l.name == it->name; });
+    if (clean.isEmpty()) {
+        if (!wasNamed)
+            return;
+        // Forgotten: they are found again as someone unnamed.
+        labels.erase(old);
+        m_status = "Forgot the name " + it->name;
+    } else if (wasNamed && old != labels.end() && !same(*old)) {
+        // Renamed, or joined with someone of that name.
+        auto existing = std::find_if(labels.begin(), labels.end(), same);
+        if (existing != labels.end()) {
+            existing->descriptors += old->descriptors;
+            labels.erase(old);
+        } else {
+            old->name = clean;
+        }
+        m_status = "Renamed to " + clean;
+    } else if (!wasNamed) {
+        // Some of their faces, spread over all of them, so others are recognised.
+        QVector<QVector<float>> descriptors;
+        const int count = int(it->faces.size()), take = std::min(count, 24);
+        for (int k = 0; k < take; ++k)
+            descriptors << index.faces[it->faces[k * count / take]].descriptor;
+        auto existing = std::find_if(labels.begin(), labels.end(), same);
+        if (existing != labels.end())
+            existing->descriptors += descriptors;
+        else
+            labels.push_back({clean, descriptors});
+        m_status = "Named " + clean;
+    } else {
+        return;
+    }
+    for (auto &l : labels)
+        while (l.descriptors.size() > 200)
+            l.descriptors.removeFirst();
+    if (!writeLabels(m_data + "/people.json", labels))
+        return fail("Cannot save the names in " + m_data);
+    m_labels = labels;
+    ++m_labelsRevision;
+    peopleChanged();
+    makeFaceCrops();
+    emit changed();
+}
 QVariantMap Editor::searchMedia(const QString &query) const {
     const auto words = query.toLower().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
     QVariantMap result;
     if (words.isEmpty())
         return result;
     static const QStringList languages{"auto", "de", "en", "fr", "es", "it", "nl", "pl", "pt", "tr"};
+    // Named people seen in each medium, and when first.
+    QHash<QString, QVector<std::pair<QString, double>>> named;
+    const auto &index = peopleIndex();
+    for (const auto &person : index.people)
+        if (!person.name.isEmpty())
+            for (const auto &assetId : person.media) {
+                double first = 1e300;
+                for (const int i : person.faces)
+                    if (index.faces[i].assetId == assetId)
+                        first = std::min(first, index.faces[i].time);
+                named[assetId].push_back({person.name, first});
+            }
     for (const auto &a : m_project.assets) {
         const auto about = QStringList{a.name, QFileInfo(a.path).fileName(), a.folder, a.kind,
                                        a.width > 0 ? QString("%1x%2").arg(a.width).arg(a.height)
@@ -5420,6 +5632,16 @@ QVariantMap Editor::searchMedia(const QString &query) const {
         for (const auto &w : words) {
             if (about.contains(w))
                 continue;
+            // Someone seen in it.
+            if (const auto seen = std::find_if(named[a.id].begin(), named[a.id].end(),
+                                               [&](const auto &n) { return n.first.toLower().contains(w); });
+                seen != named[a.id].end()) {
+                if (snippet.isEmpty()) {
+                    const int s = int(seen->second);
+                    snippet = QString("%1 · %2:%3").arg(seen->first).arg(s / 60).arg(s % 60, 2, 10, QChar('0'));
+                }
+                continue;
+            }
             const auto at = spoken.indexOf(w);
             if (at < 0) {
                 all = false;

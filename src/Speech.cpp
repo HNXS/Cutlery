@@ -92,6 +92,16 @@ double Speech::wavSeconds(const QString &path) {
     }
     return 0;
 }
+QByteArray Speech::repairedWav(const QByteArray &wav) {
+    auto declared = [](const QByteArray &b) -> qint64 {
+        return b.size() >= 12 && b.startsWith("RIFF") ? qint64(qFromLittleEndian<quint32>(b.constData() + 4)) + 8 : -1;
+    };
+    if (declared(wav) == wav.size())
+        return wav;
+    auto fixed = wav;
+    fixed.replace("\r\n", "\n");
+    return declared(fixed) == fixed.size() ? fixed : wav;
+}
 QString Speech::speak(const QString &text, const QString &voiceId, double speed) {
     const auto request = QString::number(++m_serial);
     const auto spoken = spokenText(text).left(5000);
@@ -155,9 +165,9 @@ void Speech::next() {
         if (r.error.isEmpty()) {
             // The sound, also when a message came before it on standard output.
             const auto at = out->indexOf("RIFF");
+            const auto wav = at < 0 ? QByteArray() : repairedWav(out->mid(at));
             QFile file(job.path + ".part");
-            if (at < 0 || !file.open(QIODevice::WriteOnly) ||
-                file.write(out->mid(at)) != out->size() - at) {
+            if (at < 0 || !file.open(QIODevice::WriteOnly) || file.write(wav) != wav.size()) {
                 const auto last = QString::fromUtf8(*err).trimmed().split('\n').last().trimmed();
                 r.error = QString("Piper gave no sound (%1 bytes: \"%2\"%3)")
                               .arg(out->size())

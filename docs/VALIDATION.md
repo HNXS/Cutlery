@@ -1,5 +1,37 @@
 # Validation record
 
+## Windows portable build — 2026-10-11, find people; Piper's speech on Windows (0.6 development)
+
+[GitHub Actions run 38177170168](https://github.com/HNXS/Cutlery/actions/runs/38177170168) on commit `a7c93370ec2b7eafcef33a6188413d5fc84bdd17` passed every step on its first attempt.
+
+**The speech fault.** The commit before it (`2d20232`, run 38176223777) failed in the interface test `speechControls` with "Piper gave no sound", the same failure seen now and then since 0.6 development began. The cause:
+
+- Piper writes the WAV file to standard output, which on Windows is in text mode, so every LF byte arrived as CR LF.
+- That turned the samples after the first LF into noise, in every speech made on Windows.
+- When a length in the header contained an LF byte, the file could not be read at all.
+
+The fix and its check:
+
+- Cutlery now removes one CR before each LF, but only when the output is longer than its header says and the lengths agree afterwards.
+- The engine test `textToSpeech` now checks that the saved file is exactly as long as its header says. It passed here with the real Piper on Windows, where the garbled output would have failed it.
+- A unit check builds Piper's output as it arrives in text mode, including a header whose length has an LF byte, and gets the original back.
+
+New coverage for person search:
+
+- **Model downloads:** SFace from the OpenCV model zoo (`face_recognition_sface.onnx`), matching its pinned SHA-256.
+- **Engine test `peopleWithRealModels`** (with BlazeFace and SFace; a CI check fails the build if it is skipped):
+  - A video shows the astronaut photograph for a second and the CC0 "camera" photograph for the next. A picture of the astronaut looking sideways is added beside it.
+  - Find people gives exactly two people: the astronaut in both media, and the other person in the video from the second second on.
+  - The astronaut's 96 × 96 face picture is made, and once named she is found by name in both media.
+- **Engine test `peopleGrouping`:**
+  - Parsing of results, similarity, and grouping, with named people first and the best face of each person.
+  - The names file.
+  - In the editor, using results in the cache: state, the result's start time, naming, and the search with the "Name · m:ss" snippet.
+  - Renaming, forgetting, and unknown ids.
+- **UI test `peopleControls`:**
+  - A face tile appears, and a click filters the library to that person's media and back.
+  - The naming dialog names the person, and the search box finds them.
+
 ## Windows portable build — 2026-10-11, removing an object that moves (0.6 development)
 
 [GitHub Actions run 38158740535](https://github.com/HNXS/Cutlery/actions/runs/38158740535) on commit `16f59dc1bfe445b99b9e16570d2e3970364d9a68` passed every step on its first attempt.

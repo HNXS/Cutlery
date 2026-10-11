@@ -139,6 +139,25 @@ class Detector {
         }
         return suppress(std::move(found));
     }
+    // Faces of any size in the frame: the whole frame, then half-overlapping tiles of 60 % and
+    // 30 % of the shorter side for smaller faces.
+    std::vector<Detection> findAll(const Image &frame) {
+        const int width = frame.width, height = frame.height;
+        auto found = find(frame, {width / 2., height / 2.}, std::max(width, height));
+        for (const double fraction : {0.6, 0.3}) {
+            const double tile = fraction * std::min(width, height);
+            const int columns = int(std::ceil((width - tile) / (tile / 2))) + 1,
+                      rows = int(std::ceil((height - tile) / (tile / 2))) + 1;
+            for (int row = 0; row < rows; ++row)
+                for (int column = 0; column < columns; ++column) {
+                    const Point centre{std::min(tile / 2 + column * tile / 2, width - tile / 2),
+                                       std::min(tile / 2 + row * tile / 2, height - tile / 2)};
+                    for (const auto &d : find(frame, centre, tile))
+                        found.push_back(d);
+                }
+        }
+        return suppress(std::move(found));
+    }
     // Keeps the best of overlapping detections.
     static std::vector<Detection> suppress(std::vector<Detection> found) {
         std::sort(found.begin(), found.end(),

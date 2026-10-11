@@ -65,11 +65,13 @@ if ($Models) {
     Copy-Item "$Models/face_detection_short_range.onnx","$Models/face_landmark.onnx","$Models/iris_landmark.onnx" "$AiPackDir/models"
     Copy-Item "$Models/UVR-MDX-NET-Inst_HQ_3.onnx" "$AiPackDir/models"
     Copy-Item "$Models/lama.onnx" "$AiPackDir/models"
+    Copy-Item "$Models/face_recognition_sface.onnx" "$AiPackDir/models"
     Copy-Item "$Models/opus-mt-de-en","$Models/opus-mt-en-de" "$AiPackDir/models" -Recurse -Force
     Copy-Item "$root/licenses/OPUS-MT-CC-BY-4.0.txt" "$AiPackDir/licenses"
     Copy-Item "$root/licenses/UVR-MDX-Net-MIT.txt" "$AiPackDir/licenses"
     Copy-Item "$root/licenses/Apache-2.0.txt" "$AiPackDir/licenses/MediaPipe-Apache-2.0.txt"
     Copy-Item "$root/licenses/Apache-2.0.txt" "$AiPackDir/licenses/LaMa-Apache-2.0.txt"
+    Copy-Item "$root/licenses/Apache-2.0.txt" "$AiPackDir/licenses/SFace-Apache-2.0.txt"
     if ($Whisper) { Copy-Item "$Whisper/ggml-silero-v6.2.0.bin" "$AiPackDir/models" }
     # Text to speech: Piper in tts/ (its own ONNX Runtime and eSpeak NG data), voices in models/.
     Copy-Item "$Models/de_DE-thorsten-medium.onnx","$Models/de_DE-thorsten-medium.onnx.json","$Models/de_DE-thorsten-medium.MODEL_CARD.txt" "$AiPackDir/models"

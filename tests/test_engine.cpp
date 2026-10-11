@@ -4,6 +4,8 @@
 #include "Interchange.h"
 #include "KeyboardShortcuts.h"
 #include "MediaAnalysis.h"
+#include "People.h"
+#include <QtEndian>
 #include "Project.h"
 #include "RenderGraph.h"
 #include "Scopes.h"
@@ -1995,6 +1997,14 @@ class EngineTest : public QObject {
         const double seconds = asset->duration;
         QVERIFY2(seconds > 2 && seconds < 8, qPrintable(QString::number(seconds)));
         QCOMPARE(clip.duration, qint64(std::floor(seconds * 25 + 1e-6)));
+        // Exactly as long as its header says: Piper's output is not garbled on the way (on
+        // Windows its standard output is in text mode).
+        {
+            QFile spokenFile(asset->path);
+            QVERIFY(spokenFile.open(QIODevice::ReadOnly));
+            const auto head = spokenFile.read(8);
+            QCOMPARE(qint64(qFromLittleEndian<quint32>(head.constData() + 4)) + 8, spokenFile.size());
+        }
         // It is speech: loud enough over most of its length.
         const auto pcm = run(Editor::executable("ffmpeg"),
                              {"-v", "error", "-i", asset->path, "-f", "s16le", "-ac", "1", "-ar",
@@ -2278,6 +2288,26 @@ class EngineTest : public QObject {
         wav.close();
         QCOMPARE(Speech::wavSeconds(wav.fileName()), 1.);
         QCOMPARE(Speech::wavSeconds(dir.filePath("none.wav")), 0.);
+        // Piper's output in Windows text mode (LF written as CR LF) is put back; samples that
+        // were CR LF already keep it, and a correct file is left alone.
+        QByteArray samples;
+        for (int i = 0; i < 4066; ++i)
+            samples += char(i % 256);
+        samples += "\r\n\n\r";
+        QByteArray original("RIFF\0\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x80\x3e\0\0\0\x7d\0\0\x02\0\x10\0data", 40);
+        original += QByteArray(4, 0) + samples;
+        qToLittleEndian<quint32>(quint32(original.size() - 8), original.data() + 4);
+        qToLittleEndian<quint32>(quint32(samples.size()), original.data() + 40);
+        // A length whose low byte is LF, so the header itself is changed too (as when the
+        // interface test's speech failed on Windows).
+        QCOMPARE(uchar(original[4]), uchar('\n'));
+        QCOMPARE(Speech::wavSeconds(dir.filePath("none.wav")), 0.);
+        auto textMode = original;
+        textMode.replace("\n", "\r\n");
+        QVERIFY(textMode.size() > original.size());
+        QCOMPARE(Speech::repairedWav(textMode), original);
+        QCOMPARE(Speech::repairedWav(original), original);
+        QCOMPARE(Speech::repairedWav("not a wav"), QByteArray("not a wav"));
     }
     void reframeToVertical() {
         const auto ffmpeg = Editor::executable("ffmpeg");
@@ -4933,6 +4963,178 @@ class EngineTest : public QObject {
         QVERIFY(editor.state()["error"].toString().contains("English or German"));
 #else
         QSKIP("Needs the AI worker");
+#endif
+    }
+    void peopleGrouping() {
+        // Descriptors along a few directions stand in for faces: same direction, same person.
+        auto direction = [](int axis, double tilt = 0) {
+            QVector<float> v(128, 0.f);
+            v[axis] = float(std::cos(tilt));
+            v[(axis + 1) % 128] = float(std::sin(tilt));
+            return v;
+        };
+        auto line = [](double time, const QVector<float> &v, double size = 0.2) {
+            QStringList parts{QString::number(time), "0.5", "0.4", QString::number(size), QString::number(size), "0.9"};
+            for (const float x : v)
+                parts << QString::number(x);
+            return parts.join(' ');
+        };
+        const auto text = QStringList{line(0, direction(0)), line(0, direction(5)), "0.5",
+                                      line(1, direction(0, 0.3), 0.3), line(1.5, direction(9))}
+                              .join('\n');
+        const auto faces = parsePeople(text, "a", 10);
+        QCOMPARE(faces.size(), 4);
+        QCOMPARE(faces[2].time, 11.);
+        QCOMPARE(faces[2].descriptor.size(), 128);
+        QVERIFY(std::abs(similarity(faces[0].descriptor, faces[2].descriptor) - std::cos(0.3)) < 1e-4);
+        // Three people; the one seen twice first, shown by the larger face.
+        auto grouped = groupPeople(faces, {});
+        QCOMPARE(grouped.size(), 3);
+        QCOMPARE(grouped[0].faces, (QVector<int>{0, 2}));
+        QCOMPARE(grouped[0].best, 2);
+        QCOMPARE(grouped[0].id, QString("p1"));
+        // A named person takes the faces that resemble them, and comes first.
+        grouped = groupPeople(faces, {Label{"Anna", {direction(9)}}});
+        QCOMPARE(grouped[0].name, QString("Anna"));
+        QCOMPARE(grouped[0].id, QString("name:Anna"));
+        QCOMPARE(grouped[0].faces, (QVector<int>{3}));
+        QCOMPARE(grouped.size(), 3);
+        // Names in a file.
+        QTemporaryDir dir;
+        QVERIFY(writeLabels(dir.filePath("people.json"), {Label{"Anna", {direction(9), direction(4)}}}));
+        const auto labels = readLabels(dir.filePath("people.json"));
+        QCOMPARE(labels.size(), 1);
+        QCOMPARE(labels[0].descriptors.size(), 2);
+        QCOMPARE(labels[0].descriptors[1][4], 1.f);
+        QVERIFY(readLabels(dir.filePath("none.json")).isEmpty());
+
+        // In the editor: results in the AI cache for a video and a picture.
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        const auto data = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        QFile::remove(data + "/people.json");
+        const auto video = dir.filePath("talk.mkv"), picture = dir.filePath("portrait.png");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "testsrc=s=320x180:r=25:d=3", "-c:v", "ffv1", video});
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "testsrc=s=200x200:r=1:d=1", "-frames:v", "1", picture});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(video), QUrl::fromLocalFile(picture)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        const auto &assets = editor.project().assets;
+        const auto videoId = assets[0].kind == "video" ? assets[0].id : assets[1].id,
+                   pictureId = assets[0].kind == "video" ? assets[1].id : assets[0].id;
+        auto people = [&] { return editor.state()["people"].toMap(); };
+        QCOMPARE(people()["status"].toString(), QString("none"));
+        QCOMPARE(people()["total"].toInt(), 2);
+        const auto cache = data + "/ai";
+        QDir().mkpath(cache);
+        auto store = [&](const QString &assetId, const QString &content, double start, double end) {
+            const auto base = cache + "/" + MediaAnalysis::fingerprint(*editor.project().asset(assetId)) + "-people-v1";
+            QFile t(base + ".txt"), j(base + ".json");
+            QVERIFY(t.open(QIODevice::WriteOnly) && j.open(QIODevice::WriteOnly));
+            t.write(content.toUtf8());
+            j.write(QString(R"({"start": %1, "end": %2, "rate": 2})").arg(start).arg(end).toUtf8());
+        };
+        store(videoId, QStringList{line(0, direction(0)), line(0.5, direction(0, 0.1)), line(1, direction(7))}.join('\n'), 0.5, 3);
+        store(pictureId, line(0, direction(0, 0.2), 0.5), 0, 1);
+        // An unnamed person in both, and one only in the video.
+        auto list = [&] {
+            QTest::qWait(2100); // the index is checked again every two seconds
+            return people()["people"].toList();
+        };
+        auto found = list();
+        QCOMPARE(people()["status"].toString(), QString("ready"));
+        QCOMPARE(people()["searched"].toInt(), 2);
+        QCOMPARE(found.size(), 2);
+        auto first = found[0].toMap();
+        QCOMPARE(first["faces"].toInt(), 3);
+        QCOMPARE(first["media"].toStringList().size(), 2);
+        // Shown by the picture's larger face; its picture is made.
+        QCOMPARE(first["assetId"].toString(), pictureId);
+        QCOMPARE(found[1].toMap()["time"].toDouble(), 1.5); // the video result starts at 0.5 s
+        editor.findPeople();
+        QVERIFY(editor.state()["error"].toString().contains("AI pack") ||
+                editor.state()["status"].toString().contains("searched"));
+        editor.clearError();
+        // Named: kept in the data folder, found by the search with the moment first seen.
+        editor.namePerson(first["id"].toString(), "  Eileen   Collins ");
+        found = people()["people"].toList();
+        QCOMPARE(found[0].toMap()["name"].toString(), QString("Eileen Collins"));
+        QCOMPARE(found[0].toMap()["id"].toString(), QString("name:Eileen Collins"));
+        QCOMPARE(readLabels(data + "/people.json").size(), 1);
+        auto hits = editor.searchMedia("eileen");
+        QCOMPARE(hits.size(), 2);
+        QCOMPARE(hits[videoId].toString(), QString("Eileen Collins · 0:00"));
+        QVERIFY(editor.searchMedia("eileen nobody").isEmpty());
+        // Renamed, then forgotten: unnamed again.
+        editor.namePerson("name:Eileen Collins", "Eileen");
+        QCOMPARE(people()["people"].toList()[0].toMap()["name"].toString(), QString("Eileen"));
+        editor.namePerson("name:Eileen", "");
+        found = people()["people"].toList();
+        QVERIFY(found[0].toMap()["name"].toString().isEmpty());
+        QVERIFY(readLabels(data + "/people.json").isEmpty());
+        QVERIFY(editor.searchMedia("eileen").isEmpty());
+        editor.namePerson("p9", "Nobody");
+        QVERIFY(editor.state()["error"].toString().contains("No such person"));
+        QFile::remove(data + "/people.json");
+    }
+    void peopleWithRealModels() {
+#if defined(CUTLERY_AI_WORKER) && defined(CUTLERY_TEST_MODELS)
+        const QString models = CUTLERY_TEST_MODELS;
+        if (!QFileInfo::exists(models + "/face_recognition_sface.onnx"))
+            QSKIP("SFace is not in the test models folder");
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        const auto data = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        QFile::remove(data + "/people.json");
+        QTemporaryDir dir;
+        // A video with one person for a second and another for the next (the astronaut photograph,
+        // public domain, and the "camera" photograph, CC0), and a picture of the first.
+        const auto video = dir.filePath("two.mkv"), picture = dir.filePath("side.jpg");
+        run(ffmpeg, {"-v", "error", "-loop", "1", "-t", "1", "-i", CUTLERY_SOURCE_DIR "/tests/fixtures/face-straight.jpg",
+                     "-loop", "1", "-t", "1", "-i", CUTLERY_SOURCE_DIR "/tests/fixtures/person-camera.png",
+                     "-filter_complex",
+                     "[0]scale=960:540,setsar=1,fps=10[a];[1]scale=-2:540,pad=960:540:(ow-iw)/2:0,setsar=1,format=yuv420p,fps=10[b];[a][b]concat=n=2:v=1",
+                     "-c:v", "ffv1", video});
+        QVERIFY(QFile::copy(CUTLERY_SOURCE_DIR "/tests/fixtures/face-side.jpg", picture));
+        qputenv("CUTLERY_AI_WORKER", CUTLERY_AI_WORKER);
+        qputenv("CUTLERY_AI_MODELS", models.toUtf8());
+        FrameProvider frames;
+        Editor editor(&frames);
+        qunsetenv("CUTLERY_AI_WORKER");
+        qunsetenv("CUTLERY_AI_MODELS");
+        editor.importMedia({QUrl::fromLocalFile(video), QUrl::fromLocalFile(picture)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        const auto &assets = editor.project().assets;
+        const auto videoId = assets[0].kind == "video" ? assets[0].id : assets[1].id,
+                   pictureId = assets[0].kind == "video" ? assets[1].id : assets[0].id;
+        auto people = [&] { return editor.state()["people"].toMap(); };
+        QCOMPARE(people()["missing"].toString(), QString());
+        editor.findPeople();
+        QTRY_VERIFY_WITH_TIMEOUT(people()["status"].toString() == "ready", 120000);
+        QTRY_VERIFY_WITH_TIMEOUT(people()["searched"].toInt() == 2, 5000);
+        const auto found = people()["people"].toList();
+        QStringList seen;
+        for (const auto &p : found)
+            seen << QString("%1:%2").arg(p.toMap()["faces"].toInt()).arg(p.toMap()["media"].toStringList().size());
+        // The astronaut in the first second of the video and in the picture; the cameraman in
+        // the second.
+        QVERIFY2(found.size() == 2, qPrintable(seen.join(' ')));
+        const auto astronaut = found[0].toMap(), other = found[1].toMap();
+        QCOMPARE(astronaut["media"].toStringList().size(), 2);
+        QCOMPARE(other["media"].toStringList(), QStringList{videoId});
+        QVERIFY(other["time"].toDouble() >= 0.9);
+        // Its face picture is made.
+        QTRY_VERIFY_WITH_TIMEOUT(!people()["people"].toList()[0].toMap()["thumbnail"].toString().isEmpty(), 30000);
+        const QImage thumbnail(QUrl(people()["people"].toList()[0].toMap()["thumbnail"].toString()).toLocalFile());
+        QCOMPARE(thumbnail.size(), QSize(96, 96));
+        // Named and searched for.
+        editor.namePerson(astronaut["id"].toString(), "Eileen");
+        const auto hits = editor.searchMedia("eileen");
+        QCOMPARE(hits.size(), 2);
+        QVERIFY(hits.contains(pictureId));
+        QFile::remove(data + "/people.json");
+#else
+        QSKIP("Needs the AI worker and the test models");
 #endif
     }
     void removeMovingObject() {

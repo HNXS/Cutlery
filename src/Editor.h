@@ -4,6 +4,7 @@
 #include "Playback.h"
 #include "Thumbnails.h"
 #include "Tracker.h"
+#include "People.h"
 #include "Speech.h"
 #include <QPointer>
 #include "AiJobs.h"
@@ -145,7 +146,19 @@ class Editor final : public QObject {
     // kind, size (e.g. 1920x1080), rights or credit, or in what is said in it (cached
     // transcripts in any language). Returns {assetId: snippet}, the snippet being the spoken
     // words around the first match with its time ("0:12 … words …"), or "" for other matches.
+    // Names of people seen in a medium (person search, below) match too, with the moment they
+    // are first seen as the snippet ("Anna · 0:12").
     Q_INVOKABLE QVariantMap searchMedia(const QString &query) const;
+    // Person search (AI pack): looks for faces in every video and picture of the project not
+    // searched yet (twice a second, cached per file) and groups them into people. State
+    // "people": {missing, status none|finding|ready, pending, searched, total, people [{id, name,
+    // media [asset ids], faces, assetId, time, thumbnail (file URL, "" until made)}]}.
+    Q_INVOKABLE void findPeople();
+    // Names a person (an id from state "people"); the name is kept in the data folder with some
+    // of their faces, so they are recognised in other media and projects too. A named person
+    // given another name is renamed (or joined with a person of that name); an empty name
+    // forgets a named person.
+    Q_INVOKABLE void namePerson(const QString &id, const QString &name);
     Q_INVOKABLE void setImportFolder(const QString &folder);
     // Takes media no clip uses out of the library (the files stay on disk).
     Q_INVOKABLE void removeAssets(const QStringList &assetIds);
@@ -623,6 +636,28 @@ class Editor final : public QObject {
     QVector<const Clip *> selectedPictures() const;
     // Spoken words of cached transcripts by result file: modified time and cues.
     mutable QHash<QString, QPair<qint64, QVector<Cue>>> m_spoken;
+    // Person search: the named people (data folder, people.json), the faces found in the
+    // project's media and the people they make, worked out again when a result or name changes.
+    QVector<Label> m_labels;
+    int m_labelsRevision = 0;
+    struct PeopleIndex {
+        QString signature;
+        QVector<Face> faces;
+        QVector<Person> people;
+    };
+    mutable PeopleIndex m_peopleIndex;
+    // The index and the search counts are checked again at most every two seconds (results are
+    // files), and at once after an AI job, a name or a change of the media.
+    mutable qint64 m_peopleCheckedAt = -1;
+    mutable qsizetype m_peopleAssets = -1;
+    mutable QVariantMap m_peopleCounts;
+    void peopleChanged() { m_peopleCheckedAt = -1; }
+    const PeopleIndex &peopleIndex() const;
+    QVariantMap peopleState() const;
+    // Face pictures for the people list, made by FFmpeg in the data folder (people/).
+    QString faceCropPath(const Face &) const;
+    QHash<QString, QPointer<QProcess>> m_faceCrops;
+    void makeFaceCrops();
     void saveBrand();
     // Undo history kept across sessions: written next to each save (data folder, history/),
     // read back when the same file is opened unchanged.

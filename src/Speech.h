@@ -38,6 +38,10 @@ class Speech final : public QObject {
     static QString spokenText(const QString &text);
     // Length of a PCM WAV file in seconds, 0 when it is not one.
     static double wavSeconds(const QString &path);
+    // A WAV file as Piper wrote it to standard output. On Windows that output is in text mode,
+    // so every LF byte arrives as CR LF; when the file is longer than its header says and taking
+    // one CR before each LF makes the lengths agree, that is undone.
+    static QByteArray repairedWav(const QByteArray &wav);
   signals:
     void finished(const cutlery::Speech::Result &result);
     void changed();

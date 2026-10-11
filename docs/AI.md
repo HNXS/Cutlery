@@ -168,6 +168,15 @@ Select a video clip and open **Video › Enhance › Remove an object (AI)**:
   - The area keeps its shape while it follows: a person turning or waving may stick out of it; draw it a little larger.
   - Large areas and busy surroundings (text, patterns) may look smeared, and a moving camera may make the filled area flicker.
 
+## Find people
+
+In the media library, **Find people (AI)** looks for faces in every video and picture of the project, in the background, and shows the people it found as face tiles above the media list.
+
+- **Show someone's media:** click their face. Click again, or **Show all**, to see everything.
+- **Name them:** double-click the face (or right-click), type the name and **Save**. The search box then finds every medium they are in by that name, with the moment they first appear.
+- **Remembered:** names are kept on this computer with a few of the person's faces, so they are recognised in other videos and projects too. Giving a named person another name renames them; **Forget the name** removes it.
+- **Limits:** faces turned away, very small, or hidden are not found; two people who look much alike may be grouped together, and one person may appear twice (e.g. with and without glasses), which naming both the same joins.
+
 ## Model and licences
 
 | File | Model | Licence |
@@ -178,6 +187,7 @@ Select a video clip and open **Video › Enhance › Remove an object (AI)**:
 | `models/ggml-silero-v6.2.0.bin` | Silero VAD 6.2.0 voice detector, converted by whisper.cpp | MIT, [source](https://github.com/snakers4/silero-vad) |
 | `models/face_detection_short_range.onnx`, `models/face_landmark.onnx`, `models/iris_landmark.onnx` | Google MediaPipe face detection (BlazeFace), Face Mesh and Iris Landmark, taken from the pinned mediapipe 0.10.18 wheel and converted from TFLite with tf2onnx | Apache-2.0, [source](https://github.com/google-ai-edge/mediapipe) |
 | `models/opus-mt-de-en/`, `models/opus-mt-en-de/` | Opus-MT German–English and English–German (Marian) by the Helsinki NLP group: int8 ONNX encoder and decoder (Xenova's export) with the original SentencePiece model, vocabulary and settings | CC-BY 4.0, [source](https://github.com/Helsinki-NLP/Opus-MT) |
+| `models/face_recognition_sface.onnx` | SFace face recognition (Zhong et al., MobileFaceNet trained with the SFace loss), from the OpenCV model zoo | Apache-2.0, [source](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface) |
 | `models/lama.onnx` | LaMa (big-lama, Suvorov et al. 2021) image inpainting, the 512 × 512 ONNX export published by Carve | Apache-2.0, [source](https://github.com/advimman/lama) |
 | `models/UVR-MDX-NET-Inst_HQ_3.onnx` | MDX-Net model by the Ultimate Vocal Remover developers (Anjok07, aufr33), from the pinned public UVR model release | MIT with credit to UVR and its developers, [source](https://github.com/Anjok07/ultimatevocalremovergui) |
 | `models/de_DE-thorsten-medium.onnx` (with `.onnx.json` and its model card) | Piper voice Thorsten (medium), German, from the pinned piper-voices v1.0.0 release | Dataset CC0 ([Thorsten-Voice](https://github.com/thorstenMueller/Thorsten-Voice)); per its model card fine-tuned from Piper's U.S. English lessac voice, whose training data has its own terms |

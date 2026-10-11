@@ -110,4 +110,5 @@ int separate(const QHash<QString, QString> &);
 int translate(const QHash<QString, QString> &);
 int tokenize(const QHash<QString, QString> &);
 int inpaint(const QHash<QString, QString> &);
+int people(const QHash<QString, QString> &);
 } // namespace worker

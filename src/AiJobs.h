@@ -16,6 +16,8 @@ namespace cutlery {
 //    the source size and frame rate);
 //  - "transcribe": speech as SRT subtitles (whisper.cpp);
 //  - "separate": the sound as music and voice apart (4-channel FLAC, see worker/separate.cpp);
+//  - "people": faces with descriptors for finding a person again, twice a second, as text (see
+//    worker/people.cpp); also for pictures (one frame, range 0..1);
 //  - "inpaint": the video with an area painted over (ProRes 422 at the source size and frame
 //    rate); the variant is the area's outline in fractions of the source picture, and after
 //    "|" the path it moves along (see Clip::removePath) when it follows something.
@@ -47,6 +49,7 @@ class AiJobs final : public QObject {
         return m_process != nullptr || !m_queue.isEmpty();
     }
     static constexpr double matteRate = 8; // analysed frames per second
+    static constexpr double peopleRate = 2; // frames per second searched for people
     // Output size of an upscale to `height`, keeping the asset's aspect ratio (even sizes).
     static QSize upscaleSize(const Asset &, int height);
 
