@@ -4616,6 +4616,58 @@ void Editor::startSpeech(const QVector<std::pair<qint64, QString>> &items, const
     m_status = "Speaking…";
     emit changed();
 }
+// Lowers a clip's sound to `level` while each of `spans` (timeline frames, sorted) plays,
+// easing down over `ramp` frames before and up after. Spans closer than two ramps are joined.
+// Existing volume keyframes are kept and multiplied.
+static void duckVolume(Clip &c, const QVector<std::pair<qint64, qint64>> &spans, double level,
+                       qint64 ramp) {
+    QVector<std::pair<qint64, qint64>> joined;
+    for (auto [from, to] : spans) {
+        from -= c.start;
+        to -= c.start;
+        if (to <= 0 || from >= c.duration)
+            continue;
+        if (!joined.isEmpty() && from - joined.last().second <= 2 * ramp)
+            joined.last().second = std::max(joined.last().second, to);
+        else
+            joined.push_back({from, to});
+    }
+    if (joined.isEmpty())
+        return;
+    auto factor = [&](double t) {
+        double f = 1;
+        for (const auto &[from, to] : joined) {
+            double g = 1;
+            if (t >= from && t <= to)
+                g = level;
+            else if (t > from - ramp && t < from)
+                g = 1 + (level - 1) * (t - (from - ramp)) / ramp;
+            else if (t > to && t < to + ramp)
+                g = level + (1 - level) * (t - to) / ramp;
+            f = std::min(f, g);
+        }
+        return f;
+    };
+    QMap<qint64, QString> frames{{0, "linear"}, {c.duration, "linear"}};
+    for (const auto &[from, to] : joined)
+        for (const qint64 f : {from - ramp, from, to, to + ramp})
+            if (f >= 0 && f <= c.duration)
+                frames.insert(f, "linear");
+    const auto old = c.keyframes.value("volume");
+    for (const auto &k : old)
+        if (k.frame >= 0 && k.frame <= c.duration)
+            frames.insert(k.frame, k.easing());
+    QVector<Keyframe> ducked;
+    for (auto it = frames.cbegin(); it != frames.cend(); ++it) {
+        Keyframe k;
+        k.frame = it.key();
+        k.value = c.valueAt("volume", it.key()) * factor(it.key());
+        k.smooth = false;
+        k.ease = it.value();
+        ducked.push_back(k);
+    }
+    c.keyframes["volume"] = ducked;
+}
 void Editor::spoken(const Speech::Result &result) {
     if (!m_speaking.contains(result.request))
         return;
@@ -4660,6 +4712,7 @@ void Editor::spoken(const Speech::Result &result) {
                         originals << c.id;
                 }
             }
+            QVector<std::pair<qint64, qint64>> spoken;
             for (const auto &item : items) {
                 Sound s;
                 s.name = item.value("name").toString();
@@ -4675,16 +4728,18 @@ void Editor::spoken(const Speech::Result &result) {
                         tooLong += frames / speed > slot + 0.5;
                     }
                 }
-                placed += placeSound(p, s, item.value("frame").toLongLong(), speed);
+                if (placeSound(p, s, item.value("frame").toLongLong(), speed)) {
+                    ++placed;
+                    spoken.push_back({p.clips.back().start, p.clips.back().start + p.clips.back().duration});
+                }
             }
+            std::sort(spoken.begin(), spoken.end());
             for (const auto &id : originals) {
                 auto *c = p.clip(id);
                 if (original == "quieter") {
-                    c->volume *= .25;
-                    for (auto &k : c->keyframes["volume"])
-                        k.value *= .25;
-                    if (c->keyframes["volume"].isEmpty())
-                        c->keyframes.remove("volume");
+                    // Down to a quarter while a line is spoken, in a quarter of a second.
+                    duckVolume(*c, spoken, .25,
+                               std::max<qint64>(1, qRound64(0.25 * p.fpsN / p.fpsD)));
                 } else if (original == "music") {
                     c->stems = "music";
                     if (!separate.contains(c->assetId))
