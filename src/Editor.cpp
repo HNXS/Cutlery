@@ -4863,8 +4863,18 @@ bool applyCamera(Project &p, Clip &video, const QVector<PointerPoint> &points, c
         }
     }
     const bool zooms = plan.keyframes.contains("z");
-    const double fw = s.frame.value("width").toDouble(), fh = s.frame.value("height").toDouble();
-    const bool framed = s.frame.value("ratio").toDouble() > 0 && fw > 0 && fh > 0;
+    // The frame's width from its height and format on the recorded screen's real shape (Qt's
+    // idea of the screen can differ from the monitor's), around the placed centre.
+    const double ratio = s.frame.value("ratio").toDouble(), aspect = ex / ey * p.width / p.height;
+    double fh = std::min(1., s.frame.value("height").toDouble()), fw = 0;
+    if (ratio > 0 && fh > 0 && aspect > 0) {
+        fw = fh * ratio / aspect;
+        if (fw > 1) {
+            fw = 1;
+            fh = aspect / ratio;
+        }
+    }
+    const bool framed = fw > 0 && fh > 0;
     if (!framed) {
         // The whole screen: zoomed in on clicks only, around the clicked point.
         if (!zooms)
@@ -4883,7 +4893,8 @@ bool applyCamera(Project &p, Clip &video, const QVector<PointerPoint> &points, c
     // the chosen axes; zoom on clicks moves in on the clicked point from there.
     const double base = 1 / (fh * ey), zoomMax = std::max(1., s.zoom);
     const double hw = fw / 2, hh = fh / 2;
-    double cu = s.frame.value("x").toDouble() + hw, cv = s.frame.value("y").toDouble() + hh;
+    double cu = s.frame.value("x").toDouble() + s.frame.value("width").toDouble() / 2,
+           cv = s.frame.value("y").toDouble() + s.frame.value("height").toDouble() / 2;
     const bool alongX = s.speed > 0 && s.axes != "vertical", alongY = s.speed > 0 && s.axes != "horizontal";
     const double rate = 0.45 * s.speed; // per second
     QVector<qint64> frames;

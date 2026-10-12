@@ -5266,8 +5266,8 @@ class EngineTest : public QObject {
         const auto screen = editor.screens().first().toMap();
         QCOMPARE(asset->width, screen["width"].toInt() / 2 * 2);
         QVERIFY(QFileInfo::exists(path + ".pointer.json"));
-        // The frame fills the canvas: the screen's height on the 9:16 canvas is 360/640 of
-        // it at scale 1 (a square screen), and the frame is half of that.
+        // The frame fills the canvas: at scale 1 the screen fits the 9:16 canvas, and the
+        // frame is half its height.
         auto spread = [](const QVector<Keyframe> &k) {
             double lo = 1e9, hi = -1e9;
             for (const auto &x : k) {
@@ -5276,7 +5276,9 @@ class EngineTest : public QObject {
             }
             return k.isEmpty() ? 0. : hi - lo;
         };
-        const double base = 1 / (0.5 * 360. / 640);
+        const double fit = std::min(360. / asset->width, 640. / asset->height);
+        const double ex = asset->width * fit / 360, ey = asset->height * fit / 640;
+        const double base = 1 / (0.5 * ey);
         {
             const auto &c = *video();
             QVERIFY2(c.keyframes.value("x").size() >= 3, qPrintable(QString::number(c.keyframes.value("x").size())));
@@ -5285,7 +5287,6 @@ class EngineTest : public QObject {
             QVERIFY2(spread(c.keyframes.value("x")) > 0.05, qPrintable(QString::number(spread(c.keyframes.value("x")))));
             QVERIFY(spread(c.keyframes.value("y")) < 1e-9); // only left–right
             // The picture always covers the canvas.
-            const double ex = 360. / 360 * 1; // the square screen is as wide as the canvas at scale 1
             for (const auto &k : c.keyframes.value("x"))
                 QVERIFY(std::abs(k.value) <= (base * ex - 1) / 2 + 1e-6);
         }
