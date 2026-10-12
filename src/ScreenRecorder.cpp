@@ -1,5 +1,6 @@
 #include "ScreenRecorder.h"
 
+#include <algorithm>
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
@@ -133,9 +134,13 @@ void ScreenRecorder::launch() {
         }
         const bool saved = QFileInfo(m_output).size() > 0;
         if (!saved || (status != QProcess::NormalExit && !m_stopping) || (code != 0 && !m_stopping)) {
-            const auto lines = QString::fromUtf8(*log).trimmed().split('\n');
+            // FFmpeg's last few lines: the cause comes before "Error opening input files".
+            QStringList lines;
+            for (const auto &line : QString::fromUtf8(*log).split('\n'))
+                if (!line.trimmed().isEmpty())
+                    lines << line.trimmed();
             m_error = "Screen recording failed" +
-                      (lines.isEmpty() || lines.last().isEmpty() ? QString() : ": " + lines.last().trimmed());
+                      (lines.isEmpty() ? QString() : ": " + lines.mid(std::max<qsizetype>(0, lines.size() - 3)).join(" "));
         }
         m_clock.invalidate();
         emit finished(m_error.isEmpty() ? m_output : QString(), m_error);

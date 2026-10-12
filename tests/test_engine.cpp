@@ -4979,6 +4979,8 @@ class EngineTest : public QObject {
         const auto screens = editor.screens();
         QVERIFY(!screens.isEmpty());
         const auto screen = screens.first().toMap();
+        if (real)
+            qDebug() << "Screens:" << screens;
         QVERIFY(screen["width"].toInt() >= 16);
         // Refused: no such screen, too many frames a second.
         editor.startScreenRecording(99);
