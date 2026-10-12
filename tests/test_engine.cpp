@@ -1412,6 +1412,56 @@ class EngineTest : public QObject {
                      qPrintable(QString("%1 s: %2 vs %3").arg(t).arg(level).arg(steady)));
         }
     }
+    void removingKeyframes() {
+        // Keyframes go one moment at a time (every property there) or all at once; what is
+        // left keeps the value at the playhead, and each is one undo step.
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 30, 1);
+        editor.addTitle();
+        const auto id = editor.project().clips.first().id;
+        editor.select(id);
+        editor.seek(0);
+        editor.toggleKeyframe("x");
+        editor.toggleKeyframe("scale");
+        editor.seek(30);
+        editor.setClip("x", 0.4);
+        editor.setClip("scale", 2);
+        editor.seek(60);
+        editor.setClip("x", -0.2);
+        editor.toggleKeyframe("maskX"); // a mask offset keyframe, kept as an offset (not volume)
+        auto clip = [&] { return *editor.project().clip(id); };
+        QCOMPARE(clip().keyframes.value("x").size(), 3);
+        QCOMPARE(clip().keyframes.value("scale").size(), 2);
+        // The moment at frame 30: x and scale lose a keyframe each.
+        editor.removeKeyframesAt(id, 30);
+        QCOMPARE(clip().keyframes.value("x").size(), 2);
+        QCOMPARE(clip().keyframes.value("scale").size(), 1);
+        QCOMPARE(clip().valueAt("x", 30), -0.1); // halfway from 0 to -0.2 now
+        editor.undo();
+        QCOMPARE(clip().keyframes.value("x").size(), 3);
+        editor.removeKeyframesAt(id, 31);
+        QVERIFY(editor.state()["error"].toString().contains("no keyframe"));
+        editor.clearError();
+        // All of x, at the playhead (frame 60, value -0.2); scale stays animated.
+        editor.clearKeyframes(id, "x");
+        QVERIFY(!clip().keyframes.contains("x"));
+        QCOMPARE(clip().x, -0.2);
+        QCOMPARE(clip().keyframes.value("scale").size(), 2);
+        // Every property: scale keeps 2, the mask offset 0, and the volume is untouched.
+        editor.clearKeyframes(id);
+        QVERIFY(clip().keyframes.isEmpty());
+        QCOMPARE(clip().scale, 2.);
+        QCOMPARE(clip().maskX, 0.);
+        QCOMPARE(clip().volume, 1.);
+        editor.clearKeyframes(id);
+        QVERIFY(editor.state()["error"].toString().contains("no keyframes"));
+        editor.clearError();
+        editor.undo();
+        editor.undo();
+        QCOMPARE(clip().keyframes.value("x").size(), 3);
+        QCOMPARE(clip().keyframes.value("scale").size(), 2);
+    }
     void keyframes() {
         // Model: interpolation, editing semantics and persistence.
         Clip c;
@@ -5052,6 +5102,33 @@ class EngineTest : public QObject {
         QVERIFY(editor.state()["error"].toString().contains("1.25"));
         editor.startScreenRecording(0, 15, true, 0, {{"keyBackground", "red"}});
         QVERIFY(editor.state()["error"].toString().contains("#rrggbb"));
+        editor.startScreenRecording(0, 15, true, 0, {{"area", QVariantMap{{"x", 0.8}, {"y", 0}, {"width", 0.5}, {"height", 0.5}}}});
+        QVERIFY(editor.state()["error"].toString().contains("on the screen"));
+        editor.startScreenRecording(0, 15, true, 0, {{"area", QVariantMap{{"x", 0}, {"y", 0}, {"width", 0.01}, {"height", 0.01}}}});
+        QVERIFY(editor.state()["error"].toString().contains("too small"));
+        editor.clearError();
+        // A 9:16 part keeps exactly that shape, even when the fractions do not quite give it
+        // (Qt's idea of the screen can differ from the monitor's).
+        {
+            editor.addTitle();
+            editor.startScreenRecording(0, 15, true, 0,
+                                        {{"halo", false}, {"clicks", false},
+                                         {"area", QVariantMap{{"x", 0.25}, {"y", 0.05}, {"width", 0.5}, {"height", 0.9}, {"ratio", 9. / 16}}}});
+            QTRY_COMPARE_WITH_TIMEOUT(state()["status"].toString(), QString("recording"), 3000);
+            QTRY_VERIFY_WITH_TIMEOUT(state()["seconds"].toDouble() >= 1, 10000);
+            editor.stopScreenRecording();
+            QTRY_COMPARE_WITH_TIMEOUT(state()["status"].toString(), QString("idle"), 20000);
+            const auto part = state()["path"].toString();
+            QTRY_VERIFY_WITH_TIMEOUT(std::any_of(editor.project().assets.begin(), editor.project().assets.end(),
+                                                 [&](const Asset &a) { return a.path == part; }), 15000);
+            for (const auto &a : editor.project().assets)
+                if (a.path == part)
+                    QVERIFY2(std::abs(double(a.width) / a.height - 9. / 16) < 0.01,
+                             qPrintable(QString("%1 x %2").arg(a.width).arg(a.height)));
+            editor.undo(); // the recording's clip
+            editor.undo(); // the title
+            QFile::remove(part);
+        }
         editor.clearError();
         QCOMPARE(state()["status"].toString(), QString("idle"));
         editor.startScreenRecording(0, 15, true, 0,

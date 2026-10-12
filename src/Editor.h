@@ -243,6 +243,11 @@ class Editor final : public QObject {
     Q_INVOKABLE void split();
     // Adds a keyframe at the playhead with the current value, or removes the one there.
     Q_INVOKABLE void toggleKeyframe(const QString &property);
+    // Removes a clip's keyframes at a clip-local frame (every property), or all its keyframes
+    // of `property` (every property when empty); each property keeps its value at the
+    // playhead.
+    Q_INVOKABLE void removeKeyframesAt(const QString &clipId, qint64 frame);
+    Q_INVOKABLE void clearKeyframes(const QString &clipId, const QString &property = {});
     // How the selected clip's keyframe of `property` at the playhead moves on to the next one:
     // one of keyframeEasings().
     Q_INVOKABLE void setKeyframeEasing(const QString &property, const QString &easing);
@@ -368,7 +373,9 @@ class Editor final : public QObject {
     // pointer (default on), clicks: a ring opening at each click, red left, blue right (on),
     // keys: keyboard shortcuts as boxes with their keys (off), keyPosition bottom|bottomLeft|
     // bottomRight|top, keySize small|medium|large, keyBackground, keyText (#rrggbb or
-    // #aarrggbb), keyFont, zoom: 1.25–3 to zoom the video in on clicks (0, off)}. Highlights are
+    // #aarrggbb), keyFont, zoom: 1.25–3 to zoom the video in on clicks (0, off), area: {x, y,
+    // width, height} to record only that part of the screen, in fractions of it, and its exact
+    // width-to-height ratio if it has a format}. Highlights are
     // shape clips on tracks above the video, grouped with it; the zoom is scale and position
     // keyframes of the video.
     Q_INVOKABLE QVariantList screens() const;

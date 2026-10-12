@@ -1,5 +1,22 @@
 # Validation record
 
+## Windows portable build — 2026-10-12, snapping, removing keyframes, recording formats (0.6 development)
+
+[GitHub Actions run 38270749851](https://github.com/HNXS/Cutlery/actions/runs/38270749851) on commit `faae77b4b769c39bf238803f1a821aac3347d061` passed every step on its first attempt.
+
+**The fault.** The commit before it (`caaf4de`, run 38268901055) failed in the interface test `screenControls`: a 9:16 frame came out as a 518 × 690 video.
+
+- The frame was measured as fractions of Qt's screen. On the runner Qt runs offscreen and reports 800 × 800, while the monitor that was captured is 1024 × 768.
+- The fix: the format's ratio now goes along with the frame, and the recording keeps it exactly, around the frame's centre.
+- A new engine check records a 9:16 part from fractions that do not quite give 9:16, and gets 9:16. On the runner this ran on the real desktop.
+
+**New coverage:**
+
+- Snapping: a drag snaps a clip's edge to the canvas edge, with a guide shown; Alt moves it freely; resizing snaps to the full width.
+- Removing keyframes: a double-click on a diamond in the timeline, and the inspector's remove-all button.
+- Engine test `removingKeyframes`: removing one moment, a whole value or everything; undo; the value of a cleared mask is no longer written into the volume.
+- Interface test: a 9:16 frame is placed on the screen and recorded. The video comes out 9:16 and the project changes to 1080 × 1920.
+
 ## Windows portable build — 2026-10-12, clips with hundreds of keyframes (0.6 development)
 
 [GitHub Actions run 38265519026](https://github.com/HNXS/Cutlery/actions/runs/38265519026) on commit `5797ac4059034139f261b2ac41a0e57430a82741` passed every step on its first attempt.

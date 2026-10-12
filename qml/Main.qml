@@ -723,7 +723,21 @@ ApplicationWindow {
                 palette.buttonText: valueRow.animated ? "#ffd479" : "#e7edf2"
                 onClicked: editor.toggleKeyframe(valueRow.key)
                 ToolTip.visible: hovered
-                ToolTip.text: valueRow.keyed ? "Remove keyframe" : "Add keyframe at playhead"
+                ToolTip.text: valueRow.keyed ? "Remove the keyframe at the playhead" : "Add a keyframe at the playhead"
+            }
+            // Animated: all its keyframes go at once, keeping the value at the playhead.
+            ToolButton {
+                objectName: "clearKeyframes-" + valueRow.key
+                Accessible.name: "Remove all keyframes of " + valueRow.label.toLowerCase()
+                visible: valueRow.animatable && valueRow.animated
+                enabled: win.selection.locked !== true
+                implicitWidth: 22
+                implicitHeight: 22
+                text: "✕"
+                font.pixelSize: 10
+                onClicked: editor.clearKeyframes(win.s.selectedId, valueRow.key)
+                ToolTip.visible: hovered
+                ToolTip.text: "Remove all keyframes of " + valueRow.label.toLowerCase() + " (keeps the value at the playhead)"
             }
         }
         // The keyframe at the playhead: how it moves on to the next one.
@@ -2970,6 +2984,74 @@ ApplicationWindow {
                                 property real dragX: 0
                                 property real dragY: 0
                                 property real dragScale: 1
+                                // Snapping: the canvas edges and centre pull the box in within a
+                                // few pixels while moving, the canvas edges while resizing; the
+                                // lines it snapped to show in pink. Alt drags freely.
+                                property var guidesX: []
+                                property var guidesY: []
+                                readonly property real snapPixels: 10
+                                readonly property bool snapped: guidesX.length > 0 || guidesY.length > 0
+                                // The offset to the nearest target for any of `edges` along one
+                                // axis (fractions), or null when none is close enough.
+                                function nearest(edges, targets, size) {
+                                    let best = null;
+                                    for (const e of edges)
+                                        for (const t of targets) {
+                                            const d = t - e;
+                                            if (Math.abs(d) * size <= snapPixels && (best === null || Math.abs(d) < Math.abs(best.offset)))
+                                                best = { offset: d, at: t };
+                                        }
+                                    return best;
+                                }
+                                function snapMove(dx, dy, free) {
+                                    const b = bounds;
+                                    guidesX = [];
+                                    guidesY = [];
+                                    if (free)
+                                        return Qt.point(dx, dy);
+                                    const l = b.x + dx, t = b.y + dy;
+                                    const sx = nearest([l, l + b.width / 2, l + b.width], [0, .5, 1], canvasWidth);
+                                    const sy = nearest([t, t + b.height / 2, t + b.height], [0, .5, 1], canvasHeight);
+                                    if (sx) {
+                                        dx += sx.offset;
+                                        guidesX = [sx.at];
+                                    }
+                                    if (sy) {
+                                        dy += sy.offset;
+                                        guidesY = [sy.at];
+                                    }
+                                    return Qt.point(dx, dy);
+                                }
+                                function snapScale(s, free) {
+                                    const b = bounds;
+                                    guidesX = [];
+                                    guidesY = [];
+                                    if (free || !(b.width > 0) || !(b.height > 0))
+                                        return s;
+                                    const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+                                    // The scales at which an edge meets a canvas edge.
+                                    const options = [
+                                        { s: 2 * cx / b.width, x: 0 }, { s: 2 * (1 - cx) / b.width, x: 1 },
+                                        { s: 2 * cy / b.height, y: 0 }, { s: 2 * (1 - cy) / b.height, y: 1 }
+                                    ];
+                                    let best = null;
+                                    for (const o of options) {
+                                        const pixels = Math.abs(o.s - s) * (o.x !== undefined ? b.width * canvasWidth : b.height * canvasHeight) / 2;
+                                        if (o.s > 0 && pixels <= snapPixels && (best === null || pixels < best.pixels))
+                                            best = { s: o.s, pixels: pixels, x: o.x, y: o.y };
+                                    }
+                                    if (!best)
+                                        return s;
+                                    // Edges meeting the canvas at the same scale show too.
+                                    for (const o of options)
+                                        if (Math.abs(o.s - best.s) * Math.max(b.width * canvasWidth, b.height * canvasHeight) / 2 < 1) {
+                                            if (o.x !== undefined)
+                                                guidesX = guidesX.concat([o.x]);
+                                            else
+                                                guidesY = guidesY.concat([o.y]);
+                                        }
+                                    return best.s;
+                                }
                                 visible: bounds.inside === true && !editor.playing && win.selection.locked !== true && win.s.duration > 0
                                 x: ((bounds.x || 0) + dragX) * canvasWidth + (bounds.width || 0) * canvasWidth * (1 - dragScale) / 2
                                 y: ((bounds.y || 0) + dragY) * canvasHeight + (bounds.height || 0) * canvasHeight * (1 - dragScale) / 2
@@ -2987,13 +3069,15 @@ ApplicationWindow {
                                     dragX = 0;
                                     dragY = 0;
                                     dragScale = 1;
+                                    guidesX = [];
+                                    guidesY = [];
                                     if (Object.keys(values).length > 0)
                                         editor.setClipValues(values);
                                 }
                                 Rectangle {
                                     anchors.fill: parent
                                     color: "transparent"
-                                    border.color: win.mint
+                                    border.color: transformBox.snapped ? "#ff4fd8" : win.mint
                                     border.width: 2
                                 }
                                 MouseArea {
@@ -3002,13 +3086,16 @@ ApplicationWindow {
                                     anchors.fill: parent
                                     cursorShape: Qt.SizeAllCursor
                                     property point origin
+                                    property bool free: false
                                     onPressed: function (mouse) {
                                         origin = mapToItem(transformBox.parent, mouse.x, mouse.y);
+                                        free = (mouse.modifiers & Qt.AltModifier) !== 0;
                                     }
                                     onPositionChanged: function (mouse) {
                                         const point = mapToItem(transformBox.parent, mouse.x, mouse.y);
-                                        transformBox.dragX = (point.x - origin.x) / transformBox.canvasWidth;
-                                        transformBox.dragY = (point.y - origin.y) / transformBox.canvasHeight;
+                                        const moved = transformBox.snapMove((point.x - origin.x) / transformBox.canvasWidth, (point.y - origin.y) / transformBox.canvasHeight, free || (mouse.modifiers & Qt.AltModifier) !== 0);
+                                        transformBox.dragX = moved.x;
+                                        transformBox.dragY = moved.y;
                                     }
                                     onReleased: transformBox.commit()
                                     onCanceled: transformBox.commit()
@@ -3031,7 +3118,9 @@ ApplicationWindow {
                                             cursorShape: index === 0 || index === 3 ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor
                                             property point centre
                                             property real reach: 1
+                                            property bool free: false
                                             onPressed: function (mouse) {
+                                                free = (mouse.modifiers & Qt.AltModifier) !== 0;
                                                 const b = transformBox.bounds;
                                                 centre = Qt.point((b.x + b.width / 2) * transformBox.canvasWidth, (b.y + b.height / 2) * transformBox.canvasHeight);
                                                 const point = mapToItem(transformBox.parent, mouse.x, mouse.y);
@@ -3039,12 +3128,37 @@ ApplicationWindow {
                                             }
                                             onPositionChanged: function (mouse) {
                                                 const point = mapToItem(transformBox.parent, mouse.x, mouse.y);
-                                                transformBox.dragScale = Math.max(.05, Math.hypot(point.x - centre.x, point.y - centre.y) / reach);
+                                                transformBox.dragScale = transformBox.snapScale(Math.max(.05, Math.hypot(point.x - centre.x, point.y - centre.y) / reach), free || (mouse.modifiers & Qt.AltModifier) !== 0);
                                             }
                                             onReleased: transformBox.commit()
                                             onCanceled: transformBox.commit()
                                         }
                                     }
+                                }
+                            }
+                            // The lines the moved or resized clip snapped to.
+                            Repeater {
+                                model: transformBox.visible ? transformBox.guidesX : []
+                                Rectangle {
+                                    required property real modelData
+                                    objectName: "snapGuideX"
+                                    x: Math.min(parent.width - width, Math.max(0, modelData * parent.width - width / 2))
+                                    width: 2
+                                    height: parent.height
+                                    color: "#ff4fd8"
+                                    z: 12
+                                }
+                            }
+                            Repeater {
+                                model: transformBox.visible ? transformBox.guidesY : []
+                                Rectangle {
+                                    required property real modelData
+                                    objectName: "snapGuideY"
+                                    y: Math.min(parent.height - height, Math.max(0, modelData * parent.height - height / 2))
+                                    height: 2
+                                    width: parent.width
+                                    color: "#ff4fd8"
+                                    z: 12
                                 }
                             }
                             ColumnLayout {
@@ -3496,7 +3610,7 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 Label {
                                     Layout.fillWidth: true
-                                    text: win.selection.playheadInside ? "◇ sets a keyframe at the playhead" : "Move the playhead into the clip to animate"
+                                    text: win.selection.playheadInside ? "◇ adds a keyframe at the playhead, ◆ removes it, ✕ removes all of a value. On the clip in the timeline: double-click or right-click a ◆ to remove it." : "Move the playhead into the clip to animate"
                                     color: win.muted
                                     font.pixelSize: 10
                                     wrapMode: Text.Wrap
@@ -7229,6 +7343,39 @@ ApplicationWindow {
         readonly property var keyPositions: ["bottom", "bottomLeft", "bottomRight", "top"]
         readonly property var keySizes: ["small", "medium", "large"]
         readonly property var zoomLevels: [1.5, 2, 2.5]
+        // What is recorded: the whole screen, or a frame of a format placed on it first.
+        readonly property var formats: [
+            { name: "Whole screen", ratio: 0 },
+            { name: "16:9 (wide)", ratio: 16 / 9, w: 1920, h: 1080 },
+            { name: "9:16 (vertical: Shorts, Reels, TikTok)", ratio: 9 / 16, w: 1080, h: 1920 },
+            { name: "1:1 (square)", ratio: 1, w: 1080, h: 1080 },
+            { name: "4:5 (portrait)", ratio: 4 / 5, w: 1080, h: 1350 }
+        ]
+        readonly property var format: formats[screenFormat.currentIndex] || formats[0]
+        readonly property bool projectDiffers: format.ratio > 0 && (win.s.width !== format.w || win.s.height !== format.h)
+        // Starts the recording (after the frame was placed, with `area` in screen fractions).
+        function begin(area) {
+            const c = choices();
+            if (format.ratio > 0 && projectDiffers && screenSetProject.checked)
+                editor.configure(format.w, format.h, win.s.fpsN || 30, win.s.fpsD || 1);
+            const highlights = {
+                halo: c.halo,
+                clicks: c.clicks,
+                zoom: c.zoom ? zoomLevels[c.zoomLevel] : 0,
+                keys: c.keys,
+                keyPosition: keyPositions[c.keyPosition],
+                keySize: keySizes[c.keySize],
+                keyBackground: c.keyBackground,
+                keyText: c.keyText,
+                keyFont: c.keyFont
+            };
+            if (area)
+                highlights.area = area;
+            editor.startScreenRecording(screens[screenChoice.currentIndex].index, screenFps.currentIndex === 1 ? 60 : screenFps.currentIndex === 2 ? 15 : 30, screenCursor.checked, 3, highlights);
+            frameStrips.area = area || null;
+            if (screenHide.checked)
+                win.showMinimized();
+        }
         function choices() {
             return {
                 fps: screenFps.currentIndex,
@@ -7244,7 +7391,9 @@ ApplicationWindow {
                 keyStyle: screenKeyStyle.currentIndex,
                 keyBackground: screenKeyBackground.text.trim(),
                 keyText: screenKeyText.text.trim(),
-                keyFont: screenKeyFont.currentText
+                keyFont: screenKeyFont.currentText,
+                format: screenFormat.currentIndex,
+                setProject: screenSetProject.checked
             };
         }
         onAboutToShow: {
@@ -7268,6 +7417,8 @@ ApplicationWindow {
             screenKeyText.text = pick(c.keyText, keyStyles[0].text);
             const font = screenKeyFont.model.indexOf(pick(c.keyFont, "Arial"));
             screenKeyFont.currentIndex = Math.max(0, font);
+            screenFormat.currentIndex = pick(c.format, 0);
+            screenSetProject.checked = pick(c.setProject, true);
         }
         footer: DialogButtonBox {
             Button {
@@ -7282,21 +7433,11 @@ ApplicationWindow {
             }
         }
         onAccepted: {
-            const c = choices();
-            editor.setPreferences({ screenRecording: c });
-            editor.startScreenRecording(screenDialog.screens[screenChoice.currentIndex].index, screenFps.currentIndex === 1 ? 60 : screenFps.currentIndex === 2 ? 15 : 30, screenCursor.checked, 3, {
-                halo: c.halo,
-                clicks: c.clicks,
-                zoom: c.zoom ? zoomLevels[c.zoomLevel] : 0,
-                keys: c.keys,
-                keyPosition: keyPositions[c.keyPosition],
-                keySize: keySizes[c.keySize],
-                keyBackground: c.keyBackground,
-                keyText: c.keyText,
-                keyFont: c.keyFont
-            });
-            if (screenHide.checked)
-                win.showMinimized();
+            editor.setPreferences({ screenRecording: choices() });
+            if (format.ratio > 0)
+                framePicker.place(screens[screenChoice.currentIndex].index, format.ratio, format.name);
+            else
+                begin(null);
         }
         ColumnLayout {
             anchors.fill: parent
@@ -7307,6 +7448,22 @@ ApplicationWindow {
                 Accessible.name: "Screen"
                 Layout.fillWidth: true
                 model: screenDialog.screens.map((x, i) => "Screen " + (i + 1) + " · " + x.width + " × " + x.height + (x.primary ? " (main)" : ""))
+            }
+            ComboBox {
+                id: screenFormat
+                objectName: "screenFormat"
+                Accessible.name: "Format"
+                Layout.fillWidth: true
+                model: screenDialog.formats.map(x => x.name)
+                ToolTip.visible: hovered
+                ToolTip.text: "With a format, a frame shows on the screen to move and size before recording; only what is inside it is recorded."
+            }
+            CheckBox {
+                id: screenSetProject
+                objectName: "screenSetProject"
+                visible: screenDialog.projectDiffers
+                checked: true
+                text: "Set the project to " + (screenDialog.format.w || 0) + " × " + (screenDialog.format.h || 0) + " (now " + win.s.width + " × " + win.s.height + ")"
             }
             ComboBox {
                 id: screenFps
@@ -7463,6 +7620,190 @@ ApplicationWindow {
                 font.pixelSize: 11
                 color: win.muted
                 text: "Recording starts after 3 seconds, without sound. Stop it with the small bar that stays on top; it is left out of the recording. Highlights and shortcuts land as shapes above the video, to move, restyle or delete like any other."
+            }
+        }
+    }
+    // Placing the frame of a format on the screen before recording: drag it, drag its corner or
+    // turn the mouse wheel to size it, then Record. Only what is inside is recorded.
+    Window {
+        id: framePicker
+        objectName: "framePicker"
+        transientParent: null
+        flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+        color: "transparent"
+        visible: false
+        property int screenIndex: 0
+        property real ratio: 9 / 16
+        property string formatName: ""
+        // The frame in window pixels.
+        property real fx: 0
+        property real fy: 0
+        property real fw: 100
+        readonly property real fh: fw / ratio
+        function place(index, r, name) {
+            const screen = Qt.application.screens[index] || Qt.application.screens[0];
+            screenIndex = index;
+            ratio = r;
+            formatName = name;
+            x = screen.virtualX;
+            y = screen.virtualY;
+            width = screen.width;
+            height = screen.height;
+            // As large as fits with a margin, centred.
+            fw = Math.min(width * .9, height * .9 * r);
+            fx = (width - fw) / 2;
+            fy = (height - fw / r) / 2;
+            show();
+            raise();
+            requestActivate();
+        }
+        function resize(w) {
+            const cx = fx + fw / 2, cy = fy + fh / 2;
+            fw = Math.max(120, Math.min(w, width, height * ratio));
+            fx = Math.max(0, Math.min(width - fw, cx - fw / 2));
+            fy = Math.max(0, Math.min(height - fh, cy - fh / 2));
+        }
+        function area() {
+            return { x: fx / width, y: fy / height, width: fw / width, height: fh / height, ratio: ratio };
+        }
+        // Dimmed outside the frame.
+        Repeater {
+            model: [
+                [0, 0, framePicker.width, framePicker.fy],
+                [0, framePicker.fy + framePicker.fh, framePicker.width, framePicker.height - framePicker.fy - framePicker.fh],
+                [0, framePicker.fy, framePicker.fx, framePicker.fh],
+                [framePicker.fx + framePicker.fw, framePicker.fy, framePicker.width - framePicker.fx - framePicker.fw, framePicker.fh]
+            ]
+            Rectangle {
+                required property var modelData
+                x: modelData[0]
+                y: modelData[1]
+                width: Math.max(0, modelData[2])
+                height: Math.max(0, modelData[3])
+                color: "#99000000"
+            }
+        }
+        Rectangle {
+            objectName: "pickedFrame"
+            x: framePicker.fx - 3
+            y: framePicker.fy - 3
+            width: framePicker.fw + 6
+            height: framePicker.fh + 6
+            color: "transparent"
+            border.color: "#ff4fd8"
+            border.width: 3
+            MouseArea {
+                anchors.fill: parent
+                anchors.margins: 3
+                cursorShape: Qt.SizeAllCursor
+                property point grab
+                onPressed: function (mouse) {
+                    grab = Qt.point(mouse.x, mouse.y);
+                }
+                onPositionChanged: function (mouse) {
+                    framePicker.fx = Math.max(0, Math.min(framePicker.width - framePicker.fw, framePicker.fx + mouse.x - grab.x));
+                    framePicker.fy = Math.max(0, Math.min(framePicker.height - framePicker.fh, framePicker.fy + mouse.y - grab.y));
+                }
+                onWheel: function (wheel) {
+                    framePicker.resize(framePicker.fw * (wheel.angleDelta.y > 0 ? 1.05 : 1 / 1.05));
+                }
+            }
+            // The corner handle sizes the frame, keeping its format.
+            Rectangle {
+                objectName: "pickedFrameCorner"
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.margins: -6
+                width: 18
+                height: 18
+                radius: 4
+                color: "#ff4fd8"
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.SizeFDiagCursor
+                    onPositionChanged: function (mouse) {
+                        const p = mapToItem(null, mouse.x, mouse.y);
+                        framePicker.resize(Math.max(p.x - framePicker.fx, (p.y - framePicker.fy) * framePicker.ratio));
+                    }
+                }
+            }
+        }
+        // What to do, next to the frame.
+        Rectangle {
+            id: pickerBar
+            width: pickerRow.implicitWidth + 16
+            height: 40
+            radius: 6
+            color: "#1b232b"
+            x: Math.max(4, Math.min(framePicker.width - width - 4, framePicker.fx + (framePicker.fw - width) / 2))
+            y: framePicker.fy + framePicker.fh + 10 + height < framePicker.height ? framePicker.fy + framePicker.fh + 10 : Math.max(4, framePicker.fy - height - 10)
+            RowLayout {
+                id: pickerRow
+                anchors.centerIn: parent
+                spacing: 8
+                Label {
+                    text: framePicker.formatName + ": move and size the frame"
+                    color: "#e7edf2"
+                }
+                Button {
+                    objectName: "pickedFrameRecord"
+                    text: "● Record"
+                    onClicked: {
+                        const area = framePicker.area();
+                        framePicker.hide();
+                        screenDialog.begin(area);
+                    }
+                }
+                Button {
+                    objectName: "pickedFrameCancel"
+                    text: "Cancel"
+                    onClicked: framePicker.hide()
+                }
+            }
+        }
+        Shortcut {
+            sequence: "Esc"
+            onActivated: framePicker.hide()
+        }
+    }
+    // While a frame is recorded: the screen outside it dimmed and the frame outlined, all
+    // outside what is recorded and passing clicks through.
+    Item {
+        id: frameStrips
+        property var area: null
+        readonly property var info: win.s.screenRecording || ({})
+        readonly property bool active: area !== null && (info.status === "countdown" || info.status === "recording")
+        readonly property var screen: Qt.application.screens[framePicker.screenIndex] || Qt.application.screens[0]
+        Instantiator {
+            model: frameStrips.active ? 4 : 0
+            delegate: Window {
+                required property int index
+                objectName: "frameStrip" + index
+                transientParent: null
+                flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowTransparentForInput | Qt.WindowDoesNotAcceptFocus
+                color: "#66000000"
+                readonly property var s: frameStrips.screen
+                readonly property var a: frameStrips.area
+                readonly property real left: a.x * s.width
+                readonly property real top: a.y * s.height
+                readonly property real right: (a.x + a.width) * s.width
+                readonly property real bottom: (a.y + a.height) * s.height
+                // Above, below, left and right of the frame, 3 pixels away from it.
+                x: s.virtualX + (index === 3 ? right + 3 : 0)
+                y: s.virtualY + (index === 1 ? bottom + 3 : index >= 2 ? top - 3 : 0)
+                width: Math.max(1, index === 2 ? left - 3 : index === 3 ? s.width - right - 3 : s.width)
+                height: Math.max(1, index === 0 ? top - 3 : index === 1 ? s.height - bottom - 3 : bottom - top + 6)
+                visible: width > 1 && height > 1
+                onVisibleChanged: if (visible)
+                    editor.hideFromCapture(this)
+                Rectangle {
+                    color: "#ff4fd8"
+                    // The edge facing the frame.
+                    x: index === 2 ? parent.width - 3 : 0
+                    y: index === 0 ? parent.height - 3 : 0
+                    width: index >= 2 ? 3 : parent.width
+                    height: index >= 2 ? parent.height : 3
+                }
             }
         }
     }
