@@ -3646,6 +3646,60 @@ ApplicationWindow {
                                     { key: "rotation", name: "Rotation", lo: -180, hi: 180, step: 1, dec: 0, unit: "°", anim: true }
                                 ]
                             }
+                            // A screen recording made with a format: how its frame follows the
+                            // mouse, changed after recording.
+                            Section {
+                                id: followSection
+                                objectName: "followSection"
+                                title: "Follow the mouse"
+                                checkable: true
+                                readonly property var camera: win.selection.pointerCamera || ({})
+                                visible: win.picPage("basic") && camera.ratio !== undefined
+                                checked: camera.follow === true
+                                tip: "The format's frame moves after the mouse once it leaves the calm middle of the frame; the glow and click rings move with it."
+                                function apply(changes) {
+                                    const now = { follow: camera.follow === true, speed: camera.speed || 4, axes: camera.axes || "both" };
+                                    for (const k in changes)
+                                        now[k] = changes[k];
+                                    editor.followPointer(win.s.selectedId, now);
+                                }
+                                onToggled: on => apply({ follow: on })
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    enabled: followSection.camera.follow === true
+                                    Label {
+                                        text: "Speed"
+                                    }
+                                    Slider {
+                                        objectName: "followSpeed"
+                                        Accessible.name: "Follow speed"
+                                        Layout.fillWidth: true
+                                        from: 1
+                                        to: 10
+                                        stepSize: 1
+                                        snapMode: Slider.SnapAlways
+                                        value: followSection.camera.speed || 4
+                                        onPressedChanged: if (!pressed && value !== followSection.camera.speed)
+                                            followSection.apply({ speed: value })
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "1: slow and soft, 10: quick"
+                                    }
+                                    Label {
+                                        text: Math.round(followSection.camera.speed || 4)
+                                        color: win.muted
+                                    }
+                                }
+                                ComboBox {
+                                    objectName: "followAxes"
+                                    Accessible.name: "Follow direction"
+                                    Layout.fillWidth: true
+                                    enabled: followSection.camera.follow === true
+                                    readonly property var axes: ["both", "horizontal", "vertical"]
+                                    model: ["Left–right and up–down", "Only left–right", "Only up–down"]
+                                    currentIndex: Math.max(0, axes.indexOf(followSection.camera.axes || "both"))
+                                    onActivated: index => followSection.apply({ axes: axes[index] })
+                                }
+                            }
                             // Overlays on a video follow something in it.
                             TrackMotion {
                                 Layout.fillWidth: true
@@ -7371,8 +7425,15 @@ ApplicationWindow {
             };
             if (area)
                 highlights.area = area;
+            const follows = area !== null && format.ratio > 0 && c.follow;
+            if (follows) {
+                highlights.follow = true;
+                highlights.followSpeed = c.followSpeed;
+                highlights.followAxes = ["both", "horizontal", "vertical"][c.followAxes];
+            }
             editor.startScreenRecording(screens[screenChoice.currentIndex].index, screenFps.currentIndex === 1 ? 60 : screenFps.currentIndex === 2 ? 15 : 30, screenCursor.checked, 3, highlights);
-            frameStrips.area = area || null;
+            // A frame that follows the mouse is cut out afterwards; nothing to outline then.
+            frameStrips.area = follows ? null : (area || null);
             if (screenHide.checked)
                 win.showMinimized();
         }
@@ -7393,7 +7454,10 @@ ApplicationWindow {
                 keyText: screenKeyText.text.trim(),
                 keyFont: screenKeyFont.currentText,
                 format: screenFormat.currentIndex,
-                setProject: screenSetProject.checked
+                setProject: screenSetProject.checked,
+                follow: screenFollow.checked,
+                followSpeed: screenFollowSpeed.value,
+                followAxes: screenFollowAxes.currentIndex
             };
         }
         onAboutToShow: {
@@ -7419,6 +7483,9 @@ ApplicationWindow {
             screenKeyFont.currentIndex = Math.max(0, font);
             screenFormat.currentIndex = pick(c.format, 0);
             screenSetProject.checked = pick(c.setProject, true);
+            screenFollow.checked = pick(c.follow, false);
+            screenFollowSpeed.value = pick(c.followSpeed, 4);
+            screenFollowAxes.currentIndex = pick(c.followAxes, 0);
         }
         footer: DialogButtonBox {
             Button {
@@ -7464,6 +7531,50 @@ ApplicationWindow {
                 visible: screenDialog.projectDiffers
                 checked: true
                 text: "Set the project to " + (screenDialog.format.w || 0) + " × " + (screenDialog.format.h || 0) + " (now " + win.s.width + " × " + win.s.height + ")"
+            }
+            // The frame can follow the mouse: the whole screen is recorded and the frame cut out
+            // of it, moving after the pointer once it leaves the frame's calm middle.
+            CheckBox {
+                id: screenFollow
+                objectName: "screenFollow"
+                visible: screenDialog.format.ratio > 0
+                text: "The frame follows the mouse"
+                ToolTip.visible: hovered
+                ToolTip.text: "Records the whole screen; the frame glides after the mouse when it leaves the middle of the frame. Speed and direction can be changed after recording (Video › Basic)."
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: 28
+                visible: screenFollow.visible && screenFollow.checked
+                Label {
+                    text: "Speed"
+                }
+                Slider {
+                    id: screenFollowSpeed
+                    objectName: "screenFollowSpeed"
+                    Accessible.name: "Follow speed"
+                    Layout.fillWidth: true
+                    from: 1
+                    to: 10
+                    stepSize: 1
+                    snapMode: Slider.SnapAlways
+                    value: 4
+                    ToolTip.visible: hovered
+                    ToolTip.text: "1: slow and soft, 10: quick"
+                }
+                Label {
+                    text: Math.round(screenFollowSpeed.value)
+                    color: win.muted
+                }
+            }
+            ComboBox {
+                id: screenFollowAxes
+                objectName: "screenFollowAxes"
+                Accessible.name: "Follow direction"
+                Layout.fillWidth: true
+                Layout.leftMargin: 28
+                visible: screenFollow.visible && screenFollow.checked
+                model: ["Left–right and up–down", "Only left–right", "Only up–down"]
             }
             ComboBox {
                 id: screenFps

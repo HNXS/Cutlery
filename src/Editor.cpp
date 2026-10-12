@@ -632,6 +632,7 @@ QVariantMap Editor::state() const {
                              return outline;
                          }()},
                         {"removeArea", c.removeArea},
+                        {"pointerCamera", m_project.asset(c.assetId) ? pointerCamera(m_project.asset(c.assetId)->path) : QVariantMap{}},
                         {"removeOutline",
                          [&] {
                              // The area object removal paints over (or its points drawn so
@@ -1411,7 +1412,7 @@ static QVariantMap checkedPreferences(const QVariantMap &base, const QVariantMap
     static const QStringList screenKeys{"fps", "cursor", "minimise", "halo", "clicks", "keys",
                                         "zoom", "zoomLevel", "keyPosition", "keySize",
                                         "keyStyle", "keyBackground", "keyText", "keyFont",
-                                        "format", "setProject"};
+                                        "format", "setProject", "follow", "followSpeed", "followAxes"};
     const auto storedScreen = p["screenRecording"].toMap();
     for (const auto &key : screenKeys)
         if (const auto value = storedScreen.value(key);
@@ -3597,7 +3598,20 @@ struct ScreenHighlights {
     double zoom = 0; // 0 off, else how far clicks are zoomed in (1.25–3)
     QString keyPosition = "bottom", keySize = "medium", keyBackground = "#e6141820",
             keyText = "#ffffff", keyFont = "Arial";
+    // A format's frame that follows the mouse: how fast (1–10) and along which axes.
+    bool follow = false;
+    double followSpeed = 4;
+    QString followAxes = "both";
     explicit ScreenHighlights(const QVariantMap &m) {
+        follow = m.value("follow", follow).toBool();
+        followSpeed = m.value("followSpeed", followSpeed).toDouble();
+        if (!(followSpeed >= 1 && followSpeed <= 10))
+            throw std::runtime_error("The follow speed is 1 to 10");
+        followAxes = m.value("followAxes", followAxes).toString();
+        if (!QStringList{"both", "horizontal", "vertical"}.contains(followAxes))
+            throw std::runtime_error("The frame follows both ways, only horizontally or only vertically");
+        if (follow && !(m.value("area").toMap().value("ratio").toDouble() > 0))
+            throw std::runtime_error("Following the mouse needs a format");
         halo = m.value("halo", halo).toBool();
         clicks = m.value("clicks", clicks).toBool();
         keys = m.value("keys", keys).toBool();
@@ -3686,7 +3700,8 @@ void Editor::startScreenRecording(int screen, int fps, bool cursor, int countdow
         return fail(e.what());
     }
     // Only a part of the screen, e.g. a 9:16 frame: fractions of the screen, in even pixels.
-    if (const auto part = highlights.value("area").toMap(); !part.isEmpty()) {
+    // (A frame that follows the mouse records the whole screen and is cut out afterwards.)
+    if (const auto part = highlights.value("area").toMap(); !part.isEmpty() && !highlights.value("follow").toBool()) {
         const double fx = part.value("x").toDouble(), fy = part.value("y").toDouble(),
                      fw = part.value("width").toDouble(), fh = part.value("height").toDouble();
         if (!(fx >= 0 && fy >= 0 && fw > 0 && fh > 0 && fx + fw <= 1.0001 && fy + fh <= 1.0001))
@@ -4767,6 +4782,313 @@ QVariantMap Editor::trackState() const {
         state["progress"] = m_tracker->progress();
     return state;
 }
+namespace {
+// The mouse pointer of a screen recording at a timeline frame: where on the recorded screen
+// (0..1) and which buttons are down.
+struct PointerPoint {
+    qint64 frame;
+    double u, v;
+    int buttons;
+};
+// How the picture of a screen recording moves: zoomed in on clicks, and for a recording with a
+// format, the format's frame cut out of the whole screen and following the mouse.
+struct CameraSettings {
+    double zoom = 0;     // 0 off, else 1.25–3
+    QVariantMap frame;   // {x, y, width, height, ratio} on the recorded screen, or empty
+    double speed = 4;    // 1–10, 0 for a frame that stays where it was placed
+    QString axes = "both";
+    double deadZone = .6; // how far the pointer may go from the frame's centre before it follows
+};
+// The presses of a button in `points`.
+QVector<int> buttonPresses(const QVector<PointerPoint> &points) {
+    QVector<int> presses;
+    for (int i = 0; i < points.size(); ++i)
+        if (points[i].buttons && (i == 0 || !(points[i - 1].buttons & points[i].buttons)))
+            presses << i;
+    return presses;
+}
+// Sets the clip's scale, x and y keyframes from the pointer (replacing earlier ones). Returns
+// whether it moves at all.
+bool applyCamera(Project &p, Clip &video, const QVector<PointerPoint> &points, const CameraSettings &s) {
+    const double fps = double(p.fpsN) / p.fpsD;
+    const auto presses = buttonPresses(points);
+    for (const auto *key : {"scale", "x", "y"})
+        video.keyframes.remove(key);
+    const auto size = p.pictureSize(video, p.width, p.height);
+    const double ex = size.width() / p.width, ey = size.height() / p.height;
+    // Zoom on clicks as keyframes of the zoom and of the point it centres: in just before the
+    // first of a run of clicks (less than three seconds apart), across from click to click,
+    // out a moment after the last.
+    Clip plan; // only its keyframes: "z" zoom, "u"/"v" the point zoomed to
+    plan.duration = video.duration;
+    if (s.zoom > 1 && !presses.isEmpty()) {
+        const qint64 last = video.duration - 1, lead = qRound64(0.6 * fps),
+                     settle = std::max<qint64>(1, qRound64(0.1 * fps)), pan = qRound64(0.4 * fps),
+                     hold = qRound64(1.5 * fps), out = std::max<qint64>(2, qRound64(0.5 * fps)),
+                     gap = qRound64(3 * fps);
+        QVector<Keyframe> kz, ku, kv;
+        auto key = [&](qint64 frame, double z, double u, double v) {
+            if (!kz.isEmpty() && frame <= kz.last().frame)
+                return;
+            kz << Keyframe{frame, z, true};
+            ku << Keyframe{frame, u, true};
+            kv << Keyframe{frame, v, true};
+        };
+        for (int i = 0; i < presses.size();) {
+            int j = i;
+            while (j + 1 < presses.size() && points[presses[j + 1]].frame - points[presses[j]].frame <= gap)
+                ++j;
+            const auto &firstPress = points[presses[i]];
+            const qint64 first = firstPress.frame - video.start;
+            const qint64 from = std::clamp<qint64>(first - lead, kz.isEmpty() ? 0 : kz.last().frame + 1, last);
+            key(from, 1, firstPress.u, firstPress.v);
+            double u = firstPress.u, v = firstPress.v;
+            key(std::min(last, std::max(from + 1, first - settle)), s.zoom, u, v);
+            for (int k = i + 1; k <= j; ++k) {
+                const qint64 f = points[presses[k]].frame - video.start;
+                key(std::min(last, std::max(kz.last().frame + 1, f - pan)), s.zoom, u, v);
+                u = points[presses[k]].u;
+                v = points[presses[k]].v;
+                key(std::min(last, std::max(kz.last().frame + 1, f - settle)), s.zoom, u, v);
+            }
+            const qint64 after = points[presses[j]].frame - video.start + hold;
+            key(std::min(last - 1, std::max(kz.last().frame + 1, after)), s.zoom, u, v);
+            key(std::min(last, std::max(kz.last().frame + 1, after + out)), 1, u, v);
+            i = j + 1;
+        }
+        if (kz.size() >= 2) {
+            plan.keyframes["z"] = kz;
+            plan.keyframes["u"] = ku;
+            plan.keyframes["v"] = kv;
+        }
+    }
+    const bool zooms = plan.keyframes.contains("z");
+    const double fw = s.frame.value("width").toDouble(), fh = s.frame.value("height").toDouble();
+    const bool framed = s.frame.value("ratio").toDouble() > 0 && fw > 0 && fh > 0;
+    if (!framed) {
+        // The whole screen: zoomed in on clicks only, around the clicked point.
+        if (!zooms)
+            return false;
+        for (const auto &k : plan.keyframes["z"]) {
+            const double z = k.value, u = plan.valueAt("u", k.frame), v = plan.valueAt("v", k.frame);
+            const double limX = (z - 1) * ex / 2, limY = (z - 1) * ey / 2;
+            video.keyframes["scale"] << Keyframe{k.frame, z, true};
+            video.keyframes["x"] << Keyframe{k.frame, z > 1 ? std::clamp(-(u - 0.5) * ex * z, -limX, limX) : 0., true};
+            video.keyframes["y"] << Keyframe{k.frame, z > 1 ? std::clamp(-(v - 0.5) * ey * z, -limY, limY) : 0., true};
+        }
+        return true;
+    }
+    // The frame cut out of the whole screen, at the scale that makes it fill the canvas, moving
+    // after the pointer once it leaves the calm middle of the frame (eased, at `speed`), along
+    // the chosen axes; zoom on clicks moves in on the clicked point from there.
+    const double base = 1 / (fh * ey), zoomMax = std::max(1., s.zoom);
+    const double hw = fw / 2, hh = fh / 2;
+    double cu = s.frame.value("x").toDouble() + hw, cv = s.frame.value("y").toDouble() + hh;
+    const bool alongX = s.speed > 0 && s.axes != "vertical", alongY = s.speed > 0 && s.axes != "horizontal";
+    const double rate = 0.45 * s.speed; // per second
+    QVector<qint64> frames;
+    QVector<double> xs, ys, scales;
+    qint64 previous = -1;
+    auto follow = [&](double c, double pointer, double half) {
+        const double calm = s.deadZone * half;
+        return pointer > c + calm ? pointer - calm : pointer < c - calm ? pointer + calm : c;
+    };
+    auto place = [&](qint64 local) {
+        const double z = zooms ? plan.valueAt("z", local) : 1;
+        const double weight = zoomMax > 1 ? std::clamp((z - 1) / (zoomMax - 1), 0., 1.) : 0;
+        double u = cu, v = cv;
+        if (zooms) {
+            u += weight * (plan.valueAt("u", local) - cu);
+            v += weight * (plan.valueAt("v", local) - cv);
+        }
+        // Inside the recorded screen at every zoom.
+        u = std::clamp(u, hw / z, 1 - hw / z);
+        v = std::clamp(v, hh / z, 1 - hh / z);
+        const double scale = base * z;
+        frames << local;
+        xs << -(u - 0.5) * ex * scale;
+        ys << -(v - 0.5) * ey * scale;
+        scales << scale;
+    };
+    cu = std::clamp(cu, hw, 1 - hw);
+    cv = std::clamp(cv, hh, 1 - hh);
+    if (points.isEmpty() || points.first().frame > video.start)
+        place(0);
+    for (const auto &pt : points) {
+        const qint64 local = pt.frame - video.start;
+        if (local < 0 || local >= video.duration || local <= (frames.isEmpty() ? -1 : frames.last()))
+            continue;
+        const double dt = previous < 0 ? 0 : (local - previous) / fps;
+        previous = local;
+        const double ease = 1 - std::exp(-rate * dt);
+        if (alongX)
+            cu = std::clamp(cu + (follow(cu, pt.u, hw) - cu) * ease, hw, 1 - hw);
+        if (alongY)
+            cv = std::clamp(cv + (follow(cv, pt.v, hh) - cv) * ease, hh, 1 - hh);
+        place(local);
+    }
+    if (frames.size() == 1) {
+        video.scale = scales.first();
+        video.x = xs.first();
+        video.y = ys.first();
+        return true;
+    }
+    // Only the keyframes the path needs, the zoom's turns included.
+    auto kept = thinPath(frames, xs, ys, 0.0015);
+    QVector<double> none(scales.size(), 0.);
+    for (int i : thinPath(frames, scales, none, 0.002))
+        if (!kept.contains(i))
+            kept << i;
+    std::sort(kept.begin(), kept.end());
+    for (int i : kept) {
+        video.keyframes["scale"] << Keyframe{frames[i], scales[i], false, "linear"};
+        video.keyframes["x"] << Keyframe{frames[i], xs[i], false, "linear"};
+        video.keyframes["y"] << Keyframe{frames[i], ys[i], false, "linear"};
+    }
+    return true;
+}
+// The pointer of a screen recording, kept beside it ("<video>.pointer.json") with how its
+// picture moves, so that can be changed later.
+QString pointerFile(const QString &video) {
+    return video + ".pointer.json";
+}
+QJsonObject cameraJson(const CameraSettings &c) {
+    return {{"zoom", c.zoom}, {"frame", QJsonObject::fromVariantMap(c.frame)}, {"speed", c.speed},
+            {"axes", c.axes}, {"deadZone", c.deadZone}};
+}
+CameraSettings cameraFromJson(const QJsonObject &o) {
+    CameraSettings c;
+    c.zoom = o.value("zoom").toDouble();
+    c.frame = o.value("frame").toObject().toVariantMap();
+    c.speed = std::clamp(o.value("speed").toDouble(4), 0., 10.);
+    c.axes = o.value("axes").toString("both");
+    c.deadZone = std::clamp(o.value("deadZone").toDouble(.6), 0., .95);
+    return c;
+}
+void savePointer(const QString &video, const QVector<ScreenRecorder::PointerSample> &pointer,
+                 double late, const CameraSettings &camera) {
+    QJsonArray samples;
+    for (const auto &s : pointer)
+        samples.append(QJsonArray{std::round(s.time * 1000) / 1000, std::round(s.x * 10000) / 10000,
+                                  std::round(s.y * 10000) / 10000, s.buttons});
+    QSaveFile f(pointerFile(video));
+    if (f.open(QIODevice::WriteOnly)) {
+        f.write(QJsonDocument(QJsonObject{{"late", late}, {"samples", samples},
+                                          {"camera", cameraJson(camera)}})
+                    .toJson(QJsonDocument::Compact));
+        f.commit();
+    }
+}
+} // namespace
+QVariantMap Editor::pointerCamera(const QString &video) const {
+    const QFileInfo info(pointerFile(video));
+    if (!info.isFile())
+        return {};
+    const auto when = info.lastModified();
+    if (const auto it = m_pointerCameras.constFind(video); it != m_pointerCameras.constEnd() && it->first == when)
+        return it->second;
+    QFile f(info.filePath());
+    QVariantMap result;
+    if (f.open(QIODevice::ReadOnly)) {
+        const auto camera = cameraFromJson(QJsonDocument::fromJson(f.readAll()).object().value("camera").toObject());
+        if (camera.frame.value("ratio").toDouble() > 0)
+            result = {{"follow", camera.speed > 0}, {"speed", camera.speed > 0 ? camera.speed : 4.},
+                      {"axes", camera.axes}, {"ratio", camera.frame.value("ratio")}};
+    }
+    m_pointerCameras.insert(video, {when, result});
+    return result;
+}
+void Editor::followPointer(const QString &clipId, const QVariantMap &settings) {
+    const auto *c = m_project.clip(clipId);
+    const auto *a = c ? m_project.asset(c->assetId) : nullptr;
+    if (!a)
+        return fail("Select the screen recording");
+    QFile f(pointerFile(a->path));
+    if (!f.open(QIODevice::ReadOnly))
+        return fail("This clip has no recorded mouse pointer");
+    auto doc = QJsonDocument::fromJson(f.readAll()).object();
+    f.close();
+    auto camera = cameraFromJson(doc.value("camera").toObject());
+    if (!(camera.frame.value("ratio").toDouble() > 0))
+        return fail("Only screen recordings made with a format can follow the mouse");
+    const bool follow = settings.value("follow", true).toBool();
+    const double speed = settings.value("speed", camera.speed > 0 ? camera.speed : 4.).toDouble();
+    const auto axes = settings.value("axes", camera.axes).toString();
+    if (!(speed >= 1 && speed <= 10))
+        return fail("The follow speed is 1 to 10");
+    if (!QStringList{"both", "horizontal", "vertical"}.contains(axes))
+        return fail("The frame follows both ways, only horizontally or only vertically");
+    camera.speed = follow ? speed : 0;
+    camera.axes = axes;
+    // The pointer at the clip's frames, wherever it was moved or trimmed to.
+    const double late = doc.value("late").toDouble(), fps = double(m_project.fpsN) / m_project.fpsD;
+    QVector<PointerPoint> points;
+    for (const auto &value : doc.value("samples").toArray()) {
+        const auto s = value.toArray();
+        const qint64 frame = c->start + qRound64((s.at(0).toDouble() - late - c->sourceIn.seconds()) / c->speed.seconds() * fps);
+        if (frame < c->start || frame >= c->start + c->duration)
+            continue;
+        const int buttons = s.at(3).toInt();
+        if (!points.isEmpty() && frame <= points.last().frame) {
+            points.last().buttons |= buttons;
+            continue;
+        }
+        points << PointerPoint{frame, std::clamp(s.at(1).toDouble(), 0., 1.), std::clamp(s.at(2).toDouble(), 0., 1.), buttons};
+    }
+    if (!mutate([&](Project &p) {
+            auto *video = p.clip(clipId);
+            p.requireEditable(video->track);
+            applyCamera(p, *video, points, camera);
+            // The glow and the click rings stay on the pointer.
+            if (video->group.isEmpty())
+                return;
+            for (auto &o : p.clips) {
+                if (o.group != video->group || o.id == video->id)
+                    continue;
+                if (o.name == "Pointer") {
+                    QVector<qint64> frames;
+                    QVector<double> xs, ys;
+                    for (const auto &pt : points)
+                        if (pt.frame >= o.start && pt.frame < o.start + o.duration) {
+                            const auto at = PictureMapping(p, *video, pt.frame).toCanvas(pt.u, pt.v);
+                            frames << pt.frame;
+                            xs << at.x() - 0.5;
+                            ys << at.y() - 0.5;
+                        }
+                    o.keyframes.remove("x");
+                    o.keyframes.remove("y");
+                    if (frames.isEmpty())
+                        continue;
+                    o.x = xs.first();
+                    o.y = ys.first();
+                    if (frames.size() > 1)
+                        for (int i : thinPath(frames, xs, ys, 0.002)) {
+                            o.keyframes["x"] << Keyframe{frames[i] - o.start, xs[i], false};
+                            o.keyframes["y"] << Keyframe{frames[i] - o.start, ys[i], false};
+                        }
+                } else if (o.name == "Click" || o.name == "Right click") {
+                    const auto nearest = std::min_element(points.begin(), points.end(), [&](const PointerPoint &l, const PointerPoint &r) {
+                        return std::abs(l.frame - o.start) < std::abs(r.frame - o.start);
+                    });
+                    if (nearest == points.end())
+                        continue;
+                    const auto at = PictureMapping(p, *video, nearest->frame).toCanvas(nearest->u, nearest->v);
+                    o.x = at.x() - 0.5;
+                    o.y = at.y() - 0.5;
+                }
+            }
+        }))
+        return;
+    doc["camera"] = cameraJson(camera);
+    QSaveFile out(pointerFile(a->path));
+    if (out.open(QIODevice::WriteOnly)) {
+        out.write(QJsonDocument(doc).toJson(QJsonDocument::Compact));
+        out.commit();
+    }
+    m_pointerCameras.remove(a->path);
+    m_status = follow ? QString("The frame follows the mouse") : QString("The frame stays where it was placed");
+    emit changed();
+}
 void Editor::addRecordingHighlights(const QString &clipId,
                                     const QVector<ScreenRecorder::PointerSample> &pointer,
                                     const QVector<ScreenRecorder::KeyPress> &keys, double stopped,
@@ -4781,11 +5103,7 @@ void Editor::addRecordingHighlights(const QString &clipId,
     // recording ran and how long its video is, at most a second.
     const double late = std::clamp(stopped - asset->duration, 0., 1.);
     auto frameAt = [&](double time) { return v->start + qRound64((time - late) * fps); };
-    struct Point {
-        qint64 frame;
-        double u, v; // where on the recorded screen, 0..1
-        int buttons;
-    };
+    using Point = PointerPoint;
     QVector<Point> points;
     for (const auto &s : pointer) {
         const qint64 frame = frameAt(s.time);
@@ -4821,7 +5139,14 @@ void Editor::addRecordingHighlights(const QString &clipId,
             } else if (shown.isEmpty() || frame > shown.last().frame)
                 shown << Shown{frame, frame, k.keys};
         }
-    const bool zoom = opts.zoom > 1 && !presses.isEmpty();
+    // The pointer is kept beside the video, so the frame can follow it differently later.
+    CameraSettings camera;
+    camera.zoom = opts.zoom;
+    camera.frame = opts.follow ? highlights.value("area").toMap() : QVariantMap{};
+    camera.speed = opts.followSpeed;
+    camera.axes = opts.followAxes;
+    savePointer(asset->path, pointer, late, camera);
+    const bool zoom = (opts.zoom > 1 && !presses.isEmpty()) || opts.follow;
     const bool halo = opts.halo && !points.isEmpty(), rings = opts.clicks && !presses.isEmpty();
     if (!zoom && !halo && !rings && shown.isEmpty())
         return;
@@ -4856,56 +5181,9 @@ void Editor::addRecordingHighlights(const QString &clipId,
                 c.group = group;
                 return c;
             };
+            if (zoom)
+                applyCamera(p, *video, points, camera);
             const PictureMapping still(p, *video, video->start);
-            if (zoom) {
-                // Zoomed in on clicks: in just before the first of a run of clicks (less than
-                // three seconds apart), across from click to click, out a moment after the last.
-                const double z = opts.zoom;
-                const qint64 last = video->duration - 1, lead = qRound64(0.6 * fps),
-                             settle = std::max<qint64>(1, qRound64(0.1 * fps)),
-                             pan = qRound64(0.4 * fps), hold = qRound64(1.5 * fps),
-                             out = std::max<qint64>(2, qRound64(0.5 * fps)), gap = qRound64(3 * fps);
-                auto target = [&](const Point &pt) {
-                    const double limX = (z - 1) * still.ex / 2, limY = (z - 1) * still.ey / 2;
-                    return QPointF(std::clamp(-(pt.u - 0.5) * still.ex * z, -limX, limX),
-                                   std::clamp(-(pt.v - 0.5) * still.ey * z, -limY, limY));
-                };
-                QVector<Keyframe> ks, kx, ky;
-                auto key = [&](qint64 frame, double scale, QPointF at) {
-                    if (!ks.isEmpty() && frame <= ks.last().frame)
-                        return false;
-                    ks << Keyframe{frame, scale, true};
-                    kx << Keyframe{frame, at.x(), true};
-                    ky << Keyframe{frame, at.y(), true};
-                    return true;
-                };
-                for (int i = 0; i < presses.size();) {
-                    int j = i;
-                    while (j + 1 < presses.size() &&
-                           points[presses[j + 1]].frame - points[presses[j]].frame <= gap)
-                        ++j;
-                    const qint64 first = points[presses[i]].frame - video->start;
-                    const qint64 from = std::clamp<qint64>(first - lead, ks.isEmpty() ? 0 : ks.last().frame + 1, last);
-                    key(from, 1, {});
-                    auto at = target(points[presses[i]]);
-                    key(std::min(last, std::max(from + 1, first - settle)), z, at);
-                    for (int k = i + 1; k <= j; ++k) {
-                        const qint64 f = points[presses[k]].frame - video->start;
-                        key(std::min(last, std::max(ks.last().frame + 1, f - pan)), z, at);
-                        at = target(points[presses[k]]);
-                        key(std::min(last, std::max(ks.last().frame + 1, f - settle)), z, at);
-                    }
-                    const qint64 after = points[presses[j]].frame - video->start + hold;
-                    key(std::min(last - 1, std::max(ks.last().frame + 1, after)), z, at);
-                    key(std::min(last, std::max(ks.last().frame + 1, after + out)), 1, {});
-                    i = j + 1;
-                }
-                if (ks.size() >= 2) {
-                    video->keyframes["scale"] = ks;
-                    video->keyframes["x"] = kx;
-                    video->keyframes["y"] = ky;
-                }
-            }
             // Where a point of the screen shows on the canvas, with the zoom.
             auto canvas = [&](const Point &pt) {
                 return PictureMapping(p, *video, pt.frame).toCanvas(pt.u, pt.v);
