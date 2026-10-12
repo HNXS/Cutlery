@@ -6,6 +6,9 @@
 #include <QCoreApplication>
 #include <cmath>
 #include <QDateTime>
+#include <QGuiApplication>
+#include <QScreen>
+#include <QWindow>
 #include <QTimeZone>
 #include <QDir>
 #include <QDirIterator>
@@ -229,6 +232,23 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
         makeFaceCrops();
     });
     m_labels = readLabels(m_data + "/people.json");
+    m_screen = new ScreenRecorder(executable("ffmpeg"), this);
+    m_screenCountdown = new QTimer(this);
+    m_screenCountdown->setInterval(1000);
+    connect(m_screenCountdown, &QTimer::timeout, this, &Editor::screenCountdownTick);
+    connect(m_screen, &ScreenRecorder::changed, this, &Editor::changed);
+    connect(m_screen, &ScreenRecorder::finished, this, [this](const QString &path, const QString &error) {
+        if (!error.isEmpty()) {
+            m_screenRecording = {{"status", "failed"}, {"error", error}};
+            return fail(error);
+        }
+        const qint64 frame = m_screenStart;
+        const qint64 length = qRound64(m_screenRecording.value("seconds").toDouble() * m_project.fpsN / m_project.fpsD);
+        dropFiles({QUrl::fromLocalFile(path)}, freeRecordingTrack(frame, length), frame);
+        m_screenRecording = {{"status", "idle"}, {"path", path}};
+        m_status = "Screen recording added";
+        emit changed();
+    });
     connect(m_thumbnails, &Thumbnails::changed, this, [this] {
         emit thumbnailsChanged();
         emit changed();
@@ -915,6 +935,12 @@ QVariantMap Editor::state() const {
                                       {"people", m_ai->missing("people")},
                                       {"transcribe", m_ai->missing("transcribe")}}},
             {"captions", captionState()},
+            {"screenRecording", [this] {
+                 auto state = m_screenRecording.isEmpty() ? QVariantMap{{"status", "idle"}} : m_screenRecording;
+                 if (m_screen->recording() && state.value("status") == "recording")
+                     state["seconds"] = m_screen->seconds();
+                 return state;
+             }()},
             {"people", peopleState()},
             {"pauses", pauseState()},
             {"scenes", m_scenes},
@@ -3490,6 +3516,89 @@ void Editor::startVoiceOver() {
         play();
     m_status = "Recording voice-over…";
     emit changed();
+}
+void Editor::screenCountdownTick() {
+    const int left = m_screenRecording.value("countdown").toInt() - 1;
+    if (left > 0) {
+        m_screenRecording["countdown"] = left;
+        emit changed();
+        return;
+    }
+    m_screenCountdown->stop();
+    QDir().mkpath(m_data + "/recordings");
+    const auto file = m_data + "/recordings/screen-" +
+                      QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss") + ".mkv";
+    if (!m_screen->start(m_screenArea, m_screenFps, m_screenCursor, file)) {
+        m_screenRecording = {{"status", "failed"}, {"error", m_screen->error()}};
+        return fail(m_screen->error());
+    }
+    m_screenRecording = {{"status", "recording"}};
+    m_status = "Recording the screen…";
+    emit changed();
+}
+int Editor::freeRecordingTrack(qint64 frame, qint64 length) {
+    for (int t = 0; t < m_project.tracks; ++t) {
+        const auto &settings = m_project.trackSettings[t];
+        const bool free = std::none_of(m_project.clips.begin(), m_project.clips.end(), [&](const Clip &o) {
+            return o.track == t && o.start < frame + std::max<qint64>(1, length) && frame < o.start + o.duration;
+        });
+        if (!settings.magnetic && !settings.locked && free)
+            return t;
+    }
+    mutate([](Project &p) { p.addTrack(); });
+    return m_project.tracks - 1;
+}
+QVariantList Editor::screens() const {
+    QVariantList list;
+    const auto all = QGuiApplication::screens();
+    for (int i = 0; i < all.size(); ++i) {
+        const auto area = ScreenRecorder::screenArea(i);
+        list << QVariantMap{{"index", i},
+                            {"name", all[i]->name()},
+                            {"width", area.width()},
+                            {"height", area.height()},
+                            {"primary", all[i] == QGuiApplication::primaryScreen()}};
+    }
+    return list;
+}
+void Editor::startScreenRecording(int screen, int fps, bool cursor, int countdown) {
+    if (m_screen->recording() || m_screenCountdown->isActive())
+        return fail("The screen is being recorded already");
+    if (m_busy)
+        return fail("Wait for the export to finish");
+    m_screenArea = ScreenRecorder::screenArea(screen);
+    if (m_screenArea.width() < 16 || m_screenArea.height() < 16)
+        return fail("There is no such screen");
+    if (fps < 5 || fps > 60)
+        return fail("Screen recordings have 5 to 60 frames a second");
+    pause();
+    m_screenFps = fps;
+    m_screenCursor = cursor;
+    m_screenStart = m_playhead;
+    m_screenRecording = {{"status", "countdown"}, {"countdown", std::max(0, countdown)}};
+    if (countdown <= 0) {
+        m_screenRecording["countdown"] = 1;
+        return screenCountdownTick();
+    }
+    m_screenCountdown->start();
+    emit changed();
+}
+void Editor::stopScreenRecording() {
+    if (m_screenCountdown->isActive()) {
+        m_screenCountdown->stop();
+        m_screenRecording = {{"status", "idle"}};
+        m_status = "Screen recording cancelled";
+        emit changed();
+        return;
+    }
+    if (!m_screen->recording())
+        return;
+    m_screenRecording = {{"status", "saving"}, {"seconds", m_screen->seconds()}};
+    m_screen->stop();
+    emit changed();
+}
+void Editor::hideFromCapture(QObject *window) {
+    ScreenRecorder::hideFromCapture(qobject_cast<QWindow *>(window));
 }
 void Editor::stopVoiceOver() {
     if (!m_voiceRecorder)

@@ -4965,6 +4965,61 @@ class EngineTest : public QObject {
         QSKIP("Needs the AI worker");
 #endif
     }
+    void screenRecording() {
+        // FFmpeg's test pattern stands in for the screen, except on Windows where the real
+        // desktop is recorded (GDI) when CUTLERY_SCREEN_SOURCE is not set.
+        const bool real = qEnvironmentVariable("CUTLERY_TEST_REAL_SCREEN") == "1";
+        if (!real)
+            qputenv("CUTLERY_SCREEN_SOURCE", "test");
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(640, 360, 30, 1);
+        auto state = [&] { return editor.state()["screenRecording"].toMap(); };
+        QCOMPARE(state()["status"].toString(), QString("idle"));
+        const auto screens = editor.screens();
+        QVERIFY(!screens.isEmpty());
+        const auto screen = screens.first().toMap();
+        QVERIFY(screen["width"].toInt() >= 16);
+        // Refused: no such screen, too many frames a second.
+        editor.startScreenRecording(99);
+        QVERIFY(editor.state()["error"].toString().contains("no such screen"));
+        editor.startScreenRecording(0, 100);
+        QVERIFY(editor.state()["error"].toString().contains("5 to 60"));
+        editor.clearError();
+        // A countdown can be cancelled before anything is recorded.
+        editor.startScreenRecording(0, 15, true, 2);
+        QCOMPARE(state()["status"].toString(), QString("countdown"));
+        QCOMPARE(state()["countdown"].toInt(), 2);
+        QTRY_COMPARE_WITH_TIMEOUT(state()["countdown"].toInt(), 1, 3000);
+        editor.stopScreenRecording();
+        QCOMPARE(state()["status"].toString(), QString("idle"));
+        QTest::qWait(1500);
+        QCOMPARE(state()["status"].toString(), QString("idle"));
+        // Recorded for about two seconds at 15 frames a second, at the playhead beside a title.
+        editor.addTitle();
+        editor.setClip("duration", 100);
+        editor.seek(30);
+        editor.startScreenRecording(0, 15, true, 0);
+        QCOMPARE(state()["status"].toString(), QString("recording"));
+        QTest::qWait(2000);
+        QVERIFY(state()["seconds"].toDouble() >= 1.5);
+        editor.stopScreenRecording();
+        QTRY_COMPARE_WITH_TIMEOUT(state()["status"].toString(), QString("idle"), 20000);
+        QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+        const auto path = state()["path"].toString();
+        QVERIFY(path.contains("/recordings/screen-") && path.endsWith(".mkv"));
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().clips.size() == 2, 15000);
+        const auto &clip = editor.project().clips.last();
+        QCOMPARE(clip.start, qint64(30));
+        QVERIFY(clip.track != editor.project().clips.first().track);
+        const auto *asset = editor.project().asset(clip.assetId);
+        QVERIFY(asset && asset->kind == "video");
+        QVERIFY(!asset->hasAudio);
+        QCOMPARE(asset->width, screen["width"].toInt() / 2 * 2);
+        QVERIFY2(asset->duration > 1.2 && asset->duration < 4, qPrintable(QString::number(asset->duration)));
+        qunsetenv("CUTLERY_SCREEN_SOURCE");
+        QFile::remove(path);
+    }
     void peopleGrouping() {
         // Descriptors along a few directions stand in for faces: same direction, same person.
         auto direction = [](int axis, double tilt = 0) {

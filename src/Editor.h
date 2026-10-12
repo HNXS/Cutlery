@@ -5,6 +5,7 @@
 #include "Thumbnails.h"
 #include "Tracker.h"
 #include "People.h"
+#include "ScreenRecorder.h"
 #include "Speech.h"
 #include <QPointer>
 #include "AiJobs.h"
@@ -352,6 +353,17 @@ class Editor final : public QObject {
     // track. State "voiceOver": {available, recording, seconds}.
     Q_INVOKABLE void startVoiceOver();
     Q_INVOKABLE void stopVoiceOver();
+    // Screen recording without sound (e.g. a tutorial to voice later): the screens to choose
+    // from [{index, name, width, height, primary}], then recording one after a countdown
+    // (seconds) until stopped; the video lands at the playhead on a free track, like a
+    // voice-over, and in the library. State "screenRecording": {status idle|countdown|
+    // recording|saving|failed, countdown, seconds, error}.
+    Q_INVOKABLE QVariantList screens() const;
+    Q_INVOKABLE void startScreenRecording(int screen, int fps = 30, bool cursor = true,
+                                          int countdown = 3);
+    Q_INVOKABLE void stopScreenRecording();
+    // Keeps a window (the recording controls) out of the recording, where Windows allows it.
+    Q_INVOKABLE void hideFromCapture(QObject *window);
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     // The edit history of the shown timeline, oldest first: every state with what changed to
@@ -638,6 +650,18 @@ class Editor final : public QObject {
     mutable QHash<QString, QPair<qint64, QVector<Cue>>> m_spoken;
     // Person search: the named people (data folder, people.json), the faces found in the
     // project's media and the people they make, worked out again when a result or name changes.
+    ScreenRecorder *m_screen = nullptr;
+    QVariantMap m_screenRecording;
+    QTimer *m_screenCountdown = nullptr;
+    QRect m_screenArea;
+    int m_screenFps = 30;
+    bool m_screenCursor = true;
+    qint64 m_screenStart = 0;
+    // The lowest free track for something at `frame` lasting `length` frames that is not
+    // magnetic or locked, or a new track.
+    int freeRecordingTrack(qint64 frame, qint64 length);
+    // A second of the countdown before screen recording; at the end recording starts.
+    void screenCountdownTick();
     QVector<Label> m_labels;
     int m_labelsRevision = 0;
     struct PeopleIndex {

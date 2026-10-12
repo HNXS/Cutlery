@@ -131,6 +131,13 @@ jobs:
           build/bin/Release/cutlery_tests.exe textToSpeech -o build/tts.txt,txt | Out-Null
           $speech = Get-Content build/tts.txt -Raw
           # Caption translation ran with the real Opus-MT models, not skipped.
+          # Screen recording of the real desktop (GDI) with Media Foundation's H.264.
+          $env:CUTLERY_TEST_REAL_SCREEN = '1'
+          build/bin/Release/cutlery_tests.exe screenRecording -o build/screen.txt,txt | Out-Null
+          Remove-Item Env:CUTLERY_TEST_REAL_SCREEN
+          $screenRun = Get-Content build/screen.txt -Raw
+          Write-Output $screenRun
+          if ($screenRun -notmatch 'PASS   : EngineTest::screenRecording\(\)') { Write-Output "::error::Recording the real screen failed"; throw 'Recording the real screen failed' }
           # Person search ran with the real face models, not skipped.
           build/bin/Release/cutlery_tests.exe peopleWithRealModels -o build/people.txt,txt | Out-Null
           $peopleRun = Get-Content build/people.txt -Raw

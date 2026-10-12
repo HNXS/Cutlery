@@ -1497,6 +1497,58 @@ class UiTest : public QObject {
         QFile::remove(data + "/people.json");
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
+    void screenControls() {
+        // ▣ Screen under the player: the dialog starts a countdown, the bar on top shows it and
+        // stops the recording, which lands on the timeline (FFmpeg's test pattern stands in for
+        // the screen).
+        qputenv("CUTLERY_SCREEN_SOURCE", "test");
+        QTemporaryDir dir;
+        auto *frames = new FrameProvider;
+        Editor editor(frames);
+        editor.configure(640, 360, 30, 1);
+        KeyboardShortcuts keys(dir.filePath("keys.json"));
+        QQmlApplicationEngine engine;
+        engine.addImageProvider("frames", frames);
+        engine.rootContext()->setContextProperty("editor", &editor);
+        engine.rootContext()->setContextProperty("shortcutSettings", &keys);
+        QStringList warnings;
+        connect(&engine, &QQmlApplicationEngine::warnings, this,
+                [&](const QList<QQmlError> &errors) {
+                    for (const auto &e : errors)
+                        warnings << e.toString();
+                });
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(CUTLERY_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        auto *button = findItem(window->contentItem(), "screenRecord");
+        QTRY_VERIFY(button && button->isVisible() && button->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+        auto *dialog = window->findChild<QObject *>("screenDialog");
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        auto *choice = findItem(window->contentItem(), "screenChoice");
+        QVERIFY(choice && choice->property("count").toInt() >= 1);
+        findItem(window->contentItem(), "screenHide")->setProperty("checked", false);
+        findItem(window->contentItem(), "screenFps")->setProperty("currentIndex", 2); // 15 fps
+        QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
+        QQuickWindow *bar = nullptr;
+        for (auto *o : engine.rootObjects().first()->findChildren<QQuickWindow *>())
+            if (o->objectName() == "recordingBar")
+                bar = o;
+        QVERIFY(bar);
+        QTRY_VERIFY(bar->isVisible());
+        auto *time = findItem(bar->contentItem(), "recordingTime");
+        QVERIFY(time->property("text").toString().startsWith("Starting in"));
+        QTRY_VERIFY_WITH_TIMEOUT(time->property("text").toString().startsWith("●"), 5000);
+        QTest::qWait(1200);
+        QVERIFY(QMetaObject::invokeMethod(findItem(bar->contentItem(), "recordingStop"), "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(!bar->isVisible(), 20000);
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().clips.size() == 1, 15000);
+        QVERIFY(editor.project().asset(editor.project().clips.first().assetId)->kind == "video");
+        QFile::remove(editor.state()["screenRecording"].toMap()["path"].toString());
+        qunsetenv("CUTLERY_SCREEN_SOURCE");
+        QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
+    }
     void presenterControls() {
         QTemporaryDir dir;
         auto *frames = new FrameProvider;
