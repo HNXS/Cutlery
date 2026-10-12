@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <QFile>
+#include <QHash>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QScreen>
@@ -30,6 +31,7 @@ void ScreenRecorder::samplePointer() {
         return;
     PointerSample s;
     s.time = m_clock.elapsed() / 1000.;
+    sampleKeys(s.time);
     if (qEnvironmentVariable("CUTLERY_SCREEN_SOURCE") == "test") {
         s.x = 0.5 + 0.25 * std::cos(s.time);
         s.y = 0.5 + 0.25 * std::sin(s.time);
@@ -48,6 +50,85 @@ void ScreenRecorder::samplePointer() {
 #endif
     }
     m_pointer << s;
+}
+void ScreenRecorder::sampleKeys(double time) {
+    if (!m_captureKeys || m_keys.size() >= 100000)
+        return;
+    if (qEnvironmentVariable("CUTLERY_SCREEN_SOURCE") == "test") {
+        const int second = int(std::floor(time));
+        const bool down = time - second >= 0.5 && time - second < 0.6;
+        if (down && !m_down.contains(second))
+            m_keys << KeyPress{time, second % 2 ? "Ctrl + V" : "Ctrl + C"};
+        m_down = down ? QSet<int>{second} : QSet<int>{};
+        return;
+    }
+#ifdef Q_OS_WIN
+    auto isDown = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
+    QSet<int> down;
+    for (int vk = 0x08; vk <= 0xFE; ++vk)
+        if (isDown(vk))
+            down.insert(vk);
+    const bool ctrl = isDown(VK_CONTROL), alt = isDown(VK_MENU), shift = isDown(VK_SHIFT),
+               win = isDown(VK_LWIN) || isDown(VK_RWIN);
+    // AltGr arrives as right Alt with Ctrl: it types characters (@, €, ...).
+    const bool altGr = isDown(VK_RMENU) && ctrl;
+    // Keys already down when recording starts are not shortcuts made during it.
+    if (!m_keysPrimed) {
+        m_down = down;
+        m_keysPrimed = true;
+        return;
+    }
+    static const QSet<int> modifiers{VK_SHIFT, VK_CONTROL, VK_MENU, VK_LSHIFT, VK_RSHIFT,
+                                     VK_LCONTROL, VK_RCONTROL, VK_LMENU, VK_RMENU, VK_LWIN,
+                                     VK_RWIN, VK_CAPITAL, VK_NUMLOCK, VK_SCROLL, VK_LBUTTON,
+                                     VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2};
+    static const QHash<int, QString> named{
+        {VK_RETURN, "Enter"}, {VK_TAB, "Tab"}, {VK_ESCAPE, "Esc"}, {VK_SPACE, "Space"},
+        {VK_BACK, "Backspace"}, {VK_DELETE, "Delete"}, {VK_INSERT, "Insert"}, {VK_HOME, "Home"},
+        {VK_END, "End"}, {VK_PRIOR, "Page Up"}, {VK_NEXT, "Page Down"}, {VK_LEFT, "←"},
+        {VK_RIGHT, "→"}, {VK_UP, "↑"}, {VK_DOWN, "↓"}, {VK_SNAPSHOT, "Print"},
+        {VK_ADD, "Num +"}, {VK_SUBTRACT, "Num −"}, {VK_MULTIPLY, "Num *"}, {VK_DIVIDE, "Num /"}};
+    for (const int vk : down) {
+        if (m_down.contains(vk) || modifiers.contains(vk))
+            continue;
+        QString key;
+        bool types = false; // a key that types a character
+        if (vk >= VK_F1 && vk <= VK_F24)
+            key = QString("F%1").arg(vk - VK_F1 + 1);
+        else if (named.contains(vk))
+            key = named.value(vk);
+        else if ((vk >= '0' && vk <= '9') || (vk >= 'A' && vk <= 'Z')) {
+            key = QChar(vk);
+            types = true;
+        } else if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) {
+            key = QString("Num %1").arg(vk - VK_NUMPAD0);
+            types = true;
+        } else if (const auto c = MapVirtualKeyW(UINT(vk), MAPVK_VK_TO_CHAR) & 0x7fff; c >= 0x20) {
+            key = QChar(char16_t(c)).toUpper();
+            types = true;
+        } else
+            continue;
+        const bool command = (ctrl || alt || win) && !altGr;
+        const bool special = !types && key != "Space" && key != "Backspace" && key != "Delete";
+        const bool standalone = key == "Esc" || (key.startsWith('F') && key.size() > 1 && key[1].isDigit());
+        if (!command && !standalone && !(shift && special))
+            continue;
+        QStringList parts;
+        if (ctrl && !altGr)
+            parts << "Ctrl";
+        if (alt && !altGr)
+            parts << "Alt";
+        if (win)
+            parts << "Win";
+        if (shift)
+            parts << "Shift";
+        parts << key;
+        m_keys << KeyPress{time, parts.join(" + ")};
+    }
+    m_down = down;
+#else
+    Q_UNUSED(time);
+#endif
 }
 ScreenRecorder::~ScreenRecorder() {
     if (m_process) {
@@ -143,6 +224,8 @@ bool ScreenRecorder::start(const QRect &area, int fps, bool cursor, const QStrin
     m_error.clear();
     m_stopping = false;
     m_pointer.clear();
+    m_keys.clear();
+    m_down.clear();
     if (m_area.width() < 16 || m_area.height() < 16) {
         m_error = "There is no such screen";
         return false;
@@ -201,6 +284,9 @@ void ScreenRecorder::launch() {
     m_clock.start();
     // A second try starts the video again, and the pointer with it.
     m_pointer.clear();
+    m_keys.clear();
+    m_down.clear();
+    m_keysPrimed = false;
     m_pointerTimer.start();
     samplePointer();
     emit changed();

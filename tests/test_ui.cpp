@@ -1547,7 +1547,20 @@ class UiTest : public QObject {
         // Clicks shown, no glow following the pointer.
         QVERIFY(findItem(window->contentItem(), "screenClicks")->property("checked").toBool());
         findItem(window->contentItem(), "screenHalo")->setProperty("checked", false);
+        // Shortcuts in their own colours: the look shows once they are switched on.
+        auto *look = findItem(window->contentItem(), "screenKeyLook");
+        QVERIFY(look && !look->isVisible());
+        findItem(window->contentItem(), "screenKeys")->setProperty("checked", true);
+        QTRY_VERIFY(look->isVisible());
+        QVERIFY(findItem(window->contentItem(), "screenKeyPreview")->isVisible());
+        findItem(window->contentItem(), "screenKeyBackground")->setProperty("text", "#ff8800");
+        findItem(window->contentItem(), "screenKeyPosition")->setProperty("currentIndex", 2);
         QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
+        // The choices are kept for next time.
+        const auto kept = editor.state()["preferences"].toMap()["screenRecording"].toMap();
+        QCOMPARE(kept["keys"].toBool(), true);
+        QCOMPARE(kept["halo"].toBool(), false);
+        QCOMPARE(kept["keyBackground"].toString(), QString("#ff8800"));
         QQuickWindow *bar = nullptr;
         for (auto *o : engine.rootObjects().first()->findChildren<QQuickWindow *>())
             if (o->objectName() == "recordingBar")
@@ -1563,11 +1576,22 @@ class UiTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(std::any_of(editor.project().clips.begin(), editor.project().clips.end(),
                                              [](const Clip &c) { return !c.assetId.isEmpty(); }), 15000);
         for (const auto &c : editor.project().clips)
-            if (c.assetId.isEmpty())
+            if (c.name.startsWith("Keys: ")) {
+                QCOMPARE(c.fillColor, QString("#ff8800"));
+                QVERIFY(c.x > 0.1); // bottom right
+            } else if (c.assetId.isEmpty())
                 QCOMPARE(c.name, QString("Click"));
             else
                 QVERIFY(editor.project().asset(c.assetId)->kind == "video");
         QFile::remove(editor.state()["screenRecording"].toMap()["path"].toString());
+        // Opened again, the dialog shows the last choices.
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        QVERIFY(findItem(window->contentItem(), "screenKeys")->property("checked").toBool());
+        QVERIFY(!findItem(window->contentItem(), "screenHalo")->property("checked").toBool());
+        QCOMPARE(findItem(window->contentItem(), "screenKeyPosition")->property("currentIndex").toInt(), 2);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
+        editor.setPreferences({{"screenRecording", QVariantMap{}}});
         qunsetenv("CUTLERY_SCREEN_SOURCE");
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }

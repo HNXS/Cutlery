@@ -7211,18 +7211,63 @@ ApplicationWindow {
         }
     }
     // Screen recording: which screen, then a countdown; Cutlery steps aside while it records.
+    // The choices are kept for next time.
     Dialog {
         id: screenDialog
         objectName: "screenDialog"
         anchors.centerIn: parent
         title: "Record the screen"
         modal: true
-        width: 380
+        width: 420
         property var screens: []
+        readonly property var keyStyles: [
+            { name: "Dark", background: "#e6141820", text: "#ffffff" },
+            { name: "Light", background: "#f2ffffff", text: "#14181d" },
+            { name: "Accent", background: "#ff5a5f", text: "#ffffff" },
+            { name: "Own colours", background: "", text: "" }
+        ]
+        readonly property var keyPositions: ["bottom", "bottomLeft", "bottomRight", "top"]
+        readonly property var keySizes: ["small", "medium", "large"]
+        readonly property var zoomLevels: [1.5, 2, 2.5]
+        function choices() {
+            return {
+                fps: screenFps.currentIndex,
+                cursor: screenCursor.checked,
+                minimise: screenHide.checked,
+                halo: screenHalo.checked,
+                clicks: screenClicks.checked,
+                zoom: screenZoom.checked,
+                zoomLevel: screenZoomLevel.currentIndex,
+                keys: screenKeys.checked,
+                keyPosition: screenKeyPosition.currentIndex,
+                keySize: screenKeySize.currentIndex,
+                keyStyle: screenKeyStyle.currentIndex,
+                keyBackground: screenKeyBackground.text.trim(),
+                keyText: screenKeyText.text.trim(),
+                keyFont: screenKeyFont.currentText
+            };
+        }
         onAboutToShow: {
             screens = editor.screens();
             const main = screens.findIndex(x => x.primary);
             screenChoice.currentIndex = Math.max(0, main);
+            const c = ((win.s.preferences || {}).screenRecording) || {};
+            const pick = (v, d) => v === undefined ? d : v;
+            screenFps.currentIndex = pick(c.fps, 0);
+            screenCursor.checked = pick(c.cursor, true);
+            screenHide.checked = pick(c.minimise, true);
+            screenHalo.checked = pick(c.halo, true);
+            screenClicks.checked = pick(c.clicks, true);
+            screenZoom.checked = pick(c.zoom, false);
+            screenZoomLevel.currentIndex = pick(c.zoomLevel, 0);
+            screenKeys.checked = pick(c.keys, false);
+            screenKeyPosition.currentIndex = pick(c.keyPosition, 0);
+            screenKeySize.currentIndex = pick(c.keySize, 1);
+            screenKeyStyle.currentIndex = pick(c.keyStyle, 0);
+            screenKeyBackground.text = pick(c.keyBackground, keyStyles[0].background);
+            screenKeyText.text = pick(c.keyText, keyStyles[0].text);
+            const font = screenKeyFont.model.indexOf(pick(c.keyFont, "Arial"));
+            screenKeyFont.currentIndex = Math.max(0, font);
         }
         footer: DialogButtonBox {
             Button {
@@ -7237,13 +7282,25 @@ ApplicationWindow {
             }
         }
         onAccepted: {
-            editor.startScreenRecording(screenDialog.screens[screenChoice.currentIndex].index, screenFps.currentIndex === 1 ? 60 : screenFps.currentIndex === 2 ? 15 : 30, screenCursor.checked, 3, screenHalo.checked, screenClicks.checked);
+            const c = choices();
+            editor.setPreferences({ screenRecording: c });
+            editor.startScreenRecording(screenDialog.screens[screenChoice.currentIndex].index, screenFps.currentIndex === 1 ? 60 : screenFps.currentIndex === 2 ? 15 : 30, screenCursor.checked, 3, {
+                halo: c.halo,
+                clicks: c.clicks,
+                zoom: c.zoom ? zoomLevels[c.zoomLevel] : 0,
+                keys: c.keys,
+                keyPosition: keyPositions[c.keyPosition],
+                keySize: keySizes[c.keySize],
+                keyBackground: c.keyBackground,
+                keyText: c.keyText,
+                keyFont: c.keyFont
+            });
             if (screenHide.checked)
                 win.showMinimized();
         }
         ColumnLayout {
             anchors.fill: parent
-            spacing: 8
+            spacing: 6
             ComboBox {
                 id: screenChoice
                 objectName: "screenChoice"
@@ -7276,6 +7333,124 @@ ApplicationWindow {
                 checked: true
                 text: "Show clicks (a ring: red left, blue right)"
             }
+            RowLayout {
+                Layout.fillWidth: true
+                CheckBox {
+                    id: screenZoom
+                    objectName: "screenZoom"
+                    Layout.fillWidth: true
+                    text: "Zoom in where you click"
+                    ToolTip.visible: hovered
+                    ToolTip.text: "The video zooms in just before a click, follows further clicks and zooms out a moment after the last one. The zoom is keyframes on the video, to adjust or remove."
+                }
+                ComboBox {
+                    id: screenZoomLevel
+                    objectName: "screenZoomLevel"
+                    Accessible.name: "Zoom"
+                    enabled: screenZoom.checked
+                    implicitWidth: 90
+                    model: ["1.5×", "2×", "2.5×"]
+                }
+            }
+            CheckBox {
+                id: screenKeys
+                objectName: "screenKeys"
+                text: "Show keyboard shortcuts (e.g. Ctrl + C)"
+                ToolTip.visible: hovered
+                ToolTip.text: "Keys pressed with Ctrl, Alt or the Windows key, function keys, Esc, and Shift with arrows and other keys that do not type. Plain typing is never recorded."
+            }
+            // How the shortcuts look, with a preview.
+            GridLayout {
+                objectName: "screenKeyLook"
+                Layout.fillWidth: true
+                Layout.leftMargin: 28
+                visible: screenKeys.checked
+                columns: 2
+                columnSpacing: 6
+                rowSpacing: 4
+                ComboBox {
+                    id: screenKeyPosition
+                    objectName: "screenKeyPosition"
+                    Accessible.name: "Shortcut position"
+                    Layout.fillWidth: true
+                    model: ["Bottom centre", "Bottom left", "Bottom right", "Top centre"]
+                }
+                ComboBox {
+                    id: screenKeySize
+                    objectName: "screenKeySize"
+                    Accessible.name: "Shortcut size"
+                    Layout.fillWidth: true
+                    model: ["Small", "Medium", "Large"]
+                    currentIndex: 1
+                }
+                ComboBox {
+                    id: screenKeyStyle
+                    objectName: "screenKeyStyle"
+                    Accessible.name: "Shortcut colours"
+                    Layout.fillWidth: true
+                    model: screenDialog.keyStyles.map(x => x.name)
+                    onActivated: index => {
+                        const style = screenDialog.keyStyles[index];
+                        if (style.background !== "") {
+                            screenKeyBackground.text = style.background;
+                            screenKeyText.text = style.text;
+                        }
+                    }
+                }
+                ComboBox {
+                    id: screenKeyFont
+                    objectName: "screenKeyFont"
+                    Accessible.name: "Shortcut font"
+                    Layout.fillWidth: true
+                    model: editor.fontFamilies()
+                }
+                TextField {
+                    id: screenKeyBackground
+                    objectName: "screenKeyBackground"
+                    Layout.fillWidth: true
+                    placeholderText: "Box colour (#rrggbb)"
+                    selectByMouse: true
+                    onTextEdited: screenKeyStyle.currentIndex = screenDialog.keyStyles.length - 1
+                }
+                TextField {
+                    id: screenKeyText
+                    objectName: "screenKeyText"
+                    Layout.fillWidth: true
+                    placeholderText: "Text colour (#rrggbb)"
+                    selectByMouse: true
+                    onTextEdited: screenKeyStyle.currentIndex = screenDialog.keyStyles.length - 1
+                }
+                // The preview: a small picture of the video with the box where it will show.
+                Rectangle {
+                    objectName: "screenKeyPreview"
+                    Layout.columnSpan: 2
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: width * 9 / 16
+                    color: "#2a3340"
+                    radius: 4
+                    clip: true
+                    Rectangle {
+                        id: keyBox
+                        readonly property real share: [0.04, 0.055, 0.07][screenKeySize.currentIndex] || 0.055
+                        readonly property real fontPx: Math.max(6, share * parent.height)
+                        height: fontPx * 1.9
+                        width: keyLabel.implicitWidth * 1.08 + fontPx * 1.3
+                        radius: Math.min(width, height) * 0.08
+                        color: /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(screenKeyBackground.text.trim()) ? screenKeyBackground.text.trim() : "#e6141820"
+                        x: screenKeyPosition.currentIndex === 1 ? parent.width * 0.04 : screenKeyPosition.currentIndex === 2 ? parent.width * 0.96 - width : (parent.width - width) / 2
+                        y: screenKeyPosition.currentIndex === 3 ? parent.height * 0.06 : parent.height * 0.94 - height
+                        Text {
+                            id: keyLabel
+                            anchors.centerIn: parent
+                            text: "Ctrl + Shift + S"
+                            font.family: screenKeyFont.currentText
+                            font.pixelSize: keyBox.fontPx
+                            font.bold: true
+                            color: /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(screenKeyText.text.trim()) ? screenKeyText.text.trim() : "#ffffff"
+                        }
+                    }
+                }
+            }
             CheckBox {
                 id: screenHide
                 objectName: "screenHide"
@@ -7287,7 +7462,7 @@ ApplicationWindow {
                 wrapMode: Text.Wrap
                 font.pixelSize: 11
                 color: win.muted
-                text: "Recording starts after 3 seconds, without sound. Stop it with the small bar that stays on top; it is left out of the recording. Highlights land as shapes above the video, to move, recolour or delete like any other."
+                text: "Recording starts after 3 seconds, without sound. Stop it with the small bar that stays on top; it is left out of the recording. Highlights and shortcuts land as shapes above the video, to move, restyle or delete like any other."
             }
         }
     }

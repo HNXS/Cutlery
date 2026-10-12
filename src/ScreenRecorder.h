@@ -4,6 +4,7 @@
 #include <QPointer>
 #include <QProcess>
 #include <QRect>
+#include <QSet>
 #include <QTimer>
 #include <QVector>
 
@@ -15,8 +16,12 @@ namespace cutlery {
 // Foundation is missing, into a Matroska file that stays readable if recording is cut short.
 // While recording, the mouse pointer is sampled 30 times a second (where it is and which buttons
 // are down), for highlights placed over the video afterwards.
-// For tests, CUTLERY_SCREEN_SOURCE=test records FFmpeg's test pattern instead of the screen and
-// a pointer that circles the middle and clicks in the first tenth of every second.
+// Keyboard shortcuts are noted too: keys pressed with Ctrl, Alt or the Windows key, function
+// keys, Escape, and Shift with keys that do not type (arrows, Home, Enter, ...). Plain typing,
+// with or without Shift or AltGr, is never noted.
+// For tests, CUTLERY_SCREEN_SOURCE=test records FFmpeg's test pattern instead of the screen,
+// a pointer that circles the middle and clicks in the first tenth of every second, and
+// "Ctrl + C" and "Ctrl + V" pressed in turn half a second after every whole second.
 class ScreenRecorder final : public QObject {
     Q_OBJECT
   public:
@@ -45,6 +50,18 @@ class ScreenRecorder final : public QObject {
     const QVector<PointerSample> &pointer() const {
         return m_pointer;
     }
+    // A shortcut pressed during a recording, e.g. "Ctrl + Shift + S", at seconds from its start.
+    struct KeyPress {
+        double time = 0;
+        QString keys;
+    };
+    const QVector<KeyPress> &keys() const {
+        return m_keys;
+    }
+    // Whether shortcuts are noted at all (off by default), for the next start().
+    void setKeyCapture(bool on) {
+        m_captureKeys = on;
+    }
     // A screen's area in physical pixels, as the desktop is captured.
     static QRect screenArea(int screen);
     // Keeps a window (the recording controls) out of screen captures, where Windows supports it
@@ -60,6 +77,10 @@ class ScreenRecorder final : public QObject {
     QElapsedTimer m_clock;
     QTimer m_pointerTimer;
     QVector<PointerSample> m_pointer;
+    QVector<KeyPress> m_keys;
+    QSet<int> m_down; // keys down at the last sample (Windows virtual-key codes)
+    bool m_keysPrimed = false, m_captureKeys = false;
+    void sampleKeys(double time);
     void samplePointer();
     QRect m_area;
     int m_fps = 30;

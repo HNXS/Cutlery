@@ -363,12 +363,17 @@ class Editor final : public QObject {
     // from [{index, name, width, height, primary}], then recording one after a countdown
     // (seconds) until stopped; the video lands at the playhead on a free track, like a
     // voice-over, and in the library. State "screenRecording": {status idle|countdown|
-    // recording|saving|failed, countdown, seconds, error}. With `halo`, a soft yellow circle
-    // follows the mouse pointer over the video; with `clicks`, a ring opens where it was clicked
-    // (red left, blue right). Both are shape clips on tracks above it, grouped with it.
+    // recording|saving|failed, countdown, seconds, error}. `highlights` adds, once the video
+    // is on the timeline, in one undo step: {halo: a soft yellow circle following the mouse
+    // pointer (default on), clicks: a ring opening at each click, red left, blue right (on),
+    // keys: keyboard shortcuts as boxes with their keys (off), keyPosition bottom|bottomLeft|
+    // bottomRight|top, keySize small|medium|large, keyBackground, keyText (#rrggbb or
+    // #aarrggbb), keyFont, zoom: 1.25–3 to zoom the video in on clicks (0, off)}. Highlights are
+    // shape clips on tracks above the video, grouped with it; the zoom is scale and position
+    // keyframes of the video.
     Q_INVOKABLE QVariantList screens() const;
     Q_INVOKABLE void startScreenRecording(int screen, int fps = 30, bool cursor = true,
-                                          int countdown = 3, bool halo = true, bool clicks = true);
+                                          int countdown = 3, const QVariantMap &highlights = {});
     Q_INVOKABLE void stopScreenRecording();
     // Keeps a window (the recording controls) out of the recording, where Windows allows it.
     Q_INVOKABLE void hideFromCapture(QObject *window);
@@ -663,11 +668,14 @@ class Editor final : public QObject {
     QTimer *m_screenCountdown = nullptr;
     QRect m_screenArea;
     int m_screenFps = 30;
-    bool m_screenCursor = true, m_screenHalo = true, m_screenClicks = true;
-    // Shape clips over a screen recording for its pointer and clicks; `stopped` is how long the
+    bool m_screenCursor = true;
+    QVariantMap m_screenHighlights;
+    // Highlights over a screen recording (see startScreenRecording); `stopped` is how long the
     // recording ran by the clock, to line the pointer up with the video's own length.
-    void addPointerHighlights(const QString &clipId, const QVector<ScreenRecorder::PointerSample> &pointer,
-                              double stopped, bool halo, bool clicks);
+    void addRecordingHighlights(const QString &clipId,
+                                const QVector<ScreenRecorder::PointerSample> &pointer,
+                                const QVector<ScreenRecorder::KeyPress> &keys, double stopped,
+                                const QVariantMap &highlights);
     void importDropped(const QList<QUrl> &, int track, qint64 frame,
                        std::function<void(const QString &)> placed);
     qint64 m_screenStart = 0;

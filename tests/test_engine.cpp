@@ -5001,7 +5001,17 @@ class EngineTest : public QObject {
         editor.addTitle();
         editor.setClip("duration", 100);
         editor.seek(30);
-        editor.startScreenRecording(0, 15, true, 0);
+        // Wrong highlight settings are refused before anything is recorded.
+        editor.startScreenRecording(0, 15, true, 0, {{"zoom", 5}});
+        QVERIFY(editor.state()["error"].toString().contains("1.25"));
+        editor.startScreenRecording(0, 15, true, 0, {{"keyBackground", "red"}});
+        QVERIFY(editor.state()["error"].toString().contains("#rrggbb"));
+        editor.clearError();
+        QCOMPARE(state()["status"].toString(), QString("idle"));
+        editor.startScreenRecording(0, 15, true, 0,
+                                    {{"keys", true}, {"zoom", 2}, {"keyPosition", "top"},
+                                     {"keySize", "large"}, {"keyBackground", "#f2ffffff"},
+                                     {"keyText", "#14181d"}});
         QCOMPARE(state()["status"].toString(), QString("recording"));
         // Two seconds of video; a first try with Media Foundation that fails starts again.
         QTRY_VERIFY2_WITH_TIMEOUT(state()["seconds"].toDouble() >= 2,
@@ -5057,12 +5067,41 @@ class EngineTest : public QObject {
             // Clicks a second apart: 30 frames on the 30 fps timeline.
             if (clicks.size() > 1)
                 QVERIFY(std::abs(clicks[1].start - clicks[0].start - 30) <= 4);
-            // One undo step takes the highlights away and keeps the video.
+            // Zoomed in to 2× around the clicks, starting and ending at the whole picture.
+            const auto zoom = clip.keyframes.value("scale");
+            QVERIFY2(zoom.size() >= 4, qPrintable(QString::number(zoom.size())));
+            QCOMPARE(zoom.first().value, 1.);
+            QCOMPARE(zoom.last().value, 1.);
+            QVERIFY(std::any_of(zoom.begin(), zoom.end(), [](const Keyframe &k) { return k.value == 2; }));
+            QCOMPARE(clip.keyframes.value("x").size(), zoom.size());
+            for (const auto &k : clip.keyframes.value("x"))
+                QVERIFY(std::abs(k.value) <= 0.5 + 1e-9); // the picture always covers the canvas
+            // Shortcuts as light boxes at the top, above the clicks.
+            QVector<Clip> keys;
+            for (const auto &c : editor.project().clips)
+                if (c.name.startsWith("Keys: "))
+                    keys << c;
+            QVERIFY2(!keys.isEmpty() && keys.size() <= 4, qPrintable(QString::number(keys.size())));
+            for (const auto &k : keys) {
+                QVERIFY(k.text == "Ctrl + C" || k.text == "Ctrl + V");
+                QCOMPARE(k.graphic, QString("rectangle"));
+                QCOMPARE(k.fillColor, QString("#f2ffffff"));
+                QCOMPARE(k.textColor, QString("#14181d"));
+                QCOMPARE(k.fontSize, int(std::lround(0.07 * editor.project().height)));
+                QVERIFY(k.y < -0.3);
+                QCOMPARE(k.x, 0.);
+                QVERIFY(k.graphicWidth > k.graphicHeight);
+                QCOMPARE(k.group, clip.group);
+                QVERIFY(k.track > clicks.first().track);
+                QVERIFY(k.start + k.duration <= clip.start + clip.duration);
+            }
+            // One undo step takes the highlights and the zoom away and keeps the video.
             const int count = editor.project().clips.size();
             editor.undo();
-            QCOMPARE(editor.project().clips.size(), count - 1 - clicks.size());
+            QCOMPARE(editor.project().clips.size(), count - 1 - clicks.size() - keys.size());
             QVERIFY(video());
             QVERIFY(video()->group.isEmpty());
+            QVERIFY(video()->keyframes.value("scale").isEmpty());
         }
         qunsetenv("CUTLERY_SCREEN_SOURCE");
         QFile::remove(path);
