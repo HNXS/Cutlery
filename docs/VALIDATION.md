@@ -1,5 +1,18 @@
 # Validation record
 
+## Windows portable build — 2026-10-12, a following frame shown while recording (0.6 development)
+
+[GitHub Actions run 38291581916](https://github.com/HNXS/Cutlery/actions/runs/38291581916) on commit `651e36170cbb557d4cbdf6cb2cc7d5d299eebf45` passed every step on its first attempt.
+
+What the engine test `screenFollowsPointer` now covers:
+
+- **While recording**, the live frame of a 9:16 recording that follows the mouse:
+  - has the width of a 9:16 frame on the monitor actually captured (1024 × 768 on the runner);
+  - moves left and right only, never up or down;
+  - is reported more than 30 times;
+  - is empty again once the recording stops.
+- **The video afterwards** moves by the same steps, because the shown frame and the video's movement now share one `FollowCamera`.
+
 ## Windows portable build — 2026-10-12, a recording's frame following the mouse (0.6 development)
 
 [GitHub Actions run 38284052702](https://github.com/HNXS/Cutlery/actions/runs/38284052702) on commit `e28eff2d9db41c5321741c321c48e36fee22b92b` passed every step on its first attempt.
