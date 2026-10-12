@@ -5249,9 +5249,30 @@ class EngineTest : public QObject {
                                     {{"follow", true}, {"followSpeed", 10}, {"followAxes", "horizontal"},
                                      {"clicks", false}, {"area", area}});
         QCOMPARE(state()["status"].toString(), QString("recording"));
-        QTRY_VERIFY_WITH_TIMEOUT(state()["seconds"].toDouble() >= 3, 10000);
+        // While recording, the frame shown moves after the pointer: left–right only, as wide as
+        // a 9:16 frame of half the screen's height.
+        QSignalSpy moved(&editor, &Editor::liveFrameChanged);
+        QTRY_VERIFY_WITH_TIMEOUT(!editor.liveFrame().isEmpty(), 3000);
+        const auto recorded = ScreenRecorder::screenArea(0); // the monitor, as captured
+        const double aspect = double(recorded.width()) / recorded.height();
+        QVERIFY(std::abs(editor.liveFrame()["width"].toDouble() - 0.5 * 9 / 16 / aspect) < 0.01);
+        double leftMost = 1, rightMost = 0;
+        QSet<double> tops;
+        QElapsedTimer watch;
+        watch.start();
+        while (state()["seconds"].toDouble() < 3 && watch.elapsed() < 10000) {
+            QTest::qWait(50);
+            const auto f = editor.liveFrame();
+            leftMost = std::min(leftMost, f["x"].toDouble());
+            rightMost = std::max(rightMost, f["x"].toDouble());
+            tops << std::round(f["y"].toDouble() * 1e6);
+        }
+        QVERIFY2(rightMost - leftMost > 0.05, qPrintable(QString("%1 %2").arg(leftMost).arg(rightMost)));
+        QCOMPARE(tops.size(), 1);
+        QVERIFY(moved.count() > 30);
         editor.stopScreenRecording();
         QTRY_COMPARE_WITH_TIMEOUT(state()["status"].toString(), QString("idle"), 20000);
+        QVERIFY(editor.liveFrame().isEmpty());
         const auto path = state()["path"].toString();
         auto video = [&]() -> const Clip * {
             for (const auto &c : editor.project().clips)
