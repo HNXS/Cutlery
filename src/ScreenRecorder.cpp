@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <QWindow>
 #include <string>
+#include <vector>
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -32,24 +33,33 @@ QRect ScreenRecorder::screenArea(int screen) {
         return {};
 #ifdef Q_OS_WIN
     // Windows' own monitor rectangle, in the device pixels the desktop is captured in, also when
-    // screens have different scalings; Qt names a screen after its display device.
-    struct Search {
+    // screens have different scalings; Qt names a screen after its display device. Where the
+    // names do not match (Qt's offscreen platform), the monitor of the same number, the primary
+    // one first.
+    struct Monitor {
         std::wstring device;
-        QRect found;
-    } search{screens[screen]->name().toStdWString(), {}};
+        QRect area;
+        bool primary = false;
+    };
+    std::vector<Monitor> monitors;
     EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR monitor, HDC, LPRECT, LPARAM data) -> BOOL {
-        auto *s = reinterpret_cast<Search *>(data);
         MONITORINFOEXW info{};
         info.cbSize = sizeof(info);
-        if (GetMonitorInfoW(monitor, &info) && s->device == info.szDevice) {
+        if (GetMonitorInfoW(monitor, &info)) {
             const auto &r = info.rcMonitor;
-            s->found = QRect(r.left, r.top, r.right - r.left, r.bottom - r.top);
-            return FALSE;
+            reinterpret_cast<std::vector<Monitor> *>(data)->push_back(
+                {info.szDevice, QRect(r.left, r.top, r.right - r.left, r.bottom - r.top),
+                 (info.dwFlags & MONITORINFOF_PRIMARY) != 0});
         }
         return TRUE;
-    }, reinterpret_cast<LPARAM>(&search));
-    if (search.found.isValid())
-        return search.found;
+    }, reinterpret_cast<LPARAM>(&monitors));
+    std::stable_partition(monitors.begin(), monitors.end(), [](const Monitor &m) { return m.primary; });
+    const auto name = screens[screen]->name().toStdWString();
+    for (const auto &m : monitors)
+        if (m.device == name && m.area.isValid())
+            return m.area;
+    if (size_t(screen) < monitors.size() && monitors[size_t(screen)].area.isValid())
+        return monitors[size_t(screen)].area;
 #endif
     const auto g = screens[screen]->geometry();
     const double ratio = screens[screen]->devicePixelRatio();
