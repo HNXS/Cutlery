@@ -5,7 +5,7 @@
 Projects are saved as schema 11; 0.5 cannot open them.
 
 - **Record the screen:** "▣ Screen" under the player records a screen without sound (e.g. a tutorial to voice later) after a 3-second countdown; a small Stop bar stays on top, and the video lands at the playhead.
-- **Find people:** Find people (AI) in the media library groups the faces in your videos and pictures into people; click one to see their media, name them to find them by name in the search, in this and other projects.
+- **Find people:** Find people (AI) in the media library groups the faces in your videos and pictures into people; click one to see their media, name them to find them by name in the search, in this and other projects, mark where they appear on the timeline or cut all their scenes together on a new track.
 - **Remove an object:** Video › Enhance › Remove an object (AI): draw around a logo, sign or anything else, let the area follow it if it moves ("Follow it"), and the AI pack's LaMa model paints it over from its surroundings in every frame.
 - **Dub captions:** Captions › Dub captions (AI) speaks every caption in its time with a German or English voice from the AI pack, after translating them if wished, speeds lines up to 1.5× so they end before the next caption, and turns the original sound down while each line is spoken (volume keyframes), mutes it or keeps only its music. The AI pack adds an English Piper voice (LJSpeech).
 - **Smaller additions:** "Read all captions aloud" (Audio › Text to speech) turns captions into speech at their times, e.g. a German voice-over after translating them; a sensitivity slider for "Split at scene changes"; editing proxies can be 720 lines high (Preferences → Proxy size).

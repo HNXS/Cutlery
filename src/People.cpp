@@ -29,6 +29,24 @@ QVector<Face> parsePeople(const QString &text, const QString &assetId, double of
     }
     return faces;
 }
+QVector<Appearance> appearances(const QVector<Face> &faces, const Person &person, double step,
+                                double gap, double pad) {
+    QVector<Appearance> out;
+    for (const auto &assetId : person.media) {
+        QVector<double> times;
+        for (const int i : person.faces)
+            if (faces[i].assetId == assetId)
+                times << faces[i].time;
+        std::sort(times.begin(), times.end());
+        for (qsizetype i = 0; i < times.size(); ++i) {
+            if (i == 0 || times[i] - times[i - 1] >= gap)
+                out.push_back({assetId, std::max(0., times[i] - pad), times[i] + step + pad});
+            else
+                out.last().to = times[i] + step + pad;
+        }
+    }
+    return out;
+}
 double similarity(const QVector<float> &a, const QVector<float> &b) {
     if (a.size() != b.size() || a.isEmpty())
         return -1;

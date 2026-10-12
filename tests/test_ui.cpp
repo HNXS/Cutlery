@@ -1494,6 +1494,20 @@ class UiTest : public QObject {
         // Found by the search.
         findItem(window->contentItem(), "librarySearch")->setProperty("text", "anna");
         QTRY_COMPARE(list->property("count").toInt(), 1);
+        // Her scenes cut together on a new track, then marked there.
+        const auto person = editor.state()["people"].toMap()["people"].toList()[0];
+        QVERIFY(QMetaObject::invokeMethod(dialog, "ask", Q_ARG(QVariant, person)));
+        auto *cut = findItem(window->contentItem(), "personCut");
+        QTRY_VERIFY(cut && cut->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(cut, "clicked"));
+        QCOMPARE(editor.project().clips.size(), 1);
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "ask", Q_ARG(QVariant, person)));
+        auto *mark = findItem(window->contentItem(), "personMark");
+        QTRY_VERIFY(mark && mark->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(mark, "clicked"));
+        QCOMPARE(editor.project().markers.size(), 1);
+        QCOMPARE(editor.project().markers[0].name, QString("Anna"));
         QFile::remove(data + "/people.json");
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }

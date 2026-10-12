@@ -5136,6 +5136,108 @@ class EngineTest : public QObject {
         QVERIFY(editor.state()["error"].toString().contains("No such person"));
         QFile::remove(data + "/people.json");
     }
+    void personScenes() {
+        // Where someone is seen: faces less than 1.5 s apart make one stretch, widened by half a
+        // second before and half a second plus the analysis step after.
+        auto face = [](const QString &asset, double time) {
+            Face f;
+            f.assetId = asset;
+            f.time = time;
+            return f;
+        };
+        const QVector<Face> faces{face("a", 1), face("a", 1.5), face("a", 2), face("a", 6), face("b", 0)};
+        Person person;
+        person.faces = {0, 1, 2, 3, 4};
+        person.media = {"a", "b"};
+        const auto seen = appearances(faces, person, 0.5);
+        QCOMPARE(seen.size(), 3);
+        QCOMPARE(seen[0].from, 0.5);
+        QCOMPARE(seen[0].to, 3.);
+        QCOMPARE(seen[1].from, 5.5);
+        QCOMPARE(seen[1].to, 7.);
+        QCOMPARE(seen[2].assetId, QString("b"));
+        QCOMPARE(seen[2].from, 0.);
+
+        // In the editor, with results in the AI cache: a 10 s video and a picture.
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        const auto data = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        QFile::remove(data + "/people.json");
+        QTemporaryDir dir;
+        const auto video = dir.filePath("long.mkv"), picture = dir.filePath("photo.png");
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "testsrc=s=320x180:r=25:d=10", "-c:v", "ffv1", video});
+        run(ffmpeg, {"-v", "error", "-f", "lavfi", "-i", "testsrc=s=200x200:r=1:d=1", "-frames:v", "1", picture});
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 25, 1);
+        editor.importMedia({QUrl::fromLocalFile(video), QUrl::fromLocalFile(picture)});
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().assets.size() == 2, 15000);
+        const auto &assets = editor.project().assets;
+        const auto videoId = assets[0].kind == "video" ? assets[0].id : assets[1].id,
+                   pictureId = assets[0].kind == "video" ? assets[1].id : assets[0].id;
+        QStringList descriptor;
+        for (int i = 0; i < 128; ++i)
+            descriptor << (i == 0 ? "1" : "0");
+        auto line = [&](double time) { return QString("%1 0.5 0.5 0.2 0.3 0.9 ").arg(time) + descriptor.join(' '); };
+        auto store = [&](const QString &assetId, const QStringList &lines, double end) {
+            const auto base = data + "/ai/" + MediaAnalysis::fingerprint(*editor.project().asset(assetId)) + "-people-v1";
+            QDir().mkpath(data + "/ai");
+            QFile t(base + ".txt"), j(base + ".json");
+            QVERIFY(t.open(QIODevice::WriteOnly) && j.open(QIODevice::WriteOnly));
+            t.write(lines.join('\n').toUtf8());
+            j.write(QString(R"({"start": 0, "end": %1, "rate": 2})").arg(end).toUtf8());
+        };
+        store(videoId, {line(1), line(1.5), line(2), line(6), line(6.5)}, 10);
+        store(pictureId, {line(0)}, 1);
+        QTest::qWait(2100); // the people are worked out again every two seconds
+        const auto people = editor.state()["people"].toMap()["people"].toList();
+        QCOMPARE(people.size(), 1);
+        const auto id = people[0].toMap()["id"].toString();
+        editor.markPerson(id);
+        QVERIFY(editor.state()["error"].toString().contains("not seen in any clip"));
+        editor.clearError();
+        // The whole video on the timeline: markers where she comes into view, 0.5 s and 5.5 s.
+        editor.addAsset(videoId);
+        editor.markPerson(id);
+        QCOMPARE(editor.project().markers.size(), 2);
+        QCOMPARE(editor.project().markers[0].frame, qint64(13));
+        QCOMPARE(editor.project().markers[0].name, QString("Person"));
+        QCOMPARE(editor.project().markers[1].frame, qint64(138));
+        editor.undo();
+        QVERIFY(editor.project().markers.isEmpty());
+        // Trimmed to start at 3.5 s: only the second stretch, 2 s into the clip.
+        editor.select(editor.project().clips.first().id);
+        editor.setClipValues({{"sourceIn", 3.5}, {"duration", 100}});
+        QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+        editor.markPerson(id);
+        QCOMPARE(editor.project().markers.size(), 1);
+        QCOMPARE(editor.project().markers[0].frame, qint64(50));
+        editor.undo();
+        editor.undo();
+        // A rough cut of her scenes on a new track from the playhead: two stretches of the video
+        // and the picture for two seconds, in one undo step.
+        const int tracks = editor.project().tracks;
+        editor.seek(25);
+        editor.cutPerson(id);
+        QCOMPARE(editor.project().tracks, tracks + 1);
+        QVector<Clip> cut;
+        for (const auto &c : editor.project().clips)
+            if (c.track == tracks)
+                cut << c;
+        std::sort(cut.begin(), cut.end(), [](const Clip &a, const Clip &b) { return a.start < b.start; });
+        QCOMPARE(cut.size(), 3);
+        QCOMPARE(cut[0].start, qint64(25));
+        QCOMPARE(cut[0].sourceIn.seconds(), 0.5);
+        QCOMPARE(cut[0].duration, qint64(63));
+        QCOMPARE(cut[1].start, qint64(88));
+        QCOMPARE(cut[1].sourceIn.seconds(), 5.5);
+        QCOMPARE(cut[1].duration, qint64(50)); // 5.5 s to 7.5 s
+        QCOMPARE(cut[2].assetId, pictureId);
+        QCOMPARE(cut[2].duration, qint64(50));
+        editor.undo();
+        QCOMPARE(editor.project().tracks, tracks);
+        editor.cutPerson("p9");
+        QVERIFY(editor.state()["error"].toString().contains("No such person"));
+    }
     void peopleWithRealModels() {
 #if defined(CUTLERY_AI_WORKER) && defined(CUTLERY_TEST_MODELS)
         const QString models = CUTLERY_TEST_MODELS;

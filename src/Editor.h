@@ -160,6 +160,12 @@ class Editor final : public QObject {
     // given another name is renamed (or joined with a person of that name); an empty name
     // forgets a named person.
     Q_INVOKABLE void namePerson(const QString &id, const QString &name);
+    // Timeline markers (named after the person) where a person comes into view in the clips on
+    // the timeline, one undo step.
+    Q_INVOKABLE void markPerson(const QString &id);
+    // Every stretch a person is seen in, from all media, one after another on a new track from
+    // the playhead (pictures for two seconds), one undo step: a rough cut of their scenes.
+    Q_INVOKABLE void cutPerson(const QString &id);
     Q_INVOKABLE void setImportFolder(const QString &folder);
     // Takes media no clip uses out of the library (the files stay on disk).
     Q_INVOKABLE void removeAssets(const QStringList &assetIds);
