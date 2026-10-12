@@ -1213,6 +1213,52 @@ class EngineTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(!reused.busy(), 5000);
         QCOMPARE(reused.strip("missing")["status"].toString(), QString("unavailable"));
     }
+    void manyKeyframes() {
+        // A shape following a recorded mouse pointer has hundreds of position keyframes. FFmpeg
+        // refuses expressions nested more than about a hundred deep, so they must not chain.
+        const auto ffmpeg = Editor::executable("ffmpeg");
+        QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
+        QTemporaryDir dir;
+        Project p;
+        p.width = 160;
+        p.height = 90;
+        Clip c;
+        c.id = "dot";
+        c.graphic = "ellipse";
+        c.fillColor = "#ff0000";
+        c.graphicWidth = 0.15;
+        c.graphicHeight = 0.25;
+        c.duration = 400;
+        // Left on even frames, right on odd ones, with the last 100 frames held right.
+        for (qint64 f = 0; f < 300; ++f)
+            c.keyframes["x"] << Keyframe{f, f % 2 ? 0.3 : -0.3, false, "linear"};
+        p.clips = {c};
+        QCOMPARE(p.clips[0].valueAt("x", 150), -0.3);
+        QCOMPARE(p.clips[0].valueAt("x", 150.5), 0.);
+        auto still = [&](qint64 frame) {
+            RenderOptions options;
+            options.audio = false;
+            options.from = frame;
+            options.to = frame + 1;
+            const auto plan = compileRender(p, dir.filePath("work"), 160, 90, options);
+            QFile g(dir.filePath("graph.txt"));
+            if (!g.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                throw std::runtime_error("Cannot write graph");
+            g.write(plan.graph.toUtf8());
+            g.close();
+            QImage image;
+            image.loadFromData(run(ffmpeg, renderArguments(plan, g.fileName(), {}, "", 0)), "PNG");
+            return image.convertToFormat(QImage::Format_RGB32);
+        };
+        auto red = [](const QColor &x) { return x.red() > 180 && x.green() < 80; };
+        for (const auto &[frame, left] : {std::pair{qint64(150), true}, {qint64(151), false},
+                                          {qint64(0), true}, {qint64(350), false}}) {
+            const auto image = still(frame);
+            QVERIFY2(!image.isNull(), qPrintable(QString("frame %1 did not render").arg(frame)));
+            QCOMPARE(red(image.pixelColor(32, 45)), left);
+            QCOMPARE(red(image.pixelColor(128, 45)), !left);
+        }
+    }
     void transitions() {
         const auto ffmpeg = Editor::executable("ffmpeg");
         QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for integration tests");
