@@ -1410,7 +1410,8 @@ static QVariantMap checkedPreferences(const QVariantMap &base, const QVariantMap
     QVariantMap screen;
     static const QStringList screenKeys{"fps", "cursor", "minimise", "halo", "clicks", "keys",
                                         "zoom", "zoomLevel", "keyPosition", "keySize",
-                                        "keyStyle", "keyBackground", "keyText", "keyFont"};
+                                        "keyStyle", "keyBackground", "keyText", "keyFont",
+                                        "format", "setProject"};
     const auto storedScreen = p["screenRecording"].toMap();
     for (const auto &key : screenKeys)
         if (const auto value = storedScreen.value(key);
@@ -3361,6 +3362,15 @@ void Editor::setKeyframeEasing(const QString &property, const QString &easing) {
         throw std::runtime_error("No keyframe at the playhead");
     });
 }
+// The static value a property keeps once its keyframes are gone.
+static void setStatic(Clip &c, const QString &property, double value) {
+    static const QHash<QString, double Clip::*> fields{
+        {"scale", &Clip::scale}, {"x", &Clip::x},         {"y", &Clip::y},
+        {"rotation", &Clip::rotation}, {"opacity", &Clip::opacity}, {"pan", &Clip::pan},
+        {"volume", &Clip::volume}, {"maskX", &Clip::maskX}, {"maskY", &Clip::maskY}};
+    if (const auto field = fields.value(property))
+        c.*field = value;
+}
 void Editor::toggleKeyframe(const QString &property) {
     mutate([&](Project &p) {
         auto *c = p.clip(m_selected);
@@ -3381,24 +3391,61 @@ void Editor::toggleKeyframe(const QString &property) {
             list.erase(it);
             if (list.isEmpty()) {
                 c->keyframes.remove(property);
-                if (property == "scale")
-                    c->scale = value;
-                else if (property == "x")
-                    c->x = value;
-                else if (property == "y")
-                    c->y = value;
-                else if (property == "rotation")
-                    c->rotation = value;
-                else if (property == "opacity")
-                    c->opacity = value;
-                else if (property == "pan")
-                    c->pan = value;
-                else
-                    c->volume = value;
+                setStatic(*c, property, value);
             }
         } else
             list.insert(it, {frame, c->valueAt(property, frame), true});
     });
+}
+void Editor::removeKeyframesAt(const QString &clipId, qint64 frame) {
+    int removed = 0;
+    if (!mutate([&](Project &p) {
+            auto *c = p.clip(clipId);
+            if (!c)
+                throw std::runtime_error("The clip no longer exists");
+            p.requireEditable(c->track);
+            for (const auto &property : c->keyframes.keys()) {
+                auto &list = c->keyframes[property];
+                const auto value = c->valueAt(property, frame);
+                const auto before = list.size();
+                list.erase(std::remove_if(list.begin(), list.end(),
+                                          [&](const Keyframe &k) { return k.frame == frame; }),
+                           list.end());
+                removed += before - list.size();
+                if (list.isEmpty()) {
+                    c->keyframes.remove(property);
+                    setStatic(*c, property, value);
+                }
+            }
+            if (!removed)
+                throw std::runtime_error("There is no keyframe there");
+        }))
+        return;
+    m_status = QString("%1 keyframe%2 removed").arg(removed).arg(removed == 1 ? "" : "s");
+    emit changed();
+}
+void Editor::clearKeyframes(const QString &clipId, const QString &property) {
+    int removed = 0;
+    if (!mutate([&](Project &p) {
+            auto *c = p.clip(clipId);
+            if (!c)
+                throw std::runtime_error("The clip no longer exists");
+            p.requireEditable(c->track);
+            const qint64 at = std::clamp<qint64>(m_playhead - c->start, 0, std::max<qint64>(0, c->duration - 1));
+            for (const auto &key : c->keyframes.keys()) {
+                if (!property.isEmpty() && key != property)
+                    continue;
+                const auto value = c->valueAt(key, at);
+                removed += c->keyframes.value(key).size();
+                c->keyframes.remove(key);
+                setStatic(*c, key, value);
+            }
+            if (!removed)
+                throw std::runtime_error("There are no keyframes to remove");
+        }))
+        return;
+    m_status = QString("%1 keyframe%2 removed").arg(removed).arg(removed == 1 ? "" : "s");
+    emit changed();
 }
 qint64 Editor::adjacentKeyframe(bool forward) const {
     const auto *c = m_project.clip(m_selected);
@@ -3637,6 +3684,20 @@ void Editor::startScreenRecording(int screen, int fps, bool cursor, int countdow
         ScreenHighlights{highlights};
     } catch (const std::exception &e) {
         return fail(e.what());
+    }
+    // Only a part of the screen, e.g. a 9:16 frame: fractions of the screen, in even pixels.
+    if (const auto part = highlights.value("area").toMap(); !part.isEmpty()) {
+        const double fx = part.value("x").toDouble(), fy = part.value("y").toDouble(),
+                     fw = part.value("width").toDouble(), fh = part.value("height").toDouble();
+        if (!(fx >= 0 && fy >= 0 && fw > 0 && fh > 0 && fx + fw <= 1.0001 && fy + fh <= 1.0001))
+            return fail("The recorded part must lie on the screen");
+        const int w = std::min(m_screenArea.width(), int(std::lround(fw * m_screenArea.width()))) / 2 * 2,
+                  h = std::min(m_screenArea.height(), int(std::lround(fh * m_screenArea.height()))) / 2 * 2;
+        if (w < 64 || h < 64)
+            return fail("The recorded part is too small");
+        const int x = std::clamp(int(std::lround(fx * m_screenArea.width())), 0, m_screenArea.width() - w),
+                  y = std::clamp(int(std::lround(fy * m_screenArea.height())), 0, m_screenArea.height() - h);
+        m_screenArea = QRect(m_screenArea.x() + x, m_screenArea.y() + y, w, h);
     }
     m_screenHighlights = highlights;
     m_screenStart = m_playhead;

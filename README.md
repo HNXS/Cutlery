@@ -29,7 +29,7 @@ Open [Actions → Windows portable build](https://github.com/HNXS/Cutlery/action
 - Keyframe animation of scale, position, rotation, opacity and volume. Put the playhead in the clip and click ◇ next to a slider. Once a property has keyframes, moving its slider at another time adds a keyframe there. Keyframes show as yellow diamonds on the clip; click one to jump there, or use ◀◆ / ◆▶.
 - Presenter overlays for picture-in-picture, e.g. a speaker over a screen recording:
   - ↖ ↗ ↙ ↘ place the clip in a corner at 30 % size; ⛶ returns it to full frame.
-  - Drag the turquoise frame in the preview to move the clip; drag a corner to resize.
+  - Drag the turquoise frame in the preview to move the clip; drag a corner to resize. Near the canvas edges and centre it snaps into place (moving) or to the edges (resizing), shown by pink lines; hold Alt to place it freely.
   - Shapes: rectangle, rounded corners or circle, with a coloured border and soft shadow.
   - Green/blue screen removal with automatic spill suppression.
   - Offline AI background removal for speakers without a green screen.

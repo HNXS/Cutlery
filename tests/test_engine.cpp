@@ -1412,6 +1412,56 @@ class EngineTest : public QObject {
                      qPrintable(QString("%1 s: %2 vs %3").arg(t).arg(level).arg(steady)));
         }
     }
+    void removingKeyframes() {
+        // Keyframes go one moment at a time (every property there) or all at once; what is
+        // left keeps the value at the playhead, and each is one undo step.
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(320, 180, 30, 1);
+        editor.addTitle();
+        const auto id = editor.project().clips.first().id;
+        editor.select(id);
+        editor.seek(0);
+        editor.toggleKeyframe("x");
+        editor.toggleKeyframe("scale");
+        editor.seek(30);
+        editor.setClip("x", 0.4);
+        editor.setClip("scale", 2);
+        editor.seek(60);
+        editor.setClip("x", -0.2);
+        editor.toggleKeyframe("maskX"); // a mask offset keyframe, kept as an offset (not volume)
+        auto clip = [&] { return *editor.project().clip(id); };
+        QCOMPARE(clip().keyframes.value("x").size(), 3);
+        QCOMPARE(clip().keyframes.value("scale").size(), 2);
+        // The moment at frame 30: x and scale lose a keyframe each.
+        editor.removeKeyframesAt(id, 30);
+        QCOMPARE(clip().keyframes.value("x").size(), 2);
+        QCOMPARE(clip().keyframes.value("scale").size(), 1);
+        QCOMPARE(clip().valueAt("x", 30), -0.1); // halfway from 0 to -0.2 now
+        editor.undo();
+        QCOMPARE(clip().keyframes.value("x").size(), 3);
+        editor.removeKeyframesAt(id, 31);
+        QVERIFY(editor.state()["error"].toString().contains("no keyframe"));
+        editor.clearError();
+        // All of x, at the playhead (frame 60, value -0.2); scale stays animated.
+        editor.clearKeyframes(id, "x");
+        QVERIFY(!clip().keyframes.contains("x"));
+        QCOMPARE(clip().x, -0.2);
+        QCOMPARE(clip().keyframes.value("scale").size(), 2);
+        // Every property: scale keeps 2, the mask offset 0, and the volume is untouched.
+        editor.clearKeyframes(id);
+        QVERIFY(clip().keyframes.isEmpty());
+        QCOMPARE(clip().scale, 2.);
+        QCOMPARE(clip().maskX, 0.);
+        QCOMPARE(clip().volume, 1.);
+        editor.clearKeyframes(id);
+        QVERIFY(editor.state()["error"].toString().contains("no keyframes"));
+        editor.clearError();
+        editor.undo();
+        editor.undo();
+        QCOMPARE(clip().keyframes.value("x").size(), 3);
+        QCOMPARE(clip().keyframes.value("scale").size(), 2);
+    }
     void keyframes() {
         // Model: interpolation, editing semantics and persistence.
         Clip c;
@@ -5052,6 +5102,10 @@ class EngineTest : public QObject {
         QVERIFY(editor.state()["error"].toString().contains("1.25"));
         editor.startScreenRecording(0, 15, true, 0, {{"keyBackground", "red"}});
         QVERIFY(editor.state()["error"].toString().contains("#rrggbb"));
+        editor.startScreenRecording(0, 15, true, 0, {{"area", QVariantMap{{"x", 0.8}, {"y", 0}, {"width", 0.5}, {"height", 0.5}}}});
+        QVERIFY(editor.state()["error"].toString().contains("on the screen"));
+        editor.startScreenRecording(0, 15, true, 0, {{"area", QVariantMap{{"x", 0}, {"y", 0}, {"width", 0.01}, {"height", 0.01}}}});
+        QVERIFY(editor.state()["error"].toString().contains("too small"));
         editor.clearError();
         QCOMPARE(state()["status"].toString(), QString("idle"));
         editor.startScreenRecording(0, 15, true, 0,

@@ -968,10 +968,12 @@ FocusScope {
                                     // A nested sequence opens; other clips move the playhead to their start.
                                     onDoubleClicked: clipRect.modelData.nested ? editor.openNested(clipRect.modelData.id) : root.seekRequested(clipRect.modelData.start)
                                 }
-                                // Keyframes: click to jump the playhead there.
+                                // Keyframes: click to jump the playhead there; right-click
+                                // (or double-click) to remove them.
                                 Repeater {
                                     model: clipRect.modelData.keyframes
                                     Rectangle {
+                                        id: keyMark
                                         required property var modelData
                                         objectName: "keyframe-" + clipRect.modelData.id + "-" + modelData
                                         x: (modelData - (clipRect.shownStart - clipRect.modelData.start)) / root.state.fps * root.pixelsPerSecond - width / 2
@@ -986,10 +988,35 @@ FocusScope {
                                             anchors.fill: parent
                                             anchors.margins: -3
                                             cursorShape: Qt.PointingHandCursor
-                                            onClicked: {
+                                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                            hoverEnabled: true
+                                            ToolTip.visible: containsMouse
+                                            ToolTip.delay: 500
+                                            ToolTip.text: "Keyframe: click to go there, double-click or right-click to remove"
+                                            onClicked: function (mouse) {
                                                 root.forceActiveFocus();
                                                 editor.select(clipRect.modelData.id);
-                                                root.seekRequested(clipRect.modelData.start + parent.modelData);
+                                                root.seekRequested(clipRect.modelData.start + keyMark.modelData);
+                                                if (mouse.button === Qt.RightButton)
+                                                    keyMenu.popup();
+                                            }
+                                            onDoubleClicked: function (mouse) {
+                                                if (mouse.button === Qt.LeftButton)
+                                                    editor.removeKeyframesAt(clipRect.modelData.id, keyMark.modelData);
+                                            }
+                                        }
+                                        Menu {
+                                            id: keyMenu
+                                            objectName: "keyframeMenu-" + clipRect.modelData.id + "-" + keyMark.modelData
+                                            MenuItem {
+                                                objectName: "removeKeyframe"
+                                                text: "Remove this keyframe"
+                                                onTriggered: editor.removeKeyframesAt(clipRect.modelData.id, keyMark.modelData)
+                                            }
+                                            MenuItem {
+                                                objectName: "removeAllKeyframes"
+                                                text: "Remove all keyframes of this clip"
+                                                onTriggered: editor.clearKeyframes(clipRect.modelData.id)
                                             }
                                         }
                                     }

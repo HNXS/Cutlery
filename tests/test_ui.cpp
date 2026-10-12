@@ -487,6 +487,26 @@ class UiTest : public QObject {
         press(diamond);
         QTRY_VERIFY(!editor.project().clips.first().keyframes.contains("scale"));
         QCOMPARE(editor.project().clips.first().scale, .5);
+        // A double-click on a diamond on the clip removes that keyframe; ✕ removes all of a value.
+        editor.seek(0);
+        press(diamond);
+        editor.seek(30);
+        editor.setClip("scale", .8);
+        editor.seek(60);
+        editor.setClip("scale", .6);
+        QTRY_VERIFY(findItem(window->contentItem(), "keyframe-" + id + "-30"));
+        auto *mark = findItem(window->contentItem(), "keyframe-" + id + "-30");
+        const auto at = mark->mapToScene(QPointF(mark->width() / 2, mark->height() / 2)).toPoint();
+        QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, at);
+        QTRY_COMPARE(editor.project().clips.first().keyframes["scale"].size(), 2);
+        auto *clear = findItem(window->contentItem(), "clearKeyframes-scale");
+        QTRY_VERIFY(clear && clear->isVisible());
+        QCOMPARE(editor.state()["playhead"].toLongLong(), qint64(30)); // the click went there
+        editor.seek(60);
+        press(clear);
+        QTRY_VERIFY(!editor.project().clips.first().keyframes.contains("scale"));
+        QCOMPARE(editor.project().clips.first().scale, .6); // the value at the playhead
+        QTRY_VERIFY(!clear->isVisible());
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
     }
     void libraryFoldersAndSearch() {
@@ -1520,6 +1540,7 @@ class UiTest : public QObject {
         auto *frames = new FrameProvider;
         Editor editor(frames);
         editor.configure(640, 360, 30, 1);
+        editor.setPreferences({{"screenRecording", QVariantMap{}}}); // the dialog's defaults
         KeyboardShortcuts keys(dir.filePath("keys.json"));
         QQmlApplicationEngine engine;
         engine.addImageProvider("frames", frames);
@@ -1590,7 +1611,48 @@ class UiTest : public QObject {
         QVERIFY(findItem(window->contentItem(), "screenKeys")->property("checked").toBool());
         QVERIFY(!findItem(window->contentItem(), "screenHalo")->property("checked").toBool());
         QCOMPARE(findItem(window->contentItem(), "screenKeyPosition")->property("currentIndex").toInt(), 2);
-        QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
+        // A 9:16 frame: placed on the screen first, then only it is recorded, and the project
+        // takes the format.
+        auto *format = findItem(window->contentItem(), "screenFormat");
+        format->setProperty("currentIndex", 2);
+        QTRY_VERIFY(findItem(window->contentItem(), "screenSetProject")->isVisible());
+        findItem(window->contentItem(), "screenKeys")->setProperty("checked", false);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
+        QQuickWindow *picker = nullptr;
+        for (auto *o : engine.rootObjects().first()->findChildren<QQuickWindow *>())
+            if (o->objectName() == "framePicker")
+                picker = o;
+        QVERIFY(picker);
+        QTRY_VERIFY(picker->isVisible());
+        auto *frame = findItem(picker->contentItem(), "pickedFrame");
+        QVERIFY(frame);
+        QVERIFY2(std::abs((frame->width() - 6) / (frame->height() - 6) - 9. / 16) < 0.01,
+                 qPrintable(QString("%1 x %2").arg(frame->width()).arg(frame->height())));
+        const int before = editor.project().clips.size();
+        QVERIFY(QMetaObject::invokeMethod(findItem(picker->contentItem(), "pickedFrameRecord"), "clicked"));
+        QTRY_VERIFY(!picker->isVisible());
+        QCOMPARE(editor.project().width, 1080);
+        QCOMPARE(editor.project().height, 1920);
+        QTRY_VERIFY_WITH_TIMEOUT(time->property("text").toString().startsWith("●"), 5000);
+        QTest::qWait(1200);
+        QVERIFY(QMetaObject::invokeMethod(findItem(bar->contentItem(), "recordingStop"), "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(!bar->isVisible(), 20000);
+        auto videos = [&] {
+            int n = 0;
+            for (const auto &c : editor.project().clips)
+                if (const auto *a = editor.project().asset(c.assetId); a && a->kind == "video")
+                    ++n;
+            return n;
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(editor.project().clips.size() > before && videos() == 2, 15000);
+        const Asset *tall = nullptr;
+        for (const auto &c : editor.project().clips)
+            if (const auto *a = editor.project().asset(c.assetId); a && a->kind == "video" && a->path.contains("screen-"))
+                tall = a;
+        QVERIFY(tall);
+        QVERIFY2(std::abs(double(tall->width) / tall->height - 9. / 16) < 0.02,
+                 qPrintable(QString("%1 x %2").arg(tall->width).arg(tall->height)));
+        QFile::remove(editor.state()["screenRecording"].toMap()["path"].toString());
         editor.setPreferences({{"screenRecording", QVariantMap{}}});
         qunsetenv("CUTLERY_SCREEN_SOURCE");
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));
@@ -1663,6 +1725,47 @@ class UiTest : public QObject {
         QTRY_VERIFY2(clip().scale > .4 && clip().scale < .5, qPrintable(QString::number(clip().scale)));
         editor.undo();
         QCOMPARE(clip().scale, .3);
+        // Near the left edge the box snaps to it, with a pink guide while dragging; Alt drags
+        // freely.
+        {
+            const auto from = move->mapToScene(QPointF(move->width() / 2, move->height() / 2)).toPoint();
+            const double left = (0.5 + clip().x - 0.15) * canvasWidth; // pixels from the canvas edge
+            const auto to = from - QPoint(int(left) - 4, 0);
+            QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, from);
+            QTest::mouseMove(window, from - QPoint(10, 0), 20);
+            QTest::mouseMove(window, to, 20);
+            QTRY_COMPARE(box->property("guidesX").toList().size(), 1);
+            QCOMPARE(box->property("guidesX").toList().first().toDouble(), 0.);
+            QVERIFY(findItem(window->contentItem(), "snapGuideX"));
+            QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, to);
+            QTRY_VERIFY2(std::abs(clip().x - (-0.35)) < 1e-6, qPrintable(QString::number(clip().x)));
+            QVERIFY(box->property("guidesX").toList().isEmpty());
+            editor.undo();
+            const auto again = move->mapToScene(QPointF(move->width() / 2, move->height() / 2)).toPoint();
+            const auto free = again - QPoint(int(left) - 4, 0);
+            QTest::mousePress(window, Qt::LeftButton, Qt::AltModifier, again);
+            QTest::mouseMove(window, again - QPoint(10, 0), 20);
+            QTest::mouseMove(window, free, 20);
+            QTest::mouseRelease(window, Qt::LeftButton, Qt::AltModifier, free);
+            QTRY_VERIFY(std::abs(clip().x - movedX) > 0.1);
+            QVERIFY2(std::abs(clip().x - (-0.35)) > 1e-3, qPrintable(QString::number(clip().x)));
+            editor.undo();
+            // Resized close to the canvas edges, it snaps to fill the width exactly.
+            editor.setClipValues({{"x", 0}, {"y", 0}, {"scale", 0.5}});
+            QTRY_VERIFY(std::abs(box->property("bounds").toMap()["width"].toDouble() - 0.5) < 1e-6);
+            QTest::qWait(50);
+            const auto c3 = corner->mapToScene(QPointF(corner->width() / 2, corner->height() / 2));
+            const auto mid = box->mapToScene(QPointF(box->width() / 2, box->height() / 2));
+            const auto near = (mid + (c3 - mid) * 1.97).toPoint();
+            QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, c3.toPoint());
+            QTest::mouseMove(window, c3.toPoint() + QPoint(3, 3), 20);
+            QTest::mouseMove(window, near, 20);
+            QTRY_VERIFY(!box->property("guidesX").toList().isEmpty());
+            QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, near);
+            QTRY_VERIFY2(std::abs(clip().scale - 1.0) < 1e-6, qPrintable(QString::number(clip().scale)));
+            editor.undo();
+            editor.undo();
+        }
         // Style controls.
         auto *shape = findItem(window->contentItem(), "overlayShape");
         QVERIFY(shape);
