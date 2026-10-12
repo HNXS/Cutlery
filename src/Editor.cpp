@@ -238,6 +238,7 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
     m_screenCountdown->setInterval(1000);
     connect(m_screenCountdown, &QTimer::timeout, this, &Editor::screenCountdownTick);
     connect(m_screen, &ScreenRecorder::changed, this, &Editor::changed);
+    connect(m_screen, &ScreenRecorder::liveFrameChanged, this, &Editor::liveFrameChanged);
     connect(m_screen, &ScreenRecorder::finished, this, [this](const QString &path, const QString &error) {
         if (!error.isEmpty()) {
             m_screenRecording = {{"status", "failed"}, {"error", error}};
@@ -3647,6 +3648,16 @@ void Editor::screenCountdownTick() {
     const auto file = m_data + "/recordings/screen-" +
                       QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss") + ".mkv";
     m_screen->setKeyCapture(m_screenHighlights.value("keys").toBool());
+    {
+        // A frame following the mouse is shown moving while recording.
+        const auto area = m_screenHighlights.value("area").toMap();
+        const bool follow = m_screenHighlights.value("follow").toBool();
+        m_screen->setFollow(follow ? QRectF(area.value("x").toDouble(), area.value("y").toDouble(),
+                                            area.value("width").toDouble(), area.value("height").toDouble())
+                                   : QRectF(),
+                            area.value("ratio").toDouble(), m_screenHighlights.value("followSpeed", 4).toDouble(),
+                            m_screenHighlights.value("followAxes", "both").toString());
+    }
     if (!m_screen->start(m_screenArea, m_screenFps, m_screenCursor, file)) {
         m_screenRecording = {{"status", "failed"}, {"error", m_screen->error()}};
         return fail(m_screen->error());
@@ -3749,6 +3760,12 @@ void Editor::stopScreenRecording() {
     m_screenRecording = {{"status", "saving"}, {"seconds", m_screen->seconds()}};
     m_screen->stop();
     emit changed();
+}
+QVariantMap Editor::liveFrame() const {
+    const auto f = m_screen->liveFrame();
+    if (f.isEmpty())
+        return {};
+    return {{"x", f.x()}, {"y", f.y()}, {"width", f.width()}, {"height", f.height()}};
 }
 void Editor::hideFromCapture(QObject *window) {
     ScreenRecorder::hideFromCapture(qobject_cast<QWindow *>(window));
@@ -4893,18 +4910,16 @@ bool applyCamera(Project &p, Clip &video, const QVector<PointerPoint> &points, c
     // the chosen axes; zoom on clicks moves in on the clicked point from there.
     const double base = 1 / (fh * ey), zoomMax = std::max(1., s.zoom);
     const double hw = fw / 2, hh = fh / 2;
-    double cu = s.frame.value("x").toDouble() + s.frame.value("width").toDouble() / 2,
-           cv = s.frame.value("y").toDouble() + s.frame.value("height").toDouble() / 2;
-    const bool alongX = s.speed > 0 && s.axes != "vertical", alongY = s.speed > 0 && s.axes != "horizontal";
-    const double rate = 0.45 * s.speed; // per second
+    FollowCamera cam; // the same steps as the frame shown while recording
+    cam.calm = s.deadZone;
+    cam.setUp(s.frame.value("x").toDouble() + s.frame.value("width").toDouble() / 2,
+              s.frame.value("y").toDouble() + s.frame.value("height").toDouble() / 2, fh, ratio,
+              aspect, s.speed, s.axes);
     QVector<qint64> frames;
     QVector<double> xs, ys, scales;
     qint64 previous = -1;
-    auto follow = [&](double c, double pointer, double half) {
-        const double calm = s.deadZone * half;
-        return pointer > c + calm ? pointer - calm : pointer < c - calm ? pointer + calm : c;
-    };
     auto place = [&](qint64 local) {
+        const double cu = cam.u, cv = cam.v;
         const double z = zooms ? plan.valueAt("z", local) : 1;
         const double weight = zoomMax > 1 ? std::clamp((z - 1) / (zoomMax - 1), 0., 1.) : 0;
         double u = cu, v = cv;
@@ -4921,21 +4936,14 @@ bool applyCamera(Project &p, Clip &video, const QVector<PointerPoint> &points, c
         ys << -(v - 0.5) * ey * scale;
         scales << scale;
     };
-    cu = std::clamp(cu, hw, 1 - hw);
-    cv = std::clamp(cv, hh, 1 - hh);
     if (points.isEmpty() || points.first().frame > video.start)
         place(0);
     for (const auto &pt : points) {
         const qint64 local = pt.frame - video.start;
         if (local < 0 || local >= video.duration || local <= (frames.isEmpty() ? -1 : frames.last()))
             continue;
-        const double dt = previous < 0 ? 0 : (local - previous) / fps;
+        cam.step(pt.u, pt.v, previous < 0 ? 0 : (local - previous) / fps);
         previous = local;
-        const double ease = 1 - std::exp(-rate * dt);
-        if (alongX)
-            cu = std::clamp(cu + (follow(cu, pt.u, hw) - cu) * ease, hw, 1 - hw);
-        if (alongY)
-            cv = std::clamp(cv + (follow(cv, pt.v, hh) - cv) * ease, hh, 1 - hh);
         place(local);
     }
     if (frames.size() == 1) {

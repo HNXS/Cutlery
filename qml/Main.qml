@@ -7432,8 +7432,9 @@ ApplicationWindow {
                 highlights.followAxes = ["both", "horizontal", "vertical"][c.followAxes];
             }
             editor.startScreenRecording(screens[screenChoice.currentIndex].index, screenFps.currentIndex === 1 ? 60 : screenFps.currentIndex === 2 ? 15 : 30, screenCursor.checked, 3, highlights);
-            // A frame that follows the mouse is cut out afterwards; nothing to outline then.
-            frameStrips.area = follows ? null : (area || null);
+            // A frame that follows the mouse is outlined where it is now while recording.
+            frameStrips.area = area || null;
+            frameStrips.follows = follows;
             if (screenHide.checked)
                 win.showMinimized();
         }
@@ -7881,9 +7882,14 @@ ApplicationWindow {
     // outside what is recorded and passing clicks through.
     Item {
         id: frameStrips
-        property var area: null
+        objectName: "frameStrips"
+        property var placed: null
+        property alias area: frameStrips.placed
+        property bool follows: false
+        // Where the frame is: placed, or while a following frame is recorded, where it is now.
+        readonly property var shown: follows && (editor.liveFrame.width || 0) > 0 ? editor.liveFrame : placed
         readonly property var info: win.s.screenRecording || ({})
-        readonly property bool active: area !== null && (info.status === "countdown" || info.status === "recording")
+        readonly property bool active: shown !== null && (info.status === "countdown" || info.status === "recording")
         readonly property var screen: Qt.application.screens[framePicker.screenIndex] || Qt.application.screens[0]
         Instantiator {
             model: frameStrips.active ? 4 : 0
@@ -7894,7 +7900,7 @@ ApplicationWindow {
                 flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowTransparentForInput | Qt.WindowDoesNotAcceptFocus
                 color: "#66000000"
                 readonly property var s: frameStrips.screen
-                readonly property var a: frameStrips.area
+                readonly property var a: frameStrips.shown
                 readonly property real left: a.x * s.width
                 readonly property real top: a.y * s.height
                 readonly property real right: (a.x + a.width) * s.width

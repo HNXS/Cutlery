@@ -50,6 +50,23 @@ void ScreenRecorder::samplePointer() {
 #endif
     }
     m_pointer << s;
+    if (!m_followFrame.isEmpty()) {
+        m_camera.step(std::clamp(s.x, 0., 1.), std::clamp(s.y, 0., 1.),
+                      m_cameraTime < 0 ? 0 : s.time - m_cameraTime);
+        m_cameraTime = s.time;
+        emit liveFrameChanged();
+    }
+}
+void ScreenRecorder::setFollow(const QRectF &frame, double ratio, double speed, const QString &axes) {
+    m_followFrame = ratio > 0 ? frame : QRectF();
+    m_followRatio = ratio;
+    m_followSpeed = speed;
+    m_followAxes = axes;
+}
+QRectF ScreenRecorder::liveFrame() const {
+    if (m_followFrame.isEmpty() || !m_process)
+        return {};
+    return {m_camera.u - m_camera.hw, m_camera.v - m_camera.hh, 2 * m_camera.hw, 2 * m_camera.hh};
 }
 void ScreenRecorder::sampleKeys(double time) {
     if (!m_captureKeys || m_keys.size() >= 100000)
@@ -287,6 +304,12 @@ void ScreenRecorder::launch() {
     m_keys.clear();
     m_down.clear();
     m_keysPrimed = false;
+    if (!m_followFrame.isEmpty()) {
+        const double aspect = double(m_area.width()) / std::max(1, m_area.height());
+        m_camera.setUp(m_followFrame.center().x(), m_followFrame.center().y(), m_followFrame.height(),
+                       m_followRatio, aspect, m_followSpeed, m_followAxes);
+        m_cameraTime = -1;
+    }
     m_pointerTimer.start();
     samplePointer();
     emit changed();

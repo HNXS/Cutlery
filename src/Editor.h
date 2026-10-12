@@ -386,6 +386,10 @@ class Editor final : public QObject {
     // horizontal|vertical}; the glow and click rings move with the picture. The selected
     // clip's state "pointerCamera" holds the current settings.
     Q_INVOKABLE void followPointer(const QString &clipId, const QVariantMap &settings);
+    // While recording a frame that follows the mouse: where it is now ({x, y, width, height},
+    // fractions of the screen), updated 30 times a second; empty otherwise.
+    Q_PROPERTY(QVariantMap liveFrame READ liveFrame NOTIFY liveFrameChanged)
+    QVariantMap liveFrame() const;
     Q_INVOKABLE void startScreenRecording(int screen, int fps = 30, bool cursor = true,
                                           int countdown = 3, const QVariantMap &highlights = {});
     Q_INVOKABLE void stopScreenRecording();
@@ -583,6 +587,7 @@ class Editor final : public QObject {
         return m_project;
     }
   signals:
+    void liveFrameChanged();
     void changed();
     void projectChanged();
     void analysisChanged();
