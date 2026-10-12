@@ -374,7 +374,8 @@ class Editor final : public QObject {
     // keys: keyboard shortcuts as boxes with their keys (off), keyPosition bottom|bottomLeft|
     // bottomRight|top, keySize small|medium|large, keyBackground, keyText (#rrggbb or
     // #aarrggbb), keyFont, zoom: 1.25–3 to zoom the video in on clicks (0, off), area: {x, y,
-    // width, height} to record only that part of the screen, in fractions of it}. Highlights are
+    // width, height} to record only that part of the screen, in fractions of it, and its exact
+    // width-to-height ratio if it has a format}. Highlights are
     // shape clips on tracks above the video, grouped with it; the zoom is scale and position
     // keyframes of the video.
     Q_INVOKABLE QVariantList screens() const;

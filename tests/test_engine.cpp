@@ -5107,6 +5107,29 @@ class EngineTest : public QObject {
         editor.startScreenRecording(0, 15, true, 0, {{"area", QVariantMap{{"x", 0}, {"y", 0}, {"width", 0.01}, {"height", 0.01}}}});
         QVERIFY(editor.state()["error"].toString().contains("too small"));
         editor.clearError();
+        // A 9:16 part keeps exactly that shape, even when the fractions do not quite give it
+        // (Qt's idea of the screen can differ from the monitor's).
+        {
+            editor.addTitle();
+            editor.startScreenRecording(0, 15, true, 0,
+                                        {{"halo", false}, {"clicks", false},
+                                         {"area", QVariantMap{{"x", 0.25}, {"y", 0.05}, {"width", 0.5}, {"height", 0.9}, {"ratio", 9. / 16}}}});
+            QTRY_COMPARE_WITH_TIMEOUT(state()["status"].toString(), QString("recording"), 3000);
+            QTRY_VERIFY_WITH_TIMEOUT(state()["seconds"].toDouble() >= 1, 10000);
+            editor.stopScreenRecording();
+            QTRY_COMPARE_WITH_TIMEOUT(state()["status"].toString(), QString("idle"), 20000);
+            const auto part = state()["path"].toString();
+            QTRY_VERIFY_WITH_TIMEOUT(std::any_of(editor.project().assets.begin(), editor.project().assets.end(),
+                                                 [&](const Asset &a) { return a.path == part; }), 15000);
+            for (const auto &a : editor.project().assets)
+                if (a.path == part)
+                    QVERIFY2(std::abs(double(a.width) / a.height - 9. / 16) < 0.01,
+                             qPrintable(QString("%1 x %2").arg(a.width).arg(a.height)));
+            editor.undo(); // the recording's clip
+            editor.undo(); // the title
+            QFile::remove(part);
+        }
+        editor.clearError();
         QCOMPARE(state()["status"].toString(), QString("idle"));
         editor.startScreenRecording(0, 15, true, 0,
                                     {{"keys", true}, {"zoom", 2}, {"keyPosition", "top"},

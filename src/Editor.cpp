@@ -3691,12 +3691,24 @@ void Editor::startScreenRecording(int screen, int fps, bool cursor, int countdow
                      fw = part.value("width").toDouble(), fh = part.value("height").toDouble();
         if (!(fx >= 0 && fy >= 0 && fw > 0 && fh > 0 && fx + fw <= 1.0001 && fy + fh <= 1.0001))
             return fail("The recorded part must lie on the screen");
-        const int w = std::min(m_screenArea.width(), int(std::lround(fw * m_screenArea.width()))) / 2 * 2,
-                  h = std::min(m_screenArea.height(), int(std::lround(fh * m_screenArea.height()))) / 2 * 2;
+        int w = std::min(m_screenArea.width(), int(std::lround(fw * m_screenArea.width()))),
+            h = std::min(m_screenArea.height(), int(std::lround(fh * m_screenArea.height())));
+        // A format's ratio is kept exactly, around the same centre, whatever the screen's
+        // shape as Qt sees it.
+        if (const double ratio = part.value("ratio").toDouble(); ratio > 0) {
+            w = int(std::lround(h * ratio));
+            if (w > m_screenArea.width()) {
+                w = m_screenArea.width();
+                h = int(std::lround(w / ratio));
+            }
+        }
+        w = w / 2 * 2;
+        h = h / 2 * 2;
         if (w < 64 || h < 64)
             return fail("The recorded part is too small");
-        const int x = std::clamp(int(std::lround(fx * m_screenArea.width())), 0, m_screenArea.width() - w),
-                  y = std::clamp(int(std::lround(fy * m_screenArea.height())), 0, m_screenArea.height() - h);
+        const double cx = (fx + fw / 2) * m_screenArea.width(), cy = (fy + fh / 2) * m_screenArea.height();
+        const int x = std::clamp(int(std::lround(cx - w / 2.)), 0, m_screenArea.width() - w),
+                  y = std::clamp(int(std::lround(cy - h / 2.)), 0, m_screenArea.height() - h);
         m_screenArea = QRect(m_screenArea.x() + x, m_screenArea.y() + y, w, h);
     }
     m_screenHighlights = highlights;

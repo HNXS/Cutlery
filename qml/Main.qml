@@ -7664,7 +7664,7 @@ ApplicationWindow {
             fy = Math.max(0, Math.min(height - fh, cy - fh / 2));
         }
         function area() {
-            return { x: fx / width, y: fy / height, width: fw / width, height: fh / height };
+            return { x: fx / width, y: fy / height, width: fw / width, height: fh / height, ratio: ratio };
         }
         // Dimmed outside the frame.
         Repeater {
