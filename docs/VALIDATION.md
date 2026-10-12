@@ -1,5 +1,17 @@
 # Validation record
 
+## Windows portable build — 2026-10-12, clips with hundreds of keyframes (0.6 development)
+
+[GitHub Actions run 38265519026](https://github.com/HNXS/Cutlery/actions/runs/38265519026) on commit `5797ac4059034139f261b2ac41a0e57430a82741` passed every step on its first attempt.
+
+**The fault.** After a real screen recording, the preview failed with "Failed to configure input pad on Parsed_overlay … Invalid argument". The glow that follows the pointer had hundreds of position keyframes. Each keyframe added one nested `if()` to the FFmpeg expression, and FFmpeg refuses nesting deeper than about a hundred levels.
+
+**The fix.** The span between two keyframes is now found by repeatedly halving the keyframe list, so the expression nests only about log2 of the keyframe count deep.
+
+**The new test.** The engine test `manyKeyframes` renders a shape with 300 keyframes that jumps from side to side every frame:
+- It checks four frames for the right position.
+- It failed with the old expression ("Missing ')' or too many args") and passes with the new one.
+
 ## Windows portable build — 2026-10-12, keyboard shortcuts and zoom on clicks in screen recordings (0.6 development)
 
 [GitHub Actions run 38240309361](https://github.com/HNXS/Cutlery/actions/runs/38240309361) on commit `4d3df4df7fd332a38303cb1aa2a9c018daa0f236` passed every step on its first attempt. It included the Windows-only keyboard reading (`GetAsyncKeyState`, `MapVirtualKeyW`).
