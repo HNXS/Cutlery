@@ -5229,6 +5229,102 @@ class EngineTest : public QObject {
         qunsetenv("CUTLERY_SCREEN_SOURCE");
         QFile::remove(path);
     }
+    void screenFollowsPointer() {
+        // A 9:16 frame that follows the mouse: the whole screen is recorded and the frame cut
+        // out of it with scale and position keyframes, moving only along the chosen axis; it can
+        // be changed afterwards from the pointer kept beside the video.
+        qputenv("CUTLERY_SCREEN_SOURCE", "test");
+        FrameProvider frames;
+        Editor editor(&frames);
+        editor.configure(360, 640, 30, 1);
+        auto state = [&] { return editor.state()["screenRecording"].toMap(); };
+        // Half the screen's height, so there is room to follow both ways.
+        const QVariantMap area{{"x", 0.36}, {"y", 0.25}, {"width", 0.28125}, {"height", 0.5}, {"ratio", 9. / 16}};
+        editor.startScreenRecording(0, 15, true, 0, {{"follow", true}, {"followSpeed", 12}, {"area", area}});
+        QVERIFY(editor.state()["error"].toString().contains("1 to 10"));
+        editor.startScreenRecording(0, 15, true, 0, {{"follow", true}});
+        QVERIFY(editor.state()["error"].toString().contains("needs a format"));
+        editor.clearError();
+        editor.startScreenRecording(0, 15, true, 0,
+                                    {{"follow", true}, {"followSpeed", 10}, {"followAxes", "horizontal"},
+                                     {"clicks", false}, {"area", area}});
+        QCOMPARE(state()["status"].toString(), QString("recording"));
+        QTRY_VERIFY_WITH_TIMEOUT(state()["seconds"].toDouble() >= 3, 10000);
+        editor.stopScreenRecording();
+        QTRY_COMPARE_WITH_TIMEOUT(state()["status"].toString(), QString("idle"), 20000);
+        const auto path = state()["path"].toString();
+        auto video = [&]() -> const Clip * {
+            for (const auto &c : editor.project().clips)
+                if (const auto *a = editor.project().asset(c.assetId); a && a->kind == "video")
+                    return &c;
+            return nullptr;
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(video(), 15000);
+        const auto id = video()->id;
+        // The whole (test) screen is in the file.
+        const auto *asset = editor.project().asset(video()->assetId);
+        const auto screen = editor.screens().first().toMap();
+        QCOMPARE(asset->width, screen["width"].toInt() / 2 * 2);
+        QVERIFY(QFileInfo::exists(path + ".pointer.json"));
+        // The frame fills the canvas: at scale 1 the screen fits the 9:16 canvas, and the
+        // frame is half its height.
+        auto spread = [](const QVector<Keyframe> &k) {
+            double lo = 1e9, hi = -1e9;
+            for (const auto &x : k) {
+                lo = std::min(lo, x.value);
+                hi = std::max(hi, x.value);
+            }
+            return k.isEmpty() ? 0. : hi - lo;
+        };
+        const double fit = std::min(360. / asset->width, 640. / asset->height);
+        const double ex = asset->width * fit / 360, ey = asset->height * fit / 640;
+        const double base = 1 / (0.5 * ey);
+        {
+            const auto &c = *video();
+            QVERIFY2(c.keyframes.value("x").size() >= 3, qPrintable(QString::number(c.keyframes.value("x").size())));
+            for (const auto &k : c.keyframes.value("scale"))
+                QVERIFY2(std::abs(k.value - base) < 0.01, qPrintable(QString::number(k.value)));
+            QVERIFY2(spread(c.keyframes.value("x")) > 0.05, qPrintable(QString::number(spread(c.keyframes.value("x")))));
+            QVERIFY(spread(c.keyframes.value("y")) < 1e-9); // only left–right
+            // The picture always covers the canvas.
+            for (const auto &k : c.keyframes.value("x"))
+                QVERIFY(std::abs(k.value) <= (base * ex - 1) / 2 + 1e-6);
+        }
+        auto camera = [&] { return editor.state()["selected"].toMap()["pointerCamera"].toMap(); };
+        editor.select(id);
+        QCOMPARE(camera()["follow"].toBool(), true);
+        QCOMPARE(camera()["axes"].toString(), QString("horizontal"));
+        QCOMPARE(camera()["speed"].toDouble(), 10.);
+        // The glow moves with the picture.
+        const Clip *halo = nullptr;
+        for (const auto &c : editor.project().clips)
+            if (c.name == "Pointer")
+                halo = &c;
+        QVERIFY(halo);
+        const auto haloBefore = halo->keyframes.value("y");
+        // Changed afterwards: only up–down now.
+        editor.followPointer(id, {{"axes", "vertical"}});
+        QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
+        QVERIFY(spread(video()->keyframes.value("x")) < 1e-9);
+        QVERIFY(spread(video()->keyframes.value("y")) > 0.05);
+        QCOMPARE(camera()["axes"].toString(), QString("vertical"));
+        for (const auto &c : editor.project().clips)
+            if (c.name == "Pointer")
+                QVERIFY(c.keyframes.value("y") != haloBefore);
+        // Not following: the frame stays where it was placed.
+        editor.followPointer(id, {{"follow", false}});
+        QVERIFY(spread(video()->keyframes.value("x")) < 1e-9 && spread(video()->keyframes.value("y")) < 1e-9);
+        QCOMPARE(camera()["follow"].toBool(), false);
+        editor.undo();
+        editor.undo();
+        QVERIFY(spread(video()->keyframes.value("x")) > 0.05);
+        editor.followPointer(id, {{"speed", 0}});
+        QVERIFY(editor.state()["error"].toString().contains("1 to 10"));
+        editor.clearError();
+        qunsetenv("CUTLERY_SCREEN_SOURCE");
+        QFile::remove(path);
+        QFile::remove(path + ".pointer.json");
+    }
     void peopleGrouping() {
         // Descriptors along a few directions stand in for faces: same direction, same person.
         auto direction = [](int axis, double tilt = 0) {

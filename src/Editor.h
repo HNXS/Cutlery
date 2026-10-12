@@ -21,6 +21,8 @@
 #include <QProcess>
 #include <QQuickImageProvider>
 #include <QElapsedTimer>
+#include <QDateTime>
+#include <QHash>
 #include <QTimer>
 class QAudioInput;
 class QThread;
@@ -379,6 +381,11 @@ class Editor final : public QObject {
     // shape clips on tracks above the video, grouped with it; the zoom is scale and position
     // keyframes of the video.
     Q_INVOKABLE QVariantList screens() const;
+    // A screen recording made with a format: how its frame follows the mouse, changed after
+    // recording from the pointer kept beside it. {follow: true, speed: 1–10, axes: both|
+    // horizontal|vertical}; the glow and click rings move with the picture. The selected
+    // clip's state "pointerCamera" holds the current settings.
+    Q_INVOKABLE void followPointer(const QString &clipId, const QVariantMap &settings);
     Q_INVOKABLE void startScreenRecording(int screen, int fps = 30, bool cursor = true,
                                           int countdown = 3, const QVariantMap &highlights = {});
     Q_INVOKABLE void stopScreenRecording();
@@ -677,6 +684,9 @@ class Editor final : public QObject {
     int m_screenFps = 30;
     bool m_screenCursor = true;
     QVariantMap m_screenHighlights;
+    // The camera settings kept beside screen recordings, by file, read once per change.
+    mutable QHash<QString, QPair<QDateTime, QVariantMap>> m_pointerCameras;
+    QVariantMap pointerCamera(const QString &video) const;
     // Highlights over a screen recording (see startScreenRecording); `stopped` is how long the
     // recording ran by the clock, to line the pointer up with the video's own length.
     void addRecordingHighlights(const QString &clipId,
