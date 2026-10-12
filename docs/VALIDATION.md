@@ -1,5 +1,27 @@
 # Validation record
 
+## Windows portable build — 2026-10-12, keyboard shortcuts and zoom on clicks in screen recordings (0.6 development)
+
+[GitHub Actions run 38240309361](https://github.com/HNXS/Cutlery/actions/runs/38240309361) on commit `4d3df4df7fd332a38303cb1aa2a9c018daa0f236` passed every step on its first attempt. It included the Windows-only keyboard reading (`GetAsyncKeyState`, `MapVirtualKeyW`).
+
+**Real desktop.** The engine test recorded the runner's real desktop with shortcuts and a 2× zoom switched on. Nobody pressed keys or clicked there, so:
+
+- no shortcut boxes and no zoom were added;
+- the pointer glow still was.
+
+**Test source.** With the test source, the engine test checks:
+
+- that a zoom of 5× and the colour "red" are refused before anything is recorded;
+- the zoom keyframes around the clicks: from 1× to 2× and back, with the picture always covering the canvas;
+- the shortcut boxes: "Ctrl + C" and "Ctrl + V", with the chosen light colours, large size and top position, grouped with the video and above the click rings;
+- that one undo removes the zoom and every highlight.
+
+**Interface test.** `screenControls` checks:
+
+- that the look settings show only once shortcuts are ticked;
+- that an own box colour and the bottom-right position reach the boxes;
+- that the dialog's choices are saved and come back when it is opened again.
+
 ## Windows portable build — 2026-10-12, pointer and click highlights in screen recordings (0.6 development)
 
 [GitHub Actions run 38228099808](https://github.com/HNXS/Cutlery/actions/runs/38228099808) on commit `ef2c50c0319b9c163819d59b2a594a00081beb67` passed every step on its first attempt.
