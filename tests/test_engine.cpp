@@ -5001,8 +5001,9 @@ class EngineTest : public QObject {
         editor.seek(30);
         editor.startScreenRecording(0, 15, true, 0);
         QCOMPARE(state()["status"].toString(), QString("recording"));
-        QTest::qWait(2000);
-        QVERIFY(state()["seconds"].toDouble() >= 1.5);
+        // Two seconds of video; a first try with Media Foundation that fails starts again.
+        QTRY_VERIFY2_WITH_TIMEOUT(state()["seconds"].toDouble() >= 2,
+                                  qPrintable(state()["status"].toString() + " " + editor.state()["error"].toString()), 10000);
         editor.stopScreenRecording();
         QTRY_COMPARE_WITH_TIMEOUT(state()["status"].toString(), QString("idle"), 20000);
         QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
