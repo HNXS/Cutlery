@@ -1,5 +1,26 @@
 # Validation record
 
+## Windows portable build — 2026-10-12, a recording's frame following the mouse (0.6 development)
+
+[GitHub Actions run 38284052702](https://github.com/HNXS/Cutlery/actions/runs/38284052702) on commit `e28eff2d9db41c5321741c321c48e36fee22b92b` passed every step on its first attempt.
+
+**The fault.** The commit before it (`a3b996c`, run 38282167665) failed in the new engine test `screenFollowsPointer`.
+
+- **Cause:** the test assumed a square test screen. The runner records 1024 × 768.
+- **Bug it showed:** the frame's width was taken from Qt's screen, which can have a different shape from the monitor actually captured.
+- **Fix:** the width now comes from the frame's height, its format and the recorded picture.
+- **Check:** passed locally on a 1024 × 768 offscreen screen as well as the square default.
+
+**What `screenFollowsPointer` checks.** With a 9:16 frame and the test pointer circling the middle of the screen:
+
+- The whole screen is recorded and the pointer file is written beside the video.
+- The frame fills the canvas.
+- With "only left–right", only x moves, and the picture always covers the canvas.
+- Changed afterwards to "only up–down", only y moves and the glow follows.
+- Switched off, the frame stays still.
+- Undo restores the earlier movement.
+- Invalid settings are refused.
+
 ## Windows portable build — 2026-10-12, snapping, removing keyframes, recording formats (0.6 development)
 
 [GitHub Actions run 38270749851](https://github.com/HNXS/Cutlery/actions/runs/38270749851) on commit `faae77b4b769c39bf238803f1a821aac3347d061` passed every step on its first attempt.
