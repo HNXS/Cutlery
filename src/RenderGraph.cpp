@@ -1,4 +1,5 @@
 #include "RenderGraph.h"
+#include <functional>
 #include <QRegularExpression>
 #include <limits>
 #include "ExportProfiles.h"
@@ -285,13 +286,18 @@ static Decoration overlayDecoration(const Clip &c, int w, int h, double scaleHei
     }
     return {image, QPoint(s + b, s + b)};
 }
-// FFmpeg expression for a property over clip-local frame `frame`, matching Clip::valueAt.
+// FFmpeg expression for a property over clip-local frame `frame`, matching Clip::valueAt. The
+// stretches between keyframes are picked by halving, so the expression nests only about log2 of
+// the keyframe count deep: FFmpeg refuses expressions nested more than about a hundred deep,
+// which a linear chain reaches with a pointer path of a hundred keyframes.
 static QString curve(const Clip &c, const QString &property, const QString &frame) {
     const auto k = c.keyframes.value(property);
     if (k.isEmpty())
         return num(c.staticValue(property));
-    QString expr = num(k.last().value);
-    for (auto i = k.size() - 2; i >= 0; --i) {
+    if (k.size() == 1)
+        return num(k.first().value);
+    // The stretch from keyframe i to i + 1.
+    auto stretch = [&](qsizetype i) {
         const auto u = QString("((%1-%2)/%3)").arg(frame).arg(k[i].frame).arg(
             k[i + 1].frame - k[i].frame);
         // Matches eased() in Project.cpp.
@@ -301,13 +307,21 @@ static QString curve(const Clip &c, const QString &property, const QString &fram
                            : easing == "out"  ? QString("(1-(1-%1)*(1-%1))").arg(u)
                            : easing == "hold" ? QString("0")
                                               : u;
-        expr = QString("if(lt(%1,%2),%3+(%4)*%5,%6)")
-                   .arg(frame)
-                   .arg(k[i + 1].frame)
-                   .arg(num(k[i].value), num(k[i + 1].value - k[i].value), eased, expr);
-    }
-    return QString("if(lt(%1,%2),%3,%4)").arg(frame).arg(k.first().frame).arg(
-        num(k.first().value), expr);
+        return QString("%1+(%2)*%3").arg(num(k[i].value), num(k[i + 1].value - k[i].value), eased);
+    };
+    // Stretches [from, to): before keyframe `mid` the lower half, else the upper.
+    std::function<QString(qsizetype, qsizetype)> pick = [&](qsizetype from, qsizetype to) {
+        if (to - from == 1)
+            return stretch(from);
+        const auto mid = (from + to) / 2;
+        return QString("if(lt(%1,%2),%3,%4)").arg(frame).arg(k[mid].frame).arg(pick(from, mid), pick(mid, to));
+    };
+    return QString("if(lt(%1,%2),%3,if(lt(%1,%4),%5,%6))")
+        .arg(frame)
+        .arg(k.first().frame)
+        .arg(num(k.first().value))
+        .arg(k.last().frame)
+        .arg(pick(0, k.size() - 1), num(k.last().value));
 }
 // The shadow offset and outline of a text, from the clip's style at a font pixel size.
 static void paintStyledPath(QPainter &paint, const Clip &c, const QPainterPath &path, double px,
