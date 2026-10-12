@@ -1,5 +1,16 @@
 # Validation record
 
+## Windows portable build — 2026-10-12, a person's appearances and scenes (0.6 development)
+
+[GitHub Actions run 38223875897](https://github.com/HNXS/Cutlery/actions/runs/38223875897) on commit `79ae9f779f6b5731b06a03dea572ae6e0dbd5b12` passed every step on its first attempt.
+
+New coverage for person search:
+
+- The engine test `personScenes` marks where a person comes into view, both on a whole clip and on a trimmed clip.
+- It then cuts their stretches onto a new track from the playhead: two video stretches with their in-points and lengths, and a picture for two seconds.
+- It checks that the cut is one undo step, and the errors for a person who is not on the timeline or does not exist.
+- The interface test `peopleControls` presses both new buttons of the person dialog.
+
 ## Windows portable build — 2026-10-12, screen recording (0.6 development)
 
 [GitHub Actions run 38220651600](https://github.com/HNXS/Cutlery/actions/runs/38220651600) on commit `0dbeb9671ef29b7a448a0c569bc9d5f2758a5c6e` passed every step on its first attempt.
