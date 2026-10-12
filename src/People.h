@@ -29,6 +29,16 @@ struct Person {
     QStringList media;
     int best = -1; // the face that shows them best (largest, then most certain)
 };
+// A stretch of time a person is seen in a medium (source seconds).
+struct Appearance {
+    QString assetId;
+    double from = 0, to = 0;
+};
+// Where a person is seen: their faces in each medium grouped where they are less than `gap`
+// seconds apart, each stretch reaching `pad` seconds before the first face and `pad` plus the
+// analysis `step` after the last. Ordered by medium (as first seen) and time.
+QVector<Appearance> appearances(const QVector<Face> &faces, const Person &person,
+                                double step = 0.5, double gap = 1.5, double pad = 0.5);
 // Faces from a "people" result's text, with times shifted by `offset` (the result's start).
 QVector<Face> parsePeople(const QString &text, const QString &assetId, double offset);
 double similarity(const QVector<float> &a, const QVector<float> &b);

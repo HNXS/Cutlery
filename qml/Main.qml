@@ -7381,6 +7381,32 @@ ApplicationWindow {
                 selectByMouse: true
                 onAccepted: personDialog.accept()
             }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                Button {
+                    objectName: "personMark"
+                    Layout.fillWidth: true
+                    text: "Mark on the timeline"
+                    ToolTip.visible: hovered
+                    ToolTip.text: "A marker wherever they come into view in a clip on the timeline"
+                    onClicked: {
+                        editor.markPerson(personDialog.person.id);
+                        personDialog.close();
+                    }
+                }
+                Button {
+                    objectName: "personCut"
+                    Layout.fillWidth: true
+                    text: "Cut their scenes together"
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Every stretch they are seen in, one after another on a new track from the playhead"
+                    onClicked: {
+                        editor.cutPerson(personDialog.person.id);
+                        personDialog.close();
+                    }
+                }
+            }
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap

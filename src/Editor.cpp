@@ -5687,6 +5687,87 @@ void Editor::namePerson(const QString &id, const QString &name) {
     makeFaceCrops();
     emit changed();
 }
+void Editor::markPerson(const QString &id) {
+    const auto &index = peopleIndex();
+    const auto person = std::find_if(index.people.begin(), index.people.end(), [&](const Person &p) { return p.id == id; });
+    if (person == index.people.end())
+        return fail("No such person: " + id);
+    const auto name = person->name.isEmpty() ? QString("Person") : person->name;
+    const auto seen = appearances(index.faces, *person, 1 / AiJobs::peopleRate);
+    const double fps = double(m_project.fpsN) / m_project.fpsD;
+    // Where each stretch comes into view in each clip of its medium.
+    QVector<qint64> frames;
+    for (const auto &c : m_project.clips) {
+        if (c.audioOnly || c.reverse || !person->media.contains(c.assetId))
+            continue;
+        const double in = c.sourceIn.seconds(), s = c.speed.seconds(), out = in + c.duration / fps * s;
+        for (const auto &a : seen)
+            if (a.assetId == c.assetId && a.to > in + 1e-6 && a.from < out - 1e-6)
+                frames << c.start + qRound64((std::max(a.from, in) - in) / s * fps);
+    }
+    std::sort(frames.begin(), frames.end());
+    frames.erase(std::unique(frames.begin(), frames.end()), frames.end());
+    if (frames.isEmpty())
+        return fail(name + " is not seen in any clip on the timeline");
+    int added = 0;
+    if (!mutate([&](Project &p) {
+            for (const auto frame : frames) {
+                const auto at = std::lower_bound(p.markers.begin(), p.markers.end(), frame,
+                                                 [](const Marker &m, qint64 f) { return m.frame < f; });
+                if (at != p.markers.end() && at->frame == frame)
+                    continue;
+                if (p.markers.size() >= 1000)
+                    throw std::runtime_error("At most 1000 markers");
+                p.markers.insert(at, Marker{frame, name, "#ff9f43"});
+                ++added;
+            }
+        }))
+        return;
+    m_status = QString("%1 marker%2 where %3 is seen").arg(added).arg(added == 1 ? "" : "s").arg(name);
+    emit changed();
+}
+void Editor::cutPerson(const QString &id) {
+    const auto &index = peopleIndex();
+    const auto person = std::find_if(index.people.begin(), index.people.end(), [&](const Person &p) { return p.id == id; });
+    if (person == index.people.end())
+        return fail("No such person: " + id);
+    const auto seen = appearances(index.faces, *person, 1 / AiJobs::peopleRate);
+    // Copied: the index may be worked out again while the project changes.
+    const auto name = person->name.isEmpty() ? QString("this person") : person->name;
+    QString first;
+    int placed = 0;
+    if (!mutate([&](Project &p) {
+            p.addTrack();
+            const int track = p.tracks - 1;
+            const double fps = double(p.fpsN) / p.fpsD;
+            qint64 at = m_playhead;
+            for (const auto &a : seen) {
+                const auto *asset = p.asset(a.assetId);
+                if (!asset)
+                    continue;
+                const auto clipId = insert(p, a.assetId, track, at);
+                auto *c = p.clip(clipId);
+                if (asset->kind == "video") {
+                    const double from = std::clamp(a.from, 0., asset->duration),
+                                 to = std::clamp(a.to, from, asset->duration);
+                    c->sourceIn = Time(qRound64(from * 1000), 1000);
+                    c->duration = std::max<qint64>(1, qRound64((to - from) * fps));
+                } else {
+                    c->duration = qRound64(2 * fps);
+                }
+                at = c->start + c->duration;
+                if (first.isEmpty())
+                    first = clipId;
+                ++placed;
+            }
+            if (!placed)
+                throw std::runtime_error("They are not seen in any media");
+        }))
+        return;
+    select(first);
+    m_status = QString("%1 scene%2 of %3 on a new track").arg(placed).arg(placed == 1 ? "" : "s").arg(name);
+    emit changed();
+}
 QVariantMap Editor::searchMedia(const QString &query) const {
     const auto words = query.toLower().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
     QVariantMap result;

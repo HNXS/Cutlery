@@ -174,6 +174,7 @@ In the media library, **Find people (AI)** looks for faces in every video and pi
 
 - **Show someone's media:** click their face. Click again, or **Show all**, to see everything.
 - **Name them:** double-click the face (or right-click), type the name and **Save**. The search box then finds every medium they are in by that name, with the moment they first appear.
+- **Where they appear:** in the same dialog, **Mark on the timeline** puts an orange marker (with their name) wherever they come into view in a clip on the timeline; **Cut their scenes together** places every stretch they are seen in, from half a second before to half a second after, one after another on a new track from the playhead (pictures for two seconds), as a rough cut to trim. Both are one undo step.
 - **Remembered:** names are kept on this computer with a few of the person's faces, so they are recognised in other videos and projects too. Giving a named person another name renames them; **Forget the name** removes it.
 - **Limits:** faces turned away, very small, or hidden are not found; two people who look much alike may be grouped together, and one person may appear twice (e.g. with and without glasses), which naming both the same joins.
 
