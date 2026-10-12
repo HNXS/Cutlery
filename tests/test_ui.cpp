@@ -1544,6 +1544,9 @@ class UiTest : public QObject {
         QVERIFY(choice && choice->property("count").toInt() >= 1);
         findItem(window->contentItem(), "screenHide")->setProperty("checked", false);
         findItem(window->contentItem(), "screenFps")->setProperty("currentIndex", 2); // 15 fps
+        // Clicks shown, no glow following the pointer.
+        QVERIFY(findItem(window->contentItem(), "screenClicks")->property("checked").toBool());
+        findItem(window->contentItem(), "screenHalo")->setProperty("checked", false);
         QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
         QQuickWindow *bar = nullptr;
         for (auto *o : engine.rootObjects().first()->findChildren<QQuickWindow *>())
@@ -1557,8 +1560,13 @@ class UiTest : public QObject {
         QTest::qWait(1200);
         QVERIFY(QMetaObject::invokeMethod(findItem(bar->contentItem(), "recordingStop"), "clicked"));
         QTRY_VERIFY_WITH_TIMEOUT(!bar->isVisible(), 20000);
-        QTRY_VERIFY_WITH_TIMEOUT(editor.project().clips.size() == 1, 15000);
-        QVERIFY(editor.project().asset(editor.project().clips.first().assetId)->kind == "video");
+        QTRY_VERIFY_WITH_TIMEOUT(std::any_of(editor.project().clips.begin(), editor.project().clips.end(),
+                                             [](const Clip &c) { return !c.assetId.isEmpty(); }), 15000);
+        for (const auto &c : editor.project().clips)
+            if (c.assetId.isEmpty())
+                QCOMPARE(c.name, QString("Click"));
+            else
+                QVERIFY(editor.project().asset(c.assetId)->kind == "video");
         QFile::remove(editor.state()["screenRecording"].toMap()["path"].toString());
         qunsetenv("CUTLERY_SCREEN_SOURCE");
         QVERIFY2(warnings.empty(), qPrintable(warnings.join('\n')));

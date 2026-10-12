@@ -1,5 +1,18 @@
 # Validation record
 
+## Windows portable build — 2026-10-12, pointer and click highlights in screen recordings (0.6 development)
+
+[GitHub Actions run 38228099808](https://github.com/HNXS/Cutlery/actions/runs/38228099808) on commit `ef2c50c0319b9c163819d59b2a594a00081beb67` passed every step on its first attempt.
+
+New coverage for screen recording:
+
+- **Real desktop on the runner.** The pointer was sampled through Windows (`GetCursorPos`). From that, a yellow glow clip was placed above the video, as long as the video and grouped with it.
+- **Test pointer.** With the test pattern, the test pointer circles the middle and clicks once a second. The engine test checks:
+  - the glow's position keyframes;
+  - one red ring per click, a second apart, fading to nothing and lying within the video;
+  - that one undo removes every highlight and the group.
+- **Dialog.** The interface test `screenControls` turns the glow off in the recording dialog and checks that only click rings are added.
+
 ## Windows portable build — 2026-10-12, a person's appearances and scenes (0.6 development)
 
 [GitHub Actions run 38223875897](https://github.com/HNXS/Cutlery/actions/runs/38223875897) on commit `79ae9f779f6b5731b06a03dea572ae6e0dbd5b12` passed every step on its first attempt.

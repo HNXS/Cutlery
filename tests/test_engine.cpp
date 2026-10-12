@@ -5011,8 +5011,14 @@ class EngineTest : public QObject {
         QVERIFY2(editor.state()["error"].toString().isEmpty(), qPrintable(editor.state()["error"].toString()));
         const auto path = state()["path"].toString();
         QVERIFY(path.contains("/recordings/screen-") && path.endsWith(".mkv"));
-        QTRY_VERIFY_WITH_TIMEOUT(editor.project().clips.size() == 2, 15000);
-        const auto &clip = editor.project().clips.last();
+        auto video = [&]() -> const Clip * {
+            for (const auto &c : editor.project().clips)
+                if (!c.assetId.isEmpty() && editor.project().asset(c.assetId)->kind == "video")
+                    return &c;
+            return nullptr;
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(video(), 15000);
+        const auto clip = *video();
         QCOMPARE(clip.start, qint64(30));
         QVERIFY(clip.track != editor.project().clips.first().track);
         const auto *asset = editor.project().asset(clip.assetId);
@@ -5020,6 +5026,44 @@ class EngineTest : public QObject {
         QVERIFY(!asset->hasAudio);
         QCOMPARE(asset->width, screen["width"].toInt() / 2 * 2);
         QVERIFY2(asset->duration > 1.2 && asset->duration < 4, qPrintable(QString::number(asset->duration)));
+        // The pointer and its clicks as shapes above the video, grouped with it.
+        const Clip *halo = nullptr;
+        QVector<Clip> clicks;
+        for (const auto &c : editor.project().clips) {
+            if (c.name == "Pointer")
+                halo = &c;
+            else if (c.name == "Click")
+                clicks << c;
+        }
+        QVERIFY(halo);
+        QCOMPARE(halo->graphic, QString("ellipse"));
+        QCOMPARE(halo->start, clip.start);
+        QCOMPARE(halo->duration, clip.duration);
+        QVERIFY(halo->track > clip.track);
+        QVERIFY(!clip.group.isEmpty() && halo->group == clip.group);
+        if (!real) {
+            // The test pointer circles the middle and clicks once a second.
+            QVERIFY(halo->keyframes.value("x").size() >= 3);
+            for (const auto &k : halo->keyframes.value("x"))
+                QVERIFY(k.value > -0.3 && k.value < 0.3);
+            QVERIFY2(!clicks.isEmpty() && clicks.size() <= 4, qPrintable(QString::number(clicks.size())));
+            for (const auto &c : clicks) {
+                QVERIFY(c.track > halo->track);
+                QCOMPARE(c.group, clip.group);
+                QVERIFY(c.start >= clip.start && c.start + c.duration <= clip.start + clip.duration);
+                QCOMPARE(c.strokeColor, QString("#ff5a5f"));
+                QCOMPARE(c.keyframes.value("opacity").last().value, 0.);
+            }
+            // Clicks a second apart: 30 frames on the 30 fps timeline.
+            if (clicks.size() > 1)
+                QVERIFY(std::abs(clicks[1].start - clicks[0].start - 30) <= 4);
+            // One undo step takes the highlights away and keeps the video.
+            const int count = editor.project().clips.size();
+            editor.undo();
+            QCOMPARE(editor.project().clips.size(), count - 1 - clicks.size());
+            QVERIFY(video());
+            QVERIFY(video()->group.isEmpty());
+        }
         qunsetenv("CUTLERY_SCREEN_SOURCE");
         QFile::remove(path);
     }

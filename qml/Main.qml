@@ -7237,7 +7237,7 @@ ApplicationWindow {
             }
         }
         onAccepted: {
-            editor.startScreenRecording(screenDialog.screens[screenChoice.currentIndex].index, screenFps.currentIndex === 1 ? 60 : screenFps.currentIndex === 2 ? 15 : 30, screenCursor.checked, 3);
+            editor.startScreenRecording(screenDialog.screens[screenChoice.currentIndex].index, screenFps.currentIndex === 1 ? 60 : screenFps.currentIndex === 2 ? 15 : 30, screenCursor.checked, 3, screenHalo.checked, screenClicks.checked);
             if (screenHide.checked)
                 win.showMinimized();
         }
@@ -7265,6 +7265,18 @@ ApplicationWindow {
                 text: "Show the mouse pointer"
             }
             CheckBox {
+                id: screenHalo
+                objectName: "screenHalo"
+                checked: true
+                text: "Highlight the pointer (a yellow glow that follows it)"
+            }
+            CheckBox {
+                id: screenClicks
+                objectName: "screenClicks"
+                checked: true
+                text: "Show clicks (a ring: red left, blue right)"
+            }
+            CheckBox {
                 id: screenHide
                 objectName: "screenHide"
                 checked: true
@@ -7275,7 +7287,7 @@ ApplicationWindow {
                 wrapMode: Text.Wrap
                 font.pixelSize: 11
                 color: win.muted
-                text: "Recording starts after 3 seconds, without sound. Stop it with the small bar that stays on top; it is left out of the recording."
+                text: "Recording starts after 3 seconds, without sound. Stop it with the small bar that stays on top; it is left out of the recording. Highlights land as shapes above the video, to move, recolour or delete like any other."
             }
         }
     }

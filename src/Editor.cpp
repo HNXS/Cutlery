@@ -243,8 +243,14 @@ Editor::Editor(FrameProvider *frames, QObject *parent) : QObject(parent), m_fram
             return fail(error);
         }
         const qint64 frame = m_screenStart;
-        const qint64 length = qRound64(m_screenRecording.value("seconds").toDouble() * m_project.fpsN / m_project.fpsD);
-        dropFiles({QUrl::fromLocalFile(path)}, freeRecordingTrack(frame, length), frame);
+        const double seconds = m_screenRecording.value("seconds").toDouble();
+        const qint64 length = qRound64(seconds * m_project.fpsN / m_project.fpsD);
+        const auto pointer = m_screen->pointer();
+        const bool halo = m_screenHalo, clicks = m_screenClicks;
+        importDropped({QUrl::fromLocalFile(path)}, freeRecordingTrack(frame, length), frame,
+                      [this, pointer, seconds, halo, clicks](const QString &clipId) {
+                          addPointerHighlights(clipId, pointer, seconds, halo, clicks);
+                      });
         m_screenRecording = {{"status", "idle"}, {"path", path}};
         m_status = "Screen recording added";
         emit changed();
@@ -1942,11 +1948,16 @@ void Editor::cancelImport() {
     emit changed();
 }
 void Editor::dropFiles(const QList<QUrl> &urls, int track, qint64 frame) {
+    importDropped(urls, track, frame, {});
+}
+void Editor::importDropped(const QList<QUrl> &urls, int track, qint64 frame,
+                           std::function<void(const QString &)> placed) {
     try {
         m_project.requireEditable(track);
         auto batch = std::make_shared<DropBatch>();
         batch->trackId = m_project.trackSettings[track].id;
         batch->frame = std::max(qint64(0), frame);
+        batch->placed = std::move(placed);
         const auto requests = importRequests(urls, batch);
         if (!m_importing)
             m_importErrors.clear();
@@ -2250,6 +2261,8 @@ void Editor::probeFile(const QUrl &url, const QString &replaceId, std::shared_pt
                         const auto *c = m_project.clip(addedClip);
                         drop->frame = c->start + c->duration;
                         select(addedClip);
+                        if (drop->placed)
+                            drop->placed(addedClip);
                     }
                 }
             } catch (const std::exception &e) {
@@ -3561,7 +3574,8 @@ QVariantList Editor::screens() const {
     }
     return list;
 }
-void Editor::startScreenRecording(int screen, int fps, bool cursor, int countdown) {
+void Editor::startScreenRecording(int screen, int fps, bool cursor, int countdown, bool halo,
+                                  bool clicks) {
     if (m_screen->recording() || m_screenCountdown->isActive())
         return fail("The screen is being recorded already");
     if (m_busy)
@@ -3574,6 +3588,8 @@ void Editor::startScreenRecording(int screen, int fps, bool cursor, int countdow
     pause();
     m_screenFps = fps;
     m_screenCursor = cursor;
+    m_screenHalo = halo;
+    m_screenClicks = clicks;
     m_screenStart = m_playhead;
     m_screenRecording = {{"status", "countdown"}, {"countdown", std::max(0, countdown)}};
     if (countdown <= 0) {
@@ -4628,6 +4644,135 @@ QVariantMap Editor::trackState() const {
     if (m_tracker->busy())
         state["progress"] = m_tracker->progress();
     return state;
+}
+void Editor::addPointerHighlights(const QString &clipId,
+                                  const QVector<ScreenRecorder::PointerSample> &pointer,
+                                  double stopped, bool halo, bool clicks) {
+    const auto *v = m_project.clip(clipId);
+    const auto *asset = v ? m_project.asset(v->assetId) : nullptr;
+    if (!asset || pointer.isEmpty() || (!halo && !clicks))
+        return;
+    const double fps = double(m_project.fpsN) / m_project.fpsD;
+    // The video starts a moment after FFmpeg does: the difference between how long the
+    // recording ran and how long its video is, at most a second.
+    const double late = std::clamp(stopped - asset->duration, 0., 1.);
+    struct Point {
+        qint64 frame;
+        QPointF at;
+        int buttons;
+    };
+    QVector<Point> points;
+    for (const auto &s : pointer) {
+        const qint64 frame = v->start + qRound64((s.time - late) * fps);
+        if (frame < v->start || frame >= v->start + v->duration)
+            continue;
+        if (!points.isEmpty() && frame <= points.last().frame) {
+            points.last().buttons |= s.buttons; // a click shorter than a frame still counts
+            continue;
+        }
+        // Off the recorded screen: kept at its edge.
+        const PictureMapping map(m_project, *v, frame);
+        points << Point{frame, map.toCanvas(std::clamp(s.x, 0., 1.), std::clamp(s.y, 0., 1.)), s.buttons};
+    }
+    if (points.isEmpty())
+        return;
+    const PictureMapping first(m_project, *v, v->start);
+    // Sizes follow the recording's height on the canvas.
+    const double ring = 0.09 * first.ey, glow = 0.07 * first.ey;
+    QVector<int> presses;
+    for (int i = 0; i < points.size(); ++i)
+        if (points[i].buttons && (i == 0 || !(points[i - 1].buttons & points[i].buttons)))
+            presses << i;
+    if (!halo && (!clicks || presses.isEmpty()))
+        return;
+    const qint64 opening = std::max<qint64>(2, qRound64(0.45 * fps));
+    int placed = 0;
+    if (!mutate([&](Project &p) {
+            auto *video = p.clip(clipId);
+            if (!video)
+                return;
+            // A free unlocked track above the video for a stretch, or a new one on top.
+            auto above = [&](int lowest, qint64 from, qint64 to) {
+                for (int t = lowest + 1; t < p.tracks; ++t) {
+                    const auto &settings = p.trackSettings[t];
+                    if (settings.locked || settings.magnetic)
+                        continue;
+                    if (std::none_of(p.clips.begin(), p.clips.end(), [&](const Clip &o) {
+                            return o.track == t && o.start < to && from < o.start + o.duration;
+                        }))
+                        return t;
+                }
+                p.addTrack();
+                return p.tracks - 1;
+            };
+            if (video->group.isEmpty())
+                video->group = newId();
+            const auto group = video->group;
+            auto shape = [&](const QString &name) {
+                Clip c;
+                c.id = newId();
+                c.graphic = "ellipse";
+                c.name = name;
+                c.group = group;
+                return c;
+            };
+            int lowest = video->track;
+            if (halo) {
+                auto c = shape("Pointer");
+                c.graphicHeight = glow;
+                c.graphicWidth = glow * p.height / p.width;
+                c.fillColor = "#66ffd23f";
+                c.strokeColor = "#00000000";
+                c.start = video->start;
+                c.duration = video->duration;
+                QVector<qint64> frames;
+                QVector<double> xs, ys;
+                for (const auto &pt : points) {
+                    frames << pt.frame;
+                    xs << pt.at.x() - 0.5;
+                    ys << pt.at.y() - 0.5;
+                }
+                c.x = xs.first();
+                c.y = ys.first();
+                if (points.size() > 1)
+                    for (int i : thinPath(frames, xs, ys, 0.002)) {
+                        c.keyframes["x"] << Keyframe{frames[i] - c.start, xs[i], false};
+                        c.keyframes["y"] << Keyframe{frames[i] - c.start, ys[i], false};
+                    }
+                c.track = above(lowest, c.start, c.start + c.duration);
+                lowest = c.track;
+                p.clips.push_back(c);
+                ++placed;
+            }
+            if (clicks && !presses.isEmpty()) {
+                const qint64 end = video->start + video->duration;
+                const int track = above(lowest, points[presses.first()].frame, end);
+                for (int n = 0; n < presses.size(); ++n) {
+                    const auto &pt = points[presses[n]];
+                    const qint64 next = n + 1 < presses.size() ? points[presses[n + 1]].frame : end;
+                    auto c = shape(pt.buttons & 1 ? "Click" : "Right click");
+                    c.graphicHeight = ring;
+                    c.graphicWidth = ring * p.height / p.width;
+                    c.fillColor = "#00000000";
+                    c.strokeColor = pt.buttons & 1 ? "#ff5a5f" : "#4aa3ff";
+                    c.stroke = 0.006;
+                    c.x = pt.at.x() - 0.5;
+                    c.y = pt.at.y() - 0.5;
+                    c.track = track;
+                    c.start = pt.frame;
+                    c.duration = std::max<qint64>(1, std::min({opening, next - pt.frame, end - pt.frame}));
+                    // Opens from a dot to its full size and fades.
+                    const qint64 last = std::max<qint64>(1, c.duration - 1);
+                    c.keyframes["scale"] = {Keyframe{0, 0.3, false, "out"}, Keyframe{last, 1.2, false, "linear"}};
+                    c.keyframes["opacity"] = {Keyframe{0, 1, false, "in"}, Keyframe{last, 0, false, "linear"}};
+                    p.clips.push_back(c);
+                    ++placed;
+                }
+            }
+        }))
+        return;
+    m_status = QString("Screen recording added with %1 highlight%2").arg(placed).arg(placed == 1 ? "" : "s");
+    emit changed();
 }
 void Editor::applyTracking(const QVector<Tracker::Point> &points, const QString &error) {
     const auto clipId = m_track.value("clipId").toString(),
