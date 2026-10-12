@@ -363,10 +363,12 @@ class Editor final : public QObject {
     // from [{index, name, width, height, primary}], then recording one after a countdown
     // (seconds) until stopped; the video lands at the playhead on a free track, like a
     // voice-over, and in the library. State "screenRecording": {status idle|countdown|
-    // recording|saving|failed, countdown, seconds, error}.
+    // recording|saving|failed, countdown, seconds, error}. With `halo`, a soft yellow circle
+    // follows the mouse pointer over the video; with `clicks`, a ring opens where it was clicked
+    // (red left, blue right). Both are shape clips on tracks above it, grouped with it.
     Q_INVOKABLE QVariantList screens() const;
     Q_INVOKABLE void startScreenRecording(int screen, int fps = 30, bool cursor = true,
-                                          int countdown = 3);
+                                          int countdown = 3, bool halo = true, bool clicks = true);
     Q_INVOKABLE void stopScreenRecording();
     // Keeps a window (the recording controls) out of the recording, where Windows allows it.
     Q_INVOKABLE void hideFromCapture(QObject *window);
@@ -661,7 +663,13 @@ class Editor final : public QObject {
     QTimer *m_screenCountdown = nullptr;
     QRect m_screenArea;
     int m_screenFps = 30;
-    bool m_screenCursor = true;
+    bool m_screenCursor = true, m_screenHalo = true, m_screenClicks = true;
+    // Shape clips over a screen recording for its pointer and clicks; `stopped` is how long the
+    // recording ran by the clock, to line the pointer up with the video's own length.
+    void addPointerHighlights(const QString &clipId, const QVector<ScreenRecorder::PointerSample> &pointer,
+                              double stopped, bool halo, bool clicks);
+    void importDropped(const QList<QUrl> &, int track, qint64 frame,
+                       std::function<void(const QString &)> placed);
     qint64 m_screenStart = 0;
     // The lowest free track for something at `frame` lasting `length` frames that is not
     // magnetic or locked, or a new track.
@@ -819,6 +827,8 @@ class Editor final : public QObject {
         QString trackId;
         qint64 frame = 0;
         QString lastClip;
+        // Called with each clip placed on the timeline.
+        std::function<void(const QString &)> placed;
     };
     struct ImportRequest {
         QUrl url;

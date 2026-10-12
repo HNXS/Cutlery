@@ -1,6 +1,7 @@
 #include "ScreenRecorder.h"
 
 #include <algorithm>
+#include <cmath>
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
@@ -19,7 +20,35 @@
 
 namespace cutlery {
 ScreenRecorder::ScreenRecorder(QString ffmpeg, QObject *parent)
-    : QObject(parent), m_ffmpeg(std::move(ffmpeg)) {}
+    : QObject(parent), m_ffmpeg(std::move(ffmpeg)) {
+    m_pointerTimer.setInterval(33);
+    m_pointerTimer.setTimerType(Qt::PreciseTimer);
+    connect(&m_pointerTimer, &QTimer::timeout, this, &ScreenRecorder::samplePointer);
+}
+void ScreenRecorder::samplePointer() {
+    if (!m_clock.isValid() || m_pointer.size() >= 30 * 60 * 60 * 4) // four hours
+        return;
+    PointerSample s;
+    s.time = m_clock.elapsed() / 1000.;
+    if (qEnvironmentVariable("CUTLERY_SCREEN_SOURCE") == "test") {
+        s.x = 0.5 + 0.25 * std::cos(s.time);
+        s.y = 0.5 + 0.25 * std::sin(s.time);
+        s.buttons = s.time - std::floor(s.time) < 0.1 ? 1 : 0;
+    } else {
+#ifdef Q_OS_WIN
+        POINT at{};
+        if (!GetCursorPos(&at))
+            return;
+        s.x = (at.x - m_area.x() + 0.5) / m_area.width();
+        s.y = (at.y - m_area.y() + 0.5) / m_area.height();
+        s.buttons = ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) ? 1 : 0) |
+                    ((GetAsyncKeyState(VK_RBUTTON) & 0x8000) ? 2 : 0);
+#else
+        return;
+#endif
+    }
+    m_pointer << s;
+}
 ScreenRecorder::~ScreenRecorder() {
     if (m_process) {
         m_process->disconnect(this);
@@ -113,6 +142,7 @@ bool ScreenRecorder::start(const QRect &area, int fps, bool cursor, const QStrin
 #endif
     m_error.clear();
     m_stopping = false;
+    m_pointer.clear();
     if (m_area.width() < 16 || m_area.height() < 16) {
         m_error = "There is no such screen";
         return false;
@@ -134,6 +164,7 @@ void ScreenRecorder::launch() {
             return;
         m_process = nullptr;
         p->deleteLater();
+        m_pointerTimer.stop();
         const bool early = !m_stopping && m_clock.elapsed() < 3000;
         // Without Media Foundation (Windows N editions) the encoder fails at once: lossless then.
         if (early && !m_lossless && QString::fromUtf8(*log).contains("h264_mf", Qt::CaseInsensitive)) {
@@ -161,12 +192,17 @@ void ScreenRecorder::launch() {
             return;
         m_process = nullptr;
         p->deleteLater();
+        m_pointerTimer.stop();
         m_error = "FFmpeg could not be started";
         emit finished({}, m_error);
         emit changed();
     });
     p->start(m_ffmpeg, arguments());
     m_clock.start();
+    // A second try starts the video again, and the pointer with it.
+    m_pointer.clear();
+    m_pointerTimer.start();
+    samplePointer();
     emit changed();
 }
 void ScreenRecorder::stop() {
