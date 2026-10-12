@@ -137,7 +137,7 @@ jobs:
           Remove-Item Env:CUTLERY_TEST_REAL_SCREEN
           $screenRun = Get-Content build/screen.txt -Raw
           Write-Output $screenRun
-          if ($screenRun -notmatch 'PASS   : EngineTest::screenRecording\(\)') { Write-Output "::error::Recording the real screen failed"; throw 'Recording the real screen failed' }
+          if ($screenRun -notmatch 'PASS   : EngineTest::screenRecording\(\)') { $why = (($screenRun -split "`r?`n") | Where-Object { $_ -match 'FAIL|Loc:|Actual|Expected|QWARN|QDEBUG|QCRITICAL' }) -join ' | '; Write-Output "::error::Recording the real screen failed: $why"; throw 'Recording the real screen failed' }
           # Person search ran with the real face models, not skipped.
           build/bin/Release/cutlery_tests.exe peopleWithRealModels -o build/people.txt,txt | Out-Null
           $peopleRun = Get-Content build/people.txt -Raw
