@@ -3174,6 +3174,14 @@ ApplicationWindow {
                                 ToolTip.text: voice.available === true ? "Record narration from the microphone while the timeline plays from the playhead. Use headphones so the recording does not pick up the timeline." : "No microphone found"
                             }
                             Action {
+                                objectName: "screenRecord"
+                                text: "▣ Screen"
+                                enabled: !win.s.busy && (win.s.screenRecording || {}).status !== "recording"
+                                onClicked: screenDialog.open()
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Record the screen without sound, e.g. a tutorial to voice later; the video lands at the playhead"
+                            }
+                            Action {
                                 objectName: "toggleProxies"
                                 visible: editor.assets.some(a => a.proxy === "ready" || a.proxy === "making")
                                 text: win.s.proxies.making ? "Proxy " + Math.round(100 * (win.s.proxies.progress || 0)) + "%" : "Proxy"
@@ -7199,6 +7207,116 @@ ApplicationWindow {
                     : pauseDialog.state.status === "stale" ? "The clip changed. Find pauses again."
                     : pauseDialog.state.status === "ready" ? (pauseDialog.state.count > 0 ? pauseDialog.state.count + (pauseDialog.state.count === 1 ? " pause, " : " pauses, ") + Number(pauseDialog.state.seconds).toFixed(1) + " s in total. A short gap is kept around speech." : "No pauses found. Try a higher threshold or shorter pauses.")
                     : "Raise the threshold if background noise hides the pauses."
+            }
+        }
+    }
+    // Screen recording: which screen, then a countdown; Cutlery steps aside while it records.
+    Dialog {
+        id: screenDialog
+        objectName: "screenDialog"
+        anchors.centerIn: parent
+        title: "Record the screen"
+        modal: true
+        width: 380
+        property var screens: []
+        onAboutToShow: {
+            screens = editor.screens();
+            const main = screens.findIndex(x => x.primary);
+            screenChoice.currentIndex = Math.max(0, main);
+        }
+        footer: DialogButtonBox {
+            Button {
+                objectName: "screenStart"
+                text: "Start"
+                enabled: screenDialog.screens.length > 0
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            }
+            Button {
+                text: "Cancel"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+        }
+        onAccepted: {
+            editor.startScreenRecording(screenDialog.screens[screenChoice.currentIndex].index, screenFps.currentIndex === 1 ? 60 : screenFps.currentIndex === 2 ? 15 : 30, screenCursor.checked, 3);
+            if (screenHide.checked)
+                win.showMinimized();
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 8
+            ComboBox {
+                id: screenChoice
+                objectName: "screenChoice"
+                Accessible.name: "Screen"
+                Layout.fillWidth: true
+                model: screenDialog.screens.map((x, i) => "Screen " + (i + 1) + " · " + x.width + " × " + x.height + (x.primary ? " (main)" : ""))
+            }
+            ComboBox {
+                id: screenFps
+                objectName: "screenFps"
+                Accessible.name: "Frames per second"
+                Layout.fillWidth: true
+                model: ["30 frames a second", "60 frames a second (smoother, larger)", "15 frames a second (smaller files)"]
+            }
+            CheckBox {
+                id: screenCursor
+                objectName: "screenCursor"
+                checked: true
+                text: "Show the mouse pointer"
+            }
+            CheckBox {
+                id: screenHide
+                objectName: "screenHide"
+                checked: true
+                text: "Minimise Cutlery while recording"
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                font.pixelSize: 11
+                color: win.muted
+                text: "Recording starts after 3 seconds, without sound. Stop it with the small bar that stays on top; it is left out of the recording."
+            }
+        }
+    }
+    // The controls while the screen is recorded: always on top, left out of the recording.
+    Window {
+        id: recordingBar
+        objectName: "recordingBar"
+        readonly property var info: win.s.screenRecording || ({})
+        readonly property bool active: info.status === "countdown" || info.status === "recording" || info.status === "saving"
+        visible: active
+        // Its own window, so minimising Cutlery does not hide it.
+        transientParent: null
+        flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+        width: 230
+        height: 44
+        color: "#1b232b"
+        x: Screen.width / 2 - width / 2
+        y: 8
+        onVisibleChanged: {
+            if (visible)
+                editor.hideFromCapture(recordingBar);
+            else if (win.visibility === Window.Minimized)
+                win.showNormal();
+        }
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 6
+            spacing: 8
+            Label {
+                objectName: "recordingTime"
+                Layout.fillWidth: true
+                color: recordingBar.info.status === "recording" ? "#ff6b6b" : "#e7edf2"
+                text: recordingBar.info.status === "countdown" ? "Starting in " + recordingBar.info.countdown + "…"
+                    : recordingBar.info.status === "saving" ? "Saving…"
+                    : "● " + Math.floor((recordingBar.info.seconds || 0) / 60) + ":" + String(Math.floor(recordingBar.info.seconds || 0) % 60).padStart(2, "0")
+            }
+            Button {
+                objectName: "recordingStop"
+                text: recordingBar.info.status === "countdown" ? "Cancel" : "■ Stop"
+                enabled: recordingBar.info.status !== "saving"
+                onClicked: editor.stopScreenRecording()
             }
         }
     }

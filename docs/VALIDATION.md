@@ -1,5 +1,21 @@
 # Validation record
 
+## Windows portable build — 2026-10-12, screen recording (0.6 development)
+
+[GitHub Actions run 38220651600](https://github.com/HNXS/Cutlery/actions/runs/38220651600) on commit `0dbeb9671ef29b7a448a0c569bc9d5f2758a5c6e` passed every step on its first attempt.
+
+**The real desktop is recorded.** Besides the engine and interface tests with FFmpeg's test pattern, the build records the runner's actual desktop through GDI (`CUTLERY_TEST_REAL_SCREEN=1`) and checks that:
+
+- a video of about two seconds lands on its own track at the playhead;
+- the video has no sound;
+- it is as wide as the monitor.
+
+**Faults found on the way:**
+
+- **Wrong monitor size.** Under Qt's offscreen platform, the only screen Qt reports is a made-up 800 × 800 one without a device name. Run 38219575232 failed because the area handed to FFmpeg (800 × 800) did not fit the 1024 × 768 desktop. Cutlery now takes the Windows monitor of the same number (the primary first) when no device name matches.
+- **Failures hid their cause.** A failed recording reported only FFmpeg's last line. It now reports the last three lines, where FFmpeg names the cause.
+- **Timing-sensitive test.** The test now waits for two recorded seconds instead of waiting a fixed time.
+
 ## Windows portable build — 2026-10-11, find people; Piper's speech on Windows (0.6 development)
 
 [GitHub Actions run 38177170168](https://github.com/HNXS/Cutlery/actions/runs/38177170168) on commit `a7c93370ec2b7eafcef33a6188413d5fc84bdd17` passed every step on its first attempt.
